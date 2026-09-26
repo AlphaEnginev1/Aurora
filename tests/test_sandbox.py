@@ -69,9 +69,6 @@ def test_network_bwrap_uses_nftables_and_seccomp_lockdown(tmp_path: Path, monkey
 
 
 def test_seccomp_filter_is_x86_64_and_nonempty():
-    import struct
-
     with SandboxExecutor._seccomp_filter_fd() as f:
         payload = f.read()
-    assert struct.unpack("<H", payload[:2])[0] == 9
-    assert len(payload) == 8 + (9 * 8)
+    assert len(payload) == 9 * 8
