@@ -34,3 +34,18 @@ The service only accepts registered `ToolSpec` objects and an allowlisted source
 2. Add stronger recovery orchestration for retained snapshots and crash-interrupted commit states.
 3. Add OS-level network enforcement/proxying for acquisition subprocesses.
 4. Add sandboxed execution of acquired tools.
+
+
+## Crash recovery and reconciliation
+
+Managed filesystem activation now persists a snapshot manifest before staging and records activation phases (prepared, staged, commit_pending, swap_started, activated, committed, rolled_back). The acquisition transaction journal also records commit_pending before a PyPI runtime swap.
+
+On restart, Aurora can reconcile an interrupted managed transaction deterministically:
+
+- target + old target + verified live postcondition -> finalize activation and remove the old tree;
+- target absent + old target present -> restore the known-good previous tree;
+- no original target + verified staged tree -> activate the staged tree;
+- live target without staging/old tree -> finalize only when its postcondition verifies;
+- ambiguous or unverified state -> refuse activation and require recovery rather than guessing.
+
+Recovery is bounded to Aurora-managed runtime directories. Host APT mutations remain outside this filesystem reconciliation model.
