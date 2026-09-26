@@ -1,0 +1,35 @@
+"""Capability-aware model router."""
+
+from dataclasses import dataclass
+from .models import InferenceRequest, InferenceResponse, ModelSpec
+from .providers.nvidia_api import NVIDIAAPIProvider
+
+class ModelRoutingError(RuntimeError):
+    """Raised when no configured model can satisfy an inference request."""
+
+@dataclass
+class ModelRouter:
+    models: list[ModelSpec]
+    nvidia_api_key: str | None = None
+
+    def available(self) -> list[ModelSpec]:
+        return [m for m in self.models if m.enabled]
+
+    def select(self, request: InferenceRequest, capability: str | None = None) -> ModelSpec:
+        if request.model:
+            for model in self.available():
+                if model.id == request.model:
+                    return model
+            raise ModelRoutingError(f"Requested model is not configured: {request.model}")
+        candidates = self.available()
+        if capability:
+            candidates = [m for m in candidates if capability in m.capabilities]
+        if not candidates:
+            raise ModelRoutingError(f"No enabled model satisfies capability={capability!r}")
+        return candidates[0]
+
+    def generate(self, request: InferenceRequest, capability: str | None = None) -> InferenceResponse:
+        spec = self.select(request, capability)
+        if spec.provider == "nvidia_api":
+            return NVIDIAAPIProvider(spec, api_key=self.nvidia_api_key).generate(request)
+        raise ModelRoutingError(f"Unsupported provider: {spec.provider}")
