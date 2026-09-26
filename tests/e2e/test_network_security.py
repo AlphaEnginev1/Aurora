@@ -183,3 +183,25 @@ def test_workload_cannot_restore_default_route(proxy, tmp_path: Path):
         "10.0.2.2",
     )
     assert result.returncode != 0
+
+
+def test_proxy_gateway_is_reachable(proxy, tmp_path: Path):
+    result = run_sandbox(
+        tmp_path,
+        "curl",
+        "-v",
+        "--connect-timeout",
+        "3",
+        "--max-time",
+        "5",
+        "http://10.0.2.2:3128/",
+    )
+    assert result.returncode != 0
+    assert "HTTP/1.1 403" in result.stderr or "HTTP/1.0 403" in result.stderr
+
+
+def test_route_fence_exposes_only_proxy_gateway(tmp_path: Path):
+    result = run_sandbox(tmp_path, "ip", "route")
+    assert result.returncode == 0, result.stderr
+    assert "10.0.2.2/32" in result.stdout
+    assert "default" not in result.stdout
