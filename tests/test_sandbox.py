@@ -22,4 +22,4 @@ def test_environment_allowlist_excludes_secrets():
 def test_command_rejects_null_bytes(tmp_path: Path):
     executor = SandboxExecutor()
     with pytest.raises(SandboxError, match="invalid"):
-        executor.execute(("printf", "bad\\x00value"), workspace=tmp_path)
+        executor.execute(("printf", "bad" + bytes([0]).decode() + "value"), workspace=tmp_path)
