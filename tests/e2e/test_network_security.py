@@ -91,7 +91,9 @@ def test_allowed_https_reaches_approved_host(proxy, tmp_path: Path):
     result = run_sandbox(
         tmp_path,
         "curl",
-        "-fsS",
+        "-v",
+        "--connect-timeout",
+        "3",
         "--max-time",
         "10",
         "-o",
