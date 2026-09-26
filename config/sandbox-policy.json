@@ -1,0 +1,13 @@
+{
+  "backend": "bubblewrap",
+  "network": false,
+  "timeout_seconds": 120,
+  "cpu_seconds": 60,
+  "memory_bytes": 1073741824,
+  "max_processes": 64,
+  "max_open_files": 256,
+  "max_output_bytes": 1048576,
+  "allowed_env": ["PATH", "LANG", "LC_ALL", "TZ"],
+  "readonly_system": true,
+  "fail_closed_if_backend_missing": true
+}
