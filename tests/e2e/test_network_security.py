@@ -12,7 +12,7 @@ import pytest
 from aurora.autonomy.egress_proxy import EgressProxy, EgressProxyPolicy
 from aurora.autonomy.sandbox import SandboxExecutor, SandboxPolicy
 
-REQUIRED = ("bwrap", "slirp4netns", "iptables", "ip6tables", "ip", "setpriv", "curl")
+REQUIRED = ("bwrap", "slirp4netns", "nft", "ip", "setpriv", "curl")
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -95,14 +95,14 @@ def test_fail_closed_when_rootless_enforcement_backend_is_unavailable(rootless_n
 
 def test_allowed_https_reaches_approved_host(rootless_network_enforcement_available, proxy, tmp_path: Path):
     if not rootless_network_enforcement_available:
-        pytest.skip("runner does not expose CAP_NET_ADMIN to the rootless network namespace")
+        pytest.skip("rootless nftables enforcement backend is unavailable")
     result = run_sandbox(tmp_path, "curl", "-fsS", "--max-time", "10", "-o", "/dev/null", "https://github.com/")
     assert result.returncode == 0, f"rc={result.returncode} stderr={result.stderr!r}"
 
 
 def test_disallowed_host_is_rejected_by_proxy(rootless_network_enforcement_available, proxy, tmp_path: Path):
     if not rootless_network_enforcement_available:
-        pytest.skip("runner does not expose CAP_NET_ADMIN to the rootless network namespace")
+        pytest.skip("rootless nftables enforcement backend is unavailable")
     result = run_sandbox(tmp_path, "curl", "-fsS", "--max-time", "5", "-o", "/dev/null", "https://example.com/")
     assert result.returncode != 0
 
@@ -123,7 +123,7 @@ def test_proxy_down_does_not_fall_back_to_direct_network(tmp_path: Path):
 
 
 def test_workload_cannot_modify_namespace_firewall(tmp_path: Path):
-    result = run_sandbox(tmp_path, "iptables", "-S", "OUTPUT")
+    result = run_sandbox(tmp_path, "nft", "list", "ruleset")
     assert result.returncode != 0
 
 
@@ -134,12 +134,12 @@ def test_workload_cannot_restore_unrestricted_route(tmp_path: Path):
 
 def test_proxy_gateway_is_reachable(rootless_network_enforcement_available, proxy, tmp_path: Path):
     if not rootless_network_enforcement_available:
-        pytest.skip("runner does not expose CAP_NET_ADMIN to the rootless network namespace")
+        pytest.skip("rootless nftables enforcement backend is unavailable")
     result = run_sandbox(tmp_path, "curl", "-v", "--connect-timeout", "3", "--max-time", "5", "http://10.0.2.2:3128/")
     assert result.returncode != 0
     assert "403" in result.stderr
 
 
 def test_ipv6_firewall_is_default_deny(tmp_path: Path):
-    result = run_sandbox(tmp_path, "ip6tables", "-S", "OUTPUT")
+    result = run_sandbox(tmp_path, "nft", "list", "table", "ip6", "aurora_egress")
     assert result.returncode != 0
