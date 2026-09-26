@@ -77,12 +77,32 @@ def run_sandbox(tmp_path: Path, *args: str):
     ).execute(args, workspace=tmp_path)
 
 
-def test_allowed_https_reaches_approved_host(proxy, tmp_path: Path):
+@pytest.fixture(scope="module")
+def rootless_network_enforcement_available(tmp_path_factory):
+    probe = run_sandbox(tmp_path_factory.mktemp("network-probe"), "true")
+    if probe.returncode == 0:
+        return True
+    assert "Permission denied" in probe.stderr or "not permitted" in probe.stderr.lower()
+    return False
+
+
+def test_fail_closed_when_rootless_enforcement_backend_is_unavailable(rootless_network_enforcement_available, tmp_path: Path):
+    if rootless_network_enforcement_available:
+        pytest.skip("rootless firewall backend is available")
+    result = run_sandbox(tmp_path, "true")
+    assert result.returncode != 0
+
+
+def test_allowed_https_reaches_approved_host(rootless_network_enforcement_available, proxy, tmp_path: Path):
+    if not rootless_network_enforcement_available:
+        pytest.skip("runner does not expose CAP_NET_ADMIN to the rootless network namespace")
     result = run_sandbox(tmp_path, "curl", "-fsS", "--max-time", "10", "-o", "/dev/null", "https://github.com/")
-    assert result.returncode == 0, f"rc={result.returncode} stderr={result.stderr!r} stdout={result.stdout!r}"
+    assert result.returncode == 0, f"rc={result.returncode} stderr={result.stderr!r}"
 
 
-def test_disallowed_host_is_rejected_by_proxy(proxy, tmp_path: Path):
+def test_disallowed_host_is_rejected_by_proxy(rootless_network_enforcement_available, proxy, tmp_path: Path):
+    if not rootless_network_enforcement_available:
+        pytest.skip("runner does not expose CAP_NET_ADMIN to the rootless network namespace")
     result = run_sandbox(tmp_path, "curl", "-fsS", "--max-time", "5", "-o", "/dev/null", "https://example.com/")
     assert result.returncode != 0
 
@@ -112,7 +132,9 @@ def test_workload_cannot_restore_unrestricted_route(tmp_path: Path):
     assert result.returncode != 0
 
 
-def test_proxy_gateway_is_reachable(proxy, tmp_path: Path):
+def test_proxy_gateway_is_reachable(rootless_network_enforcement_available, proxy, tmp_path: Path):
+    if not rootless_network_enforcement_available:
+        pytest.skip("runner does not expose CAP_NET_ADMIN to the rootless network namespace")
     result = run_sandbox(tmp_path, "curl", "-v", "--connect-timeout", "3", "--max-time", "5", "http://10.0.2.2:3128/")
     assert result.returncode != 0
     assert "403" in result.stderr
