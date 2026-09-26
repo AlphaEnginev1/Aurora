@@ -43,3 +43,13 @@ def test_snapshot_rejects_nested_storage(tmp_path):
     target.mkdir()
     with pytest.raises(SnapshotError, match="must not be inside"):
         FilesystemSnapshot(target=target, snapshot_root=target / ".snapshots")
+
+
+def test_snapshot_manifest_recovers_without_original_target(tmp_path):
+    target = tmp_path / "runtime"
+    manager = FilesystemSnapshot(target=target, snapshot_root=tmp_path / ".snapshots")
+    snapshot = manager.create(transaction_id="tx-1")
+    assert not snapshot.had_original
+    recovered = manager.recover(snapshot.snapshot_id)
+    assert recovered.transaction_id == "tx-1"
+    assert recovered.target == target
