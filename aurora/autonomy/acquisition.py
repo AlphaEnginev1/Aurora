@@ -103,7 +103,7 @@ class AcquisitionManager:
             if tool_spec.source == "ubuntu-apt":
                 result = self._apt(tool_spec)
             elif tool_spec.source == "pypi":
-                result = self._pip(tool_spec)
+                result = self._pip(tool_spec, transaction_id=tx.transaction_id)
             else:
                 raise AcquisitionError(
                     f"no safe installer implemented for source: {tool_spec.source}"
@@ -274,7 +274,7 @@ class AcquisitionManager:
             return None
         return parts[1] or None
 
-    def _pip(self, spec: ToolSpec) -> AcquisitionResult:
+    def _pip(self, spec: ToolSpec, *, transaction_id: str | None = None) -> AcquisitionResult:
         if not self.install_root:
             raise AcquisitionError("pypi acquisition requires an isolated install_root")
         self.install_root.parent.mkdir(parents=True, exist_ok=True)
@@ -439,4 +439,30 @@ class AcquisitionManager:
                     "verification": result.verification,
                     "network_gateway": self.internet_gateway is not None,
                 },
+            )    def _existing_pip_provenance_at(
+        self, spec: ToolSpec, install_root: Path
+    ) -> PackageProvenance | None:
+        normalized = spec.name.lower().replace("-", "_")
+        for metadata_path in install_root.glob("*.dist-info/METADATA"):
+            fields = {}
+            metadata = metadata_path.read_text(encoding="utf-8", errors="strict")
+            for line in metadata.splitlines():
+                if ": " in line:
+                    key, value = line.split(": ", 1)
+                    fields[key.lower()] = value.strip()
+            name = fields.get("name", "").lower().replace("-", "_")
+            version = fields.get("version")
+            if name != normalized or not version:
+                continue
+            if spec.version and version != spec.version:
+                continue
+            verify_record(install_root, metadata_path.parent / "RECORD")
+            return PackageProvenance(
+                name=fields["name"], version=version, source="pypi",
+                artifact_sha256=spec.artifact_sha256,
+                install_root=install_root,
+                record_verified=True,
             )
+        return None
+
+
