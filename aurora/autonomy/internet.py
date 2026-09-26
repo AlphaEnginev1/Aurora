@@ -47,8 +47,8 @@ class InternetGateway:
         )
         try:
             with urllib.request.urlopen(request, timeout=self.timeout) as response:
-            final_url = response.geturl()
-            self.authorize(final_url)
-            return response.read()
+                final_url = response.geturl()
+                self.authorize(final_url)
+                return response.read()
         except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError) as exc:
             raise InternetPolicyError(f"network request failed: {exc}") from exc
