@@ -155,6 +155,8 @@ class SandboxExecutor:
             argv += [
                 "--unshare-user",
                 "--disable-userns",
+                "--cap-add",
+                "CAP_NET_ADMIN",
             ]
         argv += [
             "--proc",
