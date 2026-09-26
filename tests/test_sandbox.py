@@ -50,6 +50,8 @@ def test_network_bwrap_uses_route_fence_and_capability_drop(tmp_path: Path):
     )
     assert "--unshare-user" in argv
     assert "--disable-userns" in argv
+    assert "--cap-add" in argv
+    assert "CAP_NET_ADMIN" in argv
     assert "--block-fd" not in argv
     assert "/bin/sh" in argv
     bootstrap = argv[argv.index("/bin/sh") + 2]
