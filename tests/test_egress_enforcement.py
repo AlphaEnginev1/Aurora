@@ -32,3 +32,13 @@ def test_proxy_policy_rejects_non_public_resolution(monkeypatch):
     with pytest.raises(PermissionError, match="non-public"):
         p.resolve_safe("github.com", 443)
 
+
+
+def test_firewall_defaults_to_drop_and_allows_proxy_only():
+    from aurora.autonomy.egress_firewall import EgressFirewallPolicy
+
+    commands = EgressFirewallPolicy().nft_commands()
+    assert ("add", "table", "inet", "aurora_egress") in commands
+    assert any("policy" in command and "drop" in command for command in commands)
+    assert any("10.0.2.2" in command and "3128" in command for command in commands)
+    EgressFirewallPolicy().assert_complete(commands)
