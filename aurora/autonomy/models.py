@@ -15,3 +15,5 @@ class CapabilityResult:
     version: str | None = None
     source: str | None = None
     verification: str = "unknown"
+    path: str | None = None
+    sha256: str | None = None
