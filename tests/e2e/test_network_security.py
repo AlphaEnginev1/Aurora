@@ -78,14 +78,14 @@ def run_sandbox(tmp_path: Path, *args: str):
 
 
 @pytest.fixture(scope="module")
-def rootless_network_enforcement_available(tmp_path_factory):
+def controlled_network_enforcement_available(tmp_path_factory):
     probe = run_sandbox(tmp_path_factory.mktemp("network-probe"), "true")
     if probe.returncode == 0:
         return True
-    pytest.fail(f"rootless nftables enforcement backend failed: {probe.stderr}")
+    pytest.fail(f"controlled network enforcement bootstrap failed: {probe.stderr}")
 
 
-def test_allowed_https_reaches_approved_host(rootless_network_enforcement_available, proxy, tmp_path: Path):
+def test_allowed_https_reaches_approved_host(controlled_network_enforcement_available, proxy, tmp_path: Path):
     result = run_sandbox(tmp_path, "curl", "-fsS", "--max-time", "10", "-o", "/dev/null", "https://github.com/")
     assert result.returncode == 0, f"rc={result.returncode} stderr={result.stderr!r}"
 
