@@ -1,0 +1,10 @@
+functions:
+  aurora_director:
+    _type: aurora_director
+
+workflow:
+  _type: sequential_executor
+  tool_list:
+    - aurora_director
+  raise_type_incompatibility: false
+  return_error_on_exception: true
