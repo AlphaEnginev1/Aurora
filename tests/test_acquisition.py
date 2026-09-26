@@ -2,6 +2,7 @@ import pytest
 
 from aurora.autonomy.acquisition import AcquisitionError, AcquisitionManager
 from aurora.autonomy.internet import InternetGateway, InternetPolicy
+from aurora.autonomy.provenance import PackageProvenance
 from aurora.autonomy.registry import ToolSpec
 
 
@@ -70,11 +71,34 @@ def test_pypi_installer_is_pinned_to_gateway_approved_index(tmp_path, monkeypatc
         returncode = 0
         stderr = ""
 
-    monkeypatch.setattr(manager, "_run", lambda args, **kwargs: captured.update(args=args, env=kwargs["env"]) or Result())
-    monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/python3" if name == "python3" else None)
+    monkeypatch.setattr(
+        manager,
+        "_run",
+        lambda args, **kwargs: captured.update(
+            args=args, env=kwargs["env"]
+        ) or Result(),
+    )
+    monkeypatch.setattr(
+        "shutil.which",
+        lambda name: "/usr/bin/python3" if name == "python3" else None,
+    )
+    monkeypatch.setattr(
+        "aurora.autonomy.acquisition.load_pip_report",
+        lambda path: PackageProvenance(
+            name="example",
+            version="1.0.0",
+            source="pypi",
+            artifact_sha256="abc123",
+            provenance_url="https://files.pythonhosted.org/example.whl",
+        ),
+    )
+    monkeypatch.setattr(manager, "_verify_installed_distribution", lambda name, version: 1)
 
     result = manager.acquire(ToolSpec("example", "runtime", "pypi", "example"))
     assert result.status == "installed"
+    assert result.version == "1.0.0"
+    assert result.verification == "verified"
     assert "--index-url" in captured["args"]
     assert "https://pypi.org/simple/" in captured["args"]
+    assert "--report" in captured["args"]
     assert captured["env"]["PIP_NO_INPUT"] == "1"
