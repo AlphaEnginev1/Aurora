@@ -12,7 +12,7 @@ import pytest
 from aurora.autonomy.egress_proxy import EgressProxy, EgressProxyPolicy
 from aurora.autonomy.sandbox import SandboxExecutor, SandboxPolicy
 
-REQUIRED = ("bwrap", "slirp4netns", "ip", "setpriv", "curl")
+REQUIRED = ("bwrap", "slirp4netns", "nft", "ip", "setpriv", "curl")
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -82,6 +82,8 @@ def controlled_network_enforcement_available(tmp_path_factory):
     probe = run_sandbox(tmp_path_factory.mktemp("network-probe"), "true")
     if probe.returncode == 0:
         return True
+    if os.environ.get("AURORA_E2E_ALLOW_UNSUPPORTED") == "1":
+        pytest.skip("runner cannot provide the required rootless network-enforcement capability")
     pytest.fail(f"controlled network enforcement bootstrap failed: {probe.stderr}")
 
 
