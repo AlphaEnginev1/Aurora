@@ -1,0 +1,8 @@
+{
+  "default": "deny",
+  "allowed_capabilities": ["tool:git", "tool:curl", "tool:jq", "tool:rg", "tool:fd", "runtime:python", "python.package:pip"],
+  "allowed_sources": ["ubuntu-apt", "pypi", "npm", "github-release"],
+  "require_verification": true,
+  "max_retries": 3,
+  "allow_root_agent_shell": false
+}
