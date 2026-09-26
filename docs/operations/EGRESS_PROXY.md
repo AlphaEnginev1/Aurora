@@ -1,15 +1,29 @@
 # Egress proxy enforcement
 
-Aurora networked tools use a policy-enforcing HTTP CONNECT proxy. The proxy accepts only HTTPS CONNECT requests to an exact hostname allowlist and TCP/443.
+Aurora networked tools use a policy-enforcing HTTPS CONNECT proxy. The proxy accepts only CONNECT requests to an exact hostname allowlist and TCP/443.
 
-The namespace remains private and is connected through rootless slirp4netns. A namespace firewall uses default-deny OUTPUT and permits only loopback, DNS to the slirp DNS gateway, and TCP to the dedicated proxy endpoint. A workload therefore cannot open a direct external TCP connection to bypass the proxy.
+The workload runs in a private bubblewrap network namespace connected through rootless slirp4netns with host-loopback disabled and DNS forwarding disabled. A supervisor-owned route fence is installed during sandbox bootstrap while CAP_NET_ADMIN is present. The fence removes the default route and the slirp-connected subnet route, then installs a single host route to the dedicated proxy gateway `10.0.2.2/32` on `tap0`.
 
-The enforcement sequence is: create private user/network namespace; attach slirp4netns with host-loopback disabled; start the policy proxy; install the complete default-deny OUTPUT ruleset; verify the ruleset; inject HTTP_PROXY/HTTPS_PROXY; then drop CAP_NET_ADMIN before running the workload.
+After the dataplane is ready and the route fence is verified, the bootstrap drops all workload capabilities with setpriv and executes the requested command. A seccomp filter also blocks clone(), clone3(), unshare(), and setns() for the workload so it cannot create or join namespaces to regain network-control capabilities.
 
-If any prerequisite is missing or the firewall cannot be verified, networking remains disabled. There is no fallback to direct networking.
+The resulting dataplane is:
 
-slirp4netns documents rootless namespaces and --disable-host-loopback. The proxy layer is necessary because transport alone does not enforce destination policy.
+    workload
+       |
+       | only reachable IPv4 destination
+       v
+    10.0.2.2:3128
+       |
+       v
+    policy proxy
+       |
+       v
+    approved HTTPS destinations
 
-### E2E boundary
+There is no default route and no direct Internet fallback inside the workload namespace. The proxy itself performs hostname allowlisting, rejects IP-literal destinations, and only permits TCP/443 CONNECT. IPv6 default routing is removed during bootstrap.
 
-Networked workloads run with a private bubblewrap network namespace, rootless slirp4netns with host-loopback disabled, DNS forwarding disabled, and an in-namespace firewall bootstrap that sets OUTPUT to DROP and permits only loopback plus the dedicated `10.0.2.2` proxy endpoint. The bootstrap requires temporary `CAP_NET_ADMIN`; the workload then drops all capabilities before user code starts. The proxy separately enforces exact hostname allowlisting and TCP/443 CONNECT only.
+If any prerequisite, route operation, proxy setup, or sandbox hardening step fails, the networked workload is not started.
+
+### Trust boundary
+
+The supervisor/bootstrap phase is the only phase allowed to hold CAP_NET_ADMIN. User code starts only after capabilities are dropped. Bubblewrap provides the namespace/filesystem boundary; slirp4netns provides rootless transport; the route fence provides dataplane-level egress enforcement; the proxy provides destination policy.
