@@ -18,6 +18,7 @@ from .provenance import (
     verify_record,
 )
 from .registry import ToolSpec
+from .transaction import AcquisitionTransaction, TransactionError, operation_key
 
 
 class AcquisitionError(RuntimeError):
@@ -57,12 +58,14 @@ class AcquisitionManager:
         install_root: str | Path | None = None,
         timeout: int = 300,
         internet_gateway: InternetGateway | None = None,
+        transaction_dir: str | Path | None = None,
     ) -> None:
         self.allowed_sources = allowed_sources
         self.audit_path = Path(audit_path) if audit_path else None
         self.install_root = Path(install_root) if install_root else None
         self.timeout = timeout
         self.internet_gateway = internet_gateway
+        self.transaction_dir = Path(transaction_dir) if transaction_dir else (self.audit_path.parent / "transactions" if self.audit_path else Path(".aurora-transactions"))
 
     def plan(self, tool_spec: ToolSpec) -> dict[str, str]:
         if tool_spec.source not in self.allowed_sources:
@@ -74,30 +77,132 @@ class AcquisitionManager:
 
     def acquire(self, tool_spec: ToolSpec) -> AcquisitionResult:
         self.plan(tool_spec)
-        existing = shutil.which(tool_spec.executable)
-        if existing:
-            result = AcquisitionResult(
-                tool_spec.name,
-                "already_available",
-                tool_spec.source,
-                tool_spec.executable,
-                existing,
-                sha256_file(existing) if os.path.isfile(existing) else None,
-                verification="observed",
-            )
-            self._audit(result)
-            return result
+        tx = self._transaction(tool_spec)
+        try:
+            previous = tx.begin()
+        except TransactionError as exc:
+            raise AcquisitionError(str(exc)) from exc
 
-        if tool_spec.source == "ubuntu-apt":
-            result = self._apt(tool_spec)
-        elif tool_spec.source == "pypi":
-            result = self._pip(tool_spec)
-        else:
+        if previous.state == "committed":
+            existing = self._existing_result(tool_spec)
+            if existing:
+                self._audit(existing)
+                return existing
             raise AcquisitionError(
-                f"no safe installer implemented for source: {tool_spec.source}"
+                f"transaction {tx.transaction_id} is committed but its postcondition is absent"
             )
+
+        existing = self._existing_result(tool_spec)
+        if existing:
+            tx.commit("postcondition already satisfied")
+            self._audit(existing)
+            return existing
+
+        try:
+            if tool_spec.source == "ubuntu-apt":
+                result = self._apt(tool_spec)
+            elif tool_spec.source == "pypi":
+                result = self._pip(tool_spec)
+            else:
+                raise AcquisitionError(
+                    f"no safe installer implemented for source: {tool_spec.source}"
+                )
+            tx.commit("installer completed and postcondition verified")
+        except AcquisitionError as exc:
+            tx.require_recovery(str(exc))
+            raise
         self._audit(result)
         return result
+
+    def recover(self, tool_spec: ToolSpec) -> AcquisitionResult | None:
+        """Recover an interrupted operation when its verified postcondition exists."""
+        self.plan(tool_spec)
+        tx = self._transaction(tool_spec)
+        latest = tx.latest
+        if not latest or latest.state not in {"running", "recovery_required"}:
+            return None
+        existing = self._existing_result(tool_spec)
+        if not existing:
+            raise AcquisitionError(
+                f"transaction {tx.transaction_id} has no verified postcondition; manual cleanup/recovery is required"
+            )
+        tx.commit("recovery verified existing postcondition")
+        self._audit(existing)
+        return existing
+
+    def _transaction(self, spec: ToolSpec) -> AcquisitionTransaction:
+        key = operation_key(
+            tool=spec.name,
+            source=spec.source,
+            version=spec.version,
+            artifact_sha256=spec.artifact_sha256,
+            target=str(self.install_root) if self.install_root else None,
+        )
+        return AcquisitionTransaction(
+            journal_dir=self.transaction_dir,
+            operation_key=key,
+            tool=spec.name,
+            source=spec.source,
+            target=str(self.install_root) if self.install_root else None,
+        )
+
+    def _existing_result(self, spec: ToolSpec) -> AcquisitionResult | None:
+        existing = shutil.which(spec.executable)
+        if existing and spec.source == "ubuntu-apt":
+            version = self._apt_version(spec.name)
+            if spec.version and version != spec.version:
+                return None
+            return AcquisitionResult(
+                spec.name, "already_available", spec.source, spec.executable,
+                existing, sha256_file(existing) if os.path.isfile(existing) else None,
+                version=version, verification="verified" if version else "observed",
+            )
+        if spec.source == "pypi" and self.install_root:
+            try:
+                provenance = self._existing_pip_provenance(spec)
+            except (ProvenanceError, OSError):
+                provenance = None
+            if provenance:
+                return AcquisitionResult(
+                    spec.name, "already_available", spec.source, spec.executable,
+                    str(self.install_root), None, version=provenance.version,
+                    artifact_sha256=provenance.artifact_sha256,
+                    provenance_url=provenance.provenance_url,
+                    verification="verified",
+                )
+        if existing and not spec.version:
+            return AcquisitionResult(
+                spec.name, "already_available", spec.source, spec.executable,
+                existing, sha256_file(existing) if os.path.isfile(existing) else None,
+                verification="observed",
+            )
+        return None
+
+    def _existing_pip_provenance(self, spec: ToolSpec) -> PackageProvenance | None:
+        assert self.install_root is not None
+        normalized = spec.name.lower().replace("-", "_")
+        for metadata_path in self.install_root.glob("*.dist-info/METADATA"):
+            fields = {}
+            metadata = metadata_path.read_text(encoding="utf-8", errors="strict")
+            for line in metadata.splitlines():
+                if ": " in line:
+                    key, value = line.split(": ", 1)
+                    fields[key.lower()] = value.strip()
+            name = fields.get("name", "").lower().replace("-", "_")
+            version = fields.get("version")
+            if name != normalized or not version:
+                continue
+            if spec.version and version != spec.version:
+                continue
+            record_path = metadata_path.parent / "RECORD"
+            verify_record(self.install_root, record_path)
+            return PackageProvenance(
+                name=fields["name"], version=version, source="pypi",
+                artifact_sha256=spec.artifact_sha256,
+                install_root=self.install_root,
+                record_verified=True,
+            )
+        return None
 
     def _authorize_source_network(self, source: str) -> None:
         """Require every networked installer source to pass the gateway policy."""
