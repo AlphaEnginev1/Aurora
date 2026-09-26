@@ -1,0 +1,6 @@
+{
+  "default": "deny",
+  "protocols": ["https"],
+  "allowed_hosts": ["github.com", "api.github.com", "pypi.org", "files.pythonhosted.org", "registry.npmjs.org", "archive.ubuntu.com", "security.ubuntu.com"],
+  "browser_isolation_required": true
+}
