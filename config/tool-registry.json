@@ -1,0 +1,11 @@
+{
+  "tools": [
+    {"name":"git","kind":"system","source":"ubuntu-apt","executable":"git"},
+    {"name":"curl","kind":"system","source":"ubuntu-apt","executable":"curl"},
+    {"name":"jq","kind":"system","source":"ubuntu-apt","executable":"jq"},
+    {"name":"rg","kind":"system","source":"ubuntu-apt","executable":"rg"},
+    {"name":"fd","kind":"system","source":"ubuntu-apt","executable":"fd"},
+    {"name":"python","kind":"runtime","source":"ubuntu-apt","executable":"python3"},
+    {"name":"pip","kind":"runtime","source":"pypi","executable":"pip"}
+  ]
+}
