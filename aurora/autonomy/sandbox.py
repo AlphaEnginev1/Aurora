@@ -199,7 +199,6 @@ class SandboxExecutor:
 
         program = b"".join(
             [
-                stmt(BPF_LD | BPF_K | 0x20, 0),
                 stmt(BPF_LD | BPF_K | 0x20, 4),
                 jump(BPF_JMP | BPF_JEQ | BPF_K, 0, 5, 0xC000003E),
                 stmt(BPF_LD | BPF_K | 0x20, 0),
