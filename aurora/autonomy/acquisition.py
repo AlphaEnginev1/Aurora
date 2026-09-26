@@ -73,6 +73,8 @@ class AcquisitionManager:
             raise AcquisitionError(f"source is not allowed: {tool_spec.source}")
         if tool_spec.kind not in {"system", "runtime"}:
             raise AcquisitionError(f"unsupported acquisition kind: {tool_spec.kind}")
+        if tool_spec.source == "pypi" and self.install_root is None:
+            raise AcquisitionError("pypi acquisition requires an isolated install_root")
         self._authorize_source_network(tool_spec.source)
         return {"tool": tool_spec.name, "source": tool_spec.source, "action": "install"}
 
