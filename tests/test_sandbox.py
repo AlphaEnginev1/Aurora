@@ -50,8 +50,10 @@ def test_network_bwrap_requires_user_namespace_and_cap_drop(tmp_path: Path):
     )
     assert "--unshare-user" in argv
     assert "--disable-userns" in argv
-    assert "--cap-drop" in argv
-    assert "ALL" in argv
+    assert "--cap-drop" not in argv
+    assert "setpriv" in argv
+    assert "--bounding-set=-all" in argv
+    assert "--no-new-privs" in argv
     assert "--block-fd" in argv
 
 
