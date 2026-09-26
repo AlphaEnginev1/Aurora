@@ -12,3 +12,23 @@ jobs:
           python-version: "3.12"
       - run: python -m pip install --upgrade pip pytest
       - run: python -m pytest -q
+
+  e2e-network:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Linux sandbox dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap slirp4netns iptables curl ca-certificates
+      - name: Enable unprivileged namespaces for CI
+        run: |
+          sudo sysctl -w kernel.unprivileged_userns_clone=1 || true
+          if sudo sysctl -a 2>/dev/null | grep -q '^kernel.apparmor_restrict_unprivileged_userns'; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip pytest
+      - run: python -m pytest -q tests/e2e
