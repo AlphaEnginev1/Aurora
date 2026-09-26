@@ -84,14 +84,18 @@ class _EgressEnforcer:
             "--",
             *args,
         ]
-        return subprocess.run(
+        result = subprocess.run(
             argv,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
-            check=True,
+            check=False,
         )
+        if result.returncode != 0:
+            detail = result.stderr.strip() or result.stdout.strip() or f"exit {result.returncode}"
+            raise SandboxError(f"network namespace control command failed: {detail}")
+        return result
 
     def _install_and_verify(self, pid: int) -> None:
         for rule in self.firewall.iptables_rules():
