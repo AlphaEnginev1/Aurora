@@ -17,11 +17,14 @@ class CapabilityBroker:
         self.acquisition = acquisition
 
     def authorize(self, request: CapabilityRequest) -> CapabilityResult:
+        if not self.policy.allows_capability(request.name):
+            return CapabilityResult(request.name, "denied", verification="policy")
+
         spec = self._resolve(request)
         if spec is None:
             if self.registry:
                 return CapabilityResult(request.name, "unresolved", verification="registry")
-            return CapabilityResult(request.name, "authorized", verification="pending")
+            return CapabilityResult(request.name, "unresolved", verification="registry")
 
         if not self.policy.allows_source(spec.source):
             return CapabilityResult(
@@ -41,26 +44,26 @@ class CapabilityBroker:
         authorized = self.authorize(request)
         if authorized.status != "authorized":
             return authorized
-        if self.acquisition is None:
-            return CapabilityResult(
-                request.name,
-                "authorized",
-                source=authorized.source,
-                verification="pending",
-            )
-
         spec = self._resolve(request)
         if spec is None:
             return CapabilityResult(request.name, "unresolved", verification="registry")
 
         try:
-            result = self.acquisition.acquire(spec)
+            result = self.acquisition.acquire(spec) if self.acquisition else None
         except AcquisitionError:
             return CapabilityResult(
                 request.name,
                 "acquisition_failed",
                 source=spec.source,
                 verification="failed",
+            )
+
+        if result is None:
+            return CapabilityResult(
+                request.name,
+                "authorized",
+                source=spec.source,
+                verification="pending",
             )
 
         verification = "verified" if result.sha256 else "observed"
