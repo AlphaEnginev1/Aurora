@@ -12,7 +12,7 @@ import pytest
 from aurora.autonomy.egress_proxy import EgressProxy, EgressProxyPolicy
 from aurora.autonomy.sandbox import SandboxExecutor, SandboxPolicy
 
-REQUIRED = ("bwrap", "slirp4netns", "iptables", "ip6tables", "setpriv", "curl")
+REQUIRED = ("bwrap", "slirp4netns", "iptables", "ip6tables", "ip", "setpriv", "curl")
 
 
 @pytest.fixture(scope="module", autouse=True)
