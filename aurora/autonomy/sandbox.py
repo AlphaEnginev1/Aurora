@@ -80,7 +80,6 @@ class _EgressEnforcer:
             "-t",
             str(pid),
             "-U",
-            "--preserve-credentials",
             "-n",
             "--",
             *args,
