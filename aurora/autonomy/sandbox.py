@@ -207,8 +207,6 @@ class SandboxExecutor:
             argv += [
                 "--unshare-user",
                 "--disable-userns",
-                "--cap-drop",
-                "ALL",
             ]
         argv += [
             "--proc",
@@ -235,8 +233,17 @@ class SandboxExecutor:
             "--chdir",
             "/workspace",
             "--",
-            *command,
         ]
+        if network:
+            argv += [
+                "setpriv",
+                "--no-new-privs",
+                "--bounding-set=-all",
+                "--inh-caps=-all",
+                "--ambient-caps=-all",
+                "--",
+            ]
+        argv += list(command)
         return argv
 
     def _environment(
