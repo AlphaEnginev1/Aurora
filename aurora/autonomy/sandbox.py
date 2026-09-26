@@ -191,7 +191,7 @@ class SandboxExecutor:
                 "for i in $(seq 1 100); do ip link show tap0 >/dev/null 2>&1 && break; sleep 0.05; done; "
                 "ip link show tap0 >/dev/null 2>&1; "
                 "ip route replace unreachable default metric 42760; "
-                "ip -6 route replace unreachable default metric 42760; "
+                "ip -6 route replace unreachable default metric 42760 2>/dev/null || true; "
                 "ip route replace 10.0.2.2/32 dev tap0; "
                 "exec setpriv --no-new-privs --bounding-set=-all --inh-caps=-all --ambient-caps=-all -- " + wrapped
             )
