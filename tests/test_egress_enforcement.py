@@ -1,5 +1,3 @@
-from pathlib import Path
-
 import pytest
 
 from aurora.autonomy.egress_firewall import EgressFirewallPolicy, FirewallPolicyError
@@ -14,21 +12,13 @@ def test_proxy_policy_allows_approved_https_host():
 def test_proxy_policy_rejects_unapproved_host_and_port():
     p = EgressProxyPolicy(frozenset({"github.com"}))
     for value in ("example.com:443", "github.com:80"):
-        try:
+        with pytest.raises(PermissionError):
             p.authorize(value)
-        except PermissionError:
-            pass
-        else:
-            raise AssertionError("policy bypass")
 
 
 def test_proxy_policy_rejects_ip_literal():
-    try:
+    with pytest.raises(PermissionError):
         EgressProxyPolicy(frozenset({"github.com"})).authorize("1.1.1.1:443")
-    except PermissionError:
-        pass
-    else:
-        raise AssertionError("IP literal must be rejected")
 
 
 def test_proxy_policy_rejects_non_public_resolution(monkeypatch):
@@ -46,17 +36,14 @@ def test_proxy_policy_rejects_non_public_resolution(monkeypatch):
 
 def test_firewall_defaults_to_drop_and_allows_proxy_only():
     p = EgressFirewallPolicy()
-    rules = p.iptables_rules()
-    assert ("-P", "OUTPUT", "DROP") in rules
-    assert all("53" not in rule for rule in rules)
-    p.assert_complete(rules)
+    commands = p.nft_commands()
+    assert ("add", "table", "inet", "aurora_egress") in commands
+    assert any("policy" in command and "drop" in command for command in commands)
+    assert any("10.0.2.2" in command for command in commands)
+    p.assert_complete(commands)
 
 
 def test_firewall_rejects_incomplete_rules():
     p = EgressFirewallPolicy()
-    try:
-        p.assert_complete((("-P", "OUTPUT", "DROP"),))
-    except FirewallPolicyError:
-        pass
-    else:
-        raise AssertionError("incomplete firewall must fail closed")
+    with pytest.raises(FirewallPolicyError):
+        p.assert_complete((("add", "table", "inet", "aurora_egress"),))
