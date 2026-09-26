@@ -39,7 +39,7 @@ def test_command_rejects_null_bytes(tmp_path: Path):
         executor.execute(("printf", "bad" + bytes([0]).decode() + "value"), workspace=tmp_path)
 
 
-def test_network_bwrap_uses_nftables_and_seccomp_lockdown(tmp_path: Path, monkeypatch):
+def test_network_bwrap_uses_route_supervisor_and_seccomp_lockdown(tmp_path: Path, monkeypatch):
     executor = SandboxExecutor(SandboxPolicy(network=True))
     monkeypatch.setattr(
         "aurora.autonomy.sandbox.shutil.which",
@@ -56,7 +56,6 @@ def test_network_bwrap_uses_nftables_and_seccomp_lockdown(tmp_path: Path, monkey
     assert "--disable-userns" not in argv
     assert "--cap-add" in argv
     assert "CAP_NET_ADMIN" in argv
-    assert "--disable-userns" not in argv
     assert "--seccomp" in argv
     assert "17" in argv
     assert "--block-fd" not in argv
