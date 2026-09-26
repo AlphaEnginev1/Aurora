@@ -15,7 +15,7 @@ import subprocess
 import tempfile
 from typing import Mapping, Sequence
 
-from .egress_firewall import EgressFirewallPolicy
+from .network_supervisor import NetworkSupervisorError, NetworkSupervisorPolicy
 from .network_dataplane import NetworkDataplaneError, Slirp4netnsDataplane
 
 
@@ -148,15 +148,18 @@ class SandboxExecutor:
         if network:
             if self.policy.egress_proxy_host != "10.0.2.2":
                 raise SandboxError("controlled network requires slirp gateway 10.0.2.2 as proxy host")
-            nft = shutil.which("nft")
-            if nft is None:
-                raise SandboxError("nft is required for controlled sandbox networking")
-            firewall = EgressFirewallPolicy(
+            supervisor = NetworkSupervisorPolicy(
                 proxy_host=self.policy.egress_proxy_host,
                 proxy_port=self.policy.egress_proxy_port,
             )
-            commands = [[nft, *rule] for rule in firewall.nft_commands()]
+            try:
+                supervisor.validate()
+            except NetworkSupervisorError as exc:
+                raise SandboxError(str(exc)) from exc
+            if shutil.which("ip") is None:
+                raise SandboxError("ip is required for controlled sandbox networking")
             bootstrap_lines = ["set -eu"]
+            commands = supervisor.bootstrap_script()
             for command_tokens in commands:
                 bootstrap_lines.append(" ".join(shlex.quote(x) for x in command_tokens))
             wrapped = " ".join(shlex.quote(item) for item in command)
@@ -196,6 +199,9 @@ class SandboxExecutor:
 
         program = b"".join(
             [
+                stmt(BPF_LD | BPF_K | 0x20, 0),
+                stmt(BPF_LD | BPF_K | 0x20, 4),
+                jump(BPF_JMP | BPF_JEQ | BPF_K, 0, 5, 0xC000003E),
                 stmt(BPF_LD | BPF_K | 0x20, 0),
                 jump(BPF_JMP | BPF_JEQ | BPF_K, 3, 0, __NR_clone),
                 jump(BPF_JMP | BPF_JEQ | BPF_K, 2, 0, __NR_unshare),
