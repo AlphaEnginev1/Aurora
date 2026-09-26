@@ -15,6 +15,7 @@ import subprocess
 import tempfile
 from typing import Mapping, Sequence
 
+from .egress_firewall import EgressFirewallPolicy, FirewallPolicyError
 from .network_supervisor import NetworkSupervisorError, NetworkSupervisorPolicy
 from .network_dataplane import NetworkDataplaneError, Slirp4netnsDataplane
 
@@ -159,10 +160,24 @@ class SandboxExecutor:
                 raise SandboxError(str(exc)) from exc
             if shutil.which("ip") is None:
                 raise SandboxError("ip is required for controlled sandbox networking")
+            nft = shutil.which("nft")
+            if nft is None:
+                raise SandboxError("nft is required for controlled sandbox networking")
             bootstrap_lines = ["set -eu"]
-            commands = supervisor.bootstrap_script()
-            for command_tokens in commands:
+            route_commands = supervisor.bootstrap_script()
+            for command_tokens in route_commands:
                 bootstrap_lines.append(" ".join(shlex.quote(x) for x in command_tokens))
+            firewall = EgressFirewallPolicy(
+                proxy_host=self.policy.egress_proxy_host,
+                proxy_port=self.policy.egress_proxy_port,
+            )
+            try:
+                firewall_commands = firewall.nft_commands()
+                firewall.assert_complete(firewall_commands)
+            except FirewallPolicyError as exc:
+                raise SandboxError(str(exc)) from exc
+            for command_tokens in firewall_commands:
+                bootstrap_lines.append(" ".join(shlex.quote(x) for x in (nft, *command_tokens)))
             wrapped = " ".join(shlex.quote(item) for item in command)
             bootstrap_lines.append(
                 "exec setpriv --no-new-privs --bounding-set=-all --inh-caps=-all --ambient-caps=-all -- " + wrapped
