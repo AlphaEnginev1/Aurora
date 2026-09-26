@@ -183,6 +183,70 @@ def _wait_tap0(interface: str, timeout_seconds: float = 10.0) -> None:
     raise BootstrapError(f"{interface} did not appear after slirp4netns readiness")
 
 
+def _route_present(show_args: list[str]) -> bool:
+    try:
+        result = subprocess.run(
+            show_args,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise BootstrapError(
+            f"route inspection failed: {' '.join(show_args)}: {exc}"
+        ) from exc
+    if result.returncode != 0:
+        detail = result.stderr.strip() or result.stdout.strip()
+        raise BootstrapError(
+            f"route inspection failed ({result.returncode}): {' '.join(show_args)}"
+            + (f": {detail}" if detail else "")
+        )
+    return bool(result.stdout.strip())
+
+
+def _delete_route_if_present(
+    show_args: list[str],
+    delete_args: list[str],
+    description: str,
+    *,
+    attempts: int = 4,
+) -> None:
+    for _ in range(attempts):
+        if not _route_present(show_args):
+            return
+        try:
+            result = subprocess.run(
+                delete_args,
+                check=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=5,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise BootstrapError(
+                f"network bootstrap command failed to execute: {delete_args[0]}: {exc}"
+            ) from exc
+        if result.returncode == 0:
+            continue
+        # A concurrent route update can make the delete lose a race. Accept
+        # that only when an immediate re-check proves the route is gone.
+        if not _route_present(show_args):
+            return
+        detail = result.stderr.strip() or result.stdout.strip()
+        raise BootstrapError(
+            f"network bootstrap command failed ({result.returncode}): "
+            f"{' '.join(delete_args)}"
+            + (f": {detail}" if detail else "")
+        )
+    if _route_present(show_args):
+        raise BootstrapError(
+            f"route fence could not remove {description} after {attempts} attempts"
+        )
+
+
 def configure_routes(proxy_host: str, interface: str) -> None:
     try:
         ipaddress.ip_address(proxy_host)
@@ -193,43 +257,24 @@ def configure_routes(proxy_host: str, interface: str) -> None:
     if not interface.isidentifier():
         raise BootstrapError("invalid network interface")
 
-    if (
-        subprocess.run(
-            ["ip", "-4", "route", "show", "default"],
-            check=False,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            timeout=5,
-        ).stdout.strip()
-    ):
-        _run_checked(["ip", "-4", "route", "del", "default"])
-
-    if (
-        subprocess.run(
-            ["ip", "-4", "route", "show", "10.0.2.0/24", "dev", interface],
-            check=False,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            timeout=5,
-        ).stdout.strip()
-    ):
-        _run_checked(["ip", "-4", "route", "del", "10.0.2.0/24", "dev", interface])
+    _delete_route_if_present(
+        ["ip", "-4", "route", "show", "default"],
+        ["ip", "-4", "route", "del", "default"],
+        "the IPv4 default route",
+    )
+    _delete_route_if_present(
+        ["ip", "-4", "route", "show", "10.0.2.0/24", "dev", interface],
+        ["ip", "-4", "route", "del", "10.0.2.0/24", "dev", interface],
+        "the slirp IPv4 subnet route",
+    )
 
     _run_checked(["ip", "-4", "route", "replace", f"{proxy_host}/32", "dev", interface])
 
-    if (
-        subprocess.run(
-            ["ip", "-6", "route", "show", "default"],
-            check=False,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            timeout=5,
-        ).stdout.strip()
-    ):
-        _run_checked(["ip", "-6", "route", "del", "default"])
+    _delete_route_if_present(
+        ["ip", "-6", "route", "show", "default"],
+        ["ip", "-6", "route", "del", "default"],
+        "the IPv6 default route",
+    )
 
 
 def configure_firewall(proxy_host: str, proxy_port: int) -> None:
