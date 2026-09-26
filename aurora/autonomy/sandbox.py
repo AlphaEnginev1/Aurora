@@ -12,6 +12,7 @@ import signal
 import subprocess
 from typing import Mapping, Sequence
 
+from .egress_firewall import EgressFirewallPolicy
 from .network_dataplane import NetworkDataplaneError, Slirp4netnsDataplane
 
 
@@ -183,19 +184,33 @@ class SandboxExecutor:
         if network:
             if self.policy.egress_proxy_host != "10.0.2.2":
                 raise SandboxError("controlled network requires slirp gateway 10.0.2.2 as proxy host")
-            if shutil.which("ip") is None:
-                raise SandboxError("ip is required for controlled sandbox networking")
-            if shutil.which("setpriv") is None:
-                raise SandboxError("setpriv is required for controlled sandbox networking")
+            if shutil.which("iptables") is None or shutil.which("ip6tables") is None:
+                raise SandboxError("iptables and ip6tables are required for controlled sandbox networking")
+            firewall = EgressFirewallPolicy(
+                proxy_host=self.policy.egress_proxy_host,
+                proxy_port=self.policy.egress_proxy_port,
+            )
+            rules = firewall.iptables_rules()
+            commands = [
+                "iptables --wait -F OUTPUT",
+                "iptables --wait -P OUTPUT DROP",
+            ]
+            for rule in rules:
+                if rule[:2] == ("-P", "OUTPUT"):
+                    continue
+                commands.append("iptables --wait " + " ".join(shlex.quote(x) for x in rule))
+            commands += [
+                "ip6tables --wait -F OUTPUT",
+                "ip6tables --wait -P OUTPUT DROP",
+                "ip6tables --wait -A OUTPUT -o lo -j ACCEPT",
+            ]
             wrapped = " ".join(shlex.quote(item) for item in command)
             bootstrap = (
                 "set -eu; "
-                "for i in $(seq 1 100); do ip link show tap0 >/dev/null 2>&1 && break; sleep 0.05; done; "
-                "ip link show tap0 >/dev/null 2>&1; "
-                "ip route replace unreachable default metric 42760; "
-                "ip -6 route replace unreachable default metric 42760 2>/dev/null || true; "
-                "ip route replace 10.0.2.2/32 dev tap0; "
-                "exec setpriv --no-new-privs --bounding-set=-all --inh-caps=-all --ambient-caps=-all -- " + wrapped
+                + " ".join(commands)
+                + "; "
+                + "exec setpriv --no-new-privs --bounding-set=-all --inh-caps=-all --ambient-caps=-all -- "
+                + wrapped
             )
             argv += ["/bin/sh", "-c", bootstrap]
         else:
