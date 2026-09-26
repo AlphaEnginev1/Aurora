@@ -56,19 +56,20 @@ def test_network_bwrap_uses_nftables_and_seccomp_lockdown(tmp_path: Path, monkey
     assert "--disable-userns" not in argv
     assert "--cap-add" in argv
     assert "CAP_NET_ADMIN" in argv
+    assert "--disable-userns" not in argv
     assert "--seccomp" in argv
     assert "17" in argv
     assert "--block-fd" not in argv
     assert "/bin/sh" in argv
     bootstrap = argv[argv.index("/bin/sh") + 2]
-    assert "nft add table inet aurora_egress" in bootstrap
-    assert "nft add chain inet aurora_egress output" in bootstrap
-    assert "policy drop" in bootstrap
-    assert "10.0.2.2" in bootstrap
+    assert "ip -4 route del default" in bootstrap
+    assert "ip -4 route del 10.0.2.0/24 dev tap0" in bootstrap
+    assert "ip -4 route replace 10.0.2.2/32 dev tap0" in bootstrap
+    assert "ip -6 route del default" in bootstrap
     assert "setpriv --no-new-privs --bounding-set=-all" in bootstrap
 
 
 def test_seccomp_filter_is_x86_64_and_nonempty():
     with SandboxExecutor._seccomp_filter_fd() as f:
         payload = f.read()
-    assert len(payload) == 7 * 8
+    assert len(payload) == 9 * 8
