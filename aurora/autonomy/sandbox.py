@@ -170,11 +170,10 @@ class SandboxExecutor:
 
     @staticmethod
     def _seccomp_filter_fd() -> tempfile._TemporaryFileWrapper:
-        # x86_64 cBPF filter: deny namespace-changing syscalls after bwrap setup.
-        # bwrap installs the filter immediately before exec, so nft bootstrap is
-        # unaffected while the workload cannot create/join namespaces.
+        """Return a compiled classic-BPF seccomp program for namespace syscalls."""
         if os.uname().machine != "x86_64":
             raise SandboxError("controlled network seccomp policy currently requires x86_64")
+
         BPF_LD = 0x00
         BPF_JMP = 0x05
         BPF_JEQ = 0x10
@@ -183,7 +182,7 @@ class SandboxExecutor:
         SECCOMP_RET_ALLOW = 0x7FFF0000
         SECCOMP_RET_ERRNO = 0x00050000
         EPERM = errno.EPERM
-        AUDIT_ARCH_X86_64 = 0xC000003E
+
         __NR_clone = 56
         __NR_unshare = 272
         __NR_setns = 308
@@ -197,21 +196,16 @@ class SandboxExecutor:
 
         program = b"".join(
             [
-                stmt(BPF_LD | BPF_K | 0x20, 4),
-                jump(BPF_JMP | BPF_JEQ | BPF_K, 0, 6, AUDIT_ARCH_X86_64),
                 stmt(BPF_LD | BPF_K | 0x20, 0),
-                jump(BPF_JMP | BPF_JEQ | BPF_K, 4, 0, __NR_clone),
-                jump(BPF_JMP | BPF_JEQ | BPF_K, 3, 0, __NR_unshare),
-                jump(BPF_JMP | BPF_JEQ | BPF_K, 2, 0, __NR_setns),
-                jump(BPF_JMP | BPF_JEQ | BPF_K, 1, 0, __NR_clone3),
-                stmt(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
+                jump(BPF_JMP | BPF_JEQ | BPF_K, 3, 0, __NR_clone),
+                jump(BPF_JMP | BPF_JEQ | BPF_K, 2, 0, __NR_unshare),
+                jump(BPF_JMP | BPF_JEQ | BPF_K, 1, 0, __NR_setns),
+                jump(BPF_JMP | BPF_JEQ | BPF_K, 0, 1, __NR_clone3),
                 stmt(BPF_RET | BPF_K, SECCOMP_RET_ERRNO | EPERM),
+                stmt(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
             ]
         )
-        # sock_fprog: unsigned short len; struct sock_filter *filter
         f = tempfile.TemporaryFile()
-        f.write(struct.pack("<H", 9))
-        f.write(b"\x00" * 6)
         f.write(program)
         f.flush()
         f.seek(0)
