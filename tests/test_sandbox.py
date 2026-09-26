@@ -39,14 +39,14 @@ def test_command_rejects_null_bytes(tmp_path: Path):
         executor.execute(("printf", "bad" + bytes([0]).decode() + "value"), workspace=tmp_path)
 
 
-def test_network_bwrap_uses_route_fence_and_capability_drop(tmp_path: Path):
+def test_network_bwrap_uses_nftables_and_capability_drop(tmp_path: Path, monkeypatch):
     executor = SandboxExecutor(SandboxPolicy(network=True))
+    monkeypatch.setattr("aurora.autonomy.sandbox.shutil.which", lambda name: "/usr/bin/nft" if name == "nft" else "/usr/bin/slirp4netns")
     argv = executor._bubblewrap_argv(
         "/usr/bin/bwrap",
         ("true",),
         tmp_path,
         network=True,
-        gate_fd=None,
     )
     assert "--unshare-user" in argv
     assert "--disable-userns" in argv
@@ -55,8 +55,8 @@ def test_network_bwrap_uses_route_fence_and_capability_drop(tmp_path: Path):
     assert "--block-fd" not in argv
     assert "/bin/sh" in argv
     bootstrap = argv[argv.index("/bin/sh") + 2]
-    assert "iptables --wait -P OUTPUT DROP" in bootstrap
-    assert "ip6tables --wait -P OUTPUT DROP" in bootstrap
+    assert "nft add table inet aurora_egress" in bootstrap
+    assert "nft add chain inet aurora_egress output" in bootstrap
+    assert "policy drop" in bootstrap
+    assert "10.0.2.2" in bootstrap
     assert "setpriv --no-new-privs --bounding-set=-all" in bootstrap
-
-
