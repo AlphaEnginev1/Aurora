@@ -362,7 +362,12 @@ class AcquisitionManager:
             report_path.unlink(missing_ok=True)
             if staged_root.exists():
                 shutil.rmtree(staged_root, ignore_errors=True)
-            # Failed operations retain their snapshot for recovery/forensics.\n            if committed:\n                try:\n                    snapshot.discard(snapshot_state)\n                except OSError:\n                    pass
+            # Failed operations retain their snapshot for recovery/forensics.
+            if committed:
+                try:
+                    snapshot.discard(snapshot_state)
+                except OSError:
+                    pass
 
     def _verify_installed_distribution_at(
         self, install_root: Path, name: str, version: str
@@ -439,7 +444,9 @@ class AcquisitionManager:
                     "verification": result.verification,
                     "network_gateway": self.internet_gateway is not None,
                 },
-            )    def _existing_pip_provenance_at(
+            )
+
+    def _existing_pip_provenance_at(
         self, spec: ToolSpec, install_root: Path
     ) -> PackageProvenance | None:
         normalized = spec.name.lower().replace("-", "_")
