@@ -4,6 +4,7 @@ from dataclasses import dataclass
 class Policy:
     allowed_capabilities: frozenset[str]
     allowed_sources: frozenset[str]
+    require_verification: bool = True
 
     def allows_capability(self, name: str) -> bool:
         return name in self.allowed_capabilities
