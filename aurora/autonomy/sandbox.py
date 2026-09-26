@@ -163,7 +163,14 @@ class SandboxExecutor:
             nft = shutil.which("nft")
             if nft is None:
                 raise SandboxError("nft is required for controlled sandbox networking")
-            bootstrap_lines = ["set -eu"]
+            # slirp4netns creates tap0 asynchronously after the parent attaches it
+            # to this network namespace. The workload bootstrap must therefore
+            # wait for tap0 before touching routes/firewall; otherwise the shell
+            # can fail closed before the parent has a chance to attach slirp.
+            bootstrap_lines = [
+                "set -eu",
+                "i=0; while ! ip link show tap0 >/dev/null 2>&1; do i=$((i+1)); [ $i -lt 200 ] || { echo 'slirp tap0 did not appear' >&2; exit 1; }; sleep 0.05; done",
+            ]
             route_commands = supervisor.bootstrap_script()
             for command_tokens in route_commands:
                 bootstrap_lines.append(" ".join(shlex.quote(x) for x in command_tokens))
