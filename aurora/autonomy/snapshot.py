@@ -1,4 +1,4 @@
-"""Staging and filesystem rollback for Aurora-managed acquisition targets.
+"""Staging and filesystem rollback for Aurora-managed acquisition.
 
 This layer is intentionally limited to directories owned by Aurora. It never
 pretends that a host package manager transaction is reversible. For managed
@@ -28,6 +28,7 @@ class Snapshot:
     target: Path
     backup: Path
     had_original: bool
+    transaction_id: str | None = None
 
 
 class FilesystemSnapshot:
@@ -49,6 +50,7 @@ class FilesystemSnapshot:
             "target": str(snapshot.target),
             "backup": str(snapshot.backup),
             "had_original": snapshot.had_original,
+            "transaction_id": snapshot.transaction_id,
             "state": state,
         }
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -63,7 +65,7 @@ class FilesystemSnapshot:
             if os.path.exists(tmp_name):
                 os.unlink(tmp_name)
 
-    def create(self) -> Snapshot:
+    def create(self, transaction_id: str | None = None) -> Snapshot:
         self.target.parent.mkdir(parents=True, exist_ok=True)
         self.snapshot_root.mkdir(parents=True, exist_ok=True)
         snapshot_id = uuid.uuid4().hex
@@ -76,7 +78,13 @@ class FilesystemSnapshot:
             if self.target.is_symlink() or not self.target.is_dir():
                 raise SnapshotError("managed target must be a real directory")
             shutil.copytree(self.target, backup)
-        snapshot = Snapshot(snapshot_id, self.target, backup, had_original)
+        snapshot = Snapshot(
+            snapshot_id,
+            self.target,
+            backup,
+            had_original,
+            transaction_id,
+        )
         self._write_manifest(snapshot, "prepared")
         return snapshot
 
@@ -148,6 +156,11 @@ class FilesystemSnapshot:
                 target=Path(data["target"]).resolve(),
                 backup=Path(data["backup"]).resolve(),
                 had_original=bool(data["had_original"]),
+                transaction_id=(
+                    str(data["transaction_id"])
+                    if data.get("transaction_id") is not None
+                    else None
+                ),
             )
         except (OSError, UnicodeDecodeError, json.JSONDecodeError, KeyError, TypeError) as exc:
             raise SnapshotError(f"snapshot manifest is unreadable: {snapshot_id}") from exc
