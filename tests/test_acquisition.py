@@ -102,3 +102,4 @@ def test_pypi_installer_is_pinned_to_gateway_approved_index(tmp_path, monkeypatc
     assert "https://pypi.org/simple/" in captured["args"]
     assert "--report" in captured["args"]
     assert captured["env"]["PIP_NO_INPUT"] == "1"
+
