@@ -11,5 +11,12 @@
     "security.ubuntu.com",
     "integrate.api.nvidia.com"
   ],
-  "browser_isolation_required": true
+  "browser_isolation_required": true,
+  "sandbox_network": "broker_only",
+  "os_isolation": {
+    "backend": "bubblewrap",
+    "required": true,
+    "unshare_net": true,
+    "direct_network": false
+  }
 }
