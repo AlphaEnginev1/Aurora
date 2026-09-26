@@ -12,7 +12,7 @@ import pytest
 from aurora.autonomy.egress_proxy import EgressProxy, EgressProxyPolicy
 from aurora.autonomy.sandbox import SandboxExecutor, SandboxPolicy
 
-REQUIRED = ("bwrap", "slirp4netns", "nft", "ip", "setpriv", "curl")
+REQUIRED = ("bwrap", "slirp4netns", "ip", "setpriv", "curl")
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -110,9 +110,11 @@ def test_proxy_down_does_not_fall_back_to_direct_network(tmp_path: Path):
     assert result.returncode != 0
 
 
-def test_workload_cannot_modify_namespace_firewall(tmp_path: Path):
-    result = run_sandbox(tmp_path, "nft", "list", "ruleset")
-    assert result.returncode != 0
+def test_dataplane_has_no_default_route(tmp_path: Path):
+    result = run_sandbox(tmp_path, "ip", "-4", "route")
+    assert result.returncode == 0, result.stderr
+    assert not any(line.startswith("default") for line in result.stdout.splitlines())
+    assert any("10.0.2.2" in line and "tap0" in line for line in result.stdout.splitlines())
 
 
 def test_workload_cannot_restore_unrestricted_route(tmp_path: Path):
@@ -131,6 +133,7 @@ def test_proxy_gateway_is_reachable(rootless_network_enforcement_available, prox
     assert "403" in result.stderr
 
 
-def test_ipv6_firewall_is_default_deny(tmp_path: Path):
-    result = run_sandbox(tmp_path, "nft", "list", "table", "ip6", "aurora_egress")
-    assert result.returncode != 0
+def test_ipv6_has_no_default_route(tmp_path: Path):
+    result = run_sandbox(tmp_path, "ip", "-6", "route")
+    assert result.returncode == 0, result.stderr
+    assert not any(line.startswith("default") for line in result.stdout.splitlines())
