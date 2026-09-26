@@ -207,7 +207,7 @@ class SandboxExecutor:
             wrapped = " ".join(shlex.quote(item) for item in command)
             bootstrap = (
                 "set -eu; "
-                + " ".join(commands)
+                + "; ".join(commands)
                 + "; "
                 + "exec setpriv --no-new-privs --bounding-set=-all --inh-caps=-all --ambient-caps=-all -- "
                 + wrapped
