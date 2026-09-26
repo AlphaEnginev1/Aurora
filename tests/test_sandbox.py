@@ -1,4 +1,3 @@
-import os
 from pathlib import Path
 
 import pytest
@@ -40,17 +39,17 @@ def test_command_rejects_null_bytes(tmp_path: Path):
         executor.execute(("printf", "bad" + bytes([0]).decode() + "value"), workspace=tmp_path)
 
 
-def test_network_bwrap_reports_child_pid_and_keeps_lockdown(tmp_path: Path, monkeypatch):
+def test_network_bwrap_uses_post_setup_seccomp_handoff(tmp_path: Path, monkeypatch):
     executor = SandboxExecutor(SandboxPolicy(network=True))
     monkeypatch.setattr(
         "aurora.autonomy.sandbox.shutil.which",
         lambda name: (
-            "/usr/bin/nft"
-            if name == "nft"
-            else "/usr/bin/slirp4netns"
+            "/usr/bin/slirp4netns"
             if name == "slirp4netns"
             else "/usr/sbin/ip"
             if name == "ip"
+            else "/usr/bin/nft"
+            if name == "nft"
             else "/usr/bin/bwrap"
             if name == "bwrap"
             else "/usr/bin/setpriv"
@@ -61,28 +60,36 @@ def test_network_bwrap_reports_child_pid_and_keeps_lockdown(tmp_path: Path, monk
         ("true",),
         tmp_path,
         network=True,
-        seccomp_fd=17,
+        bootstrap_fd=17,
         json_status_fd=21,
     )
     assert "--unshare-user" in argv
-    assert "--disable-userns" not in argv
     assert "--cap-add" in argv
     assert "CAP_NET_ADMIN" in argv
-    assert "--seccomp" in argv
-    assert "17" in argv
+    assert "--seccomp" not in argv
     assert "--json-status-fd" in argv
     assert "21" in argv
-    assert "--block-fd" not in argv
-    assert "/bin/sh" in argv
-    bootstrap = argv[argv.index("/bin/sh") + 2]
-    assert "ip -4 route del default" in bootstrap
-    assert "ip -4 route del 10.0.2.0/24 dev tap0" in bootstrap
-    assert "ip -4 route replace 10.0.2.2/32 dev tap0" in bootstrap
-    assert "ip -6 route del default" in bootstrap
-    assert "setpriv --no-new-privs --bounding-set=-all" in bootstrap
+    assert "--file" in argv
+    assert "17" in argv
+    assert "/aurora-workload-bootstrap.py" in argv
+    assert argv[-1] == "true"
+
+
+def test_network_bwrap_requires_bootstrap_helper(tmp_path: Path):
+    executor = SandboxExecutor(SandboxPolicy(network=True))
+    with pytest.raises(SandboxError, match="bootstrap helper"):
+        executor._bubblewrap_argv(
+            "/usr/bin/bwrap",
+            ("true",),
+            tmp_path,
+            network=True,
+            json_status_fd=21,
+        )
 
 
 def test_bwrap_status_reader_accepts_child_pid():
+    import os
+
     read_fd, write_fd = os.pipe()
     os.write(write_fd, b'{"child-pid": 4321}\n')
     os.close(write_fd)
@@ -103,6 +110,8 @@ def test_bwrap_status_reader_accepts_child_pid():
 
 
 def test_bwrap_status_reader_fails_on_empty_channel():
+    import os
+
     read_fd, write_fd = os.pipe()
     os.close(write_fd)
 
@@ -121,6 +130,7 @@ def test_bwrap_status_reader_fails_on_empty_channel():
 
 
 def test_seccomp_filter_is_x86_64_and_nonempty():
-    with SandboxExecutor._seccomp_filter_fd() as f:
-        payload = f.read()
-    assert len(payload) == 9 * 8
+    from aurora.autonomy.workload_bootstrap import seccomp_program
+
+    program = seccomp_program()
+    assert len(program) == 14

@@ -137,93 +137,45 @@ class SandboxExecutor:
         root: Path,
         *,
         network: bool,
-        seccomp_fd: int | None = None,
+        bootstrap_fd: int | None = None,
         json_status_fd: int | None = None,
     ) -> list[str]:
         argv = [
-            bwrap,
-            "--die-with-parent",
-            "--new-session",
-            "--unshare-pid",
-            "--unshare-uts",
-            "--unshare-ipc",
-            "--unshare-cgroup-try",
-            "--unshare-net",
+            bwrap, "--die-with-parent", "--new-session", "--unshare-pid", "--unshare-uts",
+            "--unshare-ipc", "--unshare-cgroup-try", "--unshare-net",
         ]
         if network:
-            # --disable-userns is intentionally not used here: in this runtime it
-            # creates a nested-userns arrangement that interferes with network
-            # namespace bootstrap. Seccomp blocks namespace-changing syscalls
-            # after sandbox setup and setpriv removes network-admin capabilities.
+            # The network bootstrap needs CAP_NET_ADMIN. It is removed by
+            # setpriv before the workload starts; seccomp is installed only
+            # after that privilege drop so the bootstrap can fork/exec ip and nft.
             argv += ["--unshare-user", "--cap-add", "CAP_NET_ADMIN"]
-        if seccomp_fd is not None:
-            argv += ["--seccomp", str(seccomp_fd)]
         if json_status_fd is not None:
             if json_status_fd < 0:
                 raise SandboxError("invalid bubblewrap status fd")
             argv += ["--json-status-fd", str(json_status_fd)]
         argv += [
-            "--proc",
-            "/proc",
-            "--dev",
-            "/dev",
-            "--tmpfs",
-            "/tmp",
-            "--dir",
-            "/run",
+            "--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp", "--dir", "/run"
         ]
         if self.policy.readonly_system:
             for path in ("/usr", "/bin", "/sbin", "/lib", "/lib64", "/etc"):
                 if Path(path).exists():
                     argv += ["--ro-bind", path, path]
-        argv += ["--bind", str(root), "/workspace", "--chdir", "/workspace", "--"]
+        argv += ["--bind", str(root), "/workspace", "--chdir", "/workspace"]
         if network:
-            if self.policy.egress_proxy_host != "10.0.2.2":
-                raise SandboxError("controlled network requires slirp gateway 10.0.2.2 as proxy host")
-            supervisor = NetworkSupervisorPolicy(
-                proxy_host=self.policy.egress_proxy_host,
-                proxy_port=self.policy.egress_proxy_port,
-            )
-            try:
-                supervisor.validate()
-            except NetworkSupervisorError as exc:
-                raise SandboxError(str(exc)) from exc
-            if shutil.which("ip") is None:
-                raise SandboxError("ip is required for controlled sandbox networking")
-            nft = shutil.which("nft")
-            if nft is None:
-                raise SandboxError("nft is required for controlled sandbox networking")
-            bootstrap_lines = [
-                "set -eu",
-                "i=0; while ! ip link show tap0 >/dev/null 2>&1; do "
-                "i=$((i+1)); [ $i -lt 200 ] || { echo 'slirp tap0 did not appear' >&2; exit 1; }; "
-                "sleep 0.05; done",
+            if bootstrap_fd is None:
+                raise SandboxError("network bootstrap helper is required")
+            argv += [
+                "--file", str(bootstrap_fd), "/aurora-workload-bootstrap.py",
+                "--",
+                "python3", "/aurora-workload-bootstrap.py",
+                "--proxy-host", self.policy.egress_proxy_host,
+                "--proxy-port", str(self.policy.egress_proxy_port),
+                "--interface", "tap0",
+                "--",
+                *command,
             ]
-            route_commands = supervisor.bootstrap_script()
-            for command_tokens in route_commands:
-                bootstrap_lines.append(
-                    " ".join(shlex.quote(x) for x in command_tokens)
-                )
-            firewall = EgressFirewallPolicy(
-                proxy_host=self.policy.egress_proxy_host,
-                proxy_port=self.policy.egress_proxy_port,
-            )
-            try:
-                firewall_commands = firewall.nft_commands()
-                firewall.assert_complete(firewall_commands)
-            except FirewallPolicyError as exc:
-                raise SandboxError(str(exc)) from exc
-            for command_tokens in firewall_commands:
-                bootstrap_lines.append(
-                    " ".join(shlex.quote(x) for x in (nft, *command_tokens))
-                )
-            wrapped = " ".join(shlex.quote(item) for item in command)
-            bootstrap_lines.append(
-                "exec setpriv --no-new-privs --bounding-set=-all "
-                "--inh-caps=-all --ambient-caps=-all -- " + wrapped
-            )
-            argv += ["/bin/sh", "-c", "; ".join(bootstrap_lines)]
         else:
+            argv += ["--"]
             argv += list(command)
         return argv
 
@@ -337,25 +289,27 @@ class SandboxExecutor:
     ]:
         slirp_handle: NetworkDataplaneHandle | None = None
         process: subprocess.Popen[str] | None = None
-        seccomp_file = self._seccomp_filter_fd() if network else None
         status_read = -1
         status_write = -1
+        bootstrap_file = None
         try:
             if network:
                 status_read, status_write = os.pipe()
+                helper_path = Path(__file__).with_name("workload_bootstrap.py")
+                if not helper_path.is_file():
+                    raise SandboxError("network bootstrap helper is missing")
+                bootstrap_file = helper_path.open("rb")
             argv = self._bubblewrap_argv(
                 bwrap,
                 command,
                 cwd,
                 network=network,
-                seccomp_fd=seccomp_file.fileno() if seccomp_file is not None else None,
+                bootstrap_fd=bootstrap_file.fileno() if bootstrap_file is not None else None,
                 json_status_fd=status_write if network else None,
             )
             pass_fds_list = []
-            if seccomp_file is not None:
-                pass_fds_list.append(seccomp_file.fileno())
             if network:
-                pass_fds_list.append(status_write)
+                pass_fds_list.extend([status_write, bootstrap_file.fileno()])
             process = subprocess.Popen(
                 argv,
                 cwd=str(cwd),
@@ -371,6 +325,8 @@ class SandboxExecutor:
             if network:
                 os.close(status_write)
                 status_write = -1
+                bootstrap_file.close()
+                bootstrap_file = None
                 child_pid = self._read_bwrap_child_pid(status_read, process)
                 status_read = -1
                 slirp_handle = _EgressEnforcer(self.policy).prepare(child_pid)
@@ -417,8 +373,8 @@ class SandboxExecutor:
                     os.close(status_write)
                 except OSError:
                     pass
-            if seccomp_file is not None:
-                seccomp_file.close()
+            if bootstrap_file is not None:
+                bootstrap_file.close()
 
     def _environment(
         self,
