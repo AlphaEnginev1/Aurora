@@ -30,12 +30,13 @@ def test_pypi_requires_isolated_target():
     assert "isolated install_root" in str(exc.value)
 
 
-def test_gateway_policy_is_required_for_networked_acquisition():
+def test_gateway_policy_is_required_for_networked_acquisition(tmp_path):
     gateway = InternetGateway(
         InternetPolicy(frozenset({"https"}), frozenset({"pypi.org"}))
     )
     manager = AcquisitionManager(
         allowed_sources=frozenset({"pypi"}),
+        install_root=tmp_path / "site",
         internet_gateway=gateway,
     )
     assert manager.plan(
@@ -43,12 +44,13 @@ def test_gateway_policy_is_required_for_networked_acquisition():
     )["action"] == "install"
 
 
-def test_gateway_blocks_unapproved_acquisition_source():
+def test_gateway_blocks_unapproved_acquisition_source(tmp_path):
     gateway = InternetGateway(
         InternetPolicy(frozenset({"https"}), frozenset({"example.com"}))
     )
     manager = AcquisitionManager(
         allowed_sources=frozenset({"pypi"}),
+        install_root=tmp_path / "site",
         internet_gateway=gateway,
     )
     with pytest.raises(AcquisitionError, match="Internet Gateway"):
@@ -102,4 +104,3 @@ def test_pypi_installer_is_pinned_to_gateway_approved_index(tmp_path, monkeypatc
     assert "https://pypi.org/simple/" in captured["args"]
     assert "--report" in captured["args"]
     assert captured["env"]["PIP_NO_INPUT"] == "1"
-

@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import pytest
@@ -39,11 +40,21 @@ def test_command_rejects_null_bytes(tmp_path: Path):
         executor.execute(("printf", "bad" + bytes([0]).decode() + "value"), workspace=tmp_path)
 
 
-def test_network_bwrap_uses_route_supervisor_and_seccomp_lockdown(tmp_path: Path, monkeypatch):
+def test_network_bwrap_reports_child_pid_and_keeps_lockdown(tmp_path: Path, monkeypatch):
     executor = SandboxExecutor(SandboxPolicy(network=True))
     monkeypatch.setattr(
         "aurora.autonomy.sandbox.shutil.which",
-        lambda name: "/usr/bin/nft" if name == "nft" else "/usr/bin/slirp4netns",
+        lambda name: (
+            "/usr/bin/nft"
+            if name == "nft"
+            else "/usr/bin/slirp4netns"
+            if name == "slirp4netns"
+            else "/usr/sbin/ip"
+            if name == "ip"
+            else "/usr/bin/bwrap"
+            if name == "bwrap"
+            else "/usr/bin/setpriv"
+        ),
     )
     argv = executor._bubblewrap_argv(
         "/usr/bin/bwrap",
@@ -51,6 +62,7 @@ def test_network_bwrap_uses_route_supervisor_and_seccomp_lockdown(tmp_path: Path
         tmp_path,
         network=True,
         seccomp_fd=17,
+        json_status_fd=21,
     )
     assert "--unshare-user" in argv
     assert "--disable-userns" not in argv
@@ -58,6 +70,8 @@ def test_network_bwrap_uses_route_supervisor_and_seccomp_lockdown(tmp_path: Path
     assert "CAP_NET_ADMIN" in argv
     assert "--seccomp" in argv
     assert "17" in argv
+    assert "--json-status-fd" in argv
+    assert "21" in argv
     assert "--block-fd" not in argv
     assert "/bin/sh" in argv
     bootstrap = argv[argv.index("/bin/sh") + 2]
@@ -66,6 +80,44 @@ def test_network_bwrap_uses_route_supervisor_and_seccomp_lockdown(tmp_path: Path
     assert "ip -4 route replace 10.0.2.2/32 dev tap0" in bootstrap
     assert "ip -6 route del default" in bootstrap
     assert "setpriv --no-new-privs --bounding-set=-all" in bootstrap
+
+
+def test_bwrap_status_reader_accepts_child_pid():
+    read_fd, write_fd = os.pipe()
+    os.write(write_fd, b'{"child-pid": 4321}\n')
+    os.close(write_fd)
+
+    class DummyProcess:
+        def poll(self):
+            return None
+
+    try:
+        assert SandboxExecutor._read_bwrap_child_pid(
+            read_fd,
+            DummyProcess(),
+            timeout_seconds=1,
+        ) == 4321
+    except Exception:
+        os.close(read_fd)
+        raise
+
+
+def test_bwrap_status_reader_fails_on_empty_channel():
+    read_fd, write_fd = os.pipe()
+    os.close(write_fd)
+
+    class DummyProcess:
+        returncode = 1
+
+        def poll(self):
+            return 1
+
+    with pytest.raises(SandboxError, match="closed status channel"):
+        SandboxExecutor._read_bwrap_child_pid(
+            read_fd,
+            DummyProcess(),
+            timeout_seconds=1,
+        )
 
 
 def test_seccomp_filter_is_x86_64_and_nonempty():
