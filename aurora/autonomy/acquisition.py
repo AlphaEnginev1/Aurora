@@ -19,6 +19,7 @@ from .provenance import (
 )
 from .registry import ToolSpec
 from .transaction import AcquisitionTransaction, TransactionError, operation_key
+from .snapshot import FilesystemSnapshot, SnapshotError
 
 
 class AcquisitionError(RuntimeError):
@@ -276,10 +277,20 @@ class AcquisitionManager:
     def _pip(self, spec: ToolSpec) -> AcquisitionResult:
         if not self.install_root:
             raise AcquisitionError("pypi acquisition requires an isolated install_root")
-        self.install_root.mkdir(parents=True, exist_ok=True)
+        self.install_root.parent.mkdir(parents=True, exist_ok=True)
         python = shutil.which("python3") or shutil.which("python")
         if not python:
             raise AcquisitionError("python runtime not found")
+
+        snapshot = FilesystemSnapshot(
+            target=self.install_root,
+            snapshot_root=self.transaction_dir / "snapshots",
+        )
+        try:
+            snapshot_state = snapshot.create()
+            staged_root = snapshot.stage_directory(snapshot_state)
+        except SnapshotError as exc:
+            raise AcquisitionError(f"filesystem staging preparation failed: {exc}") from exc
 
         env = os.environ.copy()
         env["PIP_INDEX_URL"] = "https://pypi.org/simple/"
@@ -303,23 +314,33 @@ class AcquisitionManager:
                     "--report",
                     str(report_path),
                     "--target",
-                    str(self.install_root),
+                    str(staged_root),
                     spec.name,
                 ],
                 env=env,
             )
             if result.returncode != 0:
+                snapshot.rollback(snapshot_state)
                 raise AcquisitionError(f"pip install failed: {result.stderr.strip()}")
             try:
                 provenance = load_pip_report(report_path)
                 self._validate_expected(spec, provenance)
-                record_count = self._verify_installed_distribution(
-                    provenance.name, provenance.version
+                record_count = self._verify_installed_distribution_at(
+                    staged_root, provenance.name, provenance.version
                 )
+                if record_count <= 0:
+                    raise ProvenanceError("installed distribution RECORD was not verified")
             except (ProvenanceError, OSError, ValueError) as exc:
+                snapshot.rollback(snapshot_state)
                 raise AcquisitionError(
                     f"package provenance verification failed: {exc}"
                 ) from exc
+
+            try:
+                snapshot.commit(snapshot_state, staged_root)
+            except SnapshotError as exc:
+                raise AcquisitionError(f"filesystem commit failed: {exc}") from exc
+
             return AcquisitionResult(
                 spec.name,
                 "installed",
@@ -330,10 +351,42 @@ class AcquisitionManager:
                 version=provenance.version,
                 artifact_sha256=provenance.artifact_sha256,
                 provenance_url=provenance.provenance_url,
-                verification="verified" if record_count > 0 else "observed",
+                verification="verified",
             )
+        except AcquisitionError:
+            # The target remains unchanged unless commit has already succeeded.
+            raise
         finally:
             report_path.unlink(missing_ok=True)
+            if staged_root.exists():
+                shutil.rmtree(staged_root, ignore_errors=True)
+            # The retained snapshot is removed only after a successful commit.
+            # Failed verification/installation keeps the pre-install backup available.
+            if self.install_root.exists() and 'snapshot_state' in locals():
+                try:
+                    snapshot.discard(snapshot_state)
+                except OSError:
+                    pass
+
+    def _verify_installed_distribution_at(
+        self, install_root: Path, name: str, version: str
+    ) -> int:
+        normalized = name.lower().replace("-", "_")
+        for metadata_path in install_root.glob("*.dist-info/METADATA"):
+            metadata = metadata_path.read_text(encoding="utf-8", errors="strict")
+            fields = {}
+            for line in metadata.splitlines():
+                if ": " in line:
+                    key, value = line.split(": ", 1)
+                    fields[key.lower()] = value.strip()
+            if (
+                fields.get("name", "").lower().replace("-", "_") == normalized
+                and fields.get("version") == version
+            ):
+                return verify_record(install_root, metadata_path.parent / "RECORD")
+        raise ProvenanceError(
+            f"installed distribution metadata not found: {name}=={version}"
+        )
 
     def _validate_expected(self, spec: ToolSpec, provenance: PackageProvenance) -> None:
         if provenance.name.lower().replace("-", "_") != spec.name.lower().replace("-", "_"):
