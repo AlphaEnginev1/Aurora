@@ -170,10 +170,6 @@ class SandboxExecutor:
             for path in ("/usr", "/bin", "/sbin", "/lib", "/lib64", "/etc"):
                 if Path(path).exists():
                     argv += ["--ro-bind", path, path]
-        if network:
-            if gate_fd is None:
-                raise SandboxError("network gate is missing")
-            argv += ["--block-fd", str(gate_fd)]
         argv += [
             "--bind",
             str(root),
@@ -185,8 +181,10 @@ class SandboxExecutor:
         if network:
             if self.policy.egress_proxy_host != "10.0.2.2":
                 raise SandboxError("controlled network requires slirp gateway 10.0.2.2 as proxy host")
-            self._require("ip")
-            self._require("setpriv")
+            if shutil.which("ip") is None:
+                raise SandboxError("ip is required for controlled sandbox networking")
+            if shutil.which("setpriv") is None:
+                raise SandboxError("setpriv is required for controlled sandbox networking")
             wrapped = " ".join(shlex.quote(item) for item in command)
             bootstrap = (
                 "set -eu; "
