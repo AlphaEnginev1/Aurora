@@ -46,7 +46,7 @@ class SandboxResult:
 
 
 class _EgressEnforcer:
-    """Attach the isolated dataplane; the sandbox bootstrap installs the route fence."""
+    """Attach the isolated rootless dataplane before sandbox bootstrap."""
 
     def __init__(self, policy: SandboxPolicy) -> None:
         self.dataplane = Slirp4netnsDataplane()
@@ -96,31 +96,13 @@ class SandboxExecutor:
 
         network = self._network_mode()
         env = self._environment(environment or {}, network=network)
-        gate_read = gate_write = None
         slirp_process: subprocess.Popen[str] | None = None
 
         try:
-            argv = self._bubblewrap_argv(
-                bwrap,
-                tuple(command),
-                root,
-                network=network,
-                gate_fd=gate_read,
-            )
-            completed, timed_out, slirp_process = self._run(
-                argv,
-                env,
-                root,
-                network=network,
-                gate_read=None,
-                gate_write=None,
-            )
+            argv = self._bubblewrap_argv(bwrap, tuple(command), root, network=network)
+            completed, timed_out, slirp_process = self._run(argv, env, root, network=network)
             return SandboxResult(
-                tuple(command),
-                completed.returncode,
-                self._cap(completed.stdout),
-                self._cap(completed.stderr),
-                timed_out,
+                tuple(command), completed.returncode, self._cap(completed.stdout), self._cap(completed.stderr), timed_out
             )
         finally:
             if slirp_process is not None:
@@ -133,106 +115,53 @@ class SandboxExecutor:
             raise SandboxError("invalid egress proxy port")
         return True
 
-    def _bubblewrap_argv(
-        self,
-        bwrap: str,
-        command: tuple[str, ...],
-        root: Path,
-        *,
-        network: bool,
-        gate_fd: int | None,
-    ) -> list[str]:
+    def _bubblewrap_argv(self, bwrap: str, command: tuple[str, ...], root: Path, *, network: bool) -> list[str]:
         argv = [
-            bwrap,
-            "--die-with-parent",
-            "--new-session",
-            "--unshare-pid",
-            "--unshare-uts",
-            "--unshare-ipc",
-            "--unshare-cgroup-try",
-            "--unshare-net",
+            bwrap, "--die-with-parent", "--new-session", "--unshare-pid", "--unshare-uts",
+            "--unshare-ipc", "--unshare-cgroup-try", "--unshare-net",
         ]
         if network:
-            argv += [
-                "--unshare-user",
-                "--disable-userns",
-                "--cap-add",
-                "CAP_NET_ADMIN",
-            ]
-        argv += [
-            "--proc",
-            "/proc",
-            "--dev",
-            "/dev",
-            "--tmpfs",
-            "/tmp",
-            "--dir",
-            "/run",
-        ]
+            argv += ["--unshare-user", "--disable-userns", "--cap-add", "CAP_NET_ADMIN"]
+        argv += ["--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp", "--dir", "/run"]
         if self.policy.readonly_system:
             for path in ("/usr", "/bin", "/sbin", "/lib", "/lib64", "/etc"):
                 if Path(path).exists():
                     argv += ["--ro-bind", path, path]
-        argv += [
-            "--bind",
-            str(root),
-            "/workspace",
-            "--chdir",
-            "/workspace",
-            "--",
-        ]
+        argv += ["--bind", str(root), "/workspace", "--chdir", "/workspace", "--"]
         if network:
             if self.policy.egress_proxy_host != "10.0.2.2":
                 raise SandboxError("controlled network requires slirp gateway 10.0.2.2 as proxy host")
-            if shutil.which("iptables") is None or shutil.which("ip6tables") is None:
-                raise SandboxError("iptables and ip6tables are required for controlled sandbox networking")
+            nft = shutil.which("nft")
+            if nft is None:
+                raise SandboxError("nft is required for controlled sandbox networking")
             firewall = EgressFirewallPolicy(
                 proxy_host=self.policy.egress_proxy_host,
                 proxy_port=self.policy.egress_proxy_port,
             )
-            rules = firewall.iptables_rules()
             commands = [
-                "iptables --wait -F OUTPUT",
-                "iptables --wait -P OUTPUT DROP",
+                [nft, *rule] for rule in firewall.nft_commands()
             ]
-            for rule in rules:
-                if rule[:2] == ("-P", "OUTPUT"):
-                    continue
-                commands.append("iptables --wait " + " ".join(shlex.quote(x) for x in rule))
-            commands += [
-                "ip6tables --wait -F OUTPUT",
-                "ip6tables --wait -P OUTPUT DROP",
-                "ip6tables --wait -A OUTPUT -o lo -j ACCEPT",
-            ]
+            commands = [[nft, "-f", "/dev/stdin"]] if False else commands
+            bootstrap_lines = ["set -eu"]
+            for command_tokens in commands:
+                bootstrap_lines.append(" ".join(shlex.quote(x) for x in command_tokens))
             wrapped = " ".join(shlex.quote(item) for item in command)
-            bootstrap = (
-                "set -eu; "
-                + "; ".join(commands)
-                + "; "
-                + "exec setpriv --no-new-privs --bounding-set=-all --inh-caps=-all --ambient-caps=-all -- "
-                + wrapped
+            bootstrap_lines.append(
+                "exec setpriv --no-new-privs --bounding-set=-all --inh-caps=-all --ambient-caps=-all -- " + wrapped
             )
-            argv += ["/bin/sh", "-c", bootstrap]
+            argv += ["/bin/sh", "-c", "; ".join(bootstrap_lines)]
         else:
             argv += list(command)
         return argv
 
-    def _environment(
-        self,
-        supplied: Mapping[str, str],
-        *,
-        network: bool = False,
-    ) -> dict[str, str]:
+    def _environment(self, supplied: Mapping[str, str], *, network: bool = False) -> dict[str, str]:
         result: dict[str, str] = {}
         for key in self.policy.allowed_env:
             if key in supplied:
                 result[key] = str(supplied[key])
             elif key in os.environ:
                 result[key] = os.environ[key]
-        result.setdefault(
-            "PATH",
-            "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-        )
+        result.setdefault("PATH", "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
         result["HOME"] = "/workspace"
         if network:
             proxy = f"http://{self.policy.egress_proxy_host}:{self.policy.egress_proxy_port}"
@@ -251,48 +180,24 @@ class SandboxExecutor:
         if hasattr(resource, "RLIMIT_NPROC"):
             resource.setrlimit(resource.RLIMIT_NPROC, (self.policy.max_processes, self.policy.max_processes))
 
-    def _run(
-        self,
-        argv: list[str],
-        env: dict[str, str],
-        cwd: Path,
-        *,
-        network: bool,
-        gate_read: int | None,
-        gate_write: int | None,
-    ) -> tuple[subprocess.CompletedProcess[str], bool, subprocess.Popen[str] | None]:
+    def _run(self, argv: list[str], env: dict[str, str], cwd: Path, *, network: bool) -> tuple[subprocess.CompletedProcess[str], bool, subprocess.Popen[str] | None]:
         slirp_process: subprocess.Popen[str] | None = None
         process: subprocess.Popen[str] | None = None
         try:
             process = subprocess.Popen(
-                argv,
-                cwd=str(cwd),
-                env=env,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                start_new_session=True,
-                preexec_fn=self._limits,
-                pass_fds=(),
+                argv, cwd=str(cwd), env=env, stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                start_new_session=True, preexec_fn=self._limits, pass_fds=(),
             )
             if network:
                 slirp_process = _EgressEnforcer(self.policy).prepare(process.pid)
             try:
                 stdout, stderr = process.communicate(timeout=self.policy.timeout_seconds)
-                return (
-                    subprocess.CompletedProcess(argv, process.returncode, stdout, stderr),
-                    False,
-                    slirp_process,
-                )
+                return subprocess.CompletedProcess(argv, process.returncode, stdout, stderr), False, slirp_process
             except subprocess.TimeoutExpired:
                 os.killpg(process.pid, signal.SIGKILL)
                 stdout, stderr = process.communicate()
-                return (
-                    subprocess.CompletedProcess(argv, process.returncode, stdout, stderr),
-                    True,
-                    slirp_process,
-                )
+                return subprocess.CompletedProcess(argv, process.returncode, stdout, stderr), True, slirp_process
         except (OSError, SandboxError) as exc:
             if process is not None and process.poll() is None:
                 process.kill()
