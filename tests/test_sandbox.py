@@ -39,19 +39,25 @@ def test_command_rejects_null_bytes(tmp_path: Path):
         executor.execute(("printf", "bad" + bytes([0]).decode() + "value"), workspace=tmp_path)
 
 
-def test_network_bwrap_uses_nftables_and_capability_drop(tmp_path: Path, monkeypatch):
+def test_network_bwrap_uses_nftables_and_seccomp_lockdown(tmp_path: Path, monkeypatch):
     executor = SandboxExecutor(SandboxPolicy(network=True))
-    monkeypatch.setattr("aurora.autonomy.sandbox.shutil.which", lambda name: "/usr/bin/nft" if name == "nft" else "/usr/bin/slirp4netns")
+    monkeypatch.setattr(
+        "aurora.autonomy.sandbox.shutil.which",
+        lambda name: "/usr/bin/nft" if name == "nft" else "/usr/bin/slirp4netns",
+    )
     argv = executor._bubblewrap_argv(
         "/usr/bin/bwrap",
         ("true",),
         tmp_path,
         network=True,
+        seccomp_fd=17,
     )
     assert "--unshare-user" in argv
-    assert "--disable-userns" in argv
+    assert "--disable-userns" not in argv
     assert "--cap-add" in argv
     assert "CAP_NET_ADMIN" in argv
+    assert "--seccomp" in argv
+    assert "17" in argv
     assert "--block-fd" not in argv
     assert "/bin/sh" in argv
     bootstrap = argv[argv.index("/bin/sh") + 2]
@@ -60,3 +66,12 @@ def test_network_bwrap_uses_nftables_and_capability_drop(tmp_path: Path, monkeyp
     assert "policy drop" in bootstrap
     assert "10.0.2.2" in bootstrap
     assert "setpriv --no-new-privs --bounding-set=-all" in bootstrap
+
+
+def test_seccomp_filter_is_x86_64_and_nonempty():
+    import struct
+
+    with SandboxExecutor._seccomp_filter_fd() as f:
+        payload = f.read()
+    assert struct.unpack("<H", payload[:2])[0] == 9
+    assert len(payload) == 8 + (9 * 8)
