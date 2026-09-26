@@ -18,7 +18,7 @@ from aurora.autonomy.egress_proxy import EgressProxy, EgressProxyPolicy
 from aurora.autonomy.sandbox import SandboxExecutor, SandboxPolicy
 
 
-REQUIRED = ("bwrap", "slirp4netns", "nsenter", "iptables", "curl")
+REQUIRED = ("bwrap", "slirp4netns", "nsenter", "iptables", "setpriv", "curl")
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -156,5 +156,15 @@ def test_proxy_down_does_not_fall_back_to_direct_network(tmp_path: Path):
         "-o",
         "/dev/null",
         "https://github.com/",
+    )
+    assert result.returncode != 0
+
+
+def test_workload_cannot_modify_namespace_firewall(proxy, tmp_path: Path):
+    result = run_sandbox(
+        tmp_path,
+        "iptables",
+        "-S",
+        "OUTPUT",
     )
     assert result.returncode != 0
