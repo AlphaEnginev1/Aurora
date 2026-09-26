@@ -141,7 +141,6 @@ class SandboxExecutor:
             commands = [
                 [nft, *rule] for rule in firewall.nft_commands()
             ]
-            commands = [[nft, "-f", "/dev/stdin"]] if False else commands
             bootstrap_lines = ["set -eu"]
             for command_tokens in commands:
                 bootstrap_lines.append(" ".join(shlex.quote(x) for x in command_tokens))
