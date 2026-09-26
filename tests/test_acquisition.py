@@ -92,7 +92,11 @@ def test_pypi_installer_is_pinned_to_gateway_approved_index(tmp_path, monkeypatc
             provenance_url="https://files.pythonhosted.org/example.whl",
         ),
     )
-    monkeypatch.setattr(manager, "_verify_installed_distribution", lambda name, version: 1)
+    monkeypatch.setattr(
+        manager,
+        "_verify_installed_distribution_at",
+        lambda install_root, name, version: 1,
+    )
 
     result = manager.acquire(ToolSpec("example", "runtime", "pypi", "example"))
     assert result.status == "installed"
