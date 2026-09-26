@@ -133,9 +133,10 @@ class SandboxExecutor:
             "--unshare-ipc", "--unshare-cgroup-try", "--unshare-net",
         ]
         if network:
-            # --disable-userns is intentionally not used here: on WSL2 it creates
-            # a nested-userns arrangement in which nftables returns EPERM. Instead,
-            # seccomp blocks clone/clone3/unshare/setns after sandbox setup.
+            # --disable-userns is intentionally not used here: in this runtime it
+            # creates a nested-userns arrangement that interferes with network
+            # namespace bootstrap. Seccomp blocks namespace-changing syscalls
+            # after sandbox setup and setpriv removes network-admin capabilities.
             argv += ["--unshare-user", "--cap-add", "CAP_NET_ADMIN"]
         if seccomp_fd is not None:
             argv += ["--seccomp", str(seccomp_fd)]
