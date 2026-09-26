@@ -300,6 +300,7 @@ class AcquisitionManager:
         )
         report_path = Path(report_file.name)
         report_file.close()
+        committed = False
         try:
             result = self._run(
                 [
@@ -338,6 +339,7 @@ class AcquisitionManager:
 
             try:
                 snapshot.commit(snapshot_state, staged_root)
+                committed = True
             except SnapshotError as exc:
                 raise AcquisitionError(f"filesystem commit failed: {exc}") from exc
 
@@ -360,13 +362,7 @@ class AcquisitionManager:
             report_path.unlink(missing_ok=True)
             if staged_root.exists():
                 shutil.rmtree(staged_root, ignore_errors=True)
-            # The retained snapshot is removed only after a successful commit.
-            # Failed verification/installation keeps the pre-install backup available.
-            if self.install_root.exists() and 'snapshot_state' in locals():
-                try:
-                    snapshot.discard(snapshot_state)
-                except OSError:
-                    pass
+            # Failed operations retain their snapshot for recovery/forensics.\n            if committed:\n                try:\n                    snapshot.discard(snapshot_state)\n                except OSError:\n                    pass
 
     def _verify_installed_distribution_at(
         self, install_root: Path, name: str, version: str
