@@ -1,3 +1,4 @@
+import hashlib
 import logging
 import os
 from pathlib import Path
@@ -12,49 +13,24 @@ from nat.plugin_api import register_function
 
 from aurora.orchestration.factory import build_orchestration_engine
 from aurora.inference.router import ModelRoutingError
+from aurora.inference.config import InferenceConfigError
 
 logger = logging.getLogger(__name__)
 
-
-class AuroraDirectorFunctionConfig(
-    FunctionBaseConfig,
-    name="aurora_director",
-):
+class AuroraDirectorFunctionConfig(FunctionBaseConfig, name="aurora_director"):
     """Aurora Director configuration."""
+    prefix: str = Field(default="AURORA", description="Prefix used in Director responses.")
 
-    prefix: str = Field(
-        default="AURORA",
-        description="Prefix used in Director responses.",
-    )
-
-
-@register_function(
-    config_type=AuroraDirectorFunctionConfig,
-    framework_wrappers=[LLMFrameworkEnum.LANGCHAIN],
-)
-async def aurora_director_function(
-    config: AuroraDirectorFunctionConfig,
-    builder: Builder,
-):
+@register_function(config_type=AuroraDirectorFunctionConfig, framework_wrappers=[LLMFrameworkEnum.LANGCHAIN])
+async def aurora_director_function(config: AuroraDirectorFunctionConfig, builder: Builder):
     """Register the Aurora Director function."""
-
     async def _director(objective: str) -> str:
         objective = objective.strip()
-
         if not objective:
-            return (
-                f"{config.prefix}\n"
-                "MISSION_REJECTED\n"
-                "Reason: empty objective."
-            )
-
-        # Deterministic mode remains the safe default until a runtime operator
-        # explicitly enables model-backed Director delegation.
+            return f"{config.prefix}\nMISSION_REJECTED\nReason: empty objective."
         if os.getenv("AURORA_ENABLE_INFERENCE", "0") != "1":
             return (
-                f"{config.prefix}\n"
-                "MISSION_ACCEPTED\n\n"
-                f"Objective:\n{objective}\n\n"
+                f"{config.prefix}\nMISSION_ACCEPTED\n\nObjective:\n{objective}\n\n"
                 "Initial orchestration plan:\n"
                 "1. Analyse objective and constraints.\n"
                 "2. Decompose objective into executable tasks.\n"
@@ -65,39 +41,13 @@ async def aurora_director_function(
                 "7. Report status and remaining work.\n\n"
                 "Inference Fabric: available but disabled by runtime policy."
             )
-
-        policy_path = Path(
-            os.getenv(
-                "AURORA_INFERENCE_POLICY",
-                "config/inference-policy.json",
-            )
-        )
+        policy_path = Path(os.getenv("AURORA_INFERENCE_POLICY", "config/inference-policy.json"))
         try:
             engine = build_orchestration_engine(policy_path)
-            result = engine.run_task(
-                task_id=f"director-{id(objective)}",
-                role="director",
-                objective=objective,
-                capability="reasoning",
-            )
-            return (
-                f"{config.prefix}\n"
-                "MISSION_ACCEPTED\n\n"
-                f"Objective:\n{objective}\n\n"
-                "Model-backed Director result:\n"
-                f"{result.response.content}"
-            )
-        except ModelRoutingError as exc:
+            task_id = "director-" + hashlib.sha256(objective.encode("utf-8")).hexdigest()[:16]
+            result = engine.run_task(task_id=task_id, role="director", objective=objective, capability="reasoning")
+            return f"{config.prefix}\nMISSION_ACCEPTED\n\nObjective:\n{objective}\n\nModel-backed Director result:\n{result.response.content}"
+        except (ModelRoutingError, InferenceConfigError) as exc:
             logger.warning("Inference routing unavailable: %s", exc)
-            return (
-                f"{config.prefix}\n"
-                "MISSION_ACCEPTED\n\n"
-                f"Objective:\n{objective}\n\n"
-                "Inference Fabric unavailable; deterministic orchestration retained.\n"
-                f"Reason: {exc}"
-            )
-
-    yield FunctionInfo.from_fn(
-        _director,
-        description=_director.__doc__,
-    )
+            return f"{config.prefix}\nMISSION_ACCEPTED\n\nObjective:\n{objective}\n\nInference Fabric unavailable; deterministic orchestration retained.\nReason: {exc}"
+    yield FunctionInfo.from_fn(_director, description=_director.__doc__)
