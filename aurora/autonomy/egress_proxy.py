@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import socket
 from dataclasses import dataclass
+
 
 @dataclass(frozen=True)
 class EgressProxyPolicy:
@@ -22,13 +24,34 @@ class EgressProxyPolicy:
             raise PermissionError("destination port is not allowed")
         host = host.rstrip(".").lower()
         try:
-            socket.inet_aton(host)
-            raise PermissionError("IP-literal destinations are not allowed")
-        except OSError:
+            ipaddress.ip_address(host)
+        except ValueError:
             pass
+        else:
+            raise PermissionError("IP-literal destinations are not allowed")
         if host not in self.allowed_hosts:
             raise PermissionError("destination host is not allowed")
         return host, port
+
+    def resolve_safe(self, host: str, port: int) -> tuple[str, int]:
+        try:
+            addresses = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+        except OSError as exc:
+            raise PermissionError("destination resolution failed") from exc
+        safe: list[tuple[str, int]] = []
+        for family, _socktype, _proto, _canonname, sockaddr in addresses:
+            ip_text = sockaddr[0]
+            try:
+                address = ipaddress.ip_address(ip_text)
+            except ValueError:
+                continue
+            if not address.is_global:
+                continue
+            safe.append((ip_text, port))
+        if not safe:
+            raise PermissionError("destination resolves only to non-public addresses")
+        return safe[0]
+
 
 class EgressProxy:
     def __init__(self, policy: EgressProxyPolicy):
@@ -49,8 +72,10 @@ class EgressProxy:
                     raise PermissionError("invalid proxy headers")
                 if header in (b"\r\n", b"\n"):
                     break
+            destination_ip, destination_port = self.policy.resolve_safe(host, port)
             remote_reader, remote_writer = await asyncio.wait_for(
-                asyncio.open_connection(host, port), self.policy.connect_timeout
+                asyncio.open_connection(destination_ip, destination_port),
+                self.policy.connect_timeout,
             )
             writer.write(b"HTTP/1.1 200 Connection Established\r\n\r\n")
             await writer.drain()
