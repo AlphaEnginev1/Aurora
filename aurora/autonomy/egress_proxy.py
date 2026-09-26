@@ -35,7 +35,7 @@ class EgressProxyPolicy:
 
     def resolve_safe(self, host: str, port: int) -> tuple[str, int]:
         try:
-            addresses = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+            addresses = socket.getaddrinfo(host, port, family=socket.AF_INET, type=socket.SOCK_STREAM)
         except OSError as exc:
             raise PermissionError("destination resolution failed") from exc
         safe: list[tuple[str, int]] = []
