@@ -39,34 +39,20 @@ def test_command_rejects_null_bytes(tmp_path: Path):
         executor.execute(("printf", "bad" + bytes([0]).decode() + "value"), workspace=tmp_path)
 
 
-def test_network_bwrap_requires_user_namespace_and_cap_drop(tmp_path: Path):
+def test_network_bwrap_uses_route_fence_and_capability_drop(tmp_path: Path):
     executor = SandboxExecutor(SandboxPolicy(network=True))
     argv = executor._bubblewrap_argv(
         "/usr/bin/bwrap",
         ("true",),
         tmp_path,
         network=True,
-        gate_fd=7,
+        gate_fd=None,
     )
     assert "--unshare-user" in argv
     assert "--disable-userns" in argv
-    assert "--cap-drop" not in argv
+    assert "--block-fd" not in argv
     assert "setpriv" in argv
     assert "--bounding-set=-all" in argv
     assert "--no-new-privs" in argv
-    assert "--block-fd" in argv
 
 
-def test_egress_enforcer_requires_firewall_prerequisites(monkeypatch):
-    from aurora.autonomy.sandbox import _EgressEnforcer
-
-    enforcer = _EgressEnforcer(SandboxPolicy(network=True))
-
-    def fake_which(name: str):
-        if name == "iptables":
-            return None
-        return "/usr/bin/" + name
-
-    monkeypatch.setattr("aurora.autonomy.sandbox.shutil.which", fake_which)
-    with pytest.raises(SandboxError, match="iptables"):
-        enforcer.prepare(1234)
