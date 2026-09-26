@@ -49,7 +49,7 @@ def test_running_transaction_requires_recovery(tmp_path):
         source="pypi",
     )
     tx.begin()
-    with pytest.raises(TransactionError, match="already running"):
+    with pytest.raises(TransactionError, match="requires recovery"):
         tx.begin()
 
 
@@ -76,3 +76,17 @@ def test_failed_transaction_can_be_restarted(tmp_path):
     tx.begin()
     tx.fail("installer returned non-zero")
     assert tx.begin().state == "running"
+
+
+def test_commit_pending_requires_recovery(tmp_path):
+    tx = AcquisitionTransaction(
+        journal_dir=tmp_path,
+        operation_key="demo-operation",
+        tool="demo",
+        source="pypi",
+    )
+    tx.begin()
+    pending = tx.commit_pending("swap")
+    assert pending.state == "commit_pending"
+    with pytest.raises(TransactionError, match="requires recovery"):
+        tx.begin()
