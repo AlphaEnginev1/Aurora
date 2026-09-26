@@ -18,7 +18,7 @@ from aurora.autonomy.egress_proxy import EgressProxy, EgressProxyPolicy
 from aurora.autonomy.sandbox import SandboxExecutor, SandboxPolicy
 
 
-REQUIRED = ("bwrap", "slirp4netns", "nsenter", "iptables", "setpriv", "curl")
+REQUIRED = ("bwrap", "slirp4netns", "ip", "setpriv", "curl")
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -166,5 +166,18 @@ def test_workload_cannot_modify_namespace_firewall(proxy, tmp_path: Path):
         "iptables",
         "-S",
         "OUTPUT",
+    )
+    assert result.returncode != 0
+
+
+def test_workload_cannot_restore_default_route(proxy, tmp_path: Path):
+    result = run_sandbox(
+        tmp_path,
+        "ip",
+        "route",
+        "add",
+        "default",
+        "via",
+        "10.0.2.2",
     )
     assert result.returncode != 0
