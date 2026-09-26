@@ -6,12 +6,12 @@ from dataclasses import dataclass
 import os
 from pathlib import Path
 import resource
+import shlex
 import shutil
 import signal
 import subprocess
 from typing import Mapping, Sequence
 
-from .egress_firewall import EgressFirewallPolicy, FirewallPolicyError
 from .network_dataplane import NetworkDataplaneError, Slirp4netnsDataplane
 
 
@@ -45,14 +45,11 @@ class SandboxResult:
 
 
 class _EgressEnforcer:
-    """Establish the network dataplane before releasing the sandbox workload."""
+    """Attach the isolated dataplane; the sandbox bootstrap installs the route fence."""
 
     def __init__(self, policy: SandboxPolicy) -> None:
-        self.firewall = EgressFirewallPolicy(
-            proxy_host=policy.egress_proxy_host,
-            proxy_port=policy.egress_proxy_port,
-        )
         self.dataplane = Slirp4netnsDataplane()
+        self.policy = policy
 
     def _require(self, name: str) -> str:
         binary = shutil.which(name)
@@ -61,52 +58,12 @@ class _EgressEnforcer:
         return binary
 
     def prepare(self, sandbox_pid: int) -> subprocess.Popen[str]:
-        self._require("nsenter")
-        self._require("iptables")
+        self._require("slirp4netns")
         try:
             slirp = self.dataplane.attach(sandbox_pid)
-            try:
-                self._install_and_verify(sandbox_pid)
-            except Exception:
-                self.dataplane.stop(slirp)
-                raise
             return slirp.process
-        except (NetworkDataplaneError, FirewallPolicyError, OSError, subprocess.SubprocessError) as exc:
+        except (NetworkDataplaneError, OSError, subprocess.SubprocessError) as exc:
             raise SandboxError(f"controlled network setup failed: {exc}") from exc
-
-    def _nsenter(self, pid: int, *args: str) -> subprocess.CompletedProcess[str]:
-        argv = [
-            "nsenter",
-            "-t",
-            str(pid),
-            "-U",
-            "-n",
-            "--",
-            *args,
-        ]
-        result = subprocess.run(
-            argv,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            check=False,
-        )
-        if result.returncode != 0:
-            detail = result.stderr.strip() or result.stdout.strip() or f"exit {result.returncode}"
-            raise SandboxError(f"network namespace control command failed: {detail}")
-        return result
-
-    def _install_and_verify(self, pid: int) -> None:
-        for rule in self.firewall.iptables_rules():
-            self._nsenter(pid, "iptables", "--wait", *rule)
-        observed = self._nsenter(pid, "iptables", "-S", "OUTPUT").stdout.splitlines()
-        normalized = tuple(
-            tuple(line.split())
-            for line in observed
-            if line.startswith("-P ") or line.startswith("-A ")
-        )
-        self.firewall.assert_complete(normalized)
 
 
 class SandboxExecutor:
@@ -140,8 +97,6 @@ class SandboxExecutor:
         env = self._environment(environment or {}, network=network)
         gate_read = gate_write = None
         slirp_process: subprocess.Popen[str] | None = None
-        if network:
-            gate_read, gate_write = os.pipe()
 
         try:
             argv = self._bubblewrap_argv(
@@ -156,8 +111,8 @@ class SandboxExecutor:
                 env,
                 root,
                 network=network,
-                gate_read=gate_read,
-                gate_write=gate_write,
+                gate_read=None,
+                gate_write=None,
             )
             return SandboxResult(
                 tuple(command),
@@ -167,16 +122,6 @@ class SandboxExecutor:
                 timed_out,
             )
         finally:
-            if gate_read is not None:
-                try:
-                    os.close(gate_read)
-                except OSError:
-                    pass
-            if gate_write is not None:
-                try:
-                    os.close(gate_write)
-                except OSError:
-                    pass
             if slirp_process is not None:
                 self._stop_process(slirp_process)
 
@@ -238,15 +183,23 @@ class SandboxExecutor:
             "--",
         ]
         if network:
-            argv += [
-                "setpriv",
-                "--no-new-privs",
-                "--bounding-set=-all",
-                "--inh-caps=-all",
-                "--ambient-caps=-all",
-                "--",
-            ]
-        argv += list(command)
+            if self.policy.egress_proxy_host != "10.0.2.2":
+                raise SandboxError("controlled network requires slirp gateway 10.0.2.2 as proxy host")
+            self._require("ip")
+            self._require("setpriv")
+            wrapped = " ".join(shlex.quote(item) for item in command)
+            bootstrap = (
+                "set -eu; "
+                "for i in $(seq 1 100); do ip link show tap0 >/dev/null 2>&1 && break; sleep 0.05; done; "
+                "ip link show tap0 >/dev/null 2>&1; "
+                "ip route del default 2>/dev/null || true; "
+                "ip -6 route del default 2>/dev/null || true; "
+                "ip route replace 10.0.2.2/32 dev tap0; "
+                "exec setpriv --no-new-privs --bounding-set=-all --inh-caps=-all --ambient-caps=-all -- " + wrapped
+            )
+            argv += ["/bin/sh", "-c", bootstrap]
+        else:
+            argv += list(command)
         return argv
 
     def _environment(
@@ -306,14 +259,10 @@ class SandboxExecutor:
                 text=True,
                 start_new_session=True,
                 preexec_fn=self._limits,
-                pass_fds=((gate_read,) if network and gate_read is not None else ()),
+                pass_fds=(),
             )
             if network:
-                if gate_write is None:
-                    raise SandboxError("network gate is missing")
                 slirp_process = _EgressEnforcer(self.policy).prepare(process.pid)
-                os.write(gate_write, b"1")
-                os.close(gate_write)
             try:
                 stdout, stderr = process.communicate(timeout=self.policy.timeout_seconds)
                 return (
