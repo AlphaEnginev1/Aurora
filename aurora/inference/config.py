@@ -1,0 +1,32 @@
+"""Load and validate the checked-in inference policy."""
+
+import json
+from pathlib import Path
+
+from .models import ModelSpec
+
+class InferenceConfigError(ValueError):
+    """Raised when inference policy is missing or invalid."""
+
+def load_model_specs(path: str | Path) -> list[ModelSpec]:
+    source = Path(path)
+    try:
+        data = json.loads(source.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise InferenceConfigError(f"Unable to load inference policy: {source}") from exc
+    models = data.get("models")
+    if not isinstance(models, list):
+        raise InferenceConfigError("inference policy 'models' must be a list")
+    result=[]
+    for item in models:
+        if not isinstance(item, dict) or not all(k in item for k in ("id","provider","endpoint")):
+            raise InferenceConfigError("each model requires id, provider, and endpoint")
+        caps=item.get("capabilities", [])
+        if not isinstance(caps, list) or not all(isinstance(x,str) for x in caps):
+            raise InferenceConfigError(f"invalid capabilities for model {item.get('id')!r}")
+        result.append(ModelSpec(
+            id=item["id"], provider=item["provider"], endpoint=item["endpoint"],
+            capabilities=tuple(caps), context_window=item.get("context_window"),
+            enabled=bool(item.get("enabled", True)),
+        ))
+    return result
