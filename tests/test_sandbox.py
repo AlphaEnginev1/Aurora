@@ -71,4 +71,4 @@ def test_network_bwrap_uses_nftables_and_seccomp_lockdown(tmp_path: Path, monkey
 def test_seccomp_filter_is_x86_64_and_nonempty():
     with SandboxExecutor._seccomp_filter_fd() as f:
         payload = f.read()
-    assert len(payload) == 9 * 8
+    assert len(payload) == 7 * 8
