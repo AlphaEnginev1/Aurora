@@ -55,7 +55,8 @@ def test_network_bwrap_uses_route_fence_and_capability_drop(tmp_path: Path):
     assert "--block-fd" not in argv
     assert "/bin/sh" in argv
     bootstrap = argv[argv.index("/bin/sh") + 2]
-    assert "ip route replace 10.0.2.2/32 dev tap0" in bootstrap
+    assert "iptables --wait -P OUTPUT DROP" in bootstrap
+    assert "ip6tables --wait -P OUTPUT DROP" in bootstrap
     assert "setpriv --no-new-privs --bounding-set=-all" in bootstrap
 
 
