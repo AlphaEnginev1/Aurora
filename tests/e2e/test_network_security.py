@@ -100,7 +100,7 @@ def test_allowed_https_reaches_approved_host(proxy, tmp_path: Path):
         "/dev/null",
         "https://github.com/",
     )
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == 0, f"rc={result.returncode} stderr={result.stderr!r} stdout={result.stdout!r}"
 
 
 def test_disallowed_host_is_rejected_by_proxy(proxy, tmp_path: Path):
@@ -196,7 +196,7 @@ def test_proxy_gateway_is_reachable(proxy, tmp_path: Path):
         "5",
         "http://10.0.2.2:3128/",
     )
-    assert result.returncode != 0
+    assert result.returncode != 0, f"rc={result.returncode} stderr={result.stderr!r} stdout={result.stdout!r}"
     assert "HTTP/1.1 403" in result.stderr or "HTTP/1.0 403" in result.stderr
 
 
