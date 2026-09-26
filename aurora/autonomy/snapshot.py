@@ -29,7 +29,6 @@ class Snapshot:
     backup: Path
     had_original: bool
     transaction_id: str | None = None
-    transaction_id: str | None = None
 
 
 class FilesystemSnapshot:
@@ -51,7 +50,6 @@ class FilesystemSnapshot:
             "target": str(snapshot.target),
             "backup": str(snapshot.backup),
             "had_original": snapshot.had_original,
-            "transaction_id": snapshot.transaction_id,
             "transaction_id": snapshot.transaction_id,
             "state": state,
         }
@@ -158,7 +156,6 @@ class FilesystemSnapshot:
                 target=Path(data["target"]).resolve(),
                 backup=Path(data["backup"]).resolve(),
                 had_original=bool(data["had_original"]),
-                transaction_id=(str(data["transaction_id"]) if data.get("transaction_id") is not None else None),
                 transaction_id=(
                     str(data["transaction_id"])
                     if data.get("transaction_id") is not None
