@@ -808,7 +808,6 @@ class DurableTaskStore:
             phase=int(row["phase"]),
         )
 
-    @classmethod
     @staticmethod
     def _row_to_event(row: sqlite3.Row) -> TaskEvent:
         return TaskEvent(
