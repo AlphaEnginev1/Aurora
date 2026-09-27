@@ -17,5 +17,10 @@ shared mission memory/inbox, persisted task results, adaptive Director
 review/replanning across durable mission phases, and the internal organization
 registry with role/capability authorization and model-preference routing.
 
+Specialist skill foundation is now implemented: versioned skill registry, default
+agent specializations, Director task-level skill assignment, capability compatibility
+validation, model preference contribution, specialist context injection, durable skill
+persistence and replan preservation.
+
 ## Phase 4
 Failure injection, security regression, observability, recovery drills and controlled live authorization.
