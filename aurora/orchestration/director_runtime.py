@@ -19,6 +19,7 @@ from .task_store import DurableTaskStore, TaskEvent, TaskStoreError
 from .task_worker import TaskWorker, WorkerCycle, WorkerPolicy
 from aurora.skills.evaluation import SkillEvaluator
 from aurora.skills.learning import SkillEvolutionEngine, SkillLearningStore
+from aurora.skills.autonomous_specialist_acquisition import AutonomousSpecialistAcquisition
 
 
 
@@ -109,9 +110,8 @@ class DirectorRuntime:
         gap_skill_id: str,
         reason: str,
         required_capabilities: tuple[str, ...] = (),
-        plan: SpecialistAcquisitionPlan,
     ):
-        """Run governed autonomous specialist acquisition and stop before promotion."""
+        """Discover, construct and prepare a specialist without a manual plan."""
         if self.autonomous_specialist_acquisition is None:
             raise DirectorRuntimeError("autonomous specialist acquisition is not configured")
         gap = self.autonomous_specialist_acquisition.pipeline.runtime.detect_gap(
@@ -120,9 +120,8 @@ class DirectorRuntime:
             reason=reason,
             required_capabilities=required_capabilities,
         )
-        prepared = self.autonomous_specialist_acquisition.prepare(
+        prepared = self.autonomous_specialist_acquisition.discover_and_prepare(
             gap=gap,
-            plan=plan,
             registry=self.director.task_engine.skill_registry,
         )
         self.event_bus.publish(
@@ -133,6 +132,9 @@ class DirectorRuntime:
                 "skill_id": prepared.candidate.skill.skill_id if prepared.candidate.skill else gap_skill_id,
                 "source_ids": list(prepared.evidence.source_ids),
                 "acquired_tools": list(prepared.evidence.acquired_tools),
+                "construction_score": prepared.evidence.construction_score,
+                "construction_evidence_state": prepared.evidence.construction_evidence_state,
+                "candidate_version": prepared.candidate.candidate_version,
                 "state": prepared.evidence.state,
             },
         )
