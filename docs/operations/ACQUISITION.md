@@ -41,6 +41,19 @@ PyPI acquisition is now split into two explicit trust boundaries:
 
 The E2E security battery validates the complete path against a real PyPI package: download, cryptographic verification, offline installation, filesystem activation, and post-install execution in the sandbox.
 
+## Acquisition v3: dependency closure
+
+When a network-enabled sandbox is supplied, PyPI acquisition can resolve a complete binary dependency closure without giving the installer direct host networking:
+
+1. pip download runs inside the controlled Bubblewrap network sandbox with the egress proxy and an explicit PyPI index.
+2. Only wheel artifacts are accepted; the resolver output is bounded by artifact count and total byte limits.
+3. Aurora reads each wheel's Name/Version metadata and asks the Internet Gateway for the exact PyPI release metadata for that filename.
+4. Each selected wheel must match a PyPI-provided SHA-256 before entering the content-addressed cache. Artifacts not attested by PyPI are rejected.
+5. The final pip install runs in the network-disabled sandbox using only the cached wheels and --no-index.
+6. Every installed distribution has its RECORD hashes verified before the staged runtime tree is activated.
+
+The networked resolver is intentionally separate from the offline installer. This prevents a package's dependency graph from becoming an implicit network escape during activation.
+
 ## Next hardening
 
 1. Add package/version constraints and lock/verification metadata.
