@@ -19,7 +19,6 @@ from .task_store import DurableTaskStore, TaskEvent, TaskStoreError
 from .task_worker import TaskWorker, WorkerCycle, WorkerPolicy
 from aurora.skills.evaluation import SkillEvaluator
 from aurora.skills.learning import SkillEvolutionEngine, SkillLearningStore
-from aurora.skills.autonomous_specialist_acquisition import AutonomousSpecialistAcquisition, SpecialistAcquisitionPlan
 
 
 
