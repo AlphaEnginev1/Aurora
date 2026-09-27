@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
 import sqlite3
+import uuid
 from typing import Sequence
 
 from .task_engine import DelegatedTask
@@ -24,6 +25,7 @@ class StoredTask:
     attempts: int
     last_error: str | None = None
     claimed_by: str | None = None
+    claim_token: str | None = None
     lease_until: str | None = None
     result: dict | None = None
     phase: int = 0
@@ -74,6 +76,7 @@ class DurableTaskStore:
                     attempts INTEGER NOT NULL DEFAULT 0,
                     last_error TEXT,
                     claimed_by TEXT,
+                    claim_token TEXT,
                     lease_until TEXT,
                     result_json TEXT,
                     phase INTEGER NOT NULL DEFAULT 0,
@@ -110,6 +113,8 @@ class DurableTaskStore:
             }
             if "claimed_by" not in columns:
                 db.execute("ALTER TABLE tasks ADD COLUMN claimed_by TEXT")
+            if "claim_token" not in columns:
+                db.execute("ALTER TABLE tasks ADD COLUMN claim_token TEXT")
             if "lease_until" not in columns:
                 db.execute("ALTER TABLE tasks ADD COLUMN lease_until TEXT")
             if "result_json" not in columns:
@@ -238,18 +243,21 @@ class DurableTaskStore:
 
                 now = self._now()
                 lease_until = self._lease_until(lease_seconds)
+                claim_token = uuid.uuid4().hex
                 updated = db.execute(
                     """
                     UPDATE tasks
                     SET status = 'running',
                         attempts = attempts + 1,
                         claimed_by = ?,
+                        claim_token = ?,
                         lease_until = ?,
                         updated_at = ?
                     WHERE mission_id = ? AND task_id = ? AND status = 'pending'
                     """,
                     (
                         worker_id,
+                        claim_token,
                         lease_until,
                         now,
                         mission_id,
@@ -267,6 +275,7 @@ class DurableTaskStore:
                         "worker_id": worker_id,
                         "attempt": row["attempts"] + 1,
                         "lease_until": lease_until,
+                        "claim_token": claim_token,
                     },
                 )
                 db.commit()
@@ -276,6 +285,7 @@ class DurableTaskStore:
                     attempts=row["attempts"] + 1,
                     last_error=None,
                     claimed_by=worker_id,
+                    claim_token=claim_token,
                     lease_until=lease_until,
                 )
 
