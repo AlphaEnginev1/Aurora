@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from aurora.autonomy.acquisition import AcquisitionManager, AcquisitionResult
 from aurora.autonomy.registry import ToolSpec
 from aurora.autonomy.sandbox import SandboxExecutor
-from aurora.research.models import ResearchRequest
+from aurora.research.models import ResearchRequest, SourceRecord
 from aurora.research.service import ResearchService
 from .acquisition import SkillAcquisitionRuntime, SkillGap
 from .acquisition_pipeline import PreparedSkillCandidate, SkillAcquisitionPipeline
@@ -40,33 +40,31 @@ class AutonomousSpecialistAcquisition:
         except Exception as exc:
             raise AutonomousSpecialistAcquisitionError(f"skill discovery/construction failed: {exc}") from exc
         return self._prepare(
-            gap=gap, skill=result.skill, research_urls=tuple(s.url for s in result.sources),
-            tools=result.tools, validation_command=result.validation_command, registry=registry,
+            gap=gap, skill=result.skill, sources=result.sources, tools=result.tools,
+            validation_command=result.validation_command, registry=registry,
         )
 
     def prepare(self, *, gap: SkillGap, plan: SpecialistAcquisitionPlan,
                 registry: SkillRegistry) -> PreparedSkillCandidate:
         if gap.skill_id != plan.skill.skill_id:
             raise AutonomousSpecialistAcquisitionError("acquisition plan skill does not match the durable gap")
-        return self._prepare(
-            gap=gap, skill=plan.skill, research_urls=plan.research_urls,
-            tools=plan.tools, validation_command=plan.validation_command, registry=registry,
-        )
-
-    def _prepare(self, *, gap: SkillGap, skill: SkillSpec, research_urls: tuple[str, ...],
-                 tools: tuple[ToolSpec, ...], validation_command: tuple[str, ...],
-                 registry: SkillRegistry) -> PreparedSkillCandidate:
-        if not research_urls:
-            raise AutonomousSpecialistAcquisitionError("autonomous acquisition requires at least one research source")
         try:
             sources=self.research.retrieve(ResearchRequest(
                 request_id=f"acq-{gap.mission_id}-{gap.skill_id}",
                 objective=f"Research procedure for specialist skill {gap.skill_id}",
-                required_sources=research_urls, constraints=gap.required_capabilities,
-                max_sources=len(research_urls),
+                required_sources=plan.research_urls, constraints=gap.required_capabilities,
+                max_sources=len(plan.research_urls),
             ))
         except Exception as exc:
             raise AutonomousSpecialistAcquisitionError(f"governed research failed: {exc}") from exc
+        return self._prepare(
+            gap=gap, skill=plan.skill, sources=sources, tools=plan.tools,
+            validation_command=plan.validation_command, registry=registry,
+        )
+
+    def _prepare(self, *, gap: SkillGap, skill: SkillSpec, sources: tuple[SourceRecord, ...],
+                 tools: tuple[ToolSpec, ...], validation_command: tuple[str, ...],
+                 registry: SkillRegistry) -> PreparedSkillCandidate:
         if not sources:
             raise AutonomousSpecialistAcquisitionError("research returned no sources")
         acquired: list[AcquisitionResult]=[]
