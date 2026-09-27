@@ -149,3 +149,45 @@ class DynamicAgentTeamSelector:
 
 
 __all__ = ["AgentTeam", "AgentTeamError", "DynamicAgentTeamSelector", "TeamMember"]
+
+
+@dataclass(frozen=True)
+class TeamReconfiguration:
+    """Auditable delta between an active team and a newly required team."""
+
+    added_roles: tuple[str, ...]
+    removed_roles: tuple[str, ...]
+    retained_roles: tuple[str, ...]
+    newly_required_skills: tuple[str, ...]
+    unresolved_skills: tuple[str, ...]
+
+    @property
+    def changed(self) -> bool:
+        return bool(self.added_roles or self.removed_roles or self.newly_required_skills)
+
+
+def reconfigure_team(
+    current: AgentTeam,
+    desired: AgentTeam,
+) -> TeamReconfiguration:
+    current_roles = {member.role for member in current.members}
+    desired_roles = {member.role for member in desired.members}
+    current_skills = set(current.required_skills)
+    desired_skills = set(desired.required_skills)
+    return TeamReconfiguration(
+        added_roles=tuple(sorted(desired_roles - current_roles)),
+        removed_roles=tuple(sorted(current_roles - desired_roles)),
+        retained_roles=tuple(sorted(current_roles & desired_roles)),
+        newly_required_skills=tuple(sorted(desired_skills - current_skills)),
+        unresolved_skills=tuple(sorted(desired.missing_skills)),
+    )
+
+
+__all__ = [
+    "AgentTeam",
+    "AgentTeamError",
+    "DynamicAgentTeamSelector",
+    "TeamMember",
+    "TeamReconfiguration",
+    "reconfigure_team",
+]
