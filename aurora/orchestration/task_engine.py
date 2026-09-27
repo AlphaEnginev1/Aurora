@@ -150,11 +150,6 @@ class TaskEngine:
         )
 
     def _execute_task(self, task: DelegatedTask):
-        agent = (
-            self.organization.resolve_agent(task.role)
-            if self.organization is not None
-            else None
-        )
         model_preferences = (
             self.organization.model_preferences_for(task.role)
             if self.organization is not None
