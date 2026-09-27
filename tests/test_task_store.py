@@ -172,3 +172,52 @@ def test_complete_rejects_an_expired_owned_lease(tmp_path: Path):
             status="succeeded",
             worker_id="worker-a",
         )
+
+
+def test_task_store_persists_result_and_phase(tmp_path: Path):
+    store = DurableTaskStore(tmp_path / "tasks.db")
+    store.enqueue(
+        "mission-1",
+        [DelegatedTask("a", "agent", "work")],
+        phase=2,
+    )
+    claimed = store.claim_next("mission-1", "worker-a")
+    assert claimed is not None
+    store.complete(
+        "mission-1",
+        "a",
+        status="succeeded",
+        result={"type": "model", "content": "useful evidence"},
+        worker_id="worker-a",
+    )
+
+    reopened = DurableTaskStore(tmp_path / "tasks.db")
+    item = reopened.get("mission-1", "a")
+    assert item is not None
+    assert item.phase == 2
+    assert item.result == {"type": "model", "content": "useful evidence"}
+
+
+def test_later_phase_supersedes_previous_failed_phase(tmp_path: Path):
+    store = DurableTaskStore(tmp_path / "tasks.db")
+    store.enqueue(
+        "mission-1",
+        [DelegatedTask("a", "agent", "initial")],
+        phase=0,
+    )
+    claimed = store.claim_next("mission-1", "worker-a")
+    assert claimed is not None
+    store.complete("mission-1", "a", status="failed", error="temporary", worker_id="worker-a")
+    assert store.mission_status("mission-1") == "failed"
+
+    store.enqueue(
+        "mission-1",
+        [DelegatedTask("b", "agent", "recovery")],
+        phase=1,
+    )
+    assert store.mission_status("mission-1") == "pending"
+    recovered = store.claim_next("mission-1", "worker-b")
+    assert recovered is not None
+    assert recovered.task.task_id == "b"
+    store.complete("mission-1", "b", status="succeeded", worker_id="worker-b")
+    assert store.mission_status("mission-1") == "succeeded"
