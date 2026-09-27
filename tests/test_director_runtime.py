@@ -160,6 +160,9 @@ def test_adaptive_director_replans_after_terminal_phase(tmp_path: Path):
     task_ids = [item.task.task_id for item in result.tasks]
     assert task_ids == ["collect", "review", "r1_validate"]
     assert result.tasks[-1].status is TaskStatus.SUCCEEDED
+    context = runtime.memory.context(submission.mission_id, limit=20)
+    assert any("completed collect" in item["content"] for item in context)
+    assert any("Decision=continue" in item["content"] for item in context)
 
     events = [event.event_type for event in store.events(submission.mission_id)]
     assert "director_review" in events
