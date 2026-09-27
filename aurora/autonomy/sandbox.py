@@ -265,7 +265,13 @@ class SandboxExecutor:
                 buffer += chunk
                 if len(buffer) > 65536:
                     raise SandboxError("bubblewrap status payload is unexpectedly large")
-                for line in buffer.splitlines():
+                # Bubblewrap writes JSON to a pipe, so one os.read() may
+                # contain only a fragment of a line. Keep the incomplete
+                # trailing record until the next read instead of attempting
+                # to decode it as a complete JSON document.
+                lines = buffer.split(b"\n")
+                buffer = lines.pop()
+                for line in lines:
                     if not line.strip():
                         continue
                     try:
