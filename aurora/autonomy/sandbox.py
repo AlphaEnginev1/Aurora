@@ -126,8 +126,14 @@ class SandboxExecutor:
     def _network_mode(self) -> bool:
         if not self.policy.network:
             return False
-        if self.policy.egress_proxy_port < 1 or self.policy.egress_proxy_port > 65535:
-            raise SandboxError("invalid egress proxy port")
+        try:
+            NetworkSupervisorPolicy(
+                proxy_host=self.policy.egress_proxy_host,
+                proxy_port=self.policy.egress_proxy_port,
+                interface="tap0",
+            ).validate()
+        except NetworkSupervisorError as exc:
+            raise SandboxError(f"invalid egress proxy endpoint: {exc}") from exc
         return True
 
     def _bubblewrap_argv(
