@@ -38,11 +38,21 @@ class ModelRouter:
         if not candidates:
             raise ModelRoutingError(f"No enabled model satisfies capability={capability!r}")
 
-        return max(candidates, key=lambda model: self._score(
-            model,
-            request=request,
-            preferred_models=preferred_models or (),
-        ))
+        scored = [
+            (
+                model,
+                self._score(
+                    model,
+                    request=request,
+                    preferred_models=preferred_models or (),
+                ),
+            )
+            for model in candidates
+        ]
+        viable = [(model, score) for model, score in scored if score != float("-inf")]
+        if not viable:
+            raise ModelRoutingError("No enabled model has sufficient context capacity")
+        return max(viable, key=lambda item: item[1])[0]
 
     @staticmethod
     def _score(
