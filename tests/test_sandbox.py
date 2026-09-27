@@ -66,6 +66,8 @@ def test_network_bwrap_uses_post_setup_seccomp_handoff(tmp_path: Path, monkeypat
     assert "--unshare-user" in argv
     assert "--cap-add" in argv
     assert "CAP_NET_ADMIN" in argv
+    assert argv.count("--cap-add") == 2
+    assert "CAP_SETPCAP" in argv
     assert "--uid" in argv
     assert argv[argv.index("--uid") + 1] == "0"
     assert "--gid" in argv
