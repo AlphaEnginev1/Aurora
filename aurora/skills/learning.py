@@ -36,6 +36,20 @@ class SkillEvolutionProposal:
     status: str = "pending"
 
 
+@dataclass(frozen=True)
+class SkillEvidenceSnapshot:
+    skill_id: str
+    skill_version: str
+    task_id: str
+    role: str
+    score: float
+    status: str
+    model: str | None
+    failure_signature: str | None
+    evidence_completeness: float
+    evidence_state: str
+
+
 class SkillLearningStore:
     """SQLite-backed evidence ledger for skill performance and model specialization."""
 
@@ -126,6 +140,45 @@ class SkillLearningStore:
                     self._now(),
                 ),
             )
+
+    def evidence_for(
+        self,
+        skill_id: str,
+        *,
+        skill_version: str | None = None,
+        limit: int = 20,
+    ) -> tuple[SkillEvidenceSnapshot, ...]:
+        """Return recent immutable execution evidence for governed learning."""
+        if limit < 1:
+            raise ValueError("limit must be at least 1")
+        query = (
+            "SELECT skill_id, skill_version, task_id, role, score, status, model, "
+            "failure_signature, evidence_completeness, evidence_state "
+            "FROM skill_evaluations WHERE skill_id = ?"
+        )
+        params: list[object] = [skill_id]
+        if skill_version is not None:
+            query += " AND skill_version = ?"
+            params.append(skill_version)
+        query += " ORDER BY evaluation_id DESC LIMIT ?"
+        params.append(limit)
+        with self._connect() as db:
+            rows = db.execute(query, tuple(params)).fetchall()
+        return tuple(
+            SkillEvidenceSnapshot(
+                skill_id=row["skill_id"],
+                skill_version=row["skill_version"],
+                task_id=row["task_id"],
+                role=row["role"],
+                score=float(row["score"]),
+                status=row["status"],
+                model=row["model"],
+                failure_signature=row["failure_signature"],
+                evidence_completeness=float(row["evidence_completeness"]),
+                evidence_state=row["evidence_state"],
+            )
+            for row in rows
+        )
 
     def performance(self, skill_id: str) -> SkillPerformance:
         with self._connect() as db:
