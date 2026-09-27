@@ -22,6 +22,7 @@ from aurora.skills.learning import SkillEvolutionEngine, SkillLearningStore
 from aurora.skills.autonomous_specialist_acquisition import AutonomousSpecialistAcquisition
 from aurora.skills.acquisition_pipeline import PreparedSkillCandidate
 from aurora.skills.evolution_runtime import PreparedSkillEvolution, SkillEvolutionRuntime
+from aurora.skills.improvement import SkillImprovementGenerator
 
 
 
@@ -75,6 +76,7 @@ class DirectorRuntime:
         skill_evolution: SkillEvolutionEngine | None = None,
         autonomous_specialist_acquisition: AutonomousSpecialistAcquisition | None = None,
         skill_evolution_runtime: SkillEvolutionRuntime | None = None,
+        skill_improvement_generator: SkillImprovementGenerator | None = None,
         sleep_fn: Callable[[float], None] = sleep,
     ) -> None:
         if not event_consumer_id.strip():
@@ -102,6 +104,7 @@ class DirectorRuntime:
         self.skill_evolution = skill_evolution
         self.autonomous_specialist_acquisition = autonomous_specialist_acquisition
         self.skill_evolution_runtime = skill_evolution_runtime
+        self.skill_improvement_generator = skill_improvement_generator
         self._sleep = sleep_fn
         self._subscription: EventSubscription = self.event_bus.subscribe(event_consumer_id)
         self._workers: dict[str, TaskWorker] = {}
@@ -204,6 +207,24 @@ class DirectorRuntime:
         proposal = next((item for item in proposals if item.proposal_id == proposal_id), None)
         if proposal is None:
             raise DirectorRuntimeError(f"unknown pending skill evolution proposal: {proposal_id}")
+        generated_model = None
+        generated_evidence = None
+        if improved_instructions is None and self.skill_improvement_generator is not None:
+            active = registry.skills.get(proposal.skill_id)
+            if active is None:
+                raise DirectorRuntimeError(f"active skill is unavailable: {proposal.skill_id}")
+            try:
+                generated = self.skill_improvement_generator.generate(active=active, proposal=proposal)
+            except Exception as exc:
+                self.event_bus.publish(
+                    mission_id=mission_id,
+                    event_type="skill.evolution.generation_failed",
+                    payload={"proposal_id": proposal.proposal_id, "skill_id": proposal.skill_id, "error": str(exc)},
+                )
+                raise DirectorRuntimeError(f"skill improvement generation failed: {exc}") from exc
+            improved_instructions = generated.instructions
+            generated_model = generated.model
+            generated_evidence = generated.evidence_summary
         prepared = self.skill_evolution_runtime.prepare(
             proposal=proposal,
             registry=registry,
@@ -221,6 +242,8 @@ class DirectorRuntime:
                 "evidence_count": proposal.evidence_count,
                 "reason": proposal.reason,
                 "suggested_change": proposal.suggested_change,
+                "generation_model": generated_model,
+                "generation_evidence": generated_evidence,
             },
         )
         return prepared
