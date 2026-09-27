@@ -2,6 +2,7 @@
 from .models import SkillAssignment, SkillSpec
 from .registry import SkillRegistry, SkillRegistryError
 from .evaluation import SkillEvaluation, SkillEvaluator
+from .acquisition import SkillAcquisitionError, SkillAcquisitionRuntime, SkillCandidate, SkillGap
 from .learning import (
     SkillEvolutionEngine,
     SkillEvolutionProposal,
@@ -22,4 +23,8 @@ __all__ = [
     "SkillRegistry",
     "SkillRegistryError",
     "SkillSpec",
+    "SkillAcquisitionError",
+    "SkillAcquisitionRuntime",
+    "SkillCandidate",
+    "SkillGap",
 ]

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Sequence
 
 from aurora.organization import AgentSelector, AgentTeam, DynamicAgentTeamSelector, TeamReconfiguration, reconfigure_team
+from aurora.skills.acquisition import SkillAcquisitionRuntime
 from .task_engine import DelegatedTask, TaskEngine, TaskEngineError
 
 
@@ -37,12 +38,14 @@ class TeamCoordinator:
         task_engine: TaskEngine,
         agent_selector: AgentSelector,
         max_members: int = 4,
+        skill_acquisition: SkillAcquisitionRuntime | None = None,
     ) -> None:
         if max_members < 1:
             raise TeamCoordinatorError("max_members must be at least 1")
         self.task_engine = task_engine
         self.agent_selector = agent_selector
         self.max_members = max_members
+        self.skill_acquisition = skill_acquisition
 
     def adapt_for_runtime(
         self,
@@ -101,6 +104,13 @@ class TeamCoordinator:
             max_members=self.max_members,
         )
         if not team.complete:
+            if self.skill_acquisition is not None:
+                for skill_id in team.missing_skills:
+                    self.skill_acquisition.detect_gap(
+                        mission_id=mission_id,
+                        skill_id=skill_id,
+                        reason=f"Mission {mission_id} requires unavailable specialist skill {skill_id}",
+                    )
             raise TeamCoordinatorError(
                 "mission team is incomplete; missing skills: "
                 + ", ".join(team.missing_skills)
