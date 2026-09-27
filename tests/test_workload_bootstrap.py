@@ -121,3 +121,18 @@ def test_require_cap_net_admin_fails_closed_without_capability(monkeypatch):
         assert "CAP_NET_ADMIN" in str(exc)
     else:
         raise AssertionError("missing CAP_NET_ADMIN must fail closed")
+
+
+def test_proxy_host_must_be_private_or_local_host_address():
+    import aurora.autonomy.workload_bootstrap as bootstrap
+
+    bootstrap.configure_routes("10.0.0.10", "tap0")
+
+
+def test_proxy_host_rejects_gateway_and_public_addresses():
+    import pytest
+    import aurora.autonomy.workload_bootstrap as bootstrap
+
+    for host in ("10.0.2.2", "1.1.1.1", "127.0.0.1"):
+        with pytest.raises(bootstrap.BootstrapError):
+            bootstrap.configure_firewall(host, 3128)
