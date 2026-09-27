@@ -13,6 +13,7 @@ from typing import Sequence
 from aurora.autonomy.capability_runtime import CapabilityExecutionError
 from aurora.autonomy.models import CapabilityRequest
 from .engine import OrchestrationEngine, TaskResult
+from aurora.organization import OrganizationConfigError, OrganizationRegistry
 
 
 class TaskEngineError(RuntimeError):
@@ -52,6 +53,7 @@ class TaskEngine:
 
     orchestration: OrchestrationEngine
     workspace_root: Path
+    organization: OrganizationRegistry | None = None
     _results: dict[str, DelegatedTaskResult] = field(default_factory=dict, init=False)
 
     def validate(self, tasks: Sequence[DelegatedTask]) -> tuple[DelegatedTask, ...]:
@@ -66,6 +68,14 @@ class TaskEngine:
         known = set(ids)
         for task in normalized:
             self._validate_task_fields(task)
+            if self.organization is not None:
+                try:
+                    self.organization.validate_task(
+                        role=task.role,
+                        capability=task.capability,
+                    )
+                except OrganizationConfigError as exc:
+                    raise TaskEngineError(str(exc)) from exc
             if any(dep not in known for dep in task.depends_on):
                 missing = sorted(set(task.depends_on) - known)
                 raise TaskEngineError(
@@ -140,6 +150,16 @@ class TaskEngine:
         )
 
     def _execute_task(self, task: DelegatedTask):
+        agent = (
+            self.organization.resolve_agent(task.role)
+            if self.organization is not None
+            else None
+        )
+        model_preferences = (
+            self.organization.model_preferences_for(task.role)
+            if self.organization is not None
+            else ()
+        )
         if task.capability:
             request = CapabilityRequest(
                 name=task.capability,
