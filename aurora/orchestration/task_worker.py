@@ -112,6 +112,7 @@ class TaskWorker:
                 },
                 result=result_payload,
                 worker_id=self.worker_id,
+                claim_token=claimed.claim_token,
             )
             self._emit(
                 "worker.task_succeeded",
@@ -136,6 +137,7 @@ class TaskWorker:
                 claimed.task.task_id,
                 worker_id=self.worker_id,
                 error=error,
+                claim_token=claimed.claim_token,
             )
             self._emit(
                 "worker.task_retried",
@@ -162,6 +164,7 @@ class TaskWorker:
             payload={"attempt": claimed.attempts},
             result={"error": error, "attempt": claimed.attempts},
             worker_id=self.worker_id,
+            claim_token=claimed.claim_token,
         )
         newly_blocked = self.store.block_dependents(self.mission_id)
         self._emit(
@@ -211,6 +214,7 @@ class TaskWorker:
                         self.mission_id,
                         claimed.task.task_id,
                         self.worker_id,
+                        claim_token=claimed.claim_token,
                         lease_seconds=self.policy.lease_seconds,
                     )
                 except TaskStoreError as exc:
