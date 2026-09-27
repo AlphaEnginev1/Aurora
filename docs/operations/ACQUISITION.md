@@ -49,7 +49,7 @@ When a network-enabled sandbox is supplied, PyPI acquisition can resolve a compl
 2. Only wheel artifacts are accepted; the resolver output is bounded by artifact count and total byte limits.
 3. Aurora reads each wheel's Name/Version metadata and asks the Internet Gateway for the exact PyPI release metadata for that filename.
 4. Each selected wheel must match a PyPI-provided SHA-256 before entering the content-addressed cache. Artifacts not attested by PyPI are rejected.
-5. The final pip install runs in the network-disabled sandbox using only the cached wheels and --no-index.
+5. The final pip install runs in the network-disabled sandbox using only the cached wheels and --no-index, targeting a single managed prefix so generated entry-point scripts remain inside the transactional tree.
 6. Every installed distribution has its RECORD hashes verified before the staged runtime tree is activated.
 
 The networked resolver is intentionally separate from the offline installer. This prevents a package's dependency graph from becoming an implicit network escape during activation.
