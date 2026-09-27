@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping, Sequence
 
+from .audit import append_event
 from .broker import CapabilityBroker
 from .models import CapabilityRequest, CapabilityResult
 from .sandbox import SandboxError, SandboxExecutor
@@ -32,9 +33,16 @@ class CapabilityExecutionResult:
 class CapabilityRuntime:
     """Turn a brokered capability into a sandboxed process execution."""
 
-    def __init__(self, broker: CapabilityBroker, sandbox: SandboxExecutor) -> None:
+    def __init__(
+        self,
+        broker: CapabilityBroker,
+        sandbox: SandboxExecutor,
+        *,
+        audit_path: str | Path | None = None,
+    ) -> None:
         self.broker = broker
         self.sandbox = sandbox
+        self.audit_path = Path(audit_path) if audit_path else None
 
     def execute(
         self,
@@ -46,10 +54,12 @@ class CapabilityRuntime:
     ) -> CapabilityExecutionResult:
         capability = self.broker.ensure(request)
         if capability.status not in {"installed", "already_available"}:
+            self._audit(request, capability, status="blocked")
             raise CapabilityExecutionError(
                 f"capability {request.name} is not executable: {capability.status}"
             )
         if self.broker.policy.require_verification and capability.verification != "verified":
+            self._audit(request, capability, status="unverified")
             raise CapabilityExecutionError(
                 f"capability {request.name} is not verified: {capability.verification}"
             )
@@ -75,10 +85,18 @@ class CapabilityRuntime:
                 environment=environment,
             )
         except SandboxError as exc:
+            self._audit(request, capability, status="sandbox_failed")
             raise CapabilityExecutionError(
                 f"capability {request.name} sandbox execution failed: {exc}"
             ) from exc
 
+        self._audit(
+            request,
+            capability,
+            status="succeeded" if result.returncode == 0 and not result.timed_out else "failed",
+            returncode=result.returncode,
+            timed_out=result.timed_out,
+        )
         return CapabilityExecutionResult(
             capability=capability,
             command=command,
@@ -86,6 +104,37 @@ class CapabilityRuntime:
             stdout=result.stdout,
             stderr=result.stderr,
             timed_out=result.timed_out,
+        )
+
+    def _audit(
+        self,
+        request: CapabilityRequest,
+        capability: CapabilityResult,
+        *,
+        status: str,
+        returncode: int | None = None,
+        timed_out: bool = False,
+    ) -> None:
+        if not self.audit_path:
+            return
+        append_event(
+            self.audit_path,
+            {
+                "event": "capability_execution",
+                "capability": request.name,
+                "actor": request.actor,
+                "reason": request.reason,
+                "status": status,
+                "acquisition_status": capability.status,
+                "verification": capability.verification,
+                "source": capability.source,
+                "version": capability.version,
+                "returncode": returncode,
+                "timed_out": timed_out,
+                "argument_count": len(request.constraints.get("args", ()))
+                if isinstance(request.constraints.get("args"), (list, tuple))
+                else None,
+            },
         )
 
     @staticmethod
