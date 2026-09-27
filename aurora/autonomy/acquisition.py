@@ -20,6 +20,8 @@ from .provenance import (
 from .registry import ToolSpec
 from .transaction import AcquisitionTransaction, TransactionError, operation_key
 from .snapshot import FilesystemSnapshot, SnapshotError
+from .pypi_downloader import ArtifactDownloadError, PypiArtifactDownloader
+from .sandbox import SandboxExecutor, SandboxPolicy
 
 
 class AcquisitionError(RuntimeError):
@@ -60,6 +62,8 @@ class AcquisitionManager:
         timeout: int = 300,
         internet_gateway: InternetGateway | None = None,
         transaction_dir: str | Path | None = None,
+        artifact_cache_dir: str | Path | None = None,
+        sandbox: SandboxExecutor | None = None,
     ) -> None:
         self.allowed_sources = allowed_sources
         self.audit_path = Path(audit_path) if audit_path else None
@@ -67,6 +71,8 @@ class AcquisitionManager:
         self.timeout = timeout
         self.internet_gateway = internet_gateway
         self.transaction_dir = Path(transaction_dir) if transaction_dir else (self.audit_path.parent / "transactions" if self.audit_path else Path(".aurora-transactions"))
+        self.artifact_cache_dir = Path(artifact_cache_dir) if artifact_cache_dir else self.transaction_dir / "artifacts"
+        self.sandbox = sandbox or SandboxExecutor(SandboxPolicy(network=False))
 
     def plan(self, tool_spec: ToolSpec) -> dict[str, str]:
         if tool_spec.source not in self.allowed_sources:
@@ -283,28 +289,51 @@ class AcquisitionManager:
         python = shutil.which("python3") or shutil.which("python")
         if not python:
             raise AcquisitionError("python runtime not found")
+        if self.internet_gateway is None:
+            raise AcquisitionError(
+                "pypi acquisition requires an Internet Gateway for artifact download"
+            )
+
+        downloader = PypiArtifactDownloader(
+            self.internet_gateway,
+            cache_dir=self.artifact_cache_dir,
+        )
+        try:
+            artifact = downloader.resolve(spec.name, spec.version)
+            if spec.artifact_sha256 and artifact.sha256.lower() != spec.artifact_sha256.lower():
+                raise AcquisitionError(
+                    f"artifact sha256 mismatch: expected {spec.artifact_sha256}, got {artifact.sha256}"
+                )
+            artifact_path = downloader.download(artifact)
+        except ArtifactDownloadError as exc:
+            raise AcquisitionError(f"PyPI artifact acquisition failed: {exc}") from exc
 
         snapshot = FilesystemSnapshot(
             target=self.install_root,
             snapshot_root=self.transaction_dir / "snapshots",
         )
         try:
-            snapshot_state = snapshot.create()
+            snapshot_state = snapshot.create(transaction_id=transaction_id)
             staged_root = snapshot.stage_directory(snapshot_state)
         except SnapshotError as exc:
             raise AcquisitionError(f"filesystem staging preparation failed: {exc}") from exc
 
-        env = os.environ.copy()
-        env["PIP_INDEX_URL"] = "https://pypi.org/simple/"
-        env["PIP_NO_INPUT"] = "1"
-        report_file = tempfile.NamedTemporaryFile(
-            prefix="aurora-pip-", suffix=".json", delete=False
+        workspace = (
+            self.transaction_dir / "sandbox-work" /
+            (transaction_id or artifact.sha256[:24])
         )
-        report_path = Path(report_file.name)
-        report_file.close()
+        if workspace.exists():
+            shutil.rmtree(workspace)
+        wheels = workspace / "wheels"
+        installed = workspace / "site"
+        workspace.mkdir(parents=True, exist_ok=False)
+        wheels.mkdir()
+        installed.mkdir()
+        shutil.copy2(artifact_path, wheels / artifact.filename)
+
         committed = False
         try:
-            result = self._run(
+            sandbox_result = self.sandbox.execute(
                 [
                     python,
                     "-m",
@@ -312,24 +341,25 @@ class AcquisitionManager:
                     "install",
                     "--disable-pip-version-check",
                     "--no-input",
-                    "--index-url",
-                    env["PIP_INDEX_URL"],
-                    "--report",
-                    str(report_path),
+                    "--no-index",
                     "--target",
-                    str(staged_root),
-                    spec.name,
+                    "/workspace/site",
+                    "--report",
+                    "/workspace/pip-report.json",
+                    f"/workspace/wheels/{artifact.filename}",
                 ],
-                env=env,
+                workspace=workspace,
             )
-            if result.returncode != 0:
+            if sandbox_result.returncode != 0:
                 snapshot.rollback(snapshot_state)
-                raise AcquisitionError(f"pip install failed: {result.stderr.strip()}")
+                detail = sandbox_result.stderr.strip() or sandbox_result.stdout.strip()
+                raise AcquisitionError(
+                    f"sandboxed pip install failed: {detail or 'unknown installer error'}"
+                )
+
             try:
-                provenance = load_pip_report(report_path)
-                self._validate_expected(spec, provenance)
                 record_count = self._verify_installed_distribution_at(
-                    staged_root, provenance.name, provenance.version
+                    installed, artifact.name, artifact.version
                 )
                 if record_count <= 0:
                     raise ProvenanceError("installed distribution RECORD was not verified")
@@ -340,9 +370,10 @@ class AcquisitionManager:
                 ) from exc
 
             try:
+                shutil.copytree(installed, staged_root, dirs_exist_ok=True)
                 snapshot.commit(snapshot_state, staged_root)
                 committed = True
-            except SnapshotError as exc:
+            except (OSError, SnapshotError) as exc:
                 raise AcquisitionError(f"filesystem commit failed: {exc}") from exc
 
             return AcquisitionResult(
@@ -352,19 +383,17 @@ class AcquisitionManager:
                 spec.executable,
                 str(self.install_root),
                 None,
-                version=provenance.version,
-                artifact_sha256=provenance.artifact_sha256,
-                provenance_url=provenance.provenance_url,
+                version=artifact.version,
+                artifact_sha256=artifact.sha256,
+                provenance_url=artifact.url,
                 verification="verified",
             )
         except AcquisitionError:
-            # The target remains unchanged unless commit has already succeeded.
             raise
         finally:
-            report_path.unlink(missing_ok=True)
-            if staged_root.exists():
+            if not committed and staged_root.exists():
                 shutil.rmtree(staged_root, ignore_errors=True)
-            # Failed operations retain their snapshot for recovery/forensics.
+            shutil.rmtree(workspace, ignore_errors=True)
             if committed:
                 try:
                     snapshot.discard(snapshot_state)
