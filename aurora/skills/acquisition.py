@@ -105,9 +105,21 @@ class SkillAcquisitionRuntime:
             skill=skill,
         )
         with self._connect() as db:
-            db.execute("INSERT INTO skill_candidates VALUES (?, ?, ?, ?, ?, 'pending', ?)",
-                       (candidate.candidate_id, candidate.skill_id, candidate.base_version,
-                        candidate.candidate_version, candidate.mission_id, candidate.reason, self._now()))
+            db.execute(
+                """INSERT INTO skill_candidates (
+                    candidate_id, skill_id, base_version, candidate_version,
+                    mission_id, reason, status, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)""",
+                (
+                    candidate.candidate_id,
+                    candidate.skill_id,
+                    candidate.base_version,
+                    candidate.candidate_version,
+                    candidate.mission_id,
+                    candidate.reason,
+                    self._now(),
+                ),
+            )
         return candidate
 
     def validate_candidate(self, candidate: SkillCandidate,
