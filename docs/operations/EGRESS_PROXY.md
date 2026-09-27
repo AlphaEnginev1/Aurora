@@ -6,7 +6,7 @@ The workload runs in a private bubblewrap network namespace connected through ro
 
 slirp4netns is started with --configure, --disable-host-loopback, --disable-dns, a readiness pipe (--ready-fd), and a lifecycle pipe (--exit-fd). Aurora does not release the bootstrap process until slirp4netns reports readiness.
 
-The bootstrap process initially retains CAP_NET_ADMIN only long enough to wait for tap0, apply the route fence, and install the native nftables policy. It then execs setpriv to drop the workload capability sets. A second stage in the same injected read-only bootstrap then sets no_new_privs, installs the namespace-restriction seccomp filter, and finally execs the requested workload.
+The bootstrap process initially retains CAP_NET_ADMIN plus the temporary CAP_SETPCAP required to drop the capability bounding set. Those capabilities are used only to wait for tap0, apply the route fence, install the native nftables policy, and harden the post-drop credential state. It then execs setpriv with locked noroot/no_setuid_fixup securebits, an empty bounding/inheritable/ambient capability set, and no_new_privs before the workload starts. A second stage in the same injected read-only bootstrap then sets no_new_privs, installs the namespace-restriction seccomp filter, and finally execs the requested workload.
 
 The seccomp policy does not block ordinary fork/thread creation. It blocks unshare() and setns() outright, rejects clone3(), and rejects clone() only when namespace-creation flags are present. This prevents namespace escape attempts without making normal multithreaded tools fail simply because they create processes or threads.
 
