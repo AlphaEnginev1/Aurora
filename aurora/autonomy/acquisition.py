@@ -167,7 +167,7 @@ class AcquisitionManager:
             return AcquisitionResult(
                 spec.name, "already_available", spec.source, spec.executable,
                 existing, sha256_file(existing) if os.path.isfile(existing) else None,
-                version=version, verification="verified" if version else "observed",
+                version=version, verification="verified" if os.path.isfile(existing) else "observed",
             )
         if spec.source == "pypi" and self.install_root:
             try:
@@ -271,7 +271,7 @@ class AcquisitionManager:
             path,
             sha256_file(path) if os.path.isfile(path) else None,
             version=version,
-            verification="verified" if version else "observed",
+            verification="verified" if os.path.isfile(path) else "observed",
         )
 
     def _apt_version(self, package: str) -> str | None:
