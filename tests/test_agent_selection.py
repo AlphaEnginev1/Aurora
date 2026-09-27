@@ -166,3 +166,23 @@ def test_dynamic_agent_team_fails_closed_when_skill_is_unavailable():
     assert not team.complete
     assert team.missing_skills == ("unknown",)
     assert {member.role for member in team.members} == {"researcher"}
+
+
+def test_dynamic_agent_team_rejects_task_outside_team():
+    from aurora.organization import DynamicAgentTeamSelector
+    from aurora.orchestration.task_engine import DelegatedTask, TaskEngine, TaskEngineError
+
+    team = DynamicAgentTeamSelector(
+        registry(), AgentSelector(registry())
+    ).form(objective="research", required_skill_ids=("research",))
+
+    engine = TaskEngine(orchestration=None, workspace_root=__import__("pathlib").Path("."))
+    try:
+        engine.execute_team(
+            team,
+            (DelegatedTask("x", "engineer", "implement"),),
+        )
+    except TaskEngineError as exc:
+        assert "outside formed team" in str(exc)
+    else:
+        raise AssertionError("team boundary was not enforced")
