@@ -88,3 +88,51 @@ class SkillAcquisitionPipeline:
         approved = self.runtime.approve(prepared.candidate)
         self._set_state(approved.candidate_id, "approved")
         return approved
+
+    def promote(
+        self, prepared: PreparedSkillCandidate, registry: SkillRegistry
+    ) -> SkillRegistry:
+        if prepared.candidate.status != "approved":
+            raise SkillAcquisitionPipelineError(
+                "candidate must be explicitly approved before promotion"
+            )
+        promoted = self.runtime.promote(prepared.candidate, registry)
+        self._set_state(prepared.candidate.candidate_id, "promoted")
+        return promoted
+
+    def _persist(self, candidate: SkillCandidate, evidence: SkillAcquisitionEvidence) -> None:
+        skill = candidate.skill
+        if skill is None:
+            raise SkillAcquisitionPipelineError("candidate has no skill definition")
+        payload = json.dumps({
+            "skill_id": skill.skill_id, "version": skill.version,
+            "name": skill.name, "mission": skill.mission,
+            "instructions": skill.instructions,
+            "required_capabilities": sorted(skill.required_capabilities),
+            "verification_requirements": list(skill.verification_requirements),
+            "quality_checks": list(skill.quality_checks),
+            "tags": list(skill.tags), "dependencies": list(skill.dependencies),
+            "enabled": skill.enabled, "model_preferences": list(skill.model_preferences),
+        }, sort_keys=True)
+        with self._connect() as db:
+            db.execute(
+                "INSERT OR REPLACE INTO candidate_artifacts VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (candidate.candidate_id, payload, json.dumps(evidence.source_ids),
+                 json.dumps(evidence.acquired_tools), evidence.validation_returncode,
+                 evidence.validation_stdout, evidence.validation_stderr, evidence.state),
+            )
+
+    def _set_state(self, candidate_id: str, state: str) -> None:
+        with self._connect() as db:
+            db.execute(
+                "UPDATE candidate_artifacts SET state=? WHERE candidate_id=?",
+                (state, candidate_id),
+            )
+
+
+__all__ = [
+    "PreparedSkillCandidate",
+    "SkillAcquisitionEvidence",
+    "SkillAcquisitionPipeline",
+    "SkillAcquisitionPipelineError",
+]
