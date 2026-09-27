@@ -8,7 +8,7 @@ from aurora.research.models import ResearchRequest, SourceRecord
 from aurora.research.service import ResearchService
 from .acquisition import SkillAcquisitionRuntime, SkillGap
 from .acquisition_pipeline import PreparedSkillCandidate, SkillAcquisitionPipeline
-from .discovery import SkillDiscoveryService
+from .discovery import SkillConstructionEvaluation, SkillDiscoveryService
 from .models import SkillSpec
 from .registry import SkillRegistry
 
@@ -41,7 +41,7 @@ class AutonomousSpecialistAcquisition:
             raise AutonomousSpecialistAcquisitionError(f"skill discovery/construction failed: {exc}") from exc
         return self._prepare(
             gap=gap, skill=result.skill, sources=result.sources, tools=result.tools,
-            validation_command=result.validation_command, registry=registry,
+            validation_command=result.validation_command, registry=registry, construction_evaluation=result.evaluation,
         )
 
     def prepare(self, *, gap: SkillGap, plan: SpecialistAcquisitionPlan,
@@ -85,6 +85,8 @@ class AutonomousSpecialistAcquisition:
             acquired_tools=tuple(item.tool for item in acquired),
             validation_returncode=result.returncode,
             validation_stdout=result.stdout, validation_stderr=result.stderr,
+            construction_score=construction_evaluation.score if construction_evaluation else 0.0,
+            construction_evidence_state=construction_evaluation.evidence_state if construction_evaluation else "unknown",
         )
 
 __all__=["AutonomousSpecialistAcquisition","AutonomousSpecialistAcquisitionError","SpecialistAcquisitionPlan"]
