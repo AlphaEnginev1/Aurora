@@ -93,6 +93,7 @@ class TaskWorker:
 
         result = self._execute_claimed(claimed)
         if result.status is TaskStatus.SUCCEEDED:
+            result_payload = self._result_payload(result)
             self.store.complete(
                 self.mission_id,
                 claimed.task.task_id,
@@ -101,6 +102,7 @@ class TaskWorker:
                     "attempt": claimed.attempts,
                     "result_type": self._result_type(result),
                 },
+                result=result_payload,
                 worker_id=self.worker_id,
             )
             self._emit(
@@ -150,6 +152,7 @@ class TaskWorker:
             status="failed",
             error=error,
             payload={"attempt": claimed.attempts},
+            result={"error": error, "attempt": claimed.attempts},
             worker_id=self.worker_id,
         )
         newly_blocked = self.store.block_dependents(self.mission_id)
@@ -245,6 +248,36 @@ class TaskWorker:
             # Task state is authoritative in DurableTaskStore. Observability
             # events must never turn a committed task transition into a retry.
             return
+
+    @staticmethod
+    def _result_payload(result: DelegatedTaskResult) -> dict:
+        """Persist a bounded, model-readable task result."""
+        limit = 16_384
+        if result.model_result is not None:
+            content = result.model_result.response.content
+            return {
+                "type": "model",
+                "model": result.model_result.response.model,
+                "content": content[:limit],
+                "truncated": len(content) > limit,
+            }
+        capability = result.capability_result
+        if capability is not None:
+            execution = getattr(capability, "execution", None)
+            if execution is not None:
+                stdout = str(getattr(execution, "stdout", ""))[:limit]
+                stderr = str(getattr(execution, "stderr", ""))[:limit]
+                return {
+                    "type": "capability",
+                    "returncode": getattr(execution, "returncode", None),
+                    "stdout": stdout,
+                    "stderr": stderr,
+                    "truncated": (
+                        len(str(getattr(execution, "stdout", ""))) > limit
+                        or len(str(getattr(execution, "stderr", ""))) > limit
+                    ),
+                }
+        return {"type": "none"}
 
     @staticmethod
     def _result_type(result: DelegatedTaskResult) -> str:
