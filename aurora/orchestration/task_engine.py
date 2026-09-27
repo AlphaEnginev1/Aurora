@@ -57,6 +57,7 @@ class TaskEngine:
     workspace_root: Path
     organization: OrganizationRegistry | None = None
     skill_registry: SkillRegistry | None = None
+    skill_learning: object | None = None
     _results: dict[str, DelegatedTaskResult] = field(default_factory=dict, init=False)
 
     def validate(self, tasks: Sequence[DelegatedTask]) -> tuple[DelegatedTask, ...]:
