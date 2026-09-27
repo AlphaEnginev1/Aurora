@@ -220,7 +220,7 @@ def test_real_pypi_acquisition_downloads_verifies_and_executes(
     assert result.verification == "verified"
     assert result.artifact_sha256 and len(result.artifact_sha256) == 64
     assert result.provenance_url.startswith("https://files.pythonhosted.org/")
-    assert any(install_root.glob("packaging-25.0.dist-info/RECORD"))
+    assert any(install_root.rglob("packaging-25.0.dist-info/RECORD"))
 
     execution = SandboxExecutor(
         SandboxPolicy(network=False, timeout_seconds=20)
@@ -292,7 +292,7 @@ def test_real_pypi_dependency_closure(
         "urllib3",
     }
     installed_names = set()
-    for metadata_path in install_root.glob("*.dist-info/METADATA"):
+    for metadata_path in install_root.rglob("*.dist-info/METADATA"):
         for line in metadata_path.read_text(encoding="utf-8").splitlines():
             if line.startswith("Name: "):
                 installed_names.add(line.split(": ", 1)[1].strip().lower().replace("-", "_"))
