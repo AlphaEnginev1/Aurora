@@ -151,6 +151,38 @@ class SkillLearningStore:
             },
         )
 
+    def agent_scores_for(
+        self,
+        skill_ids: tuple[str, ...],
+        *,
+        minimum_evaluations: int = 2,
+        minimum_evidence_completeness: float = 0.75,
+    ) -> dict[str, float]:
+        """Return trusted historical specialist scores by agent role."""
+        if not skill_ids:
+            return {}
+        if minimum_evaluations < 1:
+            raise ValueError("minimum_evaluations must be at least 1")
+        if not 0.0 <= minimum_evidence_completeness <= 1.0:
+            raise ValueError("minimum_evidence_completeness must be between 0 and 1")
+        placeholders = ",".join("?" for _ in skill_ids)
+        with self._connect() as db:
+            rows = db.execute(
+                f"""
+                SELECT role, AVG(score) AS average_score, COUNT(*) AS evaluations,
+                       AVG(evidence_completeness) AS evidence_completeness
+                FROM skill_evaluations
+                WHERE skill_id IN ({placeholders}) AND role IS NOT NULL
+                GROUP BY role
+                HAVING COUNT(*) >= ? AND AVG(evidence_completeness) >= ?
+                """,
+                (*skill_ids, minimum_evaluations, minimum_evidence_completeness),
+            ).fetchall()
+        return {
+            str(row["role"]): float(row["average_score"])
+            for row in rows
+        }
+
     def model_scores_for(
         self,
         skill_ids: tuple[str, ...],
