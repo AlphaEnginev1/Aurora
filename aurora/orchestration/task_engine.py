@@ -195,11 +195,21 @@ class TaskEngine:
                 workspace=workspace,
                 args=task.args,
             )
+        skill_context = (
+            skill_assignment.render_system_context()
+            if skill_assignment is not None
+            else ""
+        )
         return self.orchestration.run_task(
             task_id=task.task_id,
             role=task.role,
             objective=task.objective,
             model_preferences=model_preferences,
+            context=(
+                [{"role": "system", "content": skill_context}]
+                if skill_context
+                else None
+            ),
         )
 
     @staticmethod
