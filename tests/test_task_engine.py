@@ -121,3 +121,49 @@ def test_task_engine_requires_task_identity_and_objective(tmp_path):
         TaskEngine(engine(), tmp_path).validate(
             [DelegatedTask("task", "", "work")]
         )
+
+
+def test_task_engine_runs_independent_ready_nodes_in_parallel(tmp_path):
+    from threading import Lock
+    from time import sleep
+
+    class ParallelEngine:
+        def __init__(self):
+            self.active = 0
+            self.peak = 0
+            self.lock = Lock()
+
+        def run_task(self, **kwargs):
+            with self.lock:
+                self.active += 1
+                self.peak = max(self.peak, self.active)
+            sleep(0.05)
+            with self.lock:
+                self.active -= 1
+            return TaskResult(
+                task_id=kwargs["task_id"],
+                role=kwargs["role"],
+                objective=kwargs["objective"],
+                response=InferenceResponse(
+                    model="fake/model",
+                    provider="fake",
+                    content="ok",
+                ),
+            )
+
+        def run_capability_task(self, **kwargs):
+            raise AssertionError("not expected")
+
+    runtime = ParallelEngine()
+    tasks = [
+        DelegatedTask("a", "agent", "parallel A"),
+        DelegatedTask("b", "agent", "parallel B"),
+        DelegatedTask("c", "agent", "join", depends_on=("a", "b")),
+    ]
+
+    result = TaskEngine(runtime, tmp_path).execute(tasks)
+
+    assert runtime.peak == 2
+    assert [item.task.task_id for item in result[:2]] == ["a", "b"]
+    assert result[2].task.task_id == "c"
+    assert all(item.status is TaskStatus.SUCCEEDED for item in result)
