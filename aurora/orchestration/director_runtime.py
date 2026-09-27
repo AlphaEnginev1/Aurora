@@ -370,6 +370,7 @@ class DirectorRuntime:
                     capability=task.capability,
                     args=task.args,
                     depends_on=tuple(mapping.get(dep, dep) for dep in task.depends_on),
+                    skills=task.skills,
                 )
             )
         external = {
@@ -460,6 +461,7 @@ class DirectorRuntime:
     def _plan_text(tasks: tuple[DelegatedTask, ...]) -> str:
         return "\n".join(
             f"- {task.task_id} [{task.role}] capability={task.capability or 'reasoning'} "
+            f"skills={','.join(task.skills) or 'none'} "
             f"depends_on={','.join(task.depends_on) or 'none'}: {task.objective}"
             for task in tasks
         )
