@@ -46,13 +46,16 @@ class OrchestrationEngine:
         actor: str,
         reason: str,
     ) -> tuple[CapabilityResult, ...]:
-        if self._capability_runtime is None:
-            if names:
-                raise CapabilityExecutionError("required capability runtime is not configured")
+        if not names:
             return ()
-        return self._capability_runtime.prepare_capabilities(
-            names, actor=actor, reason=reason
-        )
+        if self._capability_runtime is None:
+            raise CapabilityExecutionError("required capability runtime is not configured")
+        prepare = getattr(self._capability_runtime, "prepare_capabilities", None)
+        if prepare is None:
+            raise CapabilityExecutionError(
+                "capability runtime does not support verified artifact preparation"
+            )
+        return prepare(names, actor=actor, reason=reason)
 
     def run_task(
         self,
