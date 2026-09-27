@@ -145,14 +145,18 @@ class SandboxExecutor:
             "--unshare-ipc", "--unshare-cgroup-try", "--unshare-net",
         ]
         if network:
-            # The network bootstrap needs CAP_NET_ADMIN. It is removed by
-            # setpriv before the workload starts; seccomp is installed only
-            # after that privilege drop so the bootstrap can fork/exec ip and nft.
+            # The network bootstrap needs CAP_NET_ADMIN and CAP_SETPCAP.
+            # CAP_SETPCAP is needed only so setpriv can drop the temporary
+            # capability bounding set and lock out root capability reacquisition.
+            # Both are gone before the workload starts; seccomp is installed
+            # only after that privilege drop so the bootstrap can fork/exec ip
+            # and nft.
             argv += [
                 "--unshare-user",
                 "--uid", "0",
                 "--gid", "0",
                 "--cap-add", "CAP_NET_ADMIN",
+                "--cap-add", "CAP_SETPCAP",
             ]
         if json_status_fd is not None:
             if json_status_fd < 0:
