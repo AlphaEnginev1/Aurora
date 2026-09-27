@@ -87,18 +87,19 @@ class TaskEngine:
         while remaining:
             progressed = False
             for task_id, task in tuple(remaining.items()):
+                if any(dep not in self._results for dep in task.depends_on):
+                    continue
                 dependencies = [self._results[dep] for dep in task.depends_on]
                 if any(result.status is not TaskStatus.SUCCEEDED for result in dependencies):
-                    if all(dep.task_id in self._results for dep in dependencies):
-                        result = DelegatedTaskResult(
-                            task,
-                            TaskStatus.BLOCKED,
-                            error="dependency did not succeed",
-                        )
-                        self._results[task_id] = result
-                        ordered.append(result)
-                        del remaining[task_id]
-                        progressed = True
+                    result = DelegatedTaskResult(
+                        task,
+                        TaskStatus.BLOCKED,
+                        error="dependency did not succeed",
+                    )
+                    self._results[task_id] = result
+                    ordered.append(result)
+                    del remaining[task_id]
+                    progressed = True
                     continue
 
                 self._results[task_id] = DelegatedTaskResult(task, TaskStatus.RUNNING)
