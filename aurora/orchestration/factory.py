@@ -15,6 +15,7 @@ from aurora.autonomy.registry import load_registry
 from aurora.autonomy.sandbox import SandboxExecutor, SandboxPolicy
 from aurora.inference.config import load_model_specs
 from aurora.inference.router import ModelRouter
+from aurora.organization import OrganizationRegistry
 from .director import DirectorPlanner, DirectorService
 from .durable_director import DurableDirectorService
 from .engine import OrchestrationEngine
@@ -45,6 +46,7 @@ def build_director_service(
     workspace_root: str | Path,
     egress_proxy_host: str,
     egress_proxy_port: int = 3128,
+    organization_path: str | Path = "config/organization.json",
 ) -> DirectorService:
     """Build the complete Director -> tasks -> capabilities execution path.
 
@@ -56,6 +58,10 @@ def build_director_service(
     router = ModelRouter(
         models=inference_specs,
         nvidia_api_key=os.getenv("NVIDIA_API_KEY"),
+    )
+    organization = OrganizationRegistry.from_file(
+        organization_path,
+        configured_models={model.id for model in inference_specs},
     )
 
     autonomy_data = json.loads(Path(autonomy_policy_path).read_text(encoding="utf-8"))
@@ -126,8 +132,15 @@ def build_director_service(
         router,
         capability_runtime=capability_runtime,
     )
-    task_engine = TaskEngine(orchestration, root)
-    planner = DirectorPlanner(router)
+    task_engine = TaskEngine(
+        orchestration,
+        root,
+        organization=organization,
+    )
+    planner = DirectorPlanner(
+        router,
+        organization=organization,
+    )
 
     return DirectorService(planner, task_engine)
 
