@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
 from aurora.autonomy.capability_runtime import (
     CapabilityExecutionError,
@@ -49,13 +49,33 @@ class OrchestrationEngine:
         model: str | None = None,
         model_preferences: Sequence[str] | None = None,
         context: list[dict[str, Any]] | None = None,
+        skill_ids: Sequence[str] | None = None,
+        skill_tags: Sequence[str] | None = None,
+        task_type: str | None = None,
+        learned_model_scores: Mapping[str, float] | None = None,
     ) -> TaskResult:
         messages = list(context or [])
         messages.append({"role": "user", "content": objective})
+        request_metadata: dict[str, Any] = {
+            "task_id": task_id,
+            "role": role,
+        }
+        if skill_ids:
+            request_metadata["skill_ids"] = list(skill_ids)
+        if skill_tags:
+            request_metadata["skill_tags"] = list(skill_tags)
+        if task_type:
+            request_metadata["task_type"] = task_type
+        if learned_model_scores:
+            request_metadata["learned_model_scores"] = dict(learned_model_scores)
+        request_metadata["context_tokens"] = max(
+            1,
+            sum(len(str(message.get("content", ""))) for message in messages) // 4,
+        )
         request = InferenceRequest(
             messages=messages,
             model=model,
-            metadata={"task_id": task_id, "role": role},
+            metadata=request_metadata,
         )
         if model_preferences:
             response = self._router.generate(

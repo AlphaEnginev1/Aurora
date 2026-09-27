@@ -10,6 +10,8 @@ from typing import Callable
 from .event_bus import DurableEventBus, EventBusError
 from .task_engine import DelegatedTaskResult, TaskEngine, TaskStatus
 from .task_store import DurableTaskStore, StoredTask, TaskStoreError
+from aurora.skills.evaluation import SkillEvaluator
+from aurora.skills.learning import SkillEvolutionEngine, SkillLearningStore
 
 
 class TaskWorkerError(RuntimeError):
@@ -62,6 +64,9 @@ class TaskWorker:
         worker_id: str,
         policy: WorkerPolicy | None = None,
         event_bus: DurableEventBus | None = None,
+        skill_evaluator: SkillEvaluator | None = None,
+        skill_learning: SkillLearningStore | None = None,
+        skill_evolution: SkillEvolutionEngine | None = None,
         sleep_fn: Callable[[float], None] = sleep,
     ) -> None:
         if not mission_id.strip():
@@ -74,6 +79,9 @@ class TaskWorker:
         self.worker_id = worker_id
         self.policy = policy or WorkerPolicy()
         self.event_bus = event_bus
+        self.skill_evaluator = skill_evaluator
+        self.skill_learning = skill_learning
+        self.skill_evolution = skill_evolution
         self._sleep = sleep_fn
 
     def run_once(self) -> WorkerCycle:
@@ -227,7 +235,68 @@ class TaskWorker:
             raise TaskWorkerError(
                 f"lease renewal failed for {claimed.task.task_id}: {heartbeat_errors[0]}"
             )
+        self._learn_from_result(claimed, result)
         return result
+
+    def _learn_from_result(self, claimed: StoredTask, result: DelegatedTaskResult) -> None:
+        if self.skill_evaluator is None or self.skill_learning is None:
+            return
+        organization = self.task_engine.organization
+        registry = self.task_engine.skill_registry
+        if organization is None or registry is None:
+            return
+        try:
+            agent = organization.resolve_agent(claimed.task.role)
+            evaluations = self.skill_evaluator.evaluate(
+                task=claimed.task,
+                result=result,
+                mission_id=self.mission_id,
+                default_skill_ids=agent.skill_ids,
+                agent_capabilities=agent.capabilities,
+            )
+            for evaluation in evaluations:
+                self.skill_learning.record(evaluation)
+                self._emit(
+                    "skill.evaluated",
+                    claimed.task.task_id,
+                    {
+                        "skill_id": evaluation.skill_id,
+                        "skill_version": evaluation.skill_version,
+                        "score": evaluation.score,
+                        "status": evaluation.status,
+                        "model": evaluation.model,
+                        "verification_passed": list(evaluation.verification_passed),
+                        "verification_failed": list(evaluation.verification_failed),
+                        "verification_missing": list(evaluation.verification_missing),
+                        "quality_passed": list(evaluation.quality_passed),
+                        "quality_failed": list(evaluation.quality_failed),
+                        "quality_missing": list(evaluation.quality_missing),
+                    },
+                )
+                if self.skill_evolution is not None:
+                    proposal = self.skill_evolution.observe(
+                        evaluation,
+                        base_version=evaluation.skill_version,
+                    )
+                    if proposal is not None:
+                        self._emit(
+                            "skill.evolution_proposed",
+                            claimed.task.task_id,
+                            {
+                                "proposal_id": proposal.proposal_id,
+                                "skill_id": proposal.skill_id,
+                                "base_version": proposal.base_version,
+                                "candidate_version": proposal.candidate_version,
+                                "reason": proposal.reason,
+                                "suggested_change": proposal.suggested_change,
+                            },
+                        )
+        except Exception as exc:
+            self._emit(
+                "skill.learning_failed",
+                claimed.task.task_id,
+                {"error": str(exc)},
+            )
 
     def _emit(
         self,

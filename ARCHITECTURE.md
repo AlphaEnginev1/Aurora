@@ -53,3 +53,16 @@ Skill definitions are treated as trusted policy artifacts. Adding or changing a 
 is subject to the same acquisition, verification, audit and rollback principles as
 other autonomous policy changes; a skill never grants capabilities that the agent does
 not already possess.
+## Skill evaluation, learning and model selection
+
+Every executed skill can produce a durable evaluation containing execution status, score,
+verification evidence, quality evidence, failure signature and model identity. The
+learning store aggregates this history per skill and per model. The inference router
+uses skill tags, work type, context capacity, configured model quality/latency/cost scores,
+organizational preferences and learned model performance to select among compatible
+models.
+
+Repeated underperformance can create a versioned pending skill-evolution proposal. A
+proposal is evidence-backed and bounded; activation is a separate governance action.
+Aurora never silently rewrites an active skill from one poor outcome, and missing
+verification evidence is never counted as a successful check.

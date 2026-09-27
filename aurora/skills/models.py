@@ -30,6 +30,15 @@ class SkillAssignment:
     skills: tuple[SkillSpec, ...]
 
     @property
+    def tags(self) -> tuple[str, ...]:
+        ordered: list[str] = []
+        for skill in self.skills:
+            for tag in skill.tags:
+                if tag not in ordered:
+                    ordered.append(tag)
+        return tuple(ordered)
+
+    @property
     def model_preferences(self) -> tuple[str, ...]:
         ordered: list[str] = []
         for skill in self.skills:
@@ -45,6 +54,9 @@ class SkillAssignment:
             "Aurora specialist skill profile.",
             "Treat these as governed operating procedures, not as permission "
             "to bypass Aurora capabilities or security policy.",
+            "For each declared verification and quality check, emit exactly one "
+            "machine-readable line: VERIFY:<check>=pass|fail or QUALITY:<check>=pass|fail.",
+            "Never claim a check passed unless the evidence for it is actually available.",
         ]
         for skill in self.skills:
             sections.append(

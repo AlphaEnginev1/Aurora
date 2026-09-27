@@ -87,3 +87,72 @@ def test_task_engine_rejects_skill_not_supported_by_agent(tmp_path: Path):
         assert "unauthorized capabilities" in str(exc)
     else:
         raise AssertionError("unsupported skill was accepted")
+ 
+ 
+def test_task_engine_passes_skill_tags_and_learned_scores_to_router(tmp_path: Path):
+    from aurora.skills.learning import SkillLearningStore
+    from aurora.skills.evaluation import SkillEvaluation
+
+    skill_registry=SkillRegistry({
+        "research": SkillSpec(
+            "research","1.0.0","Research","m","i",
+            frozenset(),(),(),("research",)
+        )
+    })
+    organization=OrganizationRegistry(
+        agents={"researcher": AgentSpec(
+            "researcher","researcher","research","m",
+            frozenset(),(),("research",)
+        )},
+        departments={"research": DepartmentSpec(
+            "research","m",("researcher",),(),frozenset()
+        )},
+    )
+    learning=SkillLearningStore(tmp_path/"skills.db")
+    for idx, score in enumerate((0.9, 0.9)):
+        learning.record(SkillEvaluation(
+            "research","1.0.0",None,f"t-a-{idx}","researcher",score,"succeeded","model/a",
+            (),(),(),(),(),(),None,1.0,"evidence_complete"
+        ))
+    router=CaptureRouter()
+    engine=TaskEngine(
+        OrchestrationEngine(router),
+        tmp_path/"workspace",
+        organization=organization,
+        skill_registry=skill_registry,
+        skill_learning=learning,
+    )
+    result=engine.execute([DelegatedTask("t","researcher","research paper")])
+    assert result[0].status.value=="succeeded"
+    assert router.request.metadata["skill_tags"] == ["research"]
+    assert router.request.metadata["task_type"] == "research"
+    assert router.request.metadata["learned_model_scores"] == {"model/a": 0.9}
+
+
+def test_task_engine_automatically_selects_specialist_agent(tmp_path: Path):
+    skill_registry = SkillRegistry({
+        "research": SkillSpec(
+            "research", "1.0.0", "Research", "m", "i",
+            frozenset(), (), (), ("research",)
+        )
+    })
+    organization = OrganizationRegistry(
+        agents={"researcher": AgentSpec(
+            "researcher", "researcher", "research", "research papers and evidence",
+            frozenset(), (), ("research",)
+        )},
+        departments={"research": DepartmentSpec(
+            "research", "research", ("researcher",), (), frozenset()
+        )},
+    )
+    engine = TaskEngine(
+        OrchestrationEngine(CaptureRouter()),
+        tmp_path / "workspace",
+        organization=organization,
+        skill_registry=skill_registry,
+    )
+    result = engine.execute([
+        DelegatedTask("t", "auto", "research papers and evidence", skills=("research",))
+    ])
+    assert result[0].status.value == "succeeded"
+    assert result[0].task.role == "researcher"

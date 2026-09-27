@@ -10,10 +10,14 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Sequence
 
+
 from aurora.autonomy.capability_runtime import CapabilityExecutionError
 from aurora.autonomy.models import CapabilityRequest
 from .engine import OrchestrationEngine, TaskResult
-from aurora.organization import OrganizationConfigError, OrganizationRegistry
+from aurora.organization import (
+    OrganizationConfigError,
+    OrganizationRegistry,
+)
 from aurora.skills import SkillRegistry, SkillRegistryError
 
 
@@ -47,6 +51,7 @@ class DelegatedTaskResult:
     model_result: TaskResult | None = None
     capability_result: object | None = None
     error: str | None = None
+    skill_evaluations: tuple[object, ...] = ()
 
 
 @dataclass
@@ -57,6 +62,7 @@ class TaskEngine:
     workspace_root: Path
     organization: OrganizationRegistry | None = None
     skill_registry: SkillRegistry | None = None
+    skill_learning: object | None = None
     _results: dict[str, DelegatedTaskResult] = field(default_factory=dict, init=False)
 
     def validate(self, tasks: Sequence[DelegatedTask]) -> tuple[DelegatedTask, ...]:
@@ -73,21 +79,28 @@ class TaskEngine:
             self._validate_task_fields(task)
             if self.organization is not None:
                 try:
-                    agent = self.organization.validate_task(
-                        role=task.role,
-                        capability=task.capability,
-                    )
-                    if self.skill_registry is not None:
-                        self.skill_registry.for_agent(
-                            role=agent.role,
-                            agent_capabilities=agent.capabilities,
-                            default_skill_ids=agent.skill_ids,
-                            requested_skill_ids=task.skills,
+                    if task.role == "auto":
+                        if self.skill_registry is not None:
+                            for skill_id in task.skills:
+                                self.skill_registry.resolve(skill_id)
+                    else:
+                        agent = self.organization.validate_task(
+                            role=task.role,
+                            capability=task.capability,
                         )
+                        if self.skill_registry is not None:
+                            self.skill_registry.for_agent(
+                                role=agent.role,
+                                agent_capabilities=agent.capabilities,
+                                default_skill_ids=agent.skill_ids,
+                                requested_skill_ids=task.skills,
+                            )
                 except (OrganizationConfigError, SkillRegistryError) as exc:
                     raise TaskEngineError(str(exc)) from exc
-            elif task.skills:
-                raise TaskEngineError("skill assignments require an organization registry")
+            elif task.skills or task.role == "auto":
+                raise TaskEngineError(
+                    "skill assignments and automatic agent selection require an organization registry"
+                )
             if any(dep not in known for dep in task.depends_on):
                 missing = sorted(set(task.depends_on) - known)
                 raise TaskEngineError(
@@ -146,20 +159,126 @@ class TaskEngine:
     def execute_one(self, task: DelegatedTask) -> DelegatedTaskResult:
         """Execute one already-dependency-resolved task for a durable worker."""
         self._validate_task_fields(task)
+        task = self._resolve_agent_task(task)
         try:
             result = self._execute_task(task)
         except (CapabilityExecutionError, RuntimeError, ValueError) as exc:
-            return DelegatedTaskResult(
+            result = DelegatedTaskResult(
                 task,
                 TaskStatus.FAILED,
                 error=str(exc),
             )
-        return DelegatedTaskResult(
+            return self._learn_from_result(result)
+        result = DelegatedTaskResult(
             task,
             TaskStatus.SUCCEEDED,
             model_result=result if isinstance(result, TaskResult) else None,
             capability_result=None if isinstance(result, TaskResult) else result,
         )
+        return self._learn_from_result(result)
+
+    def _learn_from_result(self, result: DelegatedTaskResult) -> DelegatedTaskResult:
+        """Evaluate and persist specialist learning immediately after execution."""
+        if (
+            self.skill_learning is None
+            or self.skill_registry is None
+            or self.organization is None
+            or not result.task.skills
+        ):
+            return result
+
+        try:
+            from aurora.skills.evaluation import SkillEvaluator
+            from aurora.skills.learning import SkillEvolutionEngine
+
+            agent = self.organization.resolve_agent(result.task.role)
+            evaluator = SkillEvaluator(self.skill_registry)
+            evaluations = evaluator.evaluate(
+                task=result.task,
+                result=result,
+                default_skill_ids=agent.skill_ids,
+                agent_capabilities=agent.capabilities,
+            )
+            evolution = SkillEvolutionEngine(self.skill_learning)
+            for evaluation in evaluations:
+                self.skill_learning.record(evaluation)
+                evolution.observe(
+                    evaluation,
+                    base_version=evaluation.skill_version,
+                )
+            return DelegatedTaskResult(
+                task=result.task,
+                status=result.status,
+                model_result=result.model_result,
+                capability_result=result.capability_result,
+                error=result.error,
+                skill_evaluations=evaluations,
+            )
+        except Exception:
+            # Learning must never turn a completed task into a false execution
+            # failure. The durable execution result remains authoritative.
+            return result
+
+    def _resolve_agent_task(self, task: DelegatedTask) -> DelegatedTask:
+        """Resolve the Director's automatic-agent sentinel to a specialist role."""
+        if task.role != "auto":
+            return task
+        if self.organization is None:
+            raise TaskEngineError("automatic agent selection requires an organization registry")
+        from aurora.organization.agent_selection import AgentSelector
+
+        selector = AgentSelector(
+            self.organization,
+            self.skill_registry,
+            self.skill_learning,
+        )
+        try:
+            role = selector.select(
+                objective=task.objective,
+                required_skill_ids=task.skills,
+                capability=task.capability,
+            )
+        except Exception as exc:
+            raise TaskEngineError(str(exc)) from exc
+        return DelegatedTask(
+            task_id=task.task_id,
+            role=role,
+            objective=task.objective,
+            capability=task.capability,
+            args=task.args,
+            depends_on=task.depends_on,
+            skills=task.skills,
+        )
+
+    def skill_assignment_for(self, task: DelegatedTask):
+        if self.skill_registry is None or self.organization is None:
+            return None
+        agent = self.organization.resolve_agent(task.role)
+        return self.skill_registry.for_agent(
+            role=agent.role,
+            agent_capabilities=agent.capabilities,
+            default_skill_ids=agent.skill_ids,
+            requested_skill_ids=task.skills,
+        )
+
+    @staticmethod
+    def _classify_task(objective: str, tags: Sequence[str]) -> str:
+        text = objective.lower()
+        tagset = {tag.lower() for tag in tags}
+        rules = (
+            ("security", {"security", "audit", "threat", "vulnerability"}),
+            ("research", {"research", "literature", "paper", "evidence", "study"}),
+            ("data", {"data", "dataset", "pipeline", "analysis", "statistics"}),
+            ("verification", {"verify", "validation", "test", "reproduce", "check"}),
+            ("operations", {"runtime", "recovery", "incident", "health", "monitor"}),
+            ("discovery", {"discover", "novel", "hypothesis", "explore", "prior art"}),
+            ("synthesis", {"synthesize", "summary", "decision", "brief", "integrate"}),
+            ("engineering", {"code", "implement", "debug", "refactor", "software"}),
+        )
+        for name, keywords in rules:
+            if name in tagset or any(keyword in text for keyword in keywords):
+                return name
+        return "general"
 
     def _execute_task(self, task: DelegatedTask):
         skill_assignment = None
@@ -172,6 +291,14 @@ class TaskEngine:
                 requested_skill_ids=task.skills,
             )
         skill_preferences = skill_assignment.model_preferences if skill_assignment else ()
+        skill_tags = skill_assignment.tags if skill_assignment else ()
+        skill_ids = skill_assignment.skill_ids if skill_assignment else ()
+        learned_model_scores = (
+            self.skill_learning.model_scores_for(skill_ids)
+            if self.skill_learning is not None and skill_ids
+            else {}
+        )
+        task_type = self._classify_task(task.objective, skill_tags)
         organization_preferences = (
             self.organization.model_preferences_for(task.role)
             if self.organization is not None
@@ -184,9 +311,6 @@ class TaskEngine:
                 actor=task.role,
                 reason=task.objective,
             )
-            # Managed capabilities are activated in the shared runtime root so
-            # stable acquisition paths (for example /workspace/managed-site)
-            # remain valid. Task-specific data must live in the task workspace.
             workspace = self.workspace_root
             return self.orchestration.run_capability_task(
                 task_id=task.task_id,
@@ -205,6 +329,10 @@ class TaskEngine:
             role=task.role,
             objective=task.objective,
             model_preferences=model_preferences,
+            skill_ids=skill_ids,
+            skill_tags=skill_tags,
+            task_type=task_type,
+            learned_model_scores=learned_model_scores,
             context=(
                 [{"role": "system", "content": skill_context}]
                 if skill_context

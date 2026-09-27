@@ -1,5 +1,25 @@
 """Aurora skill registry and execution contracts."""
 from .models import SkillAssignment, SkillSpec
 from .registry import SkillRegistry, SkillRegistryError
+from .evaluation import SkillEvaluation, SkillEvaluator
+from .learning import (
+    SkillEvolutionEngine,
+    SkillEvolutionProposal,
+    SkillLearningError,
+    SkillLearningStore,
+    SkillPerformance,
+)
 
-__all__ = ["SkillAssignment", "SkillRegistry", "SkillRegistryError", "SkillSpec"]
+__all__ = [
+    "SkillAssignment",
+    "SkillEvaluation",
+    "SkillEvaluator",
+    "SkillEvolutionEngine",
+    "SkillEvolutionProposal",
+    "SkillLearningError",
+    "SkillLearningStore",
+    "SkillPerformance",
+    "SkillRegistry",
+    "SkillRegistryError",
+    "SkillSpec",
+]
