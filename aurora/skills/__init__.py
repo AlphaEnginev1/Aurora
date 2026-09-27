@@ -28,15 +28,3 @@ __all__ = [
     "SkillCandidate",
     "SkillGap",
 ]
-
-from .acquisition_pipeline import (
-    PreparedSkillCandidate,
-    SkillAcquisitionEvidence,
-    SkillAcquisitionPipeline,
-    SkillAcquisitionPipelineError,
-)
-from .autonomous_specialist_acquisition import (
-    AutonomousSpecialistAcquisition,
-    AutonomousSpecialistAcquisitionError,
-    SpecialistAcquisitionPlan,
-)
