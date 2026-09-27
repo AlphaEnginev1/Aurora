@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
 import sqlite3
-from datetime import datetime, timezone
 from typing import Sequence
 
 from .task_engine import DelegatedTask
@@ -23,6 +23,8 @@ class StoredTask:
     status: str
     attempts: int
     last_error: str | None = None
+    claimed_by: str | None = None
+    lease_until: str | None = None
 
 
 @dataclass(frozen=True)
@@ -36,7 +38,7 @@ class TaskEvent:
 
 
 class DurableTaskStore:
-    """SQLite-backed queue with atomic claims and append-only task events."""
+    """SQLite-backed queue with atomic claims, leases, and append-only events."""
 
     VALID_STATUSES = frozenset({"pending", "running", "succeeded", "failed", "blocked"})
 
@@ -68,6 +70,8 @@ class DurableTaskStore:
                     status TEXT NOT NULL CHECK (status IN ('pending','running','succeeded','failed','blocked')),
                     attempts INTEGER NOT NULL DEFAULT 0,
                     last_error TEXT,
+                    claimed_by TEXT,
+                    lease_until TEXT,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     PRIMARY KEY (mission_id, task_id)
@@ -85,14 +89,34 @@ class DurableTaskStore:
                 CREATE INDEX IF NOT EXISTS idx_tasks_runnable
                     ON tasks (mission_id, status, created_at);
 
+                CREATE INDEX IF NOT EXISTS idx_tasks_lease
+                    ON tasks (status, lease_until);
+
                 CREATE INDEX IF NOT EXISTS idx_events_mission
                     ON task_events (mission_id, event_id);
                 """
             )
+            columns = {
+                row["name"]
+                for row in db.execute("PRAGMA table_info(tasks)").fetchall()
+            }
+            if "claimed_by" not in columns:
+                db.execute("ALTER TABLE tasks ADD COLUMN claimed_by TEXT")
+            if "lease_until" not in columns:
+                db.execute("ALTER TABLE tasks ADD COLUMN lease_until TEXT")
 
     @staticmethod
     def _now() -> str:
         return datetime.now(timezone.utc).isoformat()
+
+    @staticmethod
+    def _lease_until(seconds: float) -> str:
+        return (datetime.now(timezone.utc) + timedelta(seconds=seconds)).isoformat()
+
+    @staticmethod
+    def _validate_lease_seconds(lease_seconds: float) -> None:
+        if lease_seconds <= 0:
+            raise TaskStoreError("lease_seconds must be positive")
 
     def enqueue(self, mission_id: str, tasks: Sequence[DelegatedTask]) -> None:
         if not mission_id.strip():
@@ -117,8 +141,8 @@ class DurableTaskStore:
                         INSERT INTO tasks (
                             mission_id, task_id, role, objective, capability,
                             args_json, deps_json, status, attempts,
-                            last_error, created_at, updated_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', 0, NULL, ?, ?)
+                            last_error, claimed_by, lease_until, created_at, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', 0, NULL, NULL, NULL, ?, ?)
                         """,
                         (
                             mission_id,
@@ -149,9 +173,16 @@ class DurableTaskStore:
                 db.rollback()
                 raise
 
-    def claim_next(self, mission_id: str, worker_id: str) -> StoredTask | None:
+    def claim_next(
+        self,
+        mission_id: str,
+        worker_id: str,
+        *,
+        lease_seconds: float = 300.0,
+    ) -> StoredTask | None:
         if not worker_id.strip():
             raise TaskStoreError("worker_id is empty")
+        self._validate_lease_seconds(lease_seconds)
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
             rows = db.execute(
@@ -165,17 +196,31 @@ class DurableTaskStore:
 
             for row in rows:
                 dependencies = tuple(json.loads(row["deps_json"]))
-                if any(not self._dependency_succeeded(db, mission_id, dep) for dep in dependencies):
+                if any(
+                    not self._dependency_succeeded(db, mission_id, dep)
+                    for dep in dependencies
+                ):
                     continue
 
                 now = self._now()
+                lease_until = self._lease_until(lease_seconds)
                 updated = db.execute(
                     """
                     UPDATE tasks
-                    SET status = 'running', attempts = attempts + 1, updated_at = ?
+                    SET status = 'running',
+                        attempts = attempts + 1,
+                        claimed_by = ?,
+                        lease_until = ?,
+                        updated_at = ?
                     WHERE mission_id = ? AND task_id = ? AND status = 'pending'
                     """,
-                    (now, mission_id, row["task_id"]),
+                    (
+                        worker_id,
+                        lease_until,
+                        now,
+                        mission_id,
+                        row["task_id"],
+                    ),
                 )
                 if updated.rowcount != 1:
                     continue
@@ -184,7 +229,11 @@ class DurableTaskStore:
                     mission_id,
                     row["task_id"],
                     "claimed",
-                    {"worker_id": worker_id, "attempt": row["attempts"] + 1},
+                    {
+                        "worker_id": worker_id,
+                        "attempt": row["attempts"] + 1,
+                        "lease_until": lease_until,
+                    },
                 )
                 db.commit()
                 return self._row_to_task(
@@ -192,10 +241,170 @@ class DurableTaskStore:
                     status="running",
                     attempts=row["attempts"] + 1,
                     last_error=None,
+                    claimed_by=worker_id,
+                    lease_until=lease_until,
                 )
 
             db.commit()
             return None
+
+    def renew_lease(
+        self,
+        mission_id: str,
+        task_id: str,
+        worker_id: str,
+        *,
+        lease_seconds: float = 300.0,
+    ) -> str:
+        if not worker_id.strip():
+            raise TaskStoreError("worker_id is empty")
+        self._validate_lease_seconds(lease_seconds)
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                """
+                SELECT status, claimed_by, lease_until
+                FROM tasks
+                WHERE mission_id = ? AND task_id = ?
+                """,
+                (mission_id, task_id),
+            ).fetchone()
+            if row is None:
+                db.rollback()
+                raise TaskStoreError(f"unknown task: {mission_id}/{task_id}")
+            if row["status"] != "running" or row["claimed_by"] != worker_id:
+                db.rollback()
+                raise TaskStoreError(
+                    f"worker does not own running task: {mission_id}/{task_id}"
+                )
+            if row["lease_until"] is not None and row["lease_until"] <= self._now():
+                db.rollback()
+                raise TaskStoreError(f"task lease has expired: {mission_id}/{task_id}")
+
+            lease_until = self._lease_until(lease_seconds)
+            now = self._now()
+            db.execute(
+                """
+                UPDATE tasks
+                SET lease_until = ?, updated_at = ?
+                WHERE mission_id = ? AND task_id = ? AND status = 'running'
+                  AND claimed_by = ?
+                """,
+                (lease_until, now, mission_id, task_id, worker_id),
+            )
+            self._event_locked(
+                db,
+                mission_id,
+                task_id,
+                "lease_renewed",
+                {"worker_id": worker_id, "lease_until": lease_until},
+            )
+            db.commit()
+            return lease_until
+
+    def recover_expired(
+        self,
+        mission_id: str,
+        *,
+        now: str | None = None,
+    ) -> int:
+        """Requeue running tasks whose worker lease has expired."""
+        reference = now or self._now()
+        recovered = 0
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            rows = db.execute(
+                """
+                SELECT task_id, claimed_by, lease_until
+                FROM tasks
+                WHERE mission_id = ? AND status = 'running'
+                  AND (lease_until IS NULL OR lease_until <= ?)
+                ORDER BY created_at, task_id
+                """,
+                (mission_id, reference),
+            ).fetchall()
+            for row in rows:
+                current = self._now()
+                updated = db.execute(
+                    """
+                    UPDATE tasks
+                    SET status = 'pending',
+                        claimed_by = NULL,
+                        lease_until = NULL,
+                        updated_at = ?
+                    WHERE mission_id = ? AND task_id = ? AND status = 'running'
+                      AND (lease_until IS NULL OR lease_until <= ?)
+                    """,
+                    (current, mission_id, row["task_id"], reference),
+                )
+                if updated.rowcount != 1:
+                    continue
+                self._event_locked(
+                    db,
+                    mission_id,
+                    row["task_id"],
+                    "requeued",
+                    {
+                        "reason": "lease_expired",
+                        "previous_worker_id": row["claimed_by"],
+                        "previous_lease_until": row["lease_until"],
+                    },
+                )
+                recovered += 1
+            db.commit()
+        return recovered
+
+    def retry(
+        self,
+        mission_id: str,
+        task_id: str,
+        *,
+        worker_id: str,
+        error: str,
+    ) -> None:
+        """Return a failed running attempt to pending for another attempt."""
+        if not worker_id.strip():
+            raise TaskStoreError("worker_id is empty")
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                """
+                SELECT status, claimed_by
+                FROM tasks
+                WHERE mission_id = ? AND task_id = ?
+                """,
+                (mission_id, task_id),
+            ).fetchone()
+            if row is None:
+                db.rollback()
+                raise TaskStoreError(f"unknown task: {mission_id}/{task_id}")
+            if row["status"] != "running" or row["claimed_by"] != worker_id:
+                db.rollback()
+                raise TaskStoreError(
+                    f"worker does not own running task: {mission_id}/{task_id}"
+                )
+            now = self._now()
+            db.execute(
+                """
+                UPDATE tasks
+                SET status = 'pending',
+                    last_error = ?,
+                    claimed_by = NULL,
+                    lease_until = NULL,
+                    updated_at = ?
+                WHERE mission_id = ? AND task_id = ? AND status = 'running'
+                  AND claimed_by = ?
+                """,
+                (error, now, mission_id, task_id, worker_id),
+            )
+            self._event_locked(
+                db,
+                mission_id,
+                task_id,
+                "retry_scheduled",
+                {"worker_id": worker_id, "error": error},
+            )
+            db.commit()
 
     def complete(
         self,
@@ -205,13 +414,18 @@ class DurableTaskStore:
         status: str,
         error: str | None = None,
         payload: dict | None = None,
+        worker_id: str | None = None,
     ) -> None:
         if status not in {"succeeded", "failed", "blocked"}:
             raise TaskStoreError(f"invalid terminal task status: {status}")
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
             row = db.execute(
-                "SELECT status FROM tasks WHERE mission_id = ? AND task_id = ?",
+                """
+                SELECT status, claimed_by
+                FROM tasks
+                WHERE mission_id = ? AND task_id = ?
+                """,
                 (mission_id, task_id),
             ).fetchone()
             if row is None:
@@ -222,12 +436,18 @@ class DurableTaskStore:
                 raise TaskStoreError(
                     f"task is not running: {mission_id}/{task_id} ({row['status']})"
                 )
+            if worker_id is not None and row["claimed_by"] != worker_id:
+                db.rollback()
+                raise TaskStoreError(
+                    f"worker does not own running task: {mission_id}/{task_id}"
+                )
 
             now = self._now()
             db.execute(
                 """
                 UPDATE tasks
-                SET status = ?, last_error = ?, updated_at = ?
+                SET status = ?, last_error = ?, claimed_by = NULL,
+                    lease_until = NULL, updated_at = ?
                 WHERE mission_id = ? AND task_id = ?
                 """,
                 (status, error, now, mission_id, task_id),
@@ -235,6 +455,8 @@ class DurableTaskStore:
             event_payload = dict(payload or {})
             if error:
                 event_payload["error"] = error
+            if worker_id is not None:
+                event_payload["worker_id"] = worker_id
             self._event_locked(db, mission_id, task_id, status, event_payload)
             db.commit()
 
@@ -258,7 +480,11 @@ class DurableTaskStore:
                 db.execute(
                     """
                     UPDATE tasks
-                    SET status = 'blocked', last_error = ?, updated_at = ?
+                    SET status = 'blocked',
+                        last_error = ?,
+                        claimed_by = NULL,
+                        lease_until = NULL,
+                        updated_at = ?
                     WHERE mission_id = ? AND task_id = ? AND status = 'pending'
                     """,
                     (
@@ -349,6 +575,8 @@ class DurableTaskStore:
         status: str | None = None,
         attempts: int | None = None,
         last_error: str | None = None,
+        claimed_by: str | None = None,
+        lease_until: str | None = None,
     ) -> StoredTask:
         task = DelegatedTask(
             task_id=row["task_id"],
@@ -364,6 +592,8 @@ class DurableTaskStore:
             status=status if status is not None else row["status"],
             attempts=attempts if attempts is not None else row["attempts"],
             last_error=last_error if last_error is not None else row["last_error"],
+            claimed_by=claimed_by if claimed_by is not None else row["claimed_by"],
+            lease_until=lease_until if lease_until is not None else row["lease_until"],
         )
 
     @classmethod
