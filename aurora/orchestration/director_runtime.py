@@ -19,6 +19,8 @@ from .task_store import DurableTaskStore, TaskEvent, TaskStoreError
 from .task_worker import TaskWorker, WorkerCycle, WorkerPolicy
 from aurora.skills.evaluation import SkillEvaluator
 from aurora.skills.learning import SkillEvolutionEngine, SkillLearningStore
+from aurora.skills.autonomous_specialist_acquisition import AutonomousSpecialistAcquisition, SpecialistAcquisitionPlan
+
 
 
 class DirectorRuntimeError(RuntimeError):
@@ -69,6 +71,7 @@ class DirectorRuntime:
         skill_evaluator: SkillEvaluator | None = None,
         skill_learning: SkillLearningStore | None = None,
         skill_evolution: SkillEvolutionEngine | None = None,
+        autonomous_specialist_acquisition: AutonomousSpecialistAcquisition | None = None,
         sleep_fn: Callable[[float], None] = sleep,
     ) -> None:
         if not event_consumer_id.strip():
@@ -94,9 +97,47 @@ class DirectorRuntime:
         self.skill_evaluator = skill_evaluator
         self.skill_learning = skill_learning
         self.skill_evolution = skill_evolution
+        self.autonomous_specialist_acquisition = autonomous_specialist_acquisition
         self._sleep = sleep_fn
         self._subscription: EventSubscription = self.event_bus.subscribe(event_consumer_id)
         self._workers: dict[str, TaskWorker] = {}
+
+
+    def acquire_specialist(
+        self,
+        *,
+        mission_id: str,
+        gap_skill_id: str,
+        reason: str,
+        required_capabilities: tuple[str, ...] = (),
+        plan: SpecialistAcquisitionPlan,
+    ):
+        """Run governed autonomous specialist acquisition and stop before promotion."""
+        if self.autonomous_specialist_acquisition is None:
+            raise DirectorRuntimeError("autonomous specialist acquisition is not configured")
+        gap = self.autonomous_specialist_acquisition.pipeline.runtime.detect_gap(
+            mission_id=mission_id,
+            skill_id=gap_skill_id,
+            reason=reason,
+            required_capabilities=required_capabilities,
+        )
+        prepared = self.autonomous_specialist_acquisition.prepare(
+            gap=gap,
+            plan=plan,
+            registry=self.director.task_engine.skill_registry,
+        )
+        self.event_bus.publish(
+            mission_id=mission_id,
+            event_type="skill.acquisition.awaiting_approval",
+            payload={
+                "candidate_id": prepared.candidate.candidate_id,
+                "skill_id": prepared.candidate.skill.skill_id if prepared.candidate.skill else gap_skill_id,
+                "source_ids": list(prepared.evidence.source_ids),
+                "acquired_tools": list(prepared.evidence.acquired_tools),
+                "state": prepared.evidence.state,
+            },
+        )
+        return prepared
 
     def submit_mission(self, **kwargs: Any) -> MissionSubmission:
         """Plan and durably submit a mission for the continuous worker loop."""
