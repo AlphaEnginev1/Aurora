@@ -304,6 +304,9 @@ class DirectorRuntime:
                 "content": self._task_state_text(mission_id),
             }
         )
+        team_context = self._team_state_text(mission_id)
+        if team_context:
+            context.append({"role": "user", "content": team_context})
         self.event_bus.publish(
             mission_id=mission_id,
             event_type="director_review_started",
@@ -366,7 +369,26 @@ class DirectorRuntime:
 
         tasks = self._phase_tasks(mission_id, round_number, review.tasks)
         try:
-            validated = self.director.task_engine.validate(tasks)
+            coordinator = getattr(self.director, "team_coordinator", None)
+            if coordinator is not None:
+                team_state = coordinator.prepare(
+                    mission_id=mission_id,
+                    objective=objective,
+                    tasks=tasks,
+                )
+                validated = team_state.tasks
+                self.event_bus.publish(
+                    mission_id=mission_id,
+                    event_type="team.reconfigured",
+                    payload={
+                        "round": round_number,
+                        "roles": [member.role for member in team_state.team.members],
+                        "required_skills": list(team_state.team.required_skills),
+                        "covered_skills": list(team_state.team.covered_skills),
+                    },
+                )
+            else:
+                validated = self.director.task_engine.validate(tasks)
             self.store.enqueue(mission_id, validated, phase=round_number)
         except (TaskStoreError, ValueError) as exc:
             self._publish_terminal(
@@ -491,6 +513,15 @@ class DirectorRuntime:
             if message.kind == "mission_objective":
                 return message.content
         raise DirectorRuntimeError(f"mission objective missing from memory: {mission_id}")
+
+    def _team_state_text(self, mission_id: str) -> str:
+        events = [
+            event for event in self.store.events(mission_id)
+            if event.event_type in {"team.formed", "team.reconfigured"}
+        ]
+        if not events:
+            return ""
+        return "Current specialist team state: " + json.dumps(events[-1].payload, sort_keys=True)
 
     def _task_state_text(self, mission_id: str) -> str:
         tasks = self.store.list_tasks(mission_id)
