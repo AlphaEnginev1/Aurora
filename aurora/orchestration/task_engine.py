@@ -5,6 +5,7 @@ dispatches each task through the existing orchestration and capability boundarie
 """
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 import hashlib
 from enum import StrEnum
@@ -131,26 +132,45 @@ class TaskEngine:
 
         while remaining:
             progressed = False
+            ready: list[tuple[str, DelegatedTask]] = []
+            blocked: list[tuple[str, DelegatedTask]] = []
+
             for task_id, task in tuple(remaining.items()):
                 if any(dep not in self._results for dep in task.depends_on):
                     continue
                 dependencies = [self._results[dep] for dep in task.depends_on]
                 if any(result.status is not TaskStatus.SUCCEEDED for result in dependencies):
-                    result = DelegatedTaskResult(
-                        task,
-                        TaskStatus.BLOCKED,
-                        error="dependency did not succeed",
-                    )
-                    self._results[task_id] = result
-                    ordered.append(result)
-                    del remaining[task_id]
-                    progressed = True
-                    continue
+                    blocked.append((task_id, task))
+                else:
+                    ready.append((task_id, task))
 
-                result = self.execute_one(task)
+            for task_id, task in blocked:
+                result = DelegatedTaskResult(
+                    task,
+                    TaskStatus.BLOCKED,
+                    error="dependency did not succeed",
+                )
                 self._results[task_id] = result
                 ordered.append(result)
                 del remaining[task_id]
+                progressed = True
+
+            if ready:
+                # Independent ready tasks execute concurrently; dependency barriers
+                # are preserved between rounds of the DAG.
+                with ThreadPoolExecutor(
+                    max_workers=len(ready),
+                    thread_name_prefix="aurora-task",
+                ) as pool:
+                    futures = {
+                        task_id: pool.submit(self.execute_one, task)
+                        for task_id, task in ready
+                    }
+                    for task_id, task in ready:
+                        result = futures[task_id].result()
+                        self._results[task_id] = result
+                        ordered.append(result)
+                        del remaining[task_id]
                 progressed = True
 
             if not progressed:
