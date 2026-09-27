@@ -81,6 +81,27 @@ def build_director_runtime(*, inference_policy_path: str | Path, autonomy_policy
         egress_proxy_host=egress_proxy_host,egress_proxy_port=egress_proxy_port,organization_path=organization_path,
         skills_path=skills_path,skill_learning_path=skill_learning_path)
     runtime_root=Path(workspace_root).resolve()
+    autonomy_data=json.loads(Path(autonomy_policy_path).read_text(encoding="utf-8"))
+    policy=Policy(allowed_capabilities=frozenset(autonomy_data.get("allowed_capabilities",[])),
+                  allowed_sources=frozenset(autonomy_data.get("allowed_sources",[])),
+                  require_verification=bool(autonomy_data.get("require_verification",True)))
+    registry=load_registry(registry_path)
+    gateway=InternetGateway(InternetPolicy.from_file(network_policy_path))
+    install_root=runtime_root/"managed-site"
+    transaction_dir=runtime_root/"transactions"
+    audit_path=runtime_root/"audit.jsonl"
+    offline_sandbox=SandboxExecutor(SandboxPolicy(
+        network=False,timeout_seconds=120,cpu_seconds=60,memory_bytes=1_073_741_824,
+        max_processes=64,max_open_files=256,max_output_bytes=1_048_576,
+        allowed_env=frozenset({"PATH","LANG","LC_ALL","TZ"}),readonly_system=True))
+    network_sandbox=SandboxExecutor(SandboxPolicy(
+        network=True,egress_proxy_host=egress_proxy_host,egress_proxy_port=egress_proxy_port,
+        timeout_seconds=120,cpu_seconds=60,memory_bytes=1_073_741_824,
+        max_processes=64,max_open_files=256,max_output_bytes=1_048_576,
+        allowed_env=frozenset({"PATH","LANG","LC_ALL","TZ"}),readonly_system=True))
+    acquisition=AcquisitionManager(allowed_sources=policy.allowed_sources,audit_path=audit_path,
+        install_root=install_root,transaction_dir=transaction_dir,internet_gateway=gateway,
+        sandbox=offline_sandbox,network_sandbox=network_sandbox)
     store_path=Path(task_db_path).resolve() if task_db_path else runtime_root/"tasks.db"
     store=DurableTaskStore(store_path); event_bus=DurableEventBus(store)
     skill_acquisition=SkillAcquisitionRuntime(runtime_root/"skill-acquisition.db")
