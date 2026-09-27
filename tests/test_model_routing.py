@@ -107,6 +107,30 @@ def test_ties_are_broken_deterministically_by_model_id():
     assert router.select(request, capability="reasoning").id == "model-b"
 
 
+def test_routing_decision_exposes_auditable_factors_and_ranked_candidates():
+    router = ModelRouter([
+        _model("general", quality=0.8, specialties=("general",)),
+        _model("research", specialties=("research", "evidence")),
+    ])
+    request = InferenceRequest(
+        messages=[{"role": "user", "content": "research"}],
+        metadata={
+            "skill_tags": ["research", "evidence"],
+            "task_type": "research",
+            "learned_model_scores": {"research": 0.9},
+        },
+    )
+
+    decision = router.route(request, capability="reasoning")
+
+    assert decision.selected_model == "research"
+    assert decision.selected_score > 0.0
+    assert decision.candidates[0][0] == "research"
+    assert decision.factors["skill_tag_overlap"] == 1.0
+    assert decision.factors["work_type_match"] == 1.0
+    assert decision.factors["learned_score"] == 0.9
+
+
 def test_requested_model_must_be_healthy_available_and_within_constraints():
     router = ModelRouter([_model("target", healthy=False)])
 
