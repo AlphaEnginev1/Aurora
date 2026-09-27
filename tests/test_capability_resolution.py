@@ -3,7 +3,7 @@ from aurora.autonomy.broker import CapabilityBroker
 from aurora.autonomy.capability_resolution import CapabilityResolutionRuntime
 from aurora.autonomy.models import CapabilityRequest
 from aurora.autonomy.policy import Policy
-from aurora.autonomy.registry import ToolSpec
+from aurora.autonomy.registry import CapabilityRegistryStore, ToolSpec, load_registry
 
 
 class FakeAcquisition:
@@ -115,3 +115,14 @@ def test_no_discovery_provider_preserves_fail_closed_unresolved_state():
 
     assert resolved.result.status == "unresolved"
     assert resolved.attempts == 1
+
+
+def test_discovered_capability_registry_survives_restart(tmp_path):
+    path = tmp_path / "capability-registry.json"
+    store = CapabilityRegistryStore(path)
+    spec = ToolSpec("browser-driver", "runtime", "pypi", "browser-driver", version="1.2")
+
+    store.register(spec)
+
+    reloaded = load_registry(path)
+    assert reloaded["browser-driver"] == spec
