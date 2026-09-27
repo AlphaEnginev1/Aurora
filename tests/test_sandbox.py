@@ -68,7 +68,6 @@ def test_network_bwrap_uses_post_setup_seccomp_handoff(tmp_path: Path, monkeypat
     assert "CAP_NET_ADMIN" in argv
     assert argv.count("--cap-add") == 2
     assert "CAP_SETPCAP" in argv
-    assert "--securebits=+noroot,+noroot_locked,+no_setuid_fixup,+no_setuid_fixup_locked" in argv
     assert "--uid" in argv
     assert argv[argv.index("--uid") + 1] == "0"
     assert "--gid" in argv
@@ -79,6 +78,34 @@ def test_network_bwrap_uses_post_setup_seccomp_handoff(tmp_path: Path, monkeypat
     assert "--file" in argv
     assert "17" in argv
     assert "/aurora-workload-bootstrap.py" in argv
+    assert argv[-1] == "true"
+
+
+def test_workload_bootstrap_handoff_locks_securebits(monkeypatch):
+    import aurora.autonomy.workload_bootstrap as bootstrap
+
+    captured = {}
+
+    monkeypatch.setattr(bootstrap.shutil, "which", lambda name: "/usr/bin/setpriv" if name == "setpriv" else None)
+
+    def fake_execvpe(file, argv, env):
+        captured["file"] = file
+        captured["argv"] = argv
+        captured["env"] = env
+        raise RuntimeError("captured")
+
+    monkeypatch.setattr(bootstrap.os, "execvpe", fake_execvpe)
+
+    with pytest.raises(RuntimeError, match="captured"):
+        bootstrap.handoff_to_workload(["true"])
+
+    assert captured["file"] == "/usr/bin/setpriv"
+    argv = captured["argv"]
+    assert "--no-new-privs" in argv
+    assert "--securebits=+noroot,+noroot_locked,+no_setuid_fixup,+no_setuid_fixup_locked" in argv
+    assert "--bounding-set=-all" in argv
+    assert "--inh-caps=-all" in argv
+    assert "--ambient-caps=-all" in argv
     assert argv[-1] == "true"
 
 
