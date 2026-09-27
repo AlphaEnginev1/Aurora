@@ -28,3 +28,17 @@ def test_gateway_rejects_embedded_credentials():
     )
     with pytest.raises(InternetPolicyError):
         gateway.authorize("https://user:pass@example.com/resource")
+
+def test_gateway_redirect_handler_authorizes_every_redirect_target():
+    gateway = InternetGateway(
+        InternetPolicy(frozenset({"https"}), frozenset({"example.com"}))
+    )
+    from aurora.autonomy.internet import _PolicyRedirectHandler
+
+    handler = _PolicyRedirectHandler(gateway)
+    with pytest.raises(InternetPolicyError):
+        handler.redirect_request(
+            type("Req", (), {"full_url": "https://example.com/start"})(),
+            None, 302, "Found", {}, "https://evil.example/final"
+        )
+    assert handler.hops == []
