@@ -146,7 +146,7 @@ def test_bwrap_status_reader_accepts_child_pid():
 def test_bwrap_status_reader_accepts_fragmented_json(monkeypatch):
     import aurora.autonomy.sandbox as sandbox
 
-    chunks = iter((b'{ "child-pid": 43', b'21 }\\n'))
+    chunks = iter((b'{ "child-pid": 43', b'21 }\n'))
 
     class DummyProcess:
         def poll(self):
