@@ -51,3 +51,22 @@ def test_skill_candidate_cannot_be_promoted_without_governance(tmp_path):
         assert "approved" in str(exc)
     else:
         raise AssertionError("unapproved skill candidate was promoted")
+
+    
+def test_prepared_candidate_requires_research_evidence(tmp_path):
+    from aurora.skills.acquisition_pipeline import SkillAcquisitionPipeline, SkillAcquisitionPipelineError
+    from aurora.skills.models import SkillSpec
+
+    runtime = SkillAcquisitionRuntime(tmp_path / "pipeline.db")
+    pipeline = SkillAcquisitionPipeline(runtime)
+    gap = runtime.detect_gap(mission_id="m3", skill_id="x", reason="missing")
+    skill = SkillSpec("x", "1.0.0", "X", "test", "procedure", frozenset(), (), ())
+    try:
+        pipeline.prepare_candidate(
+            gap=gap, skill=skill, registry=SkillRegistry({}),
+            source_ids=(), acquired_tools=(), validation_returncode=0,
+        )
+    except SkillAcquisitionPipelineError as exc:
+        assert "research evidence" in str(exc)
+    else:
+        raise AssertionError("candidate without research evidence was accepted")
