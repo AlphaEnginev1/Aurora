@@ -5,8 +5,10 @@ from typing import Mapping, Sequence
 from .models import InferenceRequest, InferenceResponse, ModelSpec
 from .providers.nvidia_api import NVIDIAAPIProvider
 
+
 class ModelRoutingError(RuntimeError):
     """Raised when no configured model can satisfy an inference request."""
+
 
 @dataclass
 class ModelRouter:
@@ -14,7 +16,7 @@ class ModelRouter:
     nvidia_api_key: str | None = None
 
     def available(self) -> list[ModelSpec]:
-        return [m for m in self.models if m.enabled]
+        return [m for m in self.models if m.enabled and m.healthy and m.available]
 
     def select(
         self,
@@ -30,13 +32,19 @@ class ModelRouter:
                     raise ModelRoutingError(
                         f"Requested model {request.model} does not satisfy capability={capability!r}"
                     )
+                if not self._meets_constraints(model, request):
+                    raise ModelRoutingError(
+                        f"Requested model {request.model} does not satisfy routing constraints"
+                    )
                 return model
-            raise ModelRoutingError(f"Requested model is not configured: {request.model}")
+            raise ModelRoutingError(f"Requested model is not configured or unavailable: {request.model}")
+
         candidates = self.available()
         if capability:
             candidates = [m for m in candidates if capability in m.capabilities]
+        candidates = [m for m in candidates if self._meets_constraints(m, request)]
         if not candidates:
-            raise ModelRoutingError(f"No enabled model satisfies capability={capability!r}")
+            raise ModelRoutingError(f"No enabled, healthy, available model satisfies capability={capability!r}")
 
         scored = [
             (
@@ -52,7 +60,29 @@ class ModelRouter:
         viable = [(model, score) for model, score in scored if score != float("-inf")]
         if not viable:
             raise ModelRoutingError("No enabled model has sufficient context capacity")
-        return max(viable, key=lambda item: item[1])[0]
+        # Explicit id tie-break makes routing deterministic even if configured
+        # model ordering changes between deployments.
+        return max(viable, key=lambda item: (item[1], item[0].id))[0]
+
+    @staticmethod
+    def _meets_constraints(model: ModelSpec, request: InferenceRequest) -> bool:
+        metadata = request.metadata or {}
+        constraints = (
+            ("min_quality_score", model.quality_score),
+            ("min_latency_score", model.latency_score),
+            ("min_cost_score", model.cost_score),
+        )
+        for key, actual in constraints:
+            value = metadata.get(key)
+            if value is None:
+                continue
+            try:
+                threshold = float(value)
+            except (TypeError, ValueError):
+                return False
+            if not 0.0 <= threshold <= 1.0 or actual < threshold:
+                return False
+        return True
 
     @staticmethod
     def _score(
