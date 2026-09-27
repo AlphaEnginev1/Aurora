@@ -1,0 +1,267 @@
+"""Durable specialist-skill learning and controlled evolution proposals."""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import datetime, timezone
+import json
+from pathlib import Path
+import sqlite3
+from uuid import uuid4
+
+from .evaluation import SkillEvaluation
+
+
+class SkillLearningError(RuntimeError):
+    """Raised when skill learning state cannot be persisted safely."""
+
+
+@dataclass(frozen=True)
+class SkillPerformance:
+    skill_id: str
+    evaluations: int
+    average_score: float
+    failure_count: int
+    model_scores: dict[str, float]
+
+
+@dataclass(frozen=True)
+class SkillEvolutionProposal:
+    proposal_id: str
+    skill_id: str
+    base_version: str
+    candidate_version: str
+    reason: str
+    evidence_count: int
+    suggested_change: str
+    status: str = "pending"
+
+
+class SkillLearningStore:
+    """SQLite-backed evidence ledger for skill performance and model specialization."""
+
+    def __init__(self, path: str | Path) -> None:
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._initialize()
+
+    def _connect(self) -> sqlite3.Connection:
+        db = sqlite3.connect(self.path, timeout=30, isolation_level=None)
+        db.row_factory = sqlite3.Row
+        db.execute("PRAGMA journal_mode=WAL")
+        db.execute("PRAGMA busy_timeout=30000")
+        return db
+
+    def _initialize(self) -> None:
+        with self._connect() as db:
+            db.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS skill_evaluations (
+                    evaluation_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    skill_id TEXT NOT NULL,
+                    skill_version TEXT NOT NULL,
+                    mission_id TEXT,
+                    task_id TEXT NOT NULL,
+                    role TEXT NOT NULL,
+                    score REAL NOT NULL,
+                    status TEXT NOT NULL,
+                    model TEXT,
+                    verification_passed_json TEXT NOT NULL,
+                    verification_failed_json TEXT NOT NULL,
+                    verification_missing_json TEXT NOT NULL,
+                    quality_passed_json TEXT NOT NULL,
+                    quality_failed_json TEXT NOT NULL,
+                    quality_missing_json TEXT NOT NULL,
+                    failure_signature TEXT,
+                    created_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS skill_evolution_proposals (
+                    proposal_id TEXT PRIMARY KEY,
+                    skill_id TEXT NOT NULL,
+                    base_version TEXT NOT NULL,
+                    candidate_version TEXT NOT NULL,
+                    reason TEXT NOT NULL,
+                    evidence_count INTEGER NOT NULL,
+                    suggested_change TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_skill_eval_skill
+                    ON skill_evaluations(skill_id, created_at);
+                """
+            )
+
+    def record(self, evaluation: SkillEvaluation) -> None:
+        with self._connect() as db:
+            db.execute(
+                """
+                INSERT INTO skill_evaluations (
+                    skill_id, skill_version, mission_id, task_id, role, score, status, model,
+                    verification_passed_json, verification_failed_json, verification_missing_json,
+                    quality_passed_json, quality_failed_json, quality_missing_json,
+                    failure_signature, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    evaluation.skill_id,
+                    evaluation.skill_version,
+                    evaluation.mission_id,
+                    evaluation.task_id,
+                    evaluation.role,
+                    evaluation.score,
+                    evaluation.status,
+                    evaluation.model,
+                    json.dumps(evaluation.verification_passed),
+                    json.dumps(evaluation.verification_failed),
+                    json.dumps(evaluation.verification_missing),
+                    json.dumps(evaluation.quality_passed),
+                    json.dumps(evaluation.quality_failed),
+                    json.dumps(evaluation.quality_missing),
+                    evaluation.failure_signature,
+                    self._now(),
+                ),
+            )
+
+    def performance(self, skill_id: str) -> SkillPerformance:
+        with self._connect() as db:
+            rows = db.execute(
+                "SELECT score, status, model FROM skill_evaluations WHERE skill_id = ?",
+                (skill_id,),
+            ).fetchall()
+        if not rows:
+            return SkillPerformance(skill_id, 0, 0.0, 0, {})
+        scores = [float(row["score"]) for row in rows]
+        model_buckets: dict[str, list[float]] = {}
+        for row in rows:
+            if row["model"]:
+                model_buckets.setdefault(row["model"], []).append(float(row["score"]))
+        return SkillPerformance(
+            skill_id=skill_id,
+            evaluations=len(rows),
+            average_score=sum(scores) / len(scores),
+            failure_count=sum(row["status"] != "succeeded" for row in rows),
+            model_scores={
+                model: sum(values) / len(values)
+                for model, values in model_buckets.items()
+            },
+        )
+
+    def model_scores_for(self, skill_ids: tuple[str, ...], *, minimum_evaluations: int = 2) -> dict[str, float]:
+        buckets: dict[str, list[float]] = {}
+        for skill_id in skill_ids:
+            performance = self.performance(skill_id)
+            if performance.evaluations < minimum_evaluations:
+                continue
+            for model, score in performance.model_scores.items():
+                buckets.setdefault(model, []).append(score)
+        return {
+            model: sum(values) / len(values)
+            for model, values in buckets.items()
+        }
+
+    def propose_evolution(
+        self,
+        *,
+        skill_id: str,
+        base_version: str,
+        suggested_change: str,
+        threshold: float = 0.72,
+        minimum_evaluations: int = 3,
+    ) -> SkillEvolutionProposal | None:
+        performance = self.performance(skill_id)
+        if performance.evaluations < minimum_evaluations or performance.average_score >= threshold:
+            return None
+        candidate_version = self._patch_version(base_version)
+        reason = (
+            f"Observed average skill score {performance.average_score:.3f} across "
+            f"{performance.evaluations} evaluations with {performance.failure_count} failures."
+        )
+        proposal = SkillEvolutionProposal(
+            proposal_id=f"skill-evo-{uuid4().hex}",
+            skill_id=skill_id,
+            base_version=base_version,
+            candidate_version=candidate_version,
+            reason=reason,
+            evidence_count=performance.evaluations,
+            suggested_change=suggested_change,
+        )
+        with self._connect() as db:
+            db.execute(
+                """
+                INSERT INTO skill_evolution_proposals (
+                    proposal_id, skill_id, base_version, candidate_version,
+                    reason, evidence_count, suggested_change, status, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+                """,
+                (
+                    proposal.proposal_id,
+                    proposal.skill_id,
+                    proposal.base_version,
+                    proposal.candidate_version,
+                    proposal.reason,
+                    proposal.evidence_count,
+                    proposal.suggested_change,
+                    self._now(),
+                ),
+            )
+        return proposal
+
+    def pending_proposals(self, skill_id: str | None = None) -> tuple[SkillEvolutionProposal, ...]:
+        query = "SELECT * FROM skill_evolution_proposals WHERE status = 'pending'"
+        params: tuple = ()
+        if skill_id is not None:
+            query += " AND skill_id = ?"
+            params = (skill_id,)
+        query += " ORDER BY created_at"
+        with self._connect() as db:
+            rows = db.execute(query, params).fetchall()
+        return tuple(
+            SkillEvolutionProposal(
+                proposal_id=row["proposal_id"],
+                skill_id=row["skill_id"],
+                base_version=row["base_version"],
+                candidate_version=row["candidate_version"],
+                reason=row["reason"],
+                evidence_count=int(row["evidence_count"]),
+                suggested_change=row["suggested_change"],
+                status=row["status"],
+            )
+            for row in rows
+        )
+
+    @staticmethod
+    def _patch_version(version: str) -> str:
+        parts = version.split(".")
+        if len(parts) == 3 and all(part.isdigit() for part in parts):
+            return f"{parts[0]}.{parts[1]}.{int(parts[2]) + 1}"
+        return version + ".next"
+
+    @staticmethod
+    def _now() -> str:
+        return datetime.now(timezone.utc).isoformat()
+
+
+class SkillEvolutionEngine:
+    """Generate controlled evolution proposals from observed specialist failures."""
+
+    def __init__(self, store: SkillLearningStore) -> None:
+        self.store = store
+
+    def observe(self, evaluation: SkillEvaluation, *, base_version: str) -> SkillEvolutionProposal | None:
+        missing = list(evaluation.verification_missing) + list(evaluation.quality_missing)
+        failed = list(evaluation.verification_failed) + list(evaluation.quality_failed)
+        suggestions: list[str] = []
+        if failed:
+            suggestions.append("Strengthen the procedure around failed checks: " + ", ".join(failed))
+        if missing:
+            suggestions.append("Make required evidence explicit and machine-observable: " + ", ".join(missing))
+        if evaluation.failure_signature:
+            suggestions.append("Address recurring execution failure: " + evaluation.failure_signature)
+        if not suggestions:
+            suggestions.append("Refine the procedure using observed performance data.")
+        return self.store.propose_evolution(
+            skill_id=evaluation.skill_id,
+            base_version=base_version,
+            suggested_change=" ".join(suggestions),
+        )
