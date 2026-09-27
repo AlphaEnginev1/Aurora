@@ -1,9 +1,10 @@
 """Aurora orchestration contracts."""
 
-from .director import DirectorPlan, DirectorPlanError, DirectorPlanner, DirectorService, MissionResult
+from .director import DirectorPlan, DirectorPlanError, DirectorPlanner, DirectorReview, DirectorService, MissionResult
 from .durable_director import DurableDirectorError, DurableDirectorService, MissionSubmission
 from .engine import CapabilityTaskResult, OrchestrationEngine, TaskResult
 from .event_bus import DurableEventBus, EventBusError, EventSubscription
+from .mission_memory import MissionMemory, MissionMemoryError, MissionMessage
 from .director_runtime import DirectorRuntime, DirectorRuntimeError, MissionRuntimeResult, RuntimeCycle
 from .task_engine import DelegatedTask, DelegatedTaskResult, TaskEngine, TaskEngineError, TaskStatus
 from .task_store import DurableTaskStore, StoredTask, TaskEvent, TaskStoreError
@@ -16,6 +17,7 @@ __all__ = [
     "DirectorPlan",
     "DirectorPlanError",
     "DirectorPlanner",
+    "DirectorReview",
     "DirectorService",
     "MissionResult",
     "DurableDirectorError",
@@ -28,6 +30,9 @@ __all__ = [
     "DirectorRuntimeError",
     "MissionRuntimeResult",
     "RuntimeCycle",
+    "MissionMemory",
+    "MissionMemoryError",
+    "MissionMessage",
     "OrchestrationEngine",
     "TaskEngine",
     "TaskEngineError",
