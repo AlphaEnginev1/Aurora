@@ -5,13 +5,21 @@ from datetime import datetime, timezone
 from uuid import uuid4
 from aurora.autonomy.internet import InternetGateway, InternetPolicyError
 from .models import ResearchRequest, ResearchReport, SourceRecord
+from .discovery import ResearchDiscoveryProvider
 from .store import ResearchStore
 
 class ResearchService:
     """Retrieve and durably retain bounded source content through InternetGateway."""
     MAX_CONTENT_BYTES = 1_048_576
-    def __init__(self,gateway:InternetGateway,store:ResearchStore)->None:
-        self.gateway=gateway; self.store=store
+    def __init__(self,gateway:InternetGateway,store:ResearchStore,discovery:ResearchDiscoveryProvider | None = None)->None:
+        self.gateway=gateway; self.store=store; self.discovery=discovery
+
+    def discover(self, request: ResearchRequest) -> tuple[str, ...]:
+        """Discover candidate URLs through an explicitly configured provider."""
+        if self.discovery is None:
+            raise InternetPolicyError("research discovery provider is not configured")
+        results = self.discovery.search(request.objective, limit=request.max_sources)
+        return tuple(item.url for item in results)
     def retrieve(self,request:ResearchRequest)->tuple[SourceRecord,...]:
         if not request.request_id.strip() or not request.objective.strip(): raise ValueError("research request requires request_id and objective")
         if request.max_sources<1: raise ValueError("max_sources must be positive")
