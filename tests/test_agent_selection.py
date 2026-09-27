@@ -91,3 +91,43 @@ def test_agent_selector_fails_closed_when_no_specialist_is_viable():
         assert "no viable authorized specialist agent" in str(exc)
     else:
         raise AssertionError("selector unexpectedly selected an unauthorized specialist")
+
+def test_agent_selector_scores_resolved_skill_tags():
+    from aurora.skills.models import SkillAssignment, SkillSpec
+
+    class TaggedRegistry:
+        def for_agent(
+            self,
+            *,
+            role,
+            agent_capabilities,
+            default_skill_ids=(),
+            requested_skill_ids=(),
+        ):
+            skill = SkillSpec(
+                skill_id="research",
+                version="1.0.0",
+                name="Research",
+                mission="evidence research",
+                instructions="",
+                required_capabilities=frozenset(),
+                verification_requirements=(),
+                quality_checks=(),
+                tags=("web-research",),
+            )
+            return SkillAssignment(
+                role=role,
+                skill_ids=("research",),
+                skills=(skill,),
+            )
+
+    decision = AgentSelector(
+        registry(),
+        skill_registry=TaggedRegistry(),
+    ).route(
+        objective="research papers",
+        required_skill_ids=("research",),
+        tags=("web-research",),
+    )
+    assert decision.selected_role == "researcher"
+    assert decision.factors["tag_match"] == 1.0
