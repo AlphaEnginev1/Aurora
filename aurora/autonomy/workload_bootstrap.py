@@ -308,6 +308,9 @@ def configure_firewall(proxy_host: str, proxy_port: int) -> None:
     if not nft:
         raise BootstrapError("nft is required for controlled sandbox networking")
 
+    # Keep this firewall stateless and portable across restricted Linux kernels:
+    # OUTPUT is policy-drop and the proxy destination is the only non-loopback
+    # destination explicitly allowed. Return packets do not traverse OUTPUT.
     commands = [
         ["add", "table", "inet", "aurora_egress"],
         [
@@ -322,10 +325,6 @@ def configure_firewall(proxy_host: str, proxy_port: int) -> None:
         [
             "add", "rule", "inet", "aurora_egress", "output",
             "ip", "daddr", proxy_host, "tcp", "dport", str(proxy_port), "accept",
-        ],
-        [
-            "add", "rule", "inet", "aurora_egress", "output",
-            "ct", "state", "established,related", "accept",
         ],
     ]
     for command in commands:
