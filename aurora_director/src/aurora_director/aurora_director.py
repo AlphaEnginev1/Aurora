@@ -34,9 +34,10 @@ def _format_plan(plan) -> str:
     for task in plan.tasks:
         capability = task.capability or "reasoning"
         deps = ", ".join(task.depends_on) or "none"
+        skills = ", ".join(task.skills) or "none"
         lines.append(
             f"- {task.task_id} [{task.role}] capability={capability} "
-            f"depends_on={deps}: {task.objective}"
+            f"skills={skills} depends_on={deps}: {task.objective}"
         )
     return "\n".join(lines)
 
@@ -134,6 +135,9 @@ async def aurora_director_function(config: AuroraDirectorFunctionConfig, builder
                 worker_id=os.getenv("AURORA_WORKER_ID"),
                 organization_path=Path(
                     os.getenv("AURORA_ORGANIZATION_POLICY", "config/organization.json")
+                ),
+                skills_path=Path(
+                    os.getenv("AURORA_SKILLS_POLICY", "config/skills.json")
                 ),
             )
             submission = runtime.submit_mission(objective=objective)
