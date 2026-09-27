@@ -21,7 +21,8 @@ from .registry import ToolSpec
 from .transaction import AcquisitionTransaction, TransactionError, operation_key
 from .snapshot import FilesystemSnapshot, SnapshotError
 from .pypi_downloader import ArtifactDownloadError, PypiArtifactDownloader
-from .sandbox import SandboxExecutor, SandboxPolicy
+from .pypi_resolver import PypiDependencyResolver, PypiResolutionError
+from .sandbox import SandboxError, SandboxExecutor, SandboxPolicy
 
 
 class AcquisitionError(RuntimeError):
@@ -64,6 +65,7 @@ class AcquisitionManager:
         transaction_dir: str | Path | None = None,
         artifact_cache_dir: str | Path | None = None,
         sandbox: SandboxExecutor | None = None,
+        network_sandbox: SandboxExecutor | None = None,
     ) -> None:
         self.allowed_sources = allowed_sources
         self.audit_path = Path(audit_path) if audit_path else None
@@ -73,6 +75,7 @@ class AcquisitionManager:
         self.transaction_dir = Path(transaction_dir) if transaction_dir else (self.audit_path.parent / "transactions" if self.audit_path else Path(".aurora-transactions"))
         self.artifact_cache_dir = Path(artifact_cache_dir) if artifact_cache_dir else self.transaction_dir / "artifacts"
         self.sandbox = sandbox or SandboxExecutor(SandboxPolicy(network=False))
+        self.network_sandbox = network_sandbox
 
     def plan(self, tool_spec: ToolSpec) -> dict[str, str]:
         if tool_spec.source not in self.allowed_sources:
@@ -286,28 +289,50 @@ class AcquisitionManager:
         if not self.install_root:
             raise AcquisitionError("pypi acquisition requires an isolated install_root")
         self.install_root.parent.mkdir(parents=True, exist_ok=True)
-        # Use a command name rather than the host's absolute Python path.
-        # Bubblewrap exposes the system filesystem under /usr but intentionally
-        # does not expose runner-specific paths such as /opt/hostedtoolcache.
-        python = "python3"
         if self.internet_gateway is None:
             raise AcquisitionError(
                 "pypi acquisition requires an Internet Gateway for artifact download"
             )
+        python = "python3"
 
         downloader = PypiArtifactDownloader(
             self.internet_gateway,
             cache_dir=self.artifact_cache_dir,
         )
-        try:
-            artifact = downloader.resolve(spec.name, spec.version)
-            if spec.artifact_sha256 and artifact.sha256.lower() != spec.artifact_sha256.lower():
+
+        # v2 path: one pre-verified wheel downloaded directly through the gateway.
+        # v3 path: pip resolves the full dependency closure inside a networked
+        # sandbox; every selected wheel is then verified against PyPI metadata and
+        # cached before an offline sandbox performs the actual installation.
+        if self.network_sandbox is None:
+            try:
+                artifact = downloader.resolve(spec.name, spec.version)
+                if spec.artifact_sha256 and artifact.sha256.lower() != spec.artifact_sha256.lower():
+                    raise AcquisitionError(
+                        f"artifact sha256 mismatch: expected {spec.artifact_sha256}, got {artifact.sha256}"
+                    )
+                artifact_path = downloader.download(artifact)
+                resolved_wheels = ((artifact, artifact_path),)
+                root_artifact = artifact
+            except ArtifactDownloadError as exc:
+                raise AcquisitionError(f"PyPI artifact acquisition failed: {exc}") from exc
+        else:
+            try:
+                resolver = PypiDependencyResolver(downloader, self.network_sandbox)
+                resolution = resolver.resolve_and_download(spec.name, spec.version)
+            except (PypiResolutionError, SandboxError) as exc:
+                raise AcquisitionError(f"PyPI dependency acquisition failed: {exc}") from exc
+            root_artifact = resolution.root.artifact
+            if (
+                spec.artifact_sha256
+                and root_artifact.sha256.lower() != spec.artifact_sha256.lower()
+            ):
                 raise AcquisitionError(
-                    f"artifact sha256 mismatch: expected {spec.artifact_sha256}, got {artifact.sha256}"
+                    f"artifact sha256 mismatch: expected {spec.artifact_sha256}, got {root_artifact.sha256}"
                 )
-            artifact_path = downloader.download(artifact)
-        except ArtifactDownloadError as exc:
-            raise AcquisitionError(f"PyPI artifact acquisition failed: {exc}") from exc
+            resolved_wheels = tuple(
+                (item.artifact, item.cached_path) for item in resolution.wheels
+            )
 
         snapshot = FilesystemSnapshot(
             target=self.install_root,
@@ -321,7 +346,7 @@ class AcquisitionManager:
 
         workspace = (
             self.transaction_dir / "sandbox-work" /
-            (transaction_id or artifact.sha256[:24])
+            (transaction_id or root_artifact.sha256[:24])
         )
         if workspace.exists():
             shutil.rmtree(workspace)
@@ -330,7 +355,8 @@ class AcquisitionManager:
         workspace.mkdir(parents=True, exist_ok=False)
         wheels.mkdir()
         installed.mkdir()
-        shutil.copy2(artifact_path, wheels / artifact.filename)
+        for artifact, cached_path in resolved_wheels:
+            shutil.copy2(cached_path, wheels / artifact.filename)
 
         committed = False
         try:
@@ -343,11 +369,14 @@ class AcquisitionManager:
                     "--disable-pip-version-check",
                     "--no-input",
                     "--no-index",
+                    "--only-binary=:all:",
+                    "--find-links",
+                    "/workspace/wheels",
                     "--target",
                     "/workspace/site",
                     "--report",
                     "/workspace/pip-report.json",
-                    f"/workspace/wheels/{artifact.filename}",
+                    spec.name if spec.version is None else f"{spec.name}=={spec.version}",
                 ],
                 workspace=workspace,
             )
@@ -359,11 +388,12 @@ class AcquisitionManager:
                 )
 
             try:
-                record_count = self._verify_installed_distribution_at(
-                    installed, artifact.name, artifact.version
+                record_count = self._verify_all_installed_distributions(
+                    installed,
+                    expected_root=(root_artifact.name, root_artifact.version),
                 )
                 if record_count <= 0:
-                    raise ProvenanceError("installed distribution RECORD was not verified")
+                    raise ProvenanceError("installed distribution RECORD set was not verified")
             except (ProvenanceError, OSError, ValueError) as exc:
                 snapshot.rollback(snapshot_state)
                 raise AcquisitionError(
@@ -384,9 +414,9 @@ class AcquisitionManager:
                 spec.executable,
                 str(self.install_root),
                 None,
-                version=artifact.version,
-                artifact_sha256=artifact.sha256,
-                provenance_url=artifact.url,
+                version=root_artifact.version,
+                artifact_sha256=root_artifact.sha256,
+                provenance_url=root_artifact.url,
                 verification="verified",
             )
         except AcquisitionError:
@@ -400,6 +430,43 @@ class AcquisitionManager:
                     snapshot.discard(snapshot_state)
                 except OSError:
                     pass
+
+    def _verify_all_installed_distributions(
+        self,
+        install_root: Path,
+        *,
+        expected_root: tuple[str, str],
+    ) -> int:
+        metadata_paths = sorted(install_root.glob("*.dist-info/METADATA"))
+        if not metadata_paths:
+            raise ProvenanceError("no installed distribution metadata found")
+
+        expected_name = expected_root[0].lower().replace("-", "_")
+        expected_version = expected_root[1]
+        root_found = False
+        checked = 0
+        for metadata_path in metadata_paths:
+            metadata = metadata_path.read_text(encoding="utf-8", errors="strict")
+            fields: dict[str, str] = {}
+            for line in metadata.splitlines():
+                if ": " in line:
+                    key, value = line.split(": ", 1)
+                    fields[key.lower()] = value.strip()
+            name = fields.get("name")
+            version = fields.get("version")
+            if not name or not version:
+                raise ProvenanceError(
+                    f"installed distribution metadata is incomplete: {metadata_path}"
+                )
+            if name.lower().replace("-", "_") == expected_name and version == expected_version:
+                root_found = True
+            checked += verify_record(install_root, metadata_path.parent / "RECORD")
+
+        if not root_found:
+            raise ProvenanceError(
+                f"root distribution was not installed: {expected_root[0]}=={expected_root[1]}"
+            )
+        return checked
 
     def _verify_installed_distribution_at(
         self, install_root: Path, name: str, version: str
