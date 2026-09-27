@@ -329,16 +329,26 @@ class DurableTaskStore:
 
             lease_until = self._lease_until(lease_seconds)
             now = self._now()
-            db.execute(
-                """
-                UPDATE tasks
-                SET lease_until = ?, updated_at = ?
-                WHERE mission_id = ? AND task_id = ? AND status = 'running'
-                  AND claimed_by = ?
-                  AND claim_token = ?
-                """,
-                (lease_until, now, mission_id, task_id, worker_id, claim_token),
-            )
+            if claim_token is None:
+                db.execute(
+                    """
+                    UPDATE tasks
+                    SET lease_until = ?, updated_at = ?
+                    WHERE mission_id = ? AND task_id = ? AND status = 'running'
+                      AND claimed_by = ?
+                    """,
+                    (lease_until, now, mission_id, task_id, worker_id),
+                )
+            else:
+                db.execute(
+                    """
+                    UPDATE tasks
+                    SET lease_until = ?, updated_at = ?
+                    WHERE mission_id = ? AND task_id = ? AND status = 'running'
+                      AND claimed_by = ? AND claim_token = ?
+                    """,
+                    (lease_until, now, mission_id, task_id, worker_id, claim_token),
+                )
             self._event_locked(
                 db,
                 mission_id,
@@ -436,20 +446,36 @@ class DurableTaskStore:
             if row["lease_until"] is not None and row["lease_until"] <= now:
                 db.rollback()
                 raise TaskStoreError(f"task lease has expired: {mission_id}/{task_id}")
-            db.execute(
-                """
-                UPDATE tasks
-                SET status = 'pending',
-                    last_error = ?,
-                    claimed_by = NULL,
-                    claim_token = NULL,
-                    lease_until = NULL,
-                    updated_at = ?
-                WHERE mission_id = ? AND task_id = ? AND status = 'running'
-                  AND claimed_by = ? AND claim_token = ?
-                """,
-                (error, now, mission_id, task_id, worker_id, claim_token),
-            )
+            if claim_token is None:
+                db.execute(
+                    """
+                    UPDATE tasks
+                    SET status = 'pending',
+                        last_error = ?,
+                        claimed_by = NULL,
+                        claim_token = NULL,
+                        lease_until = NULL,
+                        updated_at = ?
+                    WHERE mission_id = ? AND task_id = ? AND status = 'running'
+                      AND claimed_by = ?
+                    """,
+                    (error, now, mission_id, task_id, worker_id),
+                )
+            else:
+                db.execute(
+                    """
+                    UPDATE tasks
+                    SET status = 'pending',
+                        last_error = ?,
+                        claimed_by = NULL,
+                        claim_token = NULL,
+                        lease_until = NULL,
+                        updated_at = ?
+                    WHERE mission_id = ? AND task_id = ? AND status = 'running'
+                      AND claimed_by = ? AND claim_token = ?
+                    """,
+                    (error, now, mission_id, task_id, worker_id, claim_token),
+                )
             self._event_locked(
                 db,
                 mission_id,
@@ -491,7 +517,10 @@ class DurableTaskStore:
                 raise TaskStoreError(
                     f"task is not running: {mission_id}/{task_id} ({row['status']})"
                 )
-            if worker_id is not None and (row["claimed_by"] != worker_id or row["claim_token"] != claim_token):
+            if worker_id is not None and (
+                row["claimed_by"] != worker_id
+                or (claim_token is not None and row["claim_token"] != claim_token)
+            ):
                 db.rollback()
                 raise TaskStoreError(
                     f"worker does not own running task: {mission_id}/{task_id}"
