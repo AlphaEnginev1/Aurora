@@ -62,6 +62,7 @@
   "agents": [
     {
       "agent_id": "researcher",
+      "skill_ids": ["research-literature-analysis","research-source-validation"],
       "role": "researcher",
       "department": "research",
       "mission": "Find relevant evidence and distinguish source material from inference.",
@@ -70,6 +71,7 @@
     },
     {
       "agent_id": "engineer",
+      "skill_ids": ["engineering-software-design","engineering-debugging"],
       "role": "engineer",
       "department": "engineering",
       "mission": "Implement and test software changes through governed capabilities.",
@@ -78,6 +80,7 @@
     },
     {
       "agent_id": "data_engineer",
+      "skill_ids": ["data-reproducible-analysis","data-pipeline-engineering"],
       "role": "data_engineer",
       "department": "data",
       "mission": "Transform, inspect and validate data reproducibly.",
@@ -86,6 +89,7 @@
     },
     {
       "agent_id": "verifier",
+      "skill_ids": ["verification-evidence-audit","verification-experimental-validation"],
       "role": "verifier",
       "department": "verification",
       "mission": "Independently test evidence and identify missing or contradictory proof.",
@@ -94,6 +98,7 @@
     },
     {
       "agent_id": "security_reviewer",
+      "skill_ids": ["security-threat-modeling","security-code-audit"],
       "role": "security_reviewer",
       "department": "security",
       "mission": "Detect policy bypasses and security regressions.",
@@ -102,6 +107,7 @@
     },
     {
       "agent_id": "operator",
+      "skill_ids": ["operations-runtime-health","operations-incident-recovery"],
       "role": "operator",
       "department": "operations",
       "mission": "Monitor and recover the autonomous runtime.",
@@ -110,6 +116,7 @@
     },
     {
       "agent_id": "discovery_agent",
+      "skill_ids": ["discovery-hypothesis-generation","discovery-novelty-analysis"],
       "role": "discovery_agent",
       "department": "discovery",
       "mission": "Explore new hypotheses and search for novel evidence or approaches.",
@@ -118,6 +125,7 @@
     },
     {
       "agent_id": "synthesizer",
+      "skill_ids": ["synthesis-cross-domain-reasoning","synthesis-decision-briefing"],
       "role": "synthesizer",
       "department": "synthesis",
       "mission": "Synthesize validated information into decisions and next actions.",
