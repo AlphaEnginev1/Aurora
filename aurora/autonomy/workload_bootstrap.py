@@ -97,7 +97,7 @@ def seccomp_program() -> list[SockFilter]:
         # clone3() takes a pointer to struct clone_args, so fail closed for it.
         _jump(BPF_JMP_JEQ_K, 5, 0, SYS_clone3),
         # For clone(), inspect flags and only deny namespace-creating variants.
-        _jump(BPF_JMP_JEQ_K, 0, 4, SYS_clone),
+        _jump(BPF_JMP_JEQ_K, 0, 5, SYS_clone),
         _stmt(BPF_LD_W_ABS, 16),
         _stmt(BPF_ALU_AND_K, NAMESPACE_CLONE_FLAGS),
         _jump(BPF_JMP_JEQ_K, 2, 0, 0),
