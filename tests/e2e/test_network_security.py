@@ -229,7 +229,6 @@ def test_real_pypi_acquisition_downloads_verifies_and_executes(
             "python3",
             "-c",
             (
-                "import sys, glob; sys.path[:0] = glob.glob('/workspace/managed-site/lib/python*/site-packages'); "
                 "import packaging; print(packaging.__version__)"
             ),
         ],
@@ -303,18 +302,17 @@ def test_real_pypi_dependency_closure(
         SandboxPolicy(network=False, timeout_seconds=20)
     ).execute(
         [
-            "python3",
+            "/workspace/managed-site/bin/python",
             "-c",
-            (
-                "import sys, glob; sys.path[:0] = glob.glob('/workspace/managed-site/lib/python*/site-packages'); "
-                "import requests; print(requests.__version__)"
-            ),
+            "import requests; print(requests.__version__)",
         ],
         workspace=tmp_path,
     )
     assert execution.returncode == 0, execution.stderr
     assert execution.stdout.strip() == "2.31.0"
 
+    managed_python = install_root / "bin" / "python"
+    assert managed_python.is_file()
     normalizer = install_root / "bin" / "normalizer"
     assert normalizer.is_file()
     script_execution = SandboxExecutor(
