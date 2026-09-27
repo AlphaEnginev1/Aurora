@@ -86,8 +86,8 @@ class DirectorRuntime:
         )
         event_missions = {event.mission_id for event in events}
 
-        mission_ids = set(self.store.list_missions())
-        mission_ids.update(event_missions)
+        known_missions = set(self.store.list_missions())
+        mission_ids = known_missions | (event_missions & known_missions)
         active = [
             mission_id
             for mission_id in sorted(mission_ids)
