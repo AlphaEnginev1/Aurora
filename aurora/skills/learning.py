@@ -238,6 +238,38 @@ class SkillLearningStore:
             )
         return proposal
 
+    def resolve_proposal(self, proposal_id: str, *, decision: str) -> SkillEvolutionProposal:
+        """Record an explicit governance decision without mutating the active skill."""
+        normalized = decision.strip().lower()
+        if normalized not in {"approved", "rejected"}:
+            raise SkillLearningError("proposal decision must be 'approved' or 'rejected'")
+        with self._connect() as db:
+            row = db.execute(
+                "SELECT * FROM skill_evolution_proposals WHERE proposal_id = ?",
+                (proposal_id,),
+            ).fetchone()
+            if row is None:
+                raise SkillLearningError(f"unknown skill evolution proposal: {proposal_id}")
+            if row["status"] != "pending":
+                raise SkillLearningError(
+                    f"skill evolution proposal is already resolved: {proposal_id}"
+                )
+            db.execute(
+                "UPDATE skill_evolution_proposals SET status = ? WHERE proposal_id = ?",
+                (normalized, proposal_id),
+            )
+            row = dict(row)
+        return SkillEvolutionProposal(
+            proposal_id=row["proposal_id"],
+            skill_id=row["skill_id"],
+            base_version=row["base_version"],
+            candidate_version=row["candidate_version"],
+            reason=row["reason"],
+            evidence_count=int(row["evidence_count"]),
+            suggested_change=row["suggested_change"],
+            status=normalized,
+        )
+
     def pending_proposals(self, skill_id: str | None = None) -> tuple[SkillEvolutionProposal, ...]:
         query = "SELECT * FROM skill_evolution_proposals WHERE status = 'pending'"
         params: tuple = ()
