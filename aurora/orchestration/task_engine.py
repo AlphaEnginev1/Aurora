@@ -14,6 +14,7 @@ from aurora.autonomy.capability_runtime import CapabilityExecutionError
 from aurora.autonomy.models import CapabilityRequest
 from .engine import OrchestrationEngine, TaskResult
 from aurora.organization import OrganizationConfigError, OrganizationRegistry
+from aurora.skills import SkillRegistry, SkillRegistryError
 
 
 class TaskEngineError(RuntimeError):
@@ -36,6 +37,7 @@ class DelegatedTask:
     capability: str | None = None
     args: tuple[str, ...] = ()
     depends_on: tuple[str, ...] = ()
+    skills: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -54,6 +56,7 @@ class TaskEngine:
     orchestration: OrchestrationEngine
     workspace_root: Path
     organization: OrganizationRegistry | None = None
+    skill_registry: SkillRegistry | None = None
     _results: dict[str, DelegatedTaskResult] = field(default_factory=dict, init=False)
 
     def validate(self, tasks: Sequence[DelegatedTask]) -> tuple[DelegatedTask, ...]:
@@ -70,12 +73,21 @@ class TaskEngine:
             self._validate_task_fields(task)
             if self.organization is not None:
                 try:
-                    self.organization.validate_task(
+                    agent = self.organization.validate_task(
                         role=task.role,
                         capability=task.capability,
                     )
-                except OrganizationConfigError as exc:
+                    if self.skill_registry is not None:
+                        self.skill_registry.for_agent(
+                            role=agent.role,
+                            agent_capabilities=agent.capabilities,
+                            default_skill_ids=agent.skill_ids,
+                            requested_skill_ids=task.skills,
+                        )
+                except (OrganizationConfigError, SkillRegistryError) as exc:
                     raise TaskEngineError(str(exc)) from exc
+            elif task.skills:
+                raise TaskEngineError("skill assignments require an organization registry")
             if any(dep not in known for dep in task.depends_on):
                 missing = sorted(set(task.depends_on) - known)
                 raise TaskEngineError(
@@ -150,11 +162,22 @@ class TaskEngine:
         )
 
     def _execute_task(self, task: DelegatedTask):
-        model_preferences = (
+        skill_assignment = None
+        if self.skill_registry is not None and self.organization is not None:
+            agent = self.organization.resolve_agent(task.role)
+            skill_assignment = self.skill_registry.for_agent(
+                role=agent.role,
+                agent_capabilities=agent.capabilities,
+                default_skill_ids=agent.skill_ids,
+                requested_skill_ids=task.skills,
+            )
+        skill_preferences = skill_assignment.model_preferences if skill_assignment else ()
+        organization_preferences = (
             self.organization.model_preferences_for(task.role)
             if self.organization is not None
             else ()
         )
+        model_preferences = tuple(dict.fromkeys((*skill_preferences, *organization_preferences)))
         if task.capability:
             request = CapabilityRequest(
                 name=task.capability,
