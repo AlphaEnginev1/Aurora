@@ -58,3 +58,33 @@ class SkillAcquisitionPipeline:
         db.execute("PRAGMA journal_mode=WAL")
         db.execute("PRAGMA busy_timeout=30000")
         return db
+
+    def prepare_candidate(
+        self,
+        *,
+        gap: SkillGap,
+        skill: SkillSpec,
+        registry: SkillRegistry,
+        source_ids: tuple[str, ...],
+        acquired_tools: tuple[str, ...],
+        validation_returncode: int,
+        validation_stdout: str = "",
+        validation_stderr: str = "",
+    ) -> PreparedSkillCandidate:
+        if not source_ids:
+            raise SkillAcquisitionPipelineError("research evidence is required")
+        if validation_returncode != 0:
+            raise SkillAcquisitionPipelineError("sandbox validation failed")
+        candidate = self.runtime.propose_candidate(gap=gap, skill=skill, registry=registry)
+        candidate = self.runtime.validate_candidate(candidate, registry)
+        evidence = SkillAcquisitionEvidence(
+            source_ids, acquired_tools, validation_returncode,
+            validation_stdout, validation_stderr, "awaiting_approval"
+        )
+        self._persist(candidate, evidence)
+        return PreparedSkillCandidate(candidate, evidence)
+
+    def approve(self, prepared: PreparedSkillCandidate) -> SkillCandidate:
+        approved = self.runtime.approve(prepared.candidate)
+        self._set_state(approved.candidate_id, "approved")
+        return approved
