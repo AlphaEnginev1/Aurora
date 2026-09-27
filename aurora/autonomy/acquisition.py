@@ -369,6 +369,7 @@ class AcquisitionManager:
                     "--disable-pip-version-check",
                     "--no-input",
                     "--no-index",
+                    "--ignore-installed",
                     "--only-binary=:all:",
                     "--find-links",
                     "/workspace/wheels",
