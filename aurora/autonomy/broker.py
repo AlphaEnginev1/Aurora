@@ -76,6 +76,10 @@ class CapabilityBroker:
             sha256=result.sha256,
         )
 
-    def _resolve(self, request: CapabilityRequest) -> ToolSpec | None:
+    def resolve(self, request: CapabilityRequest) -> ToolSpec | None:
+        """Resolve a request to the registered tool specification."""
         tool_name = request.name.split(":", 1)[1] if ":" in request.name else request.name
         return self.registry.get(tool_name)
+
+    def _resolve(self, request: CapabilityRequest) -> ToolSpec | None:
+        return self.resolve(request)
