@@ -38,6 +38,7 @@ class SkillImprovementGenerator:
         proposal: SkillEvolutionProposal,
     ) -> SkillImprovement:
         performance = self.learning.performance(active.skill_id)
+        evidence = self.learning.evidence_for(active.skill_id, limit=12)
         if performance.evaluations < 1:
             raise SkillImprovementGenerationError("no durable evidence is available")
 
@@ -56,6 +57,16 @@ class SkillImprovementGenerator:
             f"Average score: {performance.average_score:.3f}\n"
             f"Failures: {performance.failure_count}\n"
             f"Evaluations: {performance.evaluations}\n"
+            f"Model outcomes: {performance.model_scores}\n"
+            "Recent execution evidence:\n"
+            + "\n".join(
+                f"- task={item.task_id} role={item.role} score={item.score:.3f} "
+                f"status={item.status} model={item.model or 'unknown'} "
+                f"evidence={item.evidence_state} completeness={item.evidence_completeness:.2f} "
+                f"failure={item.failure_signature or 'none'}"
+                for item in evidence
+            )
+            + "\n"
             f"Required verification: {', '.join(active.verification_requirements)}\n"
             f"Required quality checks: {', '.join(active.quality_checks)}"
         )
