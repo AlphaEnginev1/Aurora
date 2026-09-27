@@ -69,6 +69,7 @@ class DurableTaskStore:
                     capability TEXT,
                     args_json TEXT NOT NULL,
                     deps_json TEXT NOT NULL,
+                    skills_json TEXT NOT NULL DEFAULT '[]',
                     status TEXT NOT NULL CHECK (status IN ('pending','running','succeeded','failed','blocked')),
                     attempts INTEGER NOT NULL DEFAULT 0,
                     last_error TEXT,
@@ -115,6 +116,8 @@ class DurableTaskStore:
                 db.execute("ALTER TABLE tasks ADD COLUMN result_json TEXT")
             if "phase" not in columns:
                 db.execute("ALTER TABLE tasks ADD COLUMN phase INTEGER NOT NULL DEFAULT 0")
+            if "skills_json" not in columns:
+                db.execute("ALTER TABLE tasks ADD COLUMN skills_json TEXT NOT NULL DEFAULT '[]'")
             db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_tasks_lease ON tasks (status, lease_until)"
             )
@@ -162,9 +165,9 @@ class DurableTaskStore:
                         """
                         INSERT INTO tasks (
                             mission_id, task_id, role, objective, capability,
-                            args_json, deps_json, status, attempts,
+                            args_json, deps_json, skills_json, status, attempts,
                             last_error, claimed_by, lease_until, result_json, phase, created_at, updated_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', 0, NULL, NULL, NULL, NULL, ?, ?, ?)
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, NULL, NULL, NULL, NULL, ?, ?, ?)
                         """,
                         (
                             mission_id,
@@ -174,6 +177,7 @@ class DurableTaskStore:
                             task.capability,
                             json.dumps(list(task.args)),
                             json.dumps(list(task.depends_on)),
+                            json.dumps(list(task.skills)),
                             phase,
                             now,
                             now,
@@ -184,7 +188,11 @@ class DurableTaskStore:
                         mission_id,
                         task.task_id,
                         "enqueued",
-                        {"role": task.role, "capability": task.capability},
+                        {
+                            "role": task.role,
+                            "capability": task.capability,
+                            "skills": list(task.skills),
+                        },
                     )
                 db.commit()
             except sqlite3.IntegrityError as exc:
@@ -794,6 +802,7 @@ class DurableTaskStore:
             capability=row["capability"],
             args=tuple(json.loads(row["args_json"])),
             depends_on=tuple(json.loads(row["deps_json"])),
+            skills=tuple(json.loads(row["skills_json"])),
         )
         raw_result = row["result_json"]
         return StoredTask(
