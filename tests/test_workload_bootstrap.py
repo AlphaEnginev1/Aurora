@@ -94,3 +94,30 @@ def test_route_delete_fails_when_route_remains(monkeypatch):
         assert "Operation not permitted" in str(exc)
     else:
         raise AssertionError("persistent route-delete failure must fail closed")
+
+
+def test_require_cap_net_admin_reads_effective_capability(monkeypatch):
+    import aurora.autonomy.workload_bootstrap as bootstrap
+
+    monkeypatch.setattr(
+        bootstrap.Path,
+        "read_text",
+        lambda *args, **kwargs: "CapEff:\t0000000000001000\n",
+    )
+    bootstrap._require_cap_net_admin()
+
+
+def test_require_cap_net_admin_fails_closed_without_capability(monkeypatch):
+    import aurora.autonomy.workload_bootstrap as bootstrap
+
+    monkeypatch.setattr(
+        bootstrap.Path,
+        "read_text",
+        lambda *args, **kwargs: "CapEff:\t0000000000000000\n",
+    )
+    try:
+        bootstrap._require_cap_net_admin()
+    except bootstrap.BootstrapError as exc:
+        assert "CAP_NET_ADMIN" in str(exc)
+    else:
+        raise AssertionError("missing CAP_NET_ADMIN must fail closed")

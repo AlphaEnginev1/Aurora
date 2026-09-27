@@ -144,6 +144,27 @@ def install_seccomp() -> None:
         )
 
 
+def _require_cap_net_admin() -> None:
+    """Require CAP_NET_ADMIN before route and firewall mutation."""
+    try:
+        status = Path("/proc/self/status").read_text(encoding="ascii")
+    except (OSError, UnicodeError) as exc:
+        raise BootstrapError(f"cannot inspect effective capabilities: {exc}") from exc
+    effective = None
+    for line in status.splitlines():
+        if line.startswith("CapEff:"):
+            _, value = line.split(None, 1)
+            try:
+                effective = int(value, 16)
+            except ValueError as exc:
+                raise BootstrapError("invalid CapEff value") from exc
+            break
+    if effective is None:
+        raise BootstrapError("CapEff is unavailable")
+    if not (effective & (1 << 12)):
+        raise BootstrapError("network bootstrap requires effective CAP_NET_ADMIN")
+
+
 def _run_checked(args: list[str]) -> None:
     try:
         result = subprocess.run(
@@ -388,6 +409,7 @@ def main() -> int:
         raise BootstrapError("bootstrap workload is empty")
 
     _wait_tap0(interface)
+    _require_cap_net_admin()
     configure_routes(proxy_host, interface)
     configure_firewall(proxy_host, proxy_port)
     handoff_to_workload(workload)

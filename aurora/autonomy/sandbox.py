@@ -148,7 +148,12 @@ class SandboxExecutor:
             # The network bootstrap needs CAP_NET_ADMIN. It is removed by
             # setpriv before the workload starts; seccomp is installed only
             # after that privilege drop so the bootstrap can fork/exec ip and nft.
-            argv += ["--unshare-user", "--cap-add", "CAP_NET_ADMIN"]
+            argv += [
+                "--unshare-user",
+                "--uid", "0",
+                "--gid", "0",
+                "--cap-add", "CAP_NET_ADMIN",
+            ]
         if json_status_fd is not None:
             if json_status_fd < 0:
                 raise SandboxError("invalid bubblewrap status fd")
