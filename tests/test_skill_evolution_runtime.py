@@ -5,6 +5,8 @@ from aurora.skills.learning import SkillEvolutionEngine, SkillLearningStore
 from aurora.skills.models import SkillSpec
 from aurora.skills.registry import SkillRegistry
 from aurora.skills.evaluation import SkillEvaluation
+from aurora.skills.validation_lab import SkillValidationLab
+from aurora.inference.models import InferenceResponse
 
 
 def make_registry() -> SkillRegistry:
@@ -95,3 +97,33 @@ def test_skill_evolution_rejects_stale_base_version(tmp_path: Path):
         assert "version changed" in str(exc)
     else:
         raise AssertionError("stale evolution proposal was accepted")
+
+
+class ValidationRouter:
+    def generate(self, request, preferred_models=()):
+        content = request.messages[-1]["content"]
+        state = "pass" if "independent source cross-checking" in content else "fail"
+        return InferenceResponse(
+            model="validation-model",
+            provider="test",
+            content=f"VERIFY:source={state}\nQUALITY:accuracy={state}",
+        )
+
+
+def test_skill_evolution_rejects_candidate_without_measured_improvement(tmp_path: Path):
+    store, proposal = make_proposal(tmp_path)
+    runtime = SkillEvolutionRuntime(
+        store, tmp_path / "evolution.db",
+        validation_lab=SkillValidationLab(ValidationRouter()),
+    )
+    registry = make_registry()
+    try:
+        runtime.prepare(
+            proposal=proposal,
+            registry=registry,
+            improved_instructions="Still collect evidence.",
+        )
+    except RuntimeError as exc:
+        assert "validation lab rejected candidate" in str(exc)
+    else:
+        raise AssertionError("non-improving candidate reached approval")
