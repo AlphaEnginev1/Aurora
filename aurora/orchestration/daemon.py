@@ -55,6 +55,9 @@ def main() -> int:
         organization_path=_path_env(
             "AURORA_ORGANIZATION_POLICY", "config/organization.json"
         ),
+        skills_path=_path_env(
+            "AURORA_SKILLS_POLICY", "config/skills.json"
+        ),
     )
 
     if args.objective:
