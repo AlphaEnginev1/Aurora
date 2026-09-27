@@ -20,6 +20,7 @@ from .task_worker import TaskWorker, WorkerCycle, WorkerPolicy
 from aurora.skills.evaluation import SkillEvaluator
 from aurora.skills.learning import SkillEvolutionEngine, SkillLearningStore
 from aurora.skills.autonomous_specialist_acquisition import AutonomousSpecialistAcquisition
+from aurora.skills.acquisition_pipeline import PreparedSkillCandidate
 
 
 
@@ -140,6 +141,49 @@ class DirectorRuntime:
         )
         return prepared
 
+    def approve_specialist(
+        self, *, mission_id: str, prepared: PreparedSkillCandidate,
+    ):
+        """Explicitly approve, promote and re-form the mission around a new specialist."""
+        if self.autonomous_specialist_acquisition is None:
+            raise DirectorRuntimeError("autonomous specialist acquisition is not configured")
+        task_engine = self.director.task_engine
+        registry = task_engine.skill_registry
+        if registry is None:
+            raise DirectorRuntimeError("skill registry is not configured")
+        pipeline = self.autonomous_specialist_acquisition.pipeline
+        try:
+            approved = pipeline.approve(prepared)
+            promoted_registry = pipeline.promote(PreparedSkillCandidate(approved, prepared.evidence), registry)
+        except Exception as exc:
+            self.event_bus.publish(mission_id=mission_id, event_type="skill.acquisition.promotion_failed",
+                payload={"candidate_id": prepared.candidate.candidate_id, "skill_id": prepared.candidate.skill_id, "error": str(exc)})
+            raise DirectorRuntimeError(f"specialist promotion failed: {exc}") from exc
+        task_engine.skill_registry = promoted_registry
+        pending = tuple(item.task for item in self.store.list_tasks(mission_id) if item.status in {"pending", "running"})
+        team_payload = {"candidate_id": approved.candidate_id, "skill_id": approved.skill_id, "version": approved.candidate_version, "promoted": True}
+        self.event_bus.publish(mission_id=mission_id, event_type="skill.acquisition.promoted", payload=team_payload)
+        coordinator = getattr(self.director, "team_coordinator", None)
+        if coordinator is not None and pending:
+            objective = self._objective_from_memory(mission_id)
+            try:
+                state = coordinator.prepare(mission_id=mission_id, objective=objective, tasks=pending)
+            except Exception as exc:
+                self.event_bus.publish(mission_id=mission_id, event_type="team.reformation_failed", payload={"candidate_id": approved.candidate_id, "error": str(exc)})
+                raise DirectorRuntimeError(f"team reformation failed: {exc}") from exc
+            self.event_bus.publish(mission_id=mission_id, event_type="team.reformed_after_skill_promotion", payload={
+                **team_payload, "roles": [member.role for member in state.team.members],
+                "required_skills": list(state.team.required_skills), "covered_skills": list(state.team.covered_skills),
+                "missing_skills": list(state.team.missing_skills),
+                "added_roles": list(state.reconfiguration.added_roles) if state.reconfiguration else [],
+                "removed_roles": list(state.reconfiguration.removed_roles) if state.reconfiguration else [],
+            })
+            self.memory.append(mission_id=mission_id, source="director", kind="skill_promotion",
+                content=json.dumps(team_payload, sort_keys=True), metadata={"candidate_id": approved.candidate_id})
+            return state
+        self.event_bus.publish(mission_id=mission_id, event_type="team.reformation_skipped",
+            payload={"candidate_id": approved.candidate_id, "reason": "no pending tasks or team coordinator"})
+        return promoted_registry
     def submit_mission(self, **kwargs: Any) -> MissionSubmission:
         """Plan and durably submit a mission for the continuous worker loop."""
         submission = self.director.submit_mission(**kwargs)
