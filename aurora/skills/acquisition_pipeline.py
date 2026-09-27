@@ -50,9 +50,16 @@ class SkillAcquisitionPipeline:
                     validation_returncode INTEGER NOT NULL,
                     validation_stdout TEXT NOT NULL,
                     validation_stderr TEXT NOT NULL,
-                    state TEXT NOT NULL
+                    state TEXT NOT NULL,
+                    construction_score REAL NOT NULL DEFAULT 0.0,
+                    construction_evidence_state TEXT NOT NULL DEFAULT "unknown"
                 )"""
             )
+            columns={row["name"] for row in db.execute("PRAGMA table_info(candidate_artifacts)").fetchall()}
+            if "construction_score" not in columns:
+                db.execute("ALTER TABLE candidate_artifacts ADD COLUMN construction_score REAL NOT NULL DEFAULT 0.0")
+            if "construction_evidence_state" not in columns:
+                db.execute("ALTER TABLE candidate_artifacts ADD COLUMN construction_evidence_state TEXT NOT NULL DEFAULT 'unknown'")
 
     def _connect(self) -> sqlite3.Connection:
         db = sqlite3.connect(self.artifact_path, timeout=30, isolation_level=None)
@@ -121,10 +128,10 @@ class SkillAcquisitionPipeline:
         }, sort_keys=True)
         with self._connect() as db:
             db.execute(
-                "INSERT OR REPLACE INTO candidate_artifacts VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT OR REPLACE INTO candidate_artifacts (candidate_id, skill_json, source_ids_json, acquired_tools_json, validation_returncode, validation_stdout, validation_stderr, state, construction_score, construction_evidence_state) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (candidate.candidate_id, payload, json.dumps(evidence.source_ids),
                  json.dumps(evidence.acquired_tools), evidence.validation_returncode,
-                 evidence.validation_stdout, evidence.validation_stderr, evidence.state),
+                 evidence.validation_stdout, evidence.validation_stderr, evidence.state, evidence.construction_score, evidence.construction_evidence_state),
             )
 
     def _set_state(self, candidate_id: str, state: str) -> None:
