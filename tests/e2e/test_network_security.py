@@ -314,3 +314,13 @@ def test_real_pypi_dependency_closure(
     )
     assert execution.returncode == 0, execution.stderr
     assert execution.stdout.strip() == "2.31.0"
+
+    normalizer = install_root / "bin" / "normalizer"
+    assert normalizer.is_file()
+    script_execution = SandboxExecutor(
+        SandboxPolicy(network=False, timeout_seconds=20)
+    ).execute(
+        [str(Path("/workspace/managed-site/bin/normalizer")), "--help"],
+        workspace=tmp_path,
+    )
+    assert script_execution.returncode == 0, script_execution.stderr
