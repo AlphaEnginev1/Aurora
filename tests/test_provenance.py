@@ -88,3 +88,38 @@ def test_load_pip_report(tmp_path):
     assert result.version == "1.2.3"
     assert result.artifact_sha256 == "abc123"
     assert result.provenance_url.endswith("demo.whl")
+
+
+def test_verify_record_resolves_paths_from_dist_info_and_allows_managed_scripts(tmp_path):
+    root = tmp_path / "prefix"
+    site = root / "lib" / "python3.12" / "site-packages"
+    bin_dir = root / "bin"
+    site.mkdir(parents=True)
+    bin_dir.mkdir(parents=True)
+    payload = bin_dir / "normalizer"
+    payload.write_bytes(b"script")
+    dist = site / "demo-1.0.dist-info"
+    dist.mkdir()
+    record = dist / "RECORD"
+    record.write_text(
+        f"../../../../bin/normalizer,{_record_digest(b'script')},6\n",
+        encoding="utf-8",
+    )
+    assert verify_record(root, record) == 1
+
+
+def test_verify_record_rejects_path_escape(tmp_path):
+    root = tmp_path / "prefix"
+    site = root / "lib" / "python3.12" / "site-packages"
+    site.mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.write_bytes(b"not managed")
+    dist = site / "demo-1.0.dist-info"
+    dist.mkdir()
+    record = dist / "RECORD"
+    record.write_text(
+        f"../../../../../outside,{_record_digest(b'not managed')},11\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ProvenanceError, match="escapes managed install root"):
+        verify_record(root, record)
