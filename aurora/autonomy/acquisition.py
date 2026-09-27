@@ -286,9 +286,10 @@ class AcquisitionManager:
         if not self.install_root:
             raise AcquisitionError("pypi acquisition requires an isolated install_root")
         self.install_root.parent.mkdir(parents=True, exist_ok=True)
-        python = shutil.which("python3") or shutil.which("python")
-        if not python:
-            raise AcquisitionError("python runtime not found")
+        # Use a command name rather than the host's absolute Python path.
+        # Bubblewrap exposes the system filesystem under /usr but intentionally
+        # does not expose runner-specific paths such as /opt/hostedtoolcache.
+        python = "python3"
         if self.internet_gateway is None:
             raise AcquisitionError(
                 "pypi acquisition requires an Internet Gateway for artifact download"
