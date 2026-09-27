@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from aurora.orchestration.event_bus import DurableEventBus, EventBusError
+from aurora.orchestration.event_bus import DurableEventBus, EventBusError, EventSubscription
 from aurora.orchestration.task_store import DurableTaskStore
 
 
@@ -66,4 +66,4 @@ def test_event_bus_requires_known_consumer(tmp_path: Path):
     store = DurableTaskStore(tmp_path / "tasks.db")
     bus = DurableEventBus(store)
     with pytest.raises(EventBusError, match="unknown event consumer"):
-        bus.poll(type("Subscription", (), {"consumer_id": "missing"})())
+        bus.poll(EventSubscription("missing"))
