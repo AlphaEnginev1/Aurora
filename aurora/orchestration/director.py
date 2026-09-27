@@ -84,7 +84,8 @@ Rules:
             roles = ", ".join(sorted(self.organization.agents_by_role()))
             system += f"\nRegistered roles: {roles}\n"
             if self.skill_registry is not None:
-                system += "\nRegistered skills:\n" + ", ".join(self.skill_registry.ids()) + "\n"
+                system += "\nRegistered specialist skill catalog:\n"
+                system += self.skill_registry.catalog() + "\n"
         messages = [
             {"role": "system", "content": system},
             *(context or []),
@@ -132,7 +133,8 @@ Rules:
             roles = ", ".join(sorted(self.organization.agents_by_role()))
             system += f"\nRegistered roles: {roles}\n"
             if self.skill_registry is not None:
-                system += "\nRegistered skills:\n" + ", ".join(self.skill_registry.ids()) + "\n"
+                system += "\nRegistered specialist skill catalog:\n"
+                system += self.skill_registry.catalog() + "\n"
         messages = [
             {"role": "system", "content": system},
             *(context or []),
