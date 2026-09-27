@@ -9,12 +9,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import json
 from typing import Callable, Protocol, Sequence
+from urllib.parse import urlencode
 
 from .audit import append_event
 from .broker import CapabilityBroker
 from .models import CapabilityRequest, CapabilityResult
 from .registry import ToolSpec
+from .internet import InternetGateway, InternetPolicyError
 
 
 class CapabilityDiscoveryProvider(Protocol):
@@ -25,6 +28,74 @@ class CapabilityDiscoveryProvider(Protocol):
         request: CapabilityRequest,
     ) -> Sequence[ToolSpec]:
         ...
+
+
+class HttpCapabilityDiscoveryProvider:
+    """Discover governed ToolSpec candidates from an allow-listed JSON endpoint.
+
+    Expected response:
+    {"results": [{"name": "...", "kind": "runtime|system",
+                  "source": "...", "executable": "...", ...}]}
+    """
+
+    def __init__(
+        self,
+        endpoint: str,
+        gateway: InternetGateway,
+        *,
+        limit: int = 10,
+    ) -> None:
+        if not endpoint.strip():
+            raise CapabilityResolutionError("capability discovery endpoint is empty")
+        if limit < 1:
+            raise CapabilityResolutionError("capability discovery limit must be positive")
+        self.endpoint = endpoint
+        self.gateway = gateway
+        self.limit = limit
+
+    def discover(self, request: CapabilityRequest) -> Sequence[ToolSpec]:
+        query = urlencode({"capability": request.name, "limit": self.limit})
+        separator = "&" if "?" in self.endpoint else "?"
+        url = f"{self.endpoint}{separator}{query}"
+        try:
+            raw = self.gateway.get(url)
+        except InternetPolicyError as exc:
+            raise CapabilityResolutionError(
+                f"capability discovery network access blocked: {exc}"
+            ) from exc
+        try:
+            payload = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise CapabilityResolutionError(
+                "capability discovery returned invalid JSON"
+            ) from exc
+        rows = payload.get("results") if isinstance(payload, dict) else None
+        if not isinstance(rows, list):
+            raise CapabilityResolutionError("capability discovery results must be a list")
+
+        candidates: list[ToolSpec] = []
+        for row in rows[: self.limit]:
+            if not isinstance(row, dict):
+                continue
+            required = ("name", "kind", "source", "executable")
+            if not all(isinstance(row.get(key), str) and row[key] for key in required):
+                continue
+            optional = {
+                key: row[key]
+                for key in ("version", "artifact_sha256")
+                if row.get(key) is None or isinstance(row.get(key), str)
+            }
+            candidates.append(
+                ToolSpec(
+                    row["name"],
+                    row["kind"],
+                    row["source"],
+                    row["executable"],
+                    optional.get("version"),
+                    optional.get("artifact_sha256"),
+                )
+            )
+        return tuple(candidates)
 
 
 @dataclass(frozen=True)
@@ -215,6 +286,7 @@ class CapabilityResolutionRuntime:
 
 __all__ = [
     "CapabilityDiscoveryProvider",
+    "HttpCapabilityDiscoveryProvider",
     "CapabilityResolution",
     "CapabilityResolutionError",
     "CapabilityResolutionRuntime",
