@@ -50,16 +50,18 @@ def test_event_bus_supports_starting_from_existing_event(tmp_path: Path):
     bus.ack(subscription, second.event_id)
 
 
-def test_event_bus_rejects_backwards_ack(tmp_path: Path):
+def test_event_bus_rejects_out_of_order_ack(tmp_path: Path):
     store = DurableTaskStore(tmp_path / "tasks.db")
     bus = DurableEventBus(store)
     subscription = bus.subscribe("director")
     first = bus.publish(mission_id="m1", event_type="a")
     second = bus.publish(mission_id="m1", event_type="b")
 
+    with pytest.raises(EventBusError, match="cannot skip events"):
+        bus.ack(subscription, second.event_id)
+
+    bus.ack(subscription, first.event_id)
     bus.ack(subscription, second.event_id)
-    with pytest.raises(EventBusError, match="cannot move backwards"):
-        bus.ack(subscription, first.event_id)
 
 
 def test_event_bus_requires_known_consumer(tmp_path: Path):
