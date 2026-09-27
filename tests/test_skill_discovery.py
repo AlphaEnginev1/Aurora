@@ -18,9 +18,6 @@ def test_skill_discovery_constructs_candidate_without_manual_plan():
         research=FakeResearch(),
         source_discovery=lambda gap: ("https://docs.test/a","https://docs.test/b"),
     )
-    gap=SkillAcquisitionRuntime(__import__("pathlib").Path(":memory:"))
-    # The runtime above is only used for the durable gap contract; use a real
-    # temporary DB so SQLite initialization remains portable.
     import tempfile
     with tempfile.TemporaryDirectory() as root:
         runtime=SkillAcquisitionRuntime(__import__("pathlib").Path(root)/"gaps.db")
