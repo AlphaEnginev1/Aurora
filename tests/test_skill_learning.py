@@ -52,7 +52,8 @@ def test_skill_evaluator_scores_observable_evidence():
     assert evaluations[0].score > 0
     assert evaluations[0].verification_passed == ("source_check",)
     assert evaluations[0].verification_missing == ()
-    assert evaluations[0].quality_missing == ("citation_check",)
+    assert evaluations[0].quality_passed == ("citation_check",)
+    assert evaluations[0].quality_missing == ()
 
 
 def test_learning_store_builds_model_scores_and_proposal(tmp_path: Path):
