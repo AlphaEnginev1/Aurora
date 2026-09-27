@@ -41,4 +41,5 @@ def test_firewall_defaults_to_drop_and_allows_proxy_only():
     assert ("add", "table", "inet", "aurora_egress") in commands
     assert any("policy" in command and "drop" in command for command in commands)
     assert any("10.0.2.2" in command and "3128" in command for command in commands)
+    assert not any("ct" in command and "state" in command for command in commands)
     EgressFirewallPolicy().assert_complete(commands)
