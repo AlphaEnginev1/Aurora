@@ -68,6 +68,7 @@ class CapabilityRuntime:
                 f"capability {request.name} is not verified: {capability.verification}"
             )
 
+        capability = replace(capability, artifact_id=self._artifact_id(request.name, capability))
         spec = self.broker.resolve(request)
         if spec is None:
             raise CapabilityExecutionError(
@@ -129,7 +130,7 @@ class CapabilityRuntime:
         """Acquire/verify required tools and return their immutable runtime manifest."""
         prepared = []
         for name in dict.fromkeys(names):
-            result = self.broker.ensure(
+            result = self._ensure(
                 CapabilityRequest(name=name, actor=actor, reason=reason)
             )
             if result.status not in {"installed", "already_available"}:
