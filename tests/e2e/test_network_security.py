@@ -11,6 +11,10 @@ import threading
 import pytest
 
 from aurora.autonomy.acquisition import AcquisitionManager
+from aurora.autonomy.broker import CapabilityBroker
+from aurora.autonomy.capability_runtime import CapabilityRuntime
+from aurora.autonomy.models import CapabilityRequest
+from aurora.autonomy.policy import Policy
 from aurora.autonomy.egress_proxy import EgressProxy, EgressProxyPolicy
 from aurora.autonomy.internet import InternetGateway, InternetPolicy
 from aurora.autonomy.registry import ToolSpec
@@ -320,3 +324,94 @@ def test_real_pypi_dependency_closure(
         workspace=tmp_path,
     )
     assert script_execution.returncode == 0, script_execution.stderr
+
+
+def test_real_brokered_capability_acquisition_verification_and_execution(
+    controlled_network_enforcement_available,
+    pypi_proxy,
+    tmp_path: Path,
+):
+    gateway = InternetGateway(
+        InternetPolicy(
+            frozenset({"https"}),
+            frozenset({"pypi.org", "files.pythonhosted.org"}),
+        )
+    )
+    network_sandbox = SandboxExecutor(
+        SandboxPolicy(
+            network=True,
+            egress_proxy_host=pypi_proxy.host,
+            egress_proxy_port=3128,
+            timeout_seconds=30,
+        )
+    )
+    install_root = tmp_path / "managed-site"
+    audit_path = tmp_path / "audit.jsonl"
+    manager = AcquisitionManager(
+        allowed_sources=frozenset({"pypi"}),
+        install_root=install_root,
+        internet_gateway=gateway,
+        transaction_dir=tmp_path / "transactions",
+        artifact_cache_dir=tmp_path / "artifact-cache",
+        sandbox=SandboxExecutor(SandboxPolicy(network=False, timeout_seconds=20)),
+        network_sandbox=network_sandbox,
+    )
+    broker = CapabilityBroker(
+        Policy(
+            frozenset({"python.package:requests"}),
+            frozenset({"pypi"}),
+            require_verification=True,
+        ),
+        {
+            "requests": ToolSpec(
+                "requests",
+                "runtime",
+                "pypi",
+                "python",
+                version="2.31.0",
+            )
+        },
+        manager,
+    )
+    runtime = CapabilityRuntime(
+        broker,
+        SandboxExecutor(SandboxPolicy(network=False, timeout_seconds=20)),
+        audit_path=audit_path,
+    )
+
+    result = runtime.execute(
+        CapabilityRequest(
+            "python.package:requests",
+            "agent-researcher",
+            reason="verify HTTP research capability",
+        ),
+        workspace=tmp_path,
+        args=("-c", "import requests; print(requests.__version__)"),
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "2.31.0"
+    assert result.capability.version == "2.31.0"
+    assert result.capability.verification == "verified"
+    assert result.command == (
+        "/workspace/managed-site/bin/python",
+        "-c",
+        "import requests; print(requests.__version__)",
+    )
+
+    events = [
+        __import__("json").loads(line)
+        for line in audit_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    execution_events = [
+        event for event in events
+        if event.get("event") == "capability_execution"
+    ]
+    assert execution_events
+    assert execution_events[-1]["capability"] == "python.package:requests"
+    assert execution_events[-1]["actor"] == "agent-researcher"
+    assert execution_events[-1]["status"] == "succeeded"
+    assert execution_events[-1]["verification"] == "verified"
+    assert execution_events[-1]["returncode"] == 0
+    assert execution_events[-1]["argument_count"] == 2
