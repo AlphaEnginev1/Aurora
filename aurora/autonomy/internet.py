@@ -22,6 +22,31 @@ class InternetPolicy:
             frozenset(data.get("allowed_hosts", [])),
         )
 
+@dataclass(frozen=True)
+class RedirectHop:
+    source_url: str
+    target_url: str
+    status_code: int
+
+@dataclass(frozen=True)
+class InternetResponse:
+    requested_url: str
+    final_url: str
+    status_code: int
+    content_type: str | None
+    body: bytes
+    redirects: tuple[RedirectHop, ...] = ()
+
+class _PolicyRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def __init__(self, gateway: "InternetGateway") -> None:
+        self.gateway = gateway
+        self.hops: list[RedirectHop] = []
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        self.gateway.authorize(newurl)
+        self.hops.append(RedirectHop(req.full_url, newurl, code))
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
 class InternetGateway:
     """Small deny-by-default HTTPS gateway for controlled outbound access."""
 
@@ -38,17 +63,30 @@ class InternetGateway:
         if parsed.username or parsed.password:
             raise InternetPolicyError("embedded URL credentials are not allowed")
 
-    def get(self, url: str) -> bytes:
+    def get_with_metadata(self, url: str) -> InternetResponse:
         self.authorize(url)
+        handler = _PolicyRedirectHandler(self)
+        opener = urllib.request.build_opener(handler)
         request = urllib.request.Request(
             url,
             method="GET",
             headers={"User-Agent": "Aurora/0.1"},
         )
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+            with opener.open(request, timeout=self.timeout) as response:
                 final_url = response.geturl()
                 self.authorize(final_url)
-                return response.read()
+                return InternetResponse(
+                    requested_url=url,
+                    final_url=final_url,
+                    status_code=response.status,
+                    content_type=response.headers.get_content_type(),
+                    body=response.read(),
+                    redirects=tuple(handler.hops),
+                )
         except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError) as exc:
             raise InternetPolicyError(f"network request failed: {exc}") from exc
+
+    def get(self, url: str) -> bytes:
+        """Return response bytes while preserving the legacy gateway API."""
+        return self.get_with_metadata(url).body
