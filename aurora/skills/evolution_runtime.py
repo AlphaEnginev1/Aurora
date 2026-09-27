@@ -10,6 +10,7 @@ from uuid import uuid4
 from .learning import SkillEvolutionProposal, SkillLearningStore
 from .models import SkillSpec
 from .registry import SkillRegistry, SkillRegistryError
+from .validation_lab import SkillValidationCase, SkillValidationLab, SkillValidationReport
 
 
 class SkillEvolutionRuntimeError(RuntimeError):
@@ -22,6 +23,7 @@ class PreparedSkillEvolution:
     proposal: SkillEvolutionProposal
     skill: SkillSpec
     status: str = "validated"
+    validation: SkillValidationReport | None = None
 
 
 class SkillEvolutionRuntime:
@@ -32,8 +34,9 @@ class SkillEvolutionRuntime:
     active base version to prevent stale candidates from overwriting newer work.
     """
 
-    def __init__(self, learning: SkillLearningStore, path: str | Path) -> None:
+    def __init__(self, learning: SkillLearningStore, path: str | Path, validation_lab: SkillValidationLab | None = None) -> None:
         self.learning = learning
+        self.validation_lab = validation_lab
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._initialize()
@@ -105,6 +108,32 @@ class SkillEvolutionRuntime:
         except (SkillRegistryError, ValueError) as exc:
             raise SkillEvolutionRuntimeError(f"candidate validation failed: {exc}") from exc
 
+        validation = None
+        if self.validation_lab is not None:
+            evidence = self.learning.evidence_for(active.skill_id, skill_version=active.version, limit=8)
+            cases = tuple(
+                SkillValidationCase(
+                    case_id=f"evidence-{item.task_id}-{index}",
+                    objective=(
+                        "Reproduce the specialist outcome represented by the historical task. "
+                        + (f"Observed failure: {item.failure_signature}" if item.failure_signature else
+                           "Preserve the successful behavior while maintaining all evidence checks.")
+                    ),
+                    expected_evidence=tuple(active.verification_requirements) + tuple(active.quality_checks),
+                )
+                for index, item in enumerate(evidence)
+            )
+            if not cases:
+                raise SkillEvolutionRuntimeError("skill validation requires durable historical evidence")
+            try:
+                validation = self.validation_lab.compare(
+                    baseline=active,
+                    candidate=skill,
+                    cases=cases,
+                )
+            except Exception as exc:
+                raise SkillEvolutionRuntimeError(f"skill validation lab rejected candidate: {exc}") from exc
+
         candidate_id = f"skill-evolution-{uuid4().hex}"
         with self._connect() as db:
             existing = db.execute(
@@ -142,7 +171,7 @@ class SkillEvolutionRuntime:
                     }, sort_keys=True),
                 ),
             )
-        return PreparedSkillEvolution(candidate_id, proposal, skill)
+        return PreparedSkillEvolution(candidate_id, proposal, skill, "validated", validation)
 
     def approve(self, prepared: PreparedSkillEvolution) -> PreparedSkillEvolution:
         if prepared.status != "validated":
@@ -156,7 +185,7 @@ class SkillEvolutionRuntime:
         if not changed:
             raise SkillEvolutionRuntimeError("candidate is no longer awaiting approval")
         return PreparedSkillEvolution(
-            prepared.candidate_id, prepared.proposal, prepared.skill, "approved"
+            prepared.candidate_id, prepared.proposal, prepared.skill, "approved", prepared.validation
         )
 
     def promote(
