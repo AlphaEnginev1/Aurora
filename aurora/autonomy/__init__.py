@@ -7,6 +7,15 @@ from .capability_resolution import (
     CapabilityResolutionRuntime,
     HttpCapabilityDiscoveryProvider,
 )
+from .computer_operator import (
+    ComputerAction,
+    ComputerOperator,
+    ComputerOperatorError,
+    ComputerPolicy,
+    CredentialProvider,
+    CredentialRef,
+    PlaywrightSession,
+)
 
 __all__ = [
     "CapabilityDiscoveryProvider",
@@ -14,4 +23,11 @@ __all__ = [
     "CapabilityResolutionError",
     "CapabilityResolutionRuntime",
     "HttpCapabilityDiscoveryProvider",
+    "ComputerAction",
+    "ComputerOperator",
+    "ComputerOperatorError",
+    "ComputerPolicy",
+    "CredentialProvider",
+    "CredentialRef",
+    "PlaywrightSession",
 ]
