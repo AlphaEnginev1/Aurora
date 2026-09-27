@@ -24,8 +24,13 @@ class ModelRouter:
     ) -> ModelSpec:
         if request.model:
             for model in self.available():
-                if model.id == request.model:
-                    return model
+                if model.id != request.model:
+                    continue
+                if capability and capability not in model.capabilities:
+                    raise ModelRoutingError(
+                        f"Requested model {request.model} does not satisfy capability={capability!r}"
+                    )
+                return model
             raise ModelRoutingError(f"Requested model is not configured: {request.model}")
         candidates = self.available()
         if capability:
