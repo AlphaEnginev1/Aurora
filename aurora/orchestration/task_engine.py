@@ -48,7 +48,8 @@ class DelegatedTaskResult:
 
 @dataclass
 class TaskEngine:
-    """Execute a validated finite task graph through OrchestrationEngine."""
+    """Execute delegated tasks through OrchestrationEngine."""
+
     orchestration: OrchestrationEngine
     workspace_root: Path
     _results: dict[str, DelegatedTaskResult] = field(default_factory=dict, init=False)
@@ -64,10 +65,7 @@ class TaskEngine:
             raise TaskEngineError("task ids must be unique")
         known = set(ids)
         for task in normalized:
-            if not task.role.strip() or not task.objective.strip():
-                raise TaskEngineError(f"task {task.task_id} has an empty role or objective")
-            if any("\x00" in arg for arg in task.args):
-                raise TaskEngineError(f"task {task.task_id} contains a null-byte argument")
+            self._validate_task_fields(task)
             if any(dep not in known for dep in task.depends_on):
                 missing = sorted(set(task.depends_on) - known)
                 raise TaskEngineError(
@@ -77,6 +75,17 @@ class TaskEngine:
                 raise TaskEngineError(f"task {task.task_id} cannot depend on itself")
         self._assert_acyclic(normalized)
         return normalized
+
+    @staticmethod
+    def _validate_task_fields(task: DelegatedTask) -> None:
+        if not task.task_id or any(ch.isspace() for ch in task.task_id):
+            raise TaskEngineError(
+                f"task {task.task_id!r} has an invalid task id"
+            )
+        if not task.role.strip() or not task.objective.strip():
+            raise TaskEngineError(f"task {task.task_id} has an empty role or objective")
+        if any("\x00" in arg for arg in task.args):
+            raise TaskEngineError(f"task {task.task_id} contains a null-byte argument")
 
     def execute(self, tasks: Sequence[DelegatedTask]) -> tuple[DelegatedTaskResult, ...]:
         plan = self.validate(tasks)
@@ -102,22 +111,7 @@ class TaskEngine:
                     progressed = True
                     continue
 
-                self._results[task_id] = DelegatedTaskResult(task, TaskStatus.RUNNING)
-                try:
-                    result = self._execute_task(task)
-                except (CapabilityExecutionError, RuntimeError, ValueError) as exc:
-                    result = DelegatedTaskResult(
-                        task,
-                        TaskStatus.FAILED,
-                        error=str(exc),
-                    )
-                else:
-                    result = DelegatedTaskResult(
-                        task,
-                        TaskStatus.SUCCEEDED,
-                        model_result=result if isinstance(result, TaskResult) else None,
-                        capability_result=None if isinstance(result, TaskResult) else result,
-                    )
+                result = self.execute_one(task)
                 self._results[task_id] = result
                 ordered.append(result)
                 del remaining[task_id]
@@ -126,6 +120,24 @@ class TaskEngine:
             if not progressed:
                 raise TaskEngineError("task graph made no progress; refusing deadlock")
         return tuple(ordered)
+
+    def execute_one(self, task: DelegatedTask) -> DelegatedTaskResult:
+        """Execute one already-dependency-resolved task for a durable worker."""
+        self._validate_task_fields(task)
+        try:
+            result = self._execute_task(task)
+        except (CapabilityExecutionError, RuntimeError, ValueError) as exc:
+            return DelegatedTaskResult(
+                task,
+                TaskStatus.FAILED,
+                error=str(exc),
+            )
+        return DelegatedTaskResult(
+            task,
+            TaskStatus.SUCCEEDED,
+            model_result=result if isinstance(result, TaskResult) else None,
+            capability_result=None if isinstance(result, TaskResult) else result,
+        )
 
     def _execute_task(self, task: DelegatedTask):
         if task.capability:
