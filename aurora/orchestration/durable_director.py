@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from uuid import uuid4
 
 from .director import DirectorPlan, DirectorPlanner
+from .event_bus import DurableEventBus
 from .task_engine import TaskEngine
 from .task_store import DurableTaskStore
 
@@ -29,10 +30,12 @@ class DurableDirectorService:
         planner: DirectorPlanner,
         task_engine: TaskEngine,
         store: DurableTaskStore,
+        event_bus: DurableEventBus | None = None,
     ) -> None:
         self.planner = planner
         self.task_engine = task_engine
         self.store = store
+        self.event_bus = event_bus or DurableEventBus(store)
 
     def submit_mission(
         self,
@@ -51,6 +54,15 @@ class DurableDirectorService:
             validated = self.task_engine.validate(plan.tasks)
             mission = mission_id or f"mission-{uuid4().hex}"
             self.store.enqueue(mission, validated)
+            self.event_bus.publish(
+                mission_id=mission,
+                event_type="mission_submitted",
+                payload={
+                    "objective": plan.objective,
+                    "model": plan.model,
+                    "task_ids": [task.task_id for task in validated],
+                },
+            )
         except Exception as exc:
             raise DurableDirectorError(
                 f"mission could not be durably submitted: {exc}"
