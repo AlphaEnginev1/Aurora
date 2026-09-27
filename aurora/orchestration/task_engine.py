@@ -14,7 +14,11 @@ from typing import Sequence
 from aurora.autonomy.capability_runtime import CapabilityExecutionError
 from aurora.autonomy.models import CapabilityRequest
 from .engine import OrchestrationEngine, TaskResult
-from aurora.organization import OrganizationConfigError, OrganizationRegistry
+from aurora.organization import (
+    AgentSelector,
+    OrganizationConfigError,
+    OrganizationRegistry,
+)
 from aurora.skills import SkillRegistry, SkillRegistryError
 
 
@@ -76,21 +80,28 @@ class TaskEngine:
             self._validate_task_fields(task)
             if self.organization is not None:
                 try:
-                    agent = self.organization.validate_task(
-                        role=task.role,
-                        capability=task.capability,
-                    )
-                    if self.skill_registry is not None:
-                        self.skill_registry.for_agent(
-                            role=agent.role,
-                            agent_capabilities=agent.capabilities,
-                            default_skill_ids=agent.skill_ids,
-                            requested_skill_ids=task.skills,
+                    if task.role == "auto":
+                        if self.skill_registry is not None:
+                            for skill_id in task.skills:
+                                self.skill_registry.resolve(skill_id)
+                    else:
+                        agent = self.organization.validate_task(
+                            role=task.role,
+                            capability=task.capability,
                         )
+                        if self.skill_registry is not None:
+                            self.skill_registry.for_agent(
+                                role=agent.role,
+                                agent_capabilities=agent.capabilities,
+                                default_skill_ids=agent.skill_ids,
+                                requested_skill_ids=task.skills,
+                            )
                 except (OrganizationConfigError, SkillRegistryError) as exc:
                     raise TaskEngineError(str(exc)) from exc
-            elif task.skills:
-                raise TaskEngineError("skill assignments require an organization registry")
+            elif task.skills or task.role == "auto":
+                raise TaskEngineError(
+                    "skill assignments and automatic agent selection require an organization registry"
+                )
             if any(dep not in known for dep in task.depends_on):
                 missing = sorted(set(task.depends_on) - known)
                 raise TaskEngineError(
@@ -149,6 +160,7 @@ class TaskEngine:
     def execute_one(self, task: DelegatedTask) -> DelegatedTaskResult:
         """Execute one already-dependency-resolved task for a durable worker."""
         self._validate_task_fields(task)
+        task = self._resolve_agent_task(task)
         try:
             result = self._execute_task(task)
         except (CapabilityExecutionError, RuntimeError, ValueError) as exc:
@@ -207,6 +219,35 @@ class TaskEngine:
             # Learning must never turn a completed task into a false execution
             # failure. The durable execution result remains authoritative.
             return result
+
+    def _resolve_agent_task(self, task: DelegatedTask) -> DelegatedTask:
+        """Resolve the Director's automatic-agent sentinel to a specialist role."""
+        if task.role != "auto":
+            return task
+        if self.organization is None:
+            raise TaskEngineError("automatic agent selection requires an organization registry")
+        selector = AgentSelector(
+            self.organization,
+            self.skill_registry,
+            self.skill_learning,
+        )
+        try:
+            role = selector.select(
+                objective=task.objective,
+                required_skill_ids=task.skills,
+                capability=task.capability,
+            )
+        except Exception as exc:
+            raise TaskEngineError(str(exc)) from exc
+        return DelegatedTask(
+            task_id=task.task_id,
+            role=role,
+            objective=task.objective,
+            capability=task.capability,
+            args=task.args,
+            depends_on=task.depends_on,
+            skills=task.skills,
+        )
 
     def skill_assignment_for(self, task: DelegatedTask):
         if self.skill_registry is None or self.organization is None:
