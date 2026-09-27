@@ -86,6 +86,12 @@ class DurableTaskStore:
                     created_at TEXT NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS event_consumers (
+                    consumer_id TEXT PRIMARY KEY,
+                    last_event_id INTEGER NOT NULL DEFAULT 0,
+                    updated_at TEXT NOT NULL
+                );
+
                 CREATE INDEX IF NOT EXISTS idx_tasks_runnable
                     ON tasks (mission_id, status, created_at);
 
@@ -527,6 +533,79 @@ class DurableTaskStore:
             ).fetchall()
         return tuple(self._row_to_task(row) for row in rows)
 
+    def list_missions(self) -> tuple[str, ...]:
+        """Return all missions known to the durable task store."""
+        with self._connect() as db:
+            rows = db.execute(
+                "SELECT DISTINCT mission_id FROM tasks ORDER BY mission_id"
+            ).fetchall()
+        return tuple(row["mission_id"] for row in rows)
+
+    def mission_status(self, mission_id: str) -> str:
+        """Compute the current durable mission state from its task states."""
+        statuses = {task.status for task in self.list_tasks(mission_id)}
+        if not statuses:
+            raise TaskStoreError(f"unknown mission: {mission_id}")
+        if "running" in statuses:
+            return "running"
+        if "pending" in statuses:
+            return "pending"
+        if "failed" in statuses:
+            return "failed"
+        if "blocked" in statuses:
+            return "blocked"
+        return "succeeded"
+
+    def has_event(self, mission_id: str, event_type: str) -> bool:
+        with self._connect() as db:
+            row = db.execute(
+                """
+                SELECT 1
+                FROM task_events
+                WHERE mission_id = ? AND event_type = ?
+                LIMIT 1
+                """,
+                (mission_id, event_type),
+            ).fetchone()
+        return row is not None
+
+    def append_event(
+        self,
+        *,
+        mission_id: str,
+        task_id: str | None,
+        event_type: str,
+        payload: dict,
+    ) -> TaskEvent:
+        if not mission_id.strip():
+            raise TaskStoreError("mission_id is empty")
+        if not event_type.strip():
+            raise TaskStoreError("event_type is empty")
+        if "\\x00" in mission_id or "\\x00" in event_type:
+            raise TaskStoreError("event identifiers contain a null byte")
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            event_id = self._event_locked(
+                db,
+                mission_id,
+                task_id,
+                event_type,
+                payload,
+            )
+            created_at = db.execute(
+                "SELECT created_at FROM task_events WHERE event_id = ?",
+                (event_id,),
+            ).fetchone()["created_at"]
+            db.commit()
+        return TaskEvent(
+            event_id=event_id,
+            mission_id=mission_id,
+            task_id=task_id,
+            event_type=event_type,
+            payload=dict(payload),
+            created_at=created_at,
+        )
+
     def events(self, mission_id: str) -> tuple[TaskEvent, ...]:
         with self._connect() as db:
             rows = db.execute(
@@ -539,16 +618,103 @@ class DurableTaskStore:
                 (mission_id,),
             ).fetchall()
         return tuple(
-            TaskEvent(
-                event_id=row["event_id"],
-                mission_id=row["mission_id"],
-                task_id=row["task_id"],
-                event_type=row["event_type"],
-                payload=json.loads(row["payload_json"]),
-                created_at=row["created_at"],
-            )
+            self._row_to_event(row)
             for row in rows
         )
+
+    def events_since(
+        self,
+        *,
+        after_event_id: int = 0,
+        limit: int = 100,
+    ) -> tuple[TaskEvent, ...]:
+        if after_event_id < 0:
+            raise TaskStoreError("after_event_id cannot be negative")
+        if limit < 1:
+            raise TaskStoreError("limit must be at least 1")
+        with self._connect() as db:
+            rows = db.execute(
+                """
+                SELECT event_id, mission_id, task_id, event_type, payload_json, created_at
+                FROM task_events
+                WHERE event_id > ?
+                ORDER BY event_id
+                LIMIT ?
+                """,
+                (after_event_id, limit),
+            ).fetchall()
+        return tuple(self._row_to_event(row) for row in rows)
+
+    def ensure_event_consumer(
+        self,
+        consumer_id: str,
+        *,
+        initial_event_id: int = 0,
+    ) -> None:
+        if not consumer_id.strip():
+            raise TaskStoreError("consumer_id is empty")
+        if initial_event_id < 0:
+            raise TaskStoreError("initial_event_id cannot be negative")
+        now = self._now()
+        with self._connect() as db:
+            db.execute(
+                """
+                INSERT INTO event_consumers (consumer_id, last_event_id, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(consumer_id) DO NOTHING
+                """,
+                (consumer_id, initial_event_id, now),
+            )
+
+    def get_event_cursor(self, consumer_id: str) -> int:
+        if not consumer_id.strip():
+            raise TaskStoreError("consumer_id is empty")
+        with self._connect() as db:
+            row = db.execute(
+                "SELECT last_event_id FROM event_consumers WHERE consumer_id = ?",
+                (consumer_id,),
+            ).fetchone()
+        if row is None:
+            raise TaskStoreError(f"unknown event consumer: {consumer_id}")
+        return int(row["last_event_id"])
+
+    def ack_event(self, consumer_id: str, event_id: int) -> None:
+        if not consumer_id.strip():
+            raise TaskStoreError("consumer_id is empty")
+        if event_id < 1:
+            raise TaskStoreError("event_id must be positive")
+        now = self._now()
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT last_event_id FROM event_consumers WHERE consumer_id = ?",
+                (consumer_id,),
+            ).fetchone()
+            if row is None:
+                db.rollback()
+                raise TaskStoreError(f"unknown event consumer: {consumer_id}")
+            current = int(row["last_event_id"])
+            if event_id < current:
+                db.rollback()
+                raise TaskStoreError(
+                    f"event cursor cannot move backwards: {event_id} < {current}"
+                )
+            exists = db.execute(
+                "SELECT 1 FROM task_events WHERE event_id = ?",
+                (event_id,),
+            ).fetchone()
+            if exists is None:
+                db.rollback()
+                raise TaskStoreError(f"unknown event: {event_id}")
+            db.execute(
+                """
+                UPDATE event_consumers
+                SET last_event_id = ?, updated_at = ?
+                WHERE consumer_id = ?
+                """,
+                (event_id, now, consumer_id),
+            )
+            db.commit()
 
     @staticmethod
     def _dependency_succeeded(
@@ -603,6 +769,18 @@ class DurableTaskStore:
         )
 
     @classmethod
+    @staticmethod
+    def _row_to_event(row: sqlite3.Row) -> TaskEvent:
+        return TaskEvent(
+            event_id=row["event_id"],
+            mission_id=row["mission_id"],
+            task_id=row["task_id"],
+            event_type=row["event_type"],
+            payload=json.loads(row["payload_json"]),
+            created_at=row["created_at"],
+        )
+
+    @classmethod
     def _event_locked(
         cls,
         db: sqlite3.Connection,
@@ -610,8 +788,8 @@ class DurableTaskStore:
         task_id: str | None,
         event_type: str,
         payload: dict,
-    ) -> None:
-        db.execute(
+    ) -> int:
+        cursor = db.execute(
             """
             INSERT INTO task_events (
                 mission_id, task_id, event_type, payload_json, created_at
@@ -625,6 +803,7 @@ class DurableTaskStore:
                 cls._now(),
             ),
         )
+        return int(cursor.lastrowid)
 
 
 __all__ = ["DurableTaskStore", "StoredTask", "TaskEvent", "TaskStoreError"]
