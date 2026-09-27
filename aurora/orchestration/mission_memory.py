@@ -114,7 +114,7 @@ class MissionMemory:
                            metadata_json, created_at
                     FROM mission_messages
                     WHERE mission_id = ?
-                    ORDER BY message_id
+                    ORDER BY message_id DESC
                     LIMIT ?
                     """,
                     (mission_id, limit),
@@ -122,7 +122,7 @@ class MissionMemory:
         except sqlite3.Error as exc:
             raise MissionMemoryError(f"could not read mission messages: {exc}") from exc
 
-        return tuple(
+        messages = [
             MissionMessage(
                 message_id=row["message_id"],
                 mission_id=row["mission_id"],
@@ -133,6 +133,37 @@ class MissionMemory:
                 created_at=row["created_at"],
             )
             for row in rows
+        ]
+        return tuple(reversed(messages))
+
+    def first_of_kind(self, mission_id: str, kind: str) -> MissionMessage | None:
+        if not kind.strip():
+            raise MissionMemoryError("kind is empty")
+        try:
+            with self.store._connect() as db:
+                row = db.execute(
+                    """
+                    SELECT message_id, mission_id, source, kind, content,
+                           metadata_json, created_at
+                    FROM mission_messages
+                    WHERE mission_id = ? AND kind = ?
+                    ORDER BY message_id
+                    LIMIT 1
+                    """,
+                    (mission_id, kind),
+                ).fetchone()
+        except sqlite3.Error as exc:
+            raise MissionMemoryError(f"could not read mission message: {exc}") from exc
+        if row is None:
+            return None
+        return MissionMessage(
+            message_id=row["message_id"],
+            mission_id=row["mission_id"],
+            source=row["source"],
+            kind=row["kind"],
+            content=row["content"],
+            metadata=json.loads(row["metadata_json"]),
+            created_at=row["created_at"],
         )
 
     def context(
