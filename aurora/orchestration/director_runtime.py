@@ -318,6 +318,32 @@ class DirectorRuntime:
         )
         return promoted
 
+    def rollback_skill_evolution(
+        self, *, mission_id: str, candidate_id: str,
+    ):
+        """Restore the exact pre-evolution skill snapshot after a verified regression."""
+        if self.skill_evolution_runtime is None:
+            raise DirectorRuntimeError("skill evolution runtime is not configured")
+        registry = self.director.task_engine.skill_registry
+        if registry is None:
+            raise DirectorRuntimeError("skill registry is not configured")
+        try:
+            restored = self.skill_evolution_runtime.rollback(candidate_id, registry)
+        except Exception as exc:
+            self.event_bus.publish(
+                mission_id=mission_id,
+                event_type="skill.evolution.rollback_failed",
+                payload={"candidate_id": candidate_id, "error": str(exc)},
+            )
+            raise DirectorRuntimeError(f"skill evolution rollback failed: {exc}") from exc
+        self.director.task_engine.skill_registry = restored
+        self.event_bus.publish(
+            mission_id=mission_id,
+            event_type="skill.evolution.rolled_back",
+            payload={"candidate_id": candidate_id, "restored": True},
+        )
+        return restored
+
     def submit_mission(self, **kwargs: Any) -> MissionSubmission:
         """Plan and durably submit a mission for the continuous worker loop."""
         submission = self.director.submit_mission(**kwargs)
