@@ -66,12 +66,12 @@ class CapabilityBroker:
                 verification="pending",
             )
 
-        verification = "verified" if result.sha256 else "observed"
         return CapabilityResult(
             request.name,
             result.status,
+            version=result.version,
             source=result.source,
-            verification=verification,
+            verification=result.verification,
             path=result.path,
             sha256=result.sha256,
         )
