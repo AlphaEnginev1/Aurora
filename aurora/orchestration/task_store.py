@@ -408,6 +408,7 @@ class DurableTaskStore:
         *,
         worker_id: str,
         error: str,
+        claim_token: str | None = None,
     ) -> None:
         """Return a failed running attempt to pending for another attempt."""
         if not worker_id.strip():
@@ -416,7 +417,7 @@ class DurableTaskStore:
             db.execute("BEGIN IMMEDIATE")
             row = db.execute(
                 """
-                SELECT status, claimed_by, lease_until
+                SELECT status, claimed_by, claim_token, lease_until
                 FROM tasks
                 WHERE mission_id = ? AND task_id = ?
                 """,
@@ -425,7 +426,7 @@ class DurableTaskStore:
             if row is None:
                 db.rollback()
                 raise TaskStoreError(f"unknown task: {mission_id}/{task_id}")
-            if row["status"] != "running" or row["claimed_by"] != worker_id:
+            if row["status"] != "running" or row["claimed_by"] != worker_id or (claim_token is not None and row["claim_token"] != claim_token):
                 db.rollback()
                 raise TaskStoreError(
                     f"worker does not own running task: {mission_id}/{task_id}"
@@ -440,12 +441,13 @@ class DurableTaskStore:
                 SET status = 'pending',
                     last_error = ?,
                     claimed_by = NULL,
+                    claim_token = NULL,
                     lease_until = NULL,
                     updated_at = ?
                 WHERE mission_id = ? AND task_id = ? AND status = 'running'
-                  AND claimed_by = ?
+                  AND claimed_by = ? AND claim_token = ?
                 """,
-                (error, now, mission_id, task_id, worker_id),
+                (error, now, mission_id, task_id, worker_id, claim_token),
             )
             self._event_locked(
                 db,
@@ -465,6 +467,7 @@ class DurableTaskStore:
         error: str | None = None,
         payload: dict | None = None,
         worker_id: str | None = None,
+        claim_token: str | None = None,
         result: dict | None = None,
     ) -> None:
         if status not in {"succeeded", "failed", "blocked"}:
@@ -473,7 +476,7 @@ class DurableTaskStore:
             db.execute("BEGIN IMMEDIATE")
             row = db.execute(
                 """
-                SELECT status, claimed_by, lease_until
+                SELECT status, claimed_by, claim_token, lease_until
                 FROM tasks
                 WHERE mission_id = ? AND task_id = ?
                 """,
@@ -487,7 +490,7 @@ class DurableTaskStore:
                 raise TaskStoreError(
                     f"task is not running: {mission_id}/{task_id} ({row['status']})"
                 )
-            if worker_id is not None and row["claimed_by"] != worker_id:
+            if worker_id is not None and (row["claimed_by"] != worker_id or row["claim_token"] != claim_token):
                 db.rollback()
                 raise TaskStoreError(
                     f"worker does not own running task: {mission_id}/{task_id}"
@@ -501,6 +504,7 @@ class DurableTaskStore:
                 """
                 UPDATE tasks
                 SET status = ?, last_error = ?, claimed_by = NULL,
+                    claim_token = NULL,
                     lease_until = NULL, result_json = ?, updated_at = ?
                 WHERE mission_id = ? AND task_id = ?
                 """,
