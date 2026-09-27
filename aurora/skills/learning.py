@@ -151,6 +151,29 @@ class SkillLearningStore:
             },
         )
 
+    def performance_for_version(self, skill_id: str, skill_version: str) -> SkillPerformance:
+        """Return evidence-backed performance for one immutable skill version."""
+        with self._connect() as db:
+            rows = db.execute(
+                "SELECT score, status, model FROM skill_evaluations "
+                "WHERE skill_id = ? AND skill_version = ?",
+                (skill_id, skill_version),
+            ).fetchall()
+        if not rows:
+            return SkillPerformance(skill_id, 0, 0.0, 0, {})
+        scores = [float(row["score"]) for row in rows]
+        buckets: dict[str, list[float]] = {}
+        for row in rows:
+            if row["model"]:
+                buckets.setdefault(str(row["model"]), []).append(float(row["score"]))
+        return SkillPerformance(
+            skill_id=skill_id,
+            evaluations=len(rows),
+            average_score=sum(scores) / len(scores),
+            failure_count=sum(row["status"] != "succeeded" for row in rows),
+            model_scores={k: sum(v) / len(v) for k, v in buckets.items()},
+        )
+
     def agent_scores_for(
         self,
         skill_ids: tuple[str, ...],
