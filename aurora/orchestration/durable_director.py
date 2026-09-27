@@ -9,6 +9,7 @@ from .director import DirectorPlan, DirectorPlanner
 from .event_bus import DurableEventBus
 from .task_engine import TaskEngine
 from .task_store import DurableTaskStore
+from .team_runtime import TeamCoordinator, TeamCoordinatorError
 
 
 class DurableDirectorError(RuntimeError):
@@ -31,11 +32,13 @@ class DurableDirectorService:
         task_engine: TaskEngine,
         store: DurableTaskStore,
         event_bus: DurableEventBus | None = None,
+        team_coordinator: TeamCoordinator | None = None,
     ) -> None:
         self.planner = planner
         self.task_engine = task_engine
         self.store = store
         self.event_bus = event_bus or DurableEventBus(store)
+        self.team_coordinator = team_coordinator
 
     def submit_mission(
         self,
@@ -51,8 +54,27 @@ class DurableDirectorService:
             model=model,
         )
         try:
-            validated = self.task_engine.validate(plan.tasks)
             mission = mission_id or f"mission-{uuid4().hex}"
+            team_state = None
+            if self.team_coordinator is not None:
+                team_state = self.team_coordinator.prepare(
+                    mission_id=mission,
+                    objective=plan.objective,
+                    tasks=plan.tasks,
+                )
+                validated = team_state.tasks
+                self.event_bus.publish(
+                    mission_id=mission,
+                    event_type="team.formed",
+                    payload={
+                        "objective": plan.objective,
+                        "roles": [member.role for member in team_state.team.members],
+                        "required_skills": list(team_state.team.required_skills),
+                        "covered_skills": list(team_state.team.covered_skills),
+                    },
+                )
+            else:
+                validated = self.task_engine.validate(plan.tasks)
             self.store.enqueue(mission, validated)
             self.event_bus.publish(
                 mission_id=mission,
@@ -67,6 +89,12 @@ class DurableDirectorService:
             raise DurableDirectorError(
                 f"mission could not be durably submitted: {exc}"
             ) from exc
+        if validated != plan.tasks:
+            plan = DirectorPlan(
+                objective=plan.objective,
+                tasks=validated,
+                model=plan.model,
+            )
         return MissionSubmission(mission_id=mission, plan=plan)
 
 
