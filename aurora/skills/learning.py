@@ -72,6 +72,8 @@ class SkillLearningStore:
                     quality_failed_json TEXT NOT NULL,
                     quality_missing_json TEXT NOT NULL,
                     failure_signature TEXT,
+                    evidence_completeness REAL NOT NULL DEFAULT 0.0,
+                    evidence_state TEXT NOT NULL DEFAULT 'unknown',
                     created_at TEXT NOT NULL
                 );
 
@@ -100,8 +102,8 @@ class SkillLearningStore:
                     skill_id, skill_version, mission_id, task_id, role, score, status, model,
                     verification_passed_json, verification_failed_json, verification_missing_json,
                     quality_passed_json, quality_failed_json, quality_missing_json,
-                    failure_signature, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    failure_signature, evidence_completeness, evidence_state, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     evaluation.skill_id,
@@ -147,17 +149,35 @@ class SkillLearningStore:
             },
         )
 
-    def model_scores_for(self, skill_ids: tuple[str, ...], *, minimum_evaluations: int = 2) -> dict[str, float]:
-        buckets: dict[str, list[float]] = {}
-        for skill_id in skill_ids:
-            performance = self.performance(skill_id)
-            if performance.evaluations < minimum_evaluations:
-                continue
-            for model, score in performance.model_scores.items():
-                buckets.setdefault(model, []).append(score)
+    def model_scores_for(
+        self,
+        skill_ids: tuple[str, ...],
+        *,
+        minimum_evaluations: int = 2,
+        minimum_evidence_completeness: float = 0.75,
+    ) -> dict[str, float]:
+        if not skill_ids:
+            return {}
+        if minimum_evaluations < 1:
+            raise ValueError("minimum_evaluations must be at least 1")
+        if not 0.0 <= minimum_evidence_completeness <= 1.0:
+            raise ValueError("minimum_evidence_completeness must be between 0 and 1")
+        placeholders = ",".join("?" for _ in skill_ids)
+        with self._connect() as db:
+            rows = db.execute(
+                f"""
+                SELECT model, AVG(score) AS average_score, COUNT(*) AS evaluations,
+                       AVG(evidence_completeness) AS evidence_completeness
+                FROM skill_evaluations
+                WHERE skill_id IN ({placeholders}) AND model IS NOT NULL
+                GROUP BY model
+                HAVING COUNT(*) >= ? AND AVG(evidence_completeness) >= ?
+                """,
+                (*skill_ids, minimum_evaluations, minimum_evidence_completeness),
+            ).fetchall()
         return {
-            model: sum(values) / len(values)
-            for model, values in buckets.items()
+            str(row["model"]): float(row["average_score"])
+            for row in rows
         }
 
     def propose_evolution(
