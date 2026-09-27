@@ -187,3 +187,7 @@ def test_seccomp_filter_is_x86_64_and_nonempty():
 
     program = seccomp_program()
     assert len(program) == 14
+    # A non-clone syscall must jump to the final ALLOW instruction. A jf=4
+    # would land on the ERRNO return and break every ordinary workload syscall.
+    clone_jump = program[7]
+    assert clone_jump.jf == 5
