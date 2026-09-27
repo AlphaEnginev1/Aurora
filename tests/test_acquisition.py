@@ -99,7 +99,7 @@ def test_pypi_installer_uses_verified_cached_artifact_and_offline_sandbox(tmp_pa
         def execute(self, command, *, workspace):
             site = workspace / "prefix" / "lib" / "python3.12" / "site-packages"
             dist = site / "example-1.0.0.dist-info"
-            dist.mkdir()
+            dist.mkdir(parents=True)
             (site / "example.py").write_bytes(b"example")
             (dist / "METADATA").write_text(
                 "Name: example\nVersion: 1.0.0\n", encoding="utf-8"
