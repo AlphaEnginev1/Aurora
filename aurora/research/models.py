@@ -23,6 +23,12 @@ class ResearchRequest:
     max_sources: int = 10
 
 @dataclass(frozen=True)
+class RedirectHop:
+    source_url: str
+    target_url: str
+    status_code: int
+
+@dataclass(frozen=True)
 class SourceRecord:
     source_id: str
     url: str
@@ -32,6 +38,8 @@ class SourceRecord:
     content_type: str | None = None
     title: str | None = None
     content_text: str = ""
+    final_url: str | None = None
+    redirect_chain: tuple[RedirectHop, ...] = ()
 
 @dataclass(frozen=True)
 class EvidenceRecord:
