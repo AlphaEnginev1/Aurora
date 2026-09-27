@@ -6,6 +6,7 @@ dispatches each task through the existing orchestration and capability boundarie
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import hashlib
 from enum import StrEnum
 from pathlib import Path
 from typing import Sequence
@@ -156,12 +157,18 @@ class TaskEngine:
                 raise TaskEngineError("task graph made no progress; refusing deadlock")
         return tuple(ordered)
 
-    def execute_one(self, task: DelegatedTask) -> DelegatedTaskResult:
+    def execute_one(
+        self,
+        task: DelegatedTask,
+        *,
+        execution_scope: str | None = None,
+    ) -> DelegatedTaskResult:
         """Execute one already-dependency-resolved task for a durable worker."""
         self._validate_task_fields(task)
         task = self._resolve_agent_task(task)
         try:
-            result = self._execute_task(task)
+            workspace = self._workspace_for_task(task, execution_scope)
+            result = self._execute_task(task, workspace=workspace)
         except (CapabilityExecutionError, RuntimeError, ValueError) as exc:
             result = DelegatedTaskResult(
                 task,
@@ -280,7 +287,7 @@ class TaskEngine:
                 return name
         return "general"
 
-    def _execute_task(self, task: DelegatedTask):
+    def _execute_task(self, task: DelegatedTask, *, workspace: Path | None = None):
         skill_assignment = None
         if self.skill_registry is not None and self.organization is not None:
             agent = self.organization.resolve_agent(task.role)
@@ -311,12 +318,12 @@ class TaskEngine:
                 actor=task.role,
                 reason=task.objective,
             )
-            workspace = self.workspace_root
+            execution_workspace = workspace or self.workspace_root
             return self.orchestration.run_capability_task(
                 task_id=task.task_id,
                 role=task.role,
                 request=request,
-                workspace=workspace,
+                workspace=execution_workspace,
                 args=task.args,
             )
         skill_context = (
@@ -339,6 +346,17 @@ class TaskEngine:
                 else None
             ),
         )
+
+    def _workspace_for_task(self, task: DelegatedTask, execution_scope: str | None) -> Path:
+        """Return an isolated deterministic workspace for one execution attempt."""
+        if execution_scope is None:
+            return self.workspace_root
+        if not execution_scope.strip():
+            raise TaskEngineError("execution_scope cannot be empty")
+        digest = hashlib.sha256(execution_scope.encode("utf-8")).hexdigest()
+        workspace = self.workspace_root / "tasks" / digest
+        workspace.mkdir(parents=True, exist_ok=True)
+        return workspace
 
     @staticmethod
     def _assert_acyclic(tasks: Sequence[DelegatedTask]) -> None:
