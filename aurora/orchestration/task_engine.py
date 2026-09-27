@@ -15,7 +15,6 @@ from aurora.autonomy.capability_runtime import CapabilityExecutionError
 from aurora.autonomy.models import CapabilityRequest
 from .engine import OrchestrationEngine, TaskResult
 from aurora.organization import (
-    AgentSelector,
     OrganizationConfigError,
     OrganizationRegistry,
 )
@@ -226,6 +225,8 @@ class TaskEngine:
             return task
         if self.organization is None:
             raise TaskEngineError("automatic agent selection requires an organization registry")
+        from aurora.organization.agent_selection import AgentSelector
+
         selector = AgentSelector(
             self.organization,
             self.skill_registry,
