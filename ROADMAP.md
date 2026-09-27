@@ -52,6 +52,21 @@ Parallel agent execution is now treated as a transversal runtime capability:
 
 This hardening must pass CI and runtime stress validation before being declared production-verified.
 
+
+### Mission Team Runtime — IMPLEMENTED
+
+The operational team layer is now connected across the mission lifecycle:
+- durable mission submission forms a specialist team from the task DAG's required skills;
+- automatic task roles are resolved only within that formed team;
+- explicit assignments outside the team fail closed;
+- the existing DAG remains the execution authority, preserving dependency barriers and durable worker fencing;
+- worker execution continues to feed skill evaluation, trusted learning and bounded skill-evolution proposals;
+- task execution continues to feed dynamic model routing through skill/work context and trusted model history;
+- team state is emitted as durable mission events and supplied to Director review context;
+- Director follow-up phases reform the team before new tasks enter the durable queue.
+
+PR #27 merged as 30239c0c78b858996054e5d5bfc7503b7e307260; CI run 769 passed both the full unit suite and e2e-network suite.
+
 ## Phase 9 — Knowledge & Research Intelligence — ACTIVE
 
 Objective: give Aurora an evidence-first research capability that can investigate
