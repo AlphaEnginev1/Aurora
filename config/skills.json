@@ -1,0 +1,408 @@
+{
+  "version": 1,
+  "description": "Governed, versioned specialist procedures that agents can carry and the Director can assign per task.",
+  "skills": [
+    {
+      "skill_id": "research-literature-analysis",
+      "version": "1.0.0",
+      "name": "Scientific literature analysis",
+      "mission": "Find, compare and interpret evidence from scientific and technical literature.",
+      "instructions": "Start from primary sources when available. Separate source claims from Aurora inference. Record publication identity, relevant evidence, limitations and contradictions. Prefer reproducible extraction over unsupported summaries.",
+      "required_capabilities": [
+        "tool:curl",
+        "tool:rg"
+      ],
+      "verification_requirements": [
+        "source_identity_check",
+        "primary_source_check",
+        "claim_evidence_alignment"
+      ],
+      "quality_checks": [
+        "citation_completeness",
+        "contradiction_scan",
+        "uncertainty_statement"
+      ],
+      "tags": [
+        "research",
+        "science",
+        "evidence"
+      ]
+    },
+    {
+      "skill_id": "research-source-validation",
+      "version": "1.0.0",
+      "name": "Source validation",
+      "mission": "Assess source provenance, relevance and evidentiary strength before reuse.",
+      "instructions": "Trace important claims to the strongest accessible source. Check provenance, recency when relevant, methodological limitations and whether a source actually supports the claim.",
+      "required_capabilities": [
+        "tool:curl",
+        "tool:rg"
+      ],
+      "verification_requirements": [
+        "provenance_check",
+        "claim_support_check"
+      ],
+      "quality_checks": [
+        "source_quality",
+        "independence_check"
+      ],
+      "tags": [
+        "research",
+        "evidence"
+      ]
+    },
+    {
+      "skill_id": "engineering-software-design",
+      "version": "1.0.0",
+      "name": "Software engineering",
+      "mission": "Design, implement and validate maintainable software changes.",
+      "instructions": "Understand existing contracts before changing code. Prefer small composable changes, explicit failure modes and tests that exercise real behavior. Preserve security boundaries and backwards compatibility unless the task explicitly changes them.",
+      "required_capabilities": [
+        "tool:git",
+        "tool:rg",
+        "tool:fd",
+        "runtime:python",
+        "python.package:pip"
+      ],
+      "verification_requirements": [
+        "test_execution",
+        "contract_check"
+      ],
+      "quality_checks": [
+        "regression_check",
+        "security_boundary_check",
+        "maintainability_check"
+      ],
+      "tags": [
+        "engineering",
+        "coding"
+      ]
+    },
+    {
+      "skill_id": "engineering-debugging",
+      "version": "1.0.0",
+      "name": "Systematic debugging",
+      "mission": "Diagnose failures from evidence and isolate root causes efficiently.",
+      "instructions": "Reproduce the failure, capture the first causal signal, form falsifiable hypotheses, change one relevant variable at a time and add a regression test for the discovered failure mode.",
+      "required_capabilities": [
+        "tool:git",
+        "tool:rg",
+        "tool:fd",
+        "runtime:python"
+      ],
+      "verification_requirements": [
+        "reproduction_check",
+        "regression_test"
+      ],
+      "quality_checks": [
+        "root_cause_evidence",
+        "side_effect_scan"
+      ],
+      "tags": [
+        "engineering",
+        "debugging"
+      ]
+    },
+    {
+      "skill_id": "data-reproducible-analysis",
+      "version": "1.0.0",
+      "name": "Reproducible data analysis",
+      "mission": "Transform and analyze structured data with reproducible methods.",
+      "instructions": "Preserve input provenance and deterministic transformations. Validate schemas and missingness before analysis. Keep intermediate calculations inspectable and document assumptions.",
+      "required_capabilities": [
+        "runtime:python",
+        "python.package:pip",
+        "tool:rg",
+        "tool:fd"
+      ],
+      "verification_requirements": [
+        "input_provenance_check",
+        "reproducibility_check"
+      ],
+      "quality_checks": [
+        "schema_validation",
+        "determinism_check",
+        "assumption_check"
+      ],
+      "tags": [
+        "data",
+        "analysis"
+      ]
+    },
+    {
+      "skill_id": "data-pipeline-engineering",
+      "version": "1.0.0",
+      "name": "Data pipeline engineering",
+      "mission": "Build robust data processing workflows with clear validation boundaries.",
+      "instructions": "Separate ingestion, normalization, validation and output stages. Make failures explicit, preserve raw inputs where policy allows and make reruns idempotent.",
+      "required_capabilities": [
+        "runtime:python",
+        "python.package:pip",
+        "tool:rg",
+        "tool:fd"
+      ],
+      "verification_requirements": [
+        "pipeline_stage_check",
+        "rerun_check"
+      ],
+      "quality_checks": [
+        "idempotency_check",
+        "data_integrity_check"
+      ],
+      "tags": [
+        "data",
+        "pipelines"
+      ]
+    },
+    {
+      "skill_id": "verification-evidence-audit",
+      "version": "1.0.0",
+      "name": "Evidence auditing",
+      "mission": "Independently test whether results are actually supported by evidence.",
+      "instructions": "Do not trust the producing agent's conclusion. Re-check key inputs, reproduce critical calculations where practical and identify unsupported leaps or missing evidence.",
+      "required_capabilities": [
+        "tool:curl",
+        "tool:rg",
+        "tool:fd",
+        "runtime:python"
+      ],
+      "verification_requirements": [
+        "independent_recheck",
+        "evidence_chain_check"
+      ],
+      "quality_checks": [
+        "independence",
+        "coverage",
+        "uncertainty"
+      ],
+      "tags": [
+        "verification",
+        "evidence"
+      ]
+    },
+    {
+      "skill_id": "verification-experimental-validation",
+      "version": "1.0.0",
+      "name": "Experimental validation",
+      "mission": "Design focused checks that distinguish competing explanations and regressions.",
+      "instructions": "State the hypothesis being tested, choose the smallest useful validation, measure the result explicitly and report both passing and failing evidence.",
+      "required_capabilities": [
+        "tool:rg",
+        "tool:fd",
+        "runtime:python"
+      ],
+      "verification_requirements": [
+        "hypothesis_check",
+        "measurement_check"
+      ],
+      "quality_checks": [
+        "negative_case",
+        "repeatability"
+      ],
+      "tags": [
+        "verification",
+        "testing"
+      ]
+    },
+    {
+      "skill_id": "security-threat-modeling",
+      "version": "1.0.0",
+      "name": "Threat modeling",
+      "mission": "Identify abuse paths and required security controls before implementation.",
+      "instructions": "Map assets, trust boundaries, attacker-controlled inputs and privileged transitions. Prefer fail-closed designs and least privilege. Treat network, execution and acquisition paths as security boundaries.",
+      "required_capabilities": [
+        "tool:rg",
+        "tool:fd",
+        "tool:git",
+        "runtime:python"
+      ],
+      "verification_requirements": [
+        "trust_boundary_check",
+        "privilege_check"
+      ],
+      "quality_checks": [
+        "attack_surface_scan",
+        "fail_closed_check"
+      ],
+      "tags": [
+        "security"
+      ]
+    },
+    {
+      "skill_id": "security-code-audit",
+      "version": "1.0.0",
+      "name": "Security code audit",
+      "mission": "Review implementation for policy bypasses, unsafe defaults and security regressions.",
+      "instructions": "Inspect authorization, input validation, path handling, subprocess execution, networking and persistence. Verify that controls are enforced at the final execution boundary rather than only in prompts.",
+      "required_capabilities": [
+        "tool:rg",
+        "tool:fd",
+        "tool:git",
+        "runtime:python"
+      ],
+      "verification_requirements": [
+        "authorization_check",
+        "execution_boundary_check"
+      ],
+      "quality_checks": [
+        "negative_path_scan",
+        "regression_scan"
+      ],
+      "tags": [
+        "security",
+        "audit"
+      ]
+    },
+    {
+      "skill_id": "operations-runtime-health",
+      "version": "1.0.0",
+      "name": "Runtime health operations",
+      "mission": "Maintain reliable continuous execution and detect degraded runtime state.",
+      "instructions": "Use observable signals, distinguish transient from persistent failures, preserve evidence before recovery and prefer bounded automatic recovery with explicit escalation when policy limits are reached.",
+      "required_capabilities": [
+        "tool:rg",
+        "tool:fd",
+        "runtime:python",
+        "tool:curl"
+      ],
+      "verification_requirements": [
+        "health_signal_check",
+        "recovery_check"
+      ],
+      "quality_checks": [
+        "evidence_preservation",
+        "bounded_recovery"
+      ],
+      "tags": [
+        "operations",
+        "reliability"
+      ]
+    },
+    {
+      "skill_id": "operations-incident-recovery",
+      "version": "1.0.0",
+      "name": "Incident recovery",
+      "mission": "Recover failed work without corrupting durable state or bypassing governance.",
+      "instructions": "Identify the last durable checkpoint, recover expired work safely, retry only within policy and verify terminal state. Never trade durable correctness for apparent liveness.",
+      "required_capabilities": [
+        "tool:rg",
+        "tool:fd",
+        "runtime:python"
+      ],
+      "verification_requirements": [
+        "checkpoint_check",
+        "lease_check",
+        "terminal_state_check"
+      ],
+      "quality_checks": [
+        "idempotent_recovery",
+        "no_data_loss"
+      ],
+      "tags": [
+        "operations",
+        "recovery"
+      ]
+    },
+    {
+      "skill_id": "discovery-hypothesis-generation",
+      "version": "1.0.0",
+      "name": "Hypothesis generation",
+      "mission": "Explore plausible explanations, opportunities and research directions beyond the current plan.",
+      "instructions": "Generate multiple hypotheses from observed evidence, including alternatives that could falsify the current direction. Rank by testability and information gain without treating hypotheses as facts.",
+      "required_capabilities": [
+        "tool:curl",
+        "tool:rg",
+        "runtime:python",
+        "python.package:pip"
+      ],
+      "verification_requirements": [
+        "evidence_anchor_check",
+        "alternative_hypothesis_check"
+      ],
+      "quality_checks": [
+        "testability",
+        "novelty_signal",
+        "uncertainty"
+      ],
+      "tags": [
+        "discovery",
+        "research"
+      ]
+    },
+    {
+      "skill_id": "discovery-novelty-analysis",
+      "version": "1.0.0",
+      "name": "Novelty analysis",
+      "mission": "Search for evidence that an approach, finding or capability is genuinely new or materially different.",
+      "instructions": "Search broadly, trace relevant prior art, distinguish novelty from rebranding and record the strongest counterexamples found. Report confidence and remaining search gaps.",
+      "required_capabilities": [
+        "tool:curl",
+        "tool:rg",
+        "runtime:python"
+      ],
+      "verification_requirements": [
+        "prior_art_check",
+        "counterexample_check"
+      ],
+      "quality_checks": [
+        "search_coverage",
+        "novelty_basis",
+        "uncertainty"
+      ],
+      "tags": [
+        "discovery",
+        "novelty"
+      ]
+    },
+    {
+      "skill_id": "synthesis-cross-domain-reasoning",
+      "version": "1.0.0",
+      "name": "Cross-domain synthesis",
+      "mission": "Integrate independently produced evidence into a coherent model and expose unresolved conflicts.",
+      "instructions": "Preserve provenance while combining results. Separate consensus, conflict and open questions. Resolve only what evidence supports and keep important disagreement explicit.",
+      "required_capabilities": [
+        "runtime:python",
+        "tool:rg",
+        "tool:curl"
+      ],
+      "verification_requirements": [
+        "provenance_preservation",
+        "conflict_check"
+      ],
+      "quality_checks": [
+        "coverage",
+        "traceability",
+        "uncertainty"
+      ],
+      "tags": [
+        "synthesis",
+        "reasoning"
+      ]
+    },
+    {
+      "skill_id": "synthesis-decision-briefing",
+      "version": "1.0.0",
+      "name": "Decision briefing",
+      "mission": "Turn verified evidence into concise, actionable next steps for the Director.",
+      "instructions": "State the decision context, evidence, alternatives, risks, dependencies and recommended next action without hiding uncertainty. Link important assertions to their evidence source.",
+      "required_capabilities": [
+        "runtime:python",
+        "tool:rg",
+        "tool:curl"
+      ],
+      "verification_requirements": [
+        "evidence_trace_check",
+        "risk_check"
+      ],
+      "quality_checks": [
+        "actionability",
+        "traceability",
+        "uncertainty"
+      ],
+      "tags": [
+        "synthesis",
+        "decisions"
+      ]
+    }
+  ]
+}
