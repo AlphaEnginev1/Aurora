@@ -64,7 +64,7 @@ def test_learning_store_builds_model_scores_and_proposal(tmp_path: Path):
     for score in (0.4, 0.5, 0.6):
         store.record(SkillEvaluation(
             "research","1.0.0",None,f"t-{score}","researcher",score,"succeeded","model/a",
-            ("source_check",),(),("citation_check",),("citation_check",),(),(),None
+            ("source_check",),(),("citation_check",),("citation_check",),(),(),None,1.0,"evidence_complete"
         ))
     perf = store.performance("research")
     assert perf.evaluations == 3
@@ -72,7 +72,7 @@ def test_learning_store_builds_model_scores_and_proposal(tmp_path: Path):
     assert store.model_scores_for(("research",)) == {"model/a": 0.5}
     proposal = SkillEvolutionEngine(store).observe(
         SkillEvaluation("research","1.0.0",None,"t-4","researcher",0.4,"failed","model/a",
-                        (),(),("source_check",),(),(),("citation_check",),"boom"),
+                        (),(),("source_check",),(),(),("citation_check",),"boom",0.0,"execution_failed"),
         base_version="1.0.0",
     )
     assert proposal is not None
