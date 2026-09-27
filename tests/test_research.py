@@ -10,6 +10,8 @@ from aurora.research import (
     ResearchService,
     ResearchStore,
 )
+from aurora.research.models import RedirectHop, SourceRecord
+from aurora.autonomy.internet import InternetResponse
 
 
 def test_verified_finding_requires_every_referenced_evidence_record():
@@ -30,7 +32,6 @@ def test_verified_finding_requires_every_referenced_evidence_record():
 
 def test_research_store_persists_source_and_evidence(tmp_path: Path):
     store = ResearchStore(tmp_path / "research.db")
-    from aurora.research.models import SourceRecord
 
     source = SourceRecord(
         source_id="s1",
@@ -59,6 +60,42 @@ class FakeGateway:
     def get(self, url: str) -> bytes:
         self.urls.append(url)
         return self.payload
+
+
+class MetadataGateway(FakeGateway):
+    def get_with_metadata(self, url: str) -> InternetResponse:
+        self.urls.append(url)
+        return InternetResponse(
+            requested_url=url,
+            final_url="https://example.invalid/final",
+            status_code=200,
+            content_type="text/html",
+            body=self.payload,
+            redirects=(
+                type("Hop", (), {
+                    "source_url": url,
+                    "target_url": "https://example.invalid/final",
+                    "status_code": 301,
+                })(),
+            ),
+        )
+
+
+def test_research_records_redirect_safe_provenance_and_restores_it(tmp_path: Path):
+    store = ResearchStore(tmp_path / "research.db")
+    service = ResearchService(MetadataGateway(b"source-content"), store)
+
+    source = service.retrieve(
+        ResearchRequest("r1", "investigate", ("https://example.invalid/start",))
+    )[0]
+
+    assert source.url == "https://example.invalid/start"
+    assert source.final_url == "https://example.invalid/final"
+    assert source.redirect_chain[0].status_code == 301
+    restored = store.source(source.source_id)
+    assert restored is not None
+    assert restored.final_url == source.final_url
+    assert restored.redirect_chain == source.redirect_chain
 
 
 def test_research_service_records_content_hash_and_rejects_invalid_limits(tmp_path: Path):
