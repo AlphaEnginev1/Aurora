@@ -84,6 +84,10 @@ def test_learning_store_builds_model_scores_and_proposal(tmp_path: Path):
     )
     assert proposal is not None
     assert proposal.candidate_version == "1.0.1"
+    approved = store.resolve_proposal(proposal.proposal_id, decision="approved")
+    assert approved.status == "approved"
+    assert store.pending_proposals("research") == ()
+    # Approval is only a governance decision; it does not rewrite the active registry.
 
 
 
