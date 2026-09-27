@@ -176,6 +176,7 @@ class TaskEngine:
             task_id=task.task_id,
             role=task.role,
             objective=task.objective,
+            model_preferences=model_preferences,
         )
 
     @staticmethod
