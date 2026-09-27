@@ -811,6 +811,7 @@ class DurableTaskStore:
         attempts: int | None = None,
         last_error: str | None = None,
         claimed_by: str | None = None,
+        claim_token: str | None = None,
         lease_until: str | None = None,
     ) -> StoredTask:
         task = DelegatedTask(
@@ -830,6 +831,7 @@ class DurableTaskStore:
             attempts=attempts if attempts is not None else row["attempts"],
             last_error=last_error if last_error is not None else row["last_error"],
             claimed_by=claimed_by if claimed_by is not None else row["claimed_by"],
+            claim_token=claim_token if claim_token is not None else row["claim_token"],
             lease_until=lease_until if lease_until is not None else row["lease_until"],
             result=json.loads(raw_result) if raw_result else None,
             phase=int(row["phase"]),
