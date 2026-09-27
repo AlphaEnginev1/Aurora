@@ -443,6 +443,9 @@ class DurableTaskStore:
                 )
 
             now = self._now()
+            if row["claimed_by"] is not None and row["lease_until"] is not None and row["lease_until"] <= now:
+                db.rollback()
+                raise TaskStoreError(f"task lease has expired: {mission_id}/{task_id}")
             db.execute(
                 """
                 UPDATE tasks
