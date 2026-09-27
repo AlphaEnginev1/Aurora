@@ -77,22 +77,23 @@ async def aurora_director_function(config: AuroraDirectorFunctionConfig, builder
                 nvidia_api_key=os.getenv("NVIDIA_API_KEY"),
             )
             planner = DirectorPlanner(router)
-            plan = planner.plan(objective=objective)
 
-            if os.getenv("AURORA_ENABLE_AUTONOMY_EXECUTION", "0") != "1":
-                return (
-                    f"{config.prefix}\nMISSION_ACCEPTED\n\nObjective:\n{objective}\n\n"
-                    + _format_plan(plan)
-                    + "\n\nAutonomous execution is disabled by runtime policy."
-                )
-
+            execution_enabled = os.getenv("AURORA_ENABLE_AUTONOMY_EXECUTION", "0") == "1"
             proxy_host = os.getenv("AURORA_EGRESS_PROXY_HOST")
-            if not proxy_host:
+            if not execution_enabled or not proxy_host:
+                plan = planner.plan(objective=objective)
+                suffix = (
+                    "\n\nAutonomous execution is disabled by runtime policy."
+                    if not execution_enabled
+                    else (
+                        "\n\nMISSION_BLOCKED\nReason: controlled egress proxy host is not "
+                        "configured; Aurora will not fall back to direct package downloads."
+                    )
+                )
                 return (
                     f"{config.prefix}\nMISSION_ACCEPTED\n\nObjective:\n{objective}\n\n"
                     + _format_plan(plan)
-                    + "\n\nMISSION_BLOCKED\nReason: controlled egress proxy host is not configured; "
-                    "Aurora will not fall back to direct package downloads."
+                    + suffix
                 )
 
             service = build_director_service(
@@ -113,7 +114,10 @@ async def aurora_director_function(config: AuroraDirectorFunctionConfig, builder
                 egress_proxy_port=int(os.getenv("AURORA_EGRESS_PROXY_PORT", "3128")),
             )
             mission = service.run_mission(objective=objective)
-            return f"{config.prefix}\nMISSION_ACCEPTED\n\nObjective:\n{objective}\n\n{_format_mission(mission)}"
+            return (
+                f"{config.prefix}\nMISSION_ACCEPTED\n\nObjective:\n{objective}\n\n"
+                + _format_mission(mission)
+            )
 
         except (ModelRoutingError, InferenceConfigError, DirectorPlanError, ValueError, OSError) as exc:
             logger.warning("Aurora Director unavailable: %s", exc)
