@@ -19,6 +19,7 @@ class AgentSpec:
     mission: str
     capabilities: frozenset[str]
     model_preferences: tuple[str, ...]
+    skill_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -80,6 +81,7 @@ class OrganizationRegistry:
                 )
             capabilities = item.get("capabilities", [])
             model_preferences = item.get("model_preferences", [])
+            skill_ids = item.get("skill_ids", [])
             if (
                 not isinstance(capabilities, list)
                 or not all(isinstance(value, str) and value.strip() for value in capabilities)
@@ -97,6 +99,13 @@ class OrganizationRegistry:
                 raise OrganizationConfigError(
                     f"invalid model_preferences for agent {item.get('agent_id')!r}"
                 )
+            if (
+                not isinstance(skill_ids, list)
+                or not all(isinstance(value, str) and value.strip() for value in skill_ids)
+            ):
+                raise OrganizationConfigError(
+                    f"invalid skill_ids for agent {item.get('agent_id')!r}"
+                )
             agent = AgentSpec(
                 agent_id=item["agent_id"],
                 role=item["role"],
@@ -104,6 +113,7 @@ class OrganizationRegistry:
                 mission=item["mission"],
                 capabilities=frozenset(capabilities),
                 model_preferences=tuple(model_preferences),
+                skill_ids=tuple(skill_ids),
             )
             if agent.agent_id in agents:
                 raise OrganizationConfigError(
