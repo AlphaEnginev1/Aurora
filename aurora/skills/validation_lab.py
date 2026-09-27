@@ -67,8 +67,9 @@ class SkillValidationLab:
             raise SkillValidationError("baseline and candidate skill ids differ")
         if not cases:
             raise SkillValidationError("at least one validation case is required")
-        baseline_results = tuple(self._run(baseline, case) for case in cases)
-        candidate_results = tuple(self._run(candidate, case) for case in cases)
+        validation_model = self._select_validation_model(baseline, cases[0])
+        baseline_results = tuple(self._run(baseline, case, model=validation_model) for case in cases)
+        candidate_results = tuple(self._run(candidate, case, model=validation_model) for case in cases)
         baseline_score = sum(item.score for item in baseline_results) / len(baseline_results)
         candidate_score = sum(item.score for item in candidate_results) / len(candidate_results)
         improvement = candidate_score - baseline_score
@@ -88,7 +89,14 @@ class SkillValidationLab:
             state=state,
         )
 
-    def _run(self, skill: SkillSpec, case: SkillValidationCase) -> SkillValidationResult:
+    def _select_validation_model(self, skill: SkillSpec, case: SkillValidationCase) -> str:
+        request = self._request(skill, case)
+        try:
+            return self.router.select(request, preferred_models=skill.model_preferences).id
+        except ModelRoutingError as exc:
+            raise SkillValidationError(str(exc)) from exc
+
+    def _request(self, skill: SkillSpec, case: SkillValidationCase, *, model: str | None = None) -> InferenceRequest:
         prompt = (
             "Execute this governed specialist procedure against the validation case.\n"
             "Do not invent evidence. Emit exactly one machine-readable line for every "
@@ -100,7 +108,8 @@ class SkillValidationLab:
             f"Verification checks: {', '.join(skill.verification_requirements)}\n"
             f"Quality checks: {', '.join(skill.quality_checks)}"
         )
-        request = InferenceRequest(
+        return InferenceRequest(
+            model=model,
             messages=[
                 {"role": "system", "content": "You are Aurora's controlled skill validation executor."},
                 {"role": "user", "content": prompt},
@@ -113,8 +122,10 @@ class SkillValidationLab:
                 "context_tokens": max(256, len(prompt) // 4),
             },
         )
+    def _run(self, skill: SkillSpec, case: SkillValidationCase, *, model: str) -> SkillValidationResult:
+        request = self._request(skill, case, model=model)
         try:
-            response = self.router.generate(request, preferred_models=skill.model_preferences)
+            response = self.router.generate(request)
         except ModelRoutingError as exc:
             raise SkillValidationError(str(exc)) from exc
 
