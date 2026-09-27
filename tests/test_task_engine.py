@@ -143,7 +143,6 @@ def test_task_engine_runs_independent_ready_nodes_in_parallel(tmp_path):
             return TaskResult(
                 task_id=kwargs["task_id"],
                 role=kwargs["role"],
-                objective=kwargs["objective"],
                 response=InferenceResponse(
                     model="fake/model",
                     provider="fake",
