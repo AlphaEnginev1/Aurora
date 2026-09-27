@@ -351,7 +351,8 @@ class AcquisitionManager:
         if workspace.exists():
             shutil.rmtree(workspace)
         wheels = workspace / "wheels"
-        installed = workspace / "prefix"
+        # The managed runtime is mounted at this stable logical path when tools execute.
+        installed = workspace / "managed-site"
         workspace.mkdir(parents=True, exist_ok=False)
         wheels.mkdir()
         installed.mkdir()
@@ -361,7 +362,7 @@ class AcquisitionManager:
         committed = False
         try:
             venv_result = self.sandbox.execute(
-                [python, "-m", "venv", "/workspace/prefix"],
+                [python, "-m", "venv", "/workspace/managed-site"],
                 workspace=workspace,
             )
             if venv_result.returncode != 0:
@@ -374,7 +375,7 @@ class AcquisitionManager:
 
             sandbox_result = self.sandbox.execute(
                 [
-                    "/workspace/prefix/bin/python",
+                    "/workspace/managed-site/bin/python",
                     "-m",
                     "pip",
                     "install",
