@@ -283,11 +283,10 @@ class SandboxExecutor:
                     child_pid = payload.get("child-pid")
                     if isinstance(child_pid, int) and child_pid > 0:
                         return child_pid
-        finally:
-            try:
-                os.close(status_fd)
-            except OSError:
-                pass
+        # Keep the status pipe open after child-pid is observed.
+        # bubblewrap writes a second JSON status record (exit-code) when the
+        # sandbox child exits. Closing the read end here would make that later
+        # write hit SIGPIPE and kill bubblewrap before it can complete.
 
     def _run(
         self,
@@ -343,11 +342,13 @@ class SandboxExecutor:
                 bootstrap_file.close()
                 bootstrap_file = None
                 child_pid = self._read_bwrap_child_pid(status_read, process)
-                status_read = -1
                 slirp_handle = _EgressEnforcer(self.policy).prepare(child_pid)
             stdout, stderr = process.communicate(
                 timeout=self.policy.timeout_seconds
             )
+            if status_read >= 0:
+                os.close(status_read)
+                status_read = -1
             return (
                 subprocess.CompletedProcess(
                     argv, process.returncode, stdout, stderr
