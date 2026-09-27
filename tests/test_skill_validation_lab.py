@@ -7,6 +7,9 @@ from aurora.skills.validation_lab import SkillValidationCase, SkillValidationErr
 
 
 class FakeRouter:
+    def select(self, request, preferred_models=()):
+        return type("Spec", (), {"id": "validation-model"})()
+
     def generate(self, request, preferred_models=()):
         prompt = request.messages[-1]["content"]
         candidate = "independent source cross-checking" in prompt
