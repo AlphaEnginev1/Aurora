@@ -193,7 +193,7 @@ class AcquisitionManager:
     def _existing_pip_provenance(self, spec: ToolSpec) -> PackageProvenance | None:
         assert self.install_root is not None
         normalized = spec.name.lower().replace("-", "_")
-        for metadata_path in self.install_root.glob("*.dist-info/METADATA"):
+        for metadata_path in self.install_root.rglob("*.dist-info/METADATA"):
             fields = {}
             metadata = metadata_path.read_text(encoding="utf-8", errors="strict")
             for line in metadata.splitlines():
@@ -472,7 +472,7 @@ class AcquisitionManager:
         self, install_root: Path, name: str, version: str
     ) -> int:
         normalized = name.lower().replace("-", "_")
-        for metadata_path in install_root.glob("*.dist-info/METADATA"):
+        for metadata_path in install_root.rglob("*.dist-info/METADATA"):
             metadata = metadata_path.read_text(encoding="utf-8", errors="strict")
             fields = {}
             for line in metadata.splitlines():
@@ -508,7 +508,7 @@ class AcquisitionManager:
     def _verify_installed_distribution(self, name: str, version: str) -> int:
         assert self.install_root is not None
         normalized = name.lower().replace("-", "_")
-        for metadata_path in self.install_root.glob("*.dist-info/METADATA"):
+        for metadata_path in self.install_root.rglob("*.dist-info/METADATA"):
             metadata = metadata_path.read_text(encoding="utf-8", errors="strict")
             fields = {}
             for line in metadata.splitlines():
@@ -549,7 +549,7 @@ class AcquisitionManager:
         self, spec: ToolSpec, install_root: Path
     ) -> PackageProvenance | None:
         normalized = spec.name.lower().replace("-", "_")
-        for metadata_path in install_root.glob("*.dist-info/METADATA"):
+        for metadata_path in install_root.rglob("*.dist-info/METADATA"):
             fields = {}
             metadata = metadata_path.read_text(encoding="utf-8", errors="strict")
             for line in metadata.splitlines():
