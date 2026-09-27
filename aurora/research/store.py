@@ -35,6 +35,7 @@ class ResearchStore:
                 db.execute("ALTER TABLE sources ADD COLUMN final_url TEXT")
             if "redirect_chain_json" not in columns:
                 db.execute("ALTER TABLE sources ADD COLUMN redirect_chain_json TEXT NOT NULL DEFAULT '[]'")
+
     def record_source(self, source: SourceRecord):
         redirect_chain=json.dumps([
             {"source_url": hop.source_url, "target_url": hop.target_url, "status_code": hop.status_code}
@@ -45,17 +46,21 @@ class ResearchStore:
             INSERT OR REPLACE INTO sources
             (source_id,url,retrieved_at,content_sha256,status_code,content_type,title,content_text,final_url,redirect_chain_json)
             VALUES (?,?,?,?,?,?,?,?,?,?)
-            """,(source.source_id,source.url,source.retrieved_at,source.content_sha256,source.status_code,source.content_type,source.title,source.content_text,source.final_url,redirect_chain))
+            """,(source.source_id,source.url,source.retrieved_at,source.content_sha256,source.status_code,
+                 source.content_type,source.title,source.content_text,source.final_url,redirect_chain))
+
     def record_evidence(self,evidence:EvidenceRecord):
         with self._connect() as db:
             db.execute("""
             INSERT OR REPLACE INTO evidence
             (evidence_id,source_id,claim,state,verification_notes,verified_at) VALUES (?,?,?,?,?,?)
             """,(evidence.evidence_id,evidence.source_id,evidence.claim,evidence.state.value,evidence.verification_notes,evidence.verified_at))
+
     def record_finding(self,finding:ResearchFinding):
         with self._connect() as db:
             db.execute("INSERT OR REPLACE INTO findings (finding_id,claim,evidence_ids,confidence,state) VALUES (?,?,?,?,?)",
                        (finding.finding_id,finding.claim,json.dumps(finding.evidence_ids),finding.confidence,finding.state.value))
+
     def evidence_for_source(self,source_id:str):
         with self._connect() as db:
             rows=db.execute("SELECT evidence_id,source_id,claim,state,verification_notes,verified_at FROM evidence WHERE source_id=? ORDER BY evidence_id",(source_id,)).fetchall()
