@@ -66,7 +66,7 @@ def verify_record(install_root: str | Path, record_path: str | Path) -> int:
     # RECORD paths are relative to the directory containing the .dist-info
     # directory, not necessarily the top-level installation root. Absolute
     # paths are accepted only when they remain inside Aurora's managed root.
-    base = record.parent
+    base = record.parent.parent
     checked = 0
     with record.open(newline="", encoding="utf-8") as handle:
         for row in csv.reader(handle):
