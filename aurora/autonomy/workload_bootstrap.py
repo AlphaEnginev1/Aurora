@@ -268,13 +268,24 @@ def _delete_route_if_present(
         )
 
 
-def configure_routes(proxy_host: str, interface: str) -> None:
+def _validate_proxy_host(proxy_host: str) -> ipaddress.IPv4Address:
     try:
-        ipaddress.ip_address(proxy_host)
+        address = ipaddress.ip_address(proxy_host)
     except ValueError as exc:
         raise BootstrapError("proxy_host must be an IP address") from exc
-    if proxy_host != "10.0.2.2":
-        raise BootstrapError("controlled proxy gateway must be 10.0.2.2")
+    if not isinstance(address, ipaddress.IPv4Address):
+        raise BootstrapError("proxy_host must be an IPv4 address")
+    if address.is_loopback or address.is_unspecified or address.is_multicast:
+        raise BootstrapError("proxy_host must be a routable host IPv4 address")
+    if address.is_global and not address.is_private:
+        raise BootstrapError("proxy_host must not be a public Internet address")
+    if address == ipaddress.IPv4Address("10.0.2.2"):
+        raise BootstrapError("proxy_host must not be the slirp gateway")
+    return address
+
+
+def configure_routes(proxy_host: str, interface: str) -> None:
+    _validate_proxy_host(proxy_host)
     if not interface.isidentifier():
         raise BootstrapError("invalid network interface")
 
@@ -289,7 +300,11 @@ def configure_routes(proxy_host: str, interface: str) -> None:
         "the slirp IPv4 subnet route",
     )
 
-    _run_checked(["ip", "-4", "route", "replace", f"{proxy_host}/32", "dev", interface])
+    _run_checked(["ip", "-4", "route", "replace", "10.0.2.2/32", "dev", interface])
+    _run_checked([
+        "ip", "-4", "route", "replace", f"{proxy_host}/32",
+        "via", "10.0.2.2", "dev", interface, "onlink",
+    ])
 
     _delete_route_if_present(
         ["ip", "-6", "route", "show", "default"],
@@ -299,8 +314,7 @@ def configure_routes(proxy_host: str, interface: str) -> None:
 
 
 def configure_firewall(proxy_host: str, proxy_port: int) -> None:
-    if proxy_host != "10.0.2.2":
-        raise BootstrapError("egress firewall proxy gateway must be 10.0.2.2")
+    _validate_proxy_host(proxy_host)
     if not 1 <= proxy_port <= 65535:
         raise BootstrapError("invalid egress proxy port")
 
