@@ -17,3 +17,4 @@ class CapabilityResult:
     verification: str = "unknown"
     path: str | None = None
     sha256: str | None = None
+    artifact_id: str | None = None

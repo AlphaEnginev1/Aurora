@@ -437,6 +437,42 @@ class TaskEngine:
             if skill_assignment is not None
             else ""
         )
+        required_capabilities = (
+            tuple(sorted({
+                capability
+                for skill in skill_assignment.skills
+                for capability in skill.required_capabilities
+            }))
+            if skill_assignment is not None
+            else ()
+        )
+        prepare_capabilities = getattr(
+            self.orchestration, "prepare_capabilities", None
+        )
+        artifacts = (
+            prepare_capabilities(
+                names=required_capabilities,
+                actor=task.role,
+                reason=task.objective,
+            )
+            if prepare_capabilities is not None
+            else ()
+        )
+        if artifacts:
+            manifest = "\n".join(
+                f"- {item.name}: version={item.version or 'unknown'}, "
+                f"source={item.source or 'unknown'}, path={item.path or 'unknown'}, "
+                f"artifact_id={item.artifact_id or 'unknown'}, verification={item.verification}"
+                for item in artifacts
+            )
+            skill_context = (
+                skill_context + "\n\n"
+                if skill_context else ""
+            ) + (
+                "Governed capability artifacts prepared for this task. "
+                "Use only through Aurora's capability boundary; do not bypass it.\n"
+                + manifest
+            )
         return self.orchestration.run_task(
             task_id=task.task_id,
             role=task.role,

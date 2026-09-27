@@ -7,6 +7,7 @@ executable inside Aurora's sandbox.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 from pathlib import Path
 from typing import Mapping, Sequence
 
@@ -106,6 +107,38 @@ class CapabilityRuntime:
             stderr=result.stderr,
             timed_out=result.timed_out,
         )
+
+    @staticmethod
+    def _artifact_id(name: str, result) -> str:
+        material = "|".join(
+            str(value or "") for value in
+            (name, result.source, result.version, result.path, result.sha256)
+        )
+        return hashlib.sha256(material.encode("utf-8")).hexdigest()[:24]
+
+    def prepare_capabilities(
+        self,
+        names: Sequence[str],
+        *,
+        actor: str,
+        reason: str,
+    ) -> tuple[CapabilityResult, ...]:
+        """Acquire/verify required tools and return their immutable runtime manifest."""
+        prepared = []
+        for name in dict.fromkeys(names):
+            result = self.broker.ensure(
+                CapabilityRequest(name=name, actor=actor, reason=reason)
+            )
+            if result.status not in {"installed", "already_available"}:
+                raise CapabilityExecutionError(
+                    f"required capability {name} is unavailable: {result.status}"
+                )
+            if self.broker.policy.require_verification and result.verification != "verified":
+                raise CapabilityExecutionError(
+                    f"required capability {name} is not verified"
+                )
+            prepared.append(result)
+        return tuple(prepared)
 
     def _audit(
         self,

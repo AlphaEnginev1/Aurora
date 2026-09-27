@@ -9,7 +9,7 @@ from aurora.autonomy.capability_runtime import (
     CapabilityExecutionResult,
     CapabilityRuntime,
 )
-from aurora.autonomy.models import CapabilityRequest
+from aurora.autonomy.models import CapabilityRequest, CapabilityResult
 from aurora.inference.models import InferenceRequest, InferenceResponse
 from aurora.inference.router import ModelRouter
 
@@ -38,6 +38,24 @@ class OrchestrationEngine:
     ) -> None:
         self._router = router
         self._capability_runtime = capability_runtime
+
+    def prepare_capabilities(
+        self,
+        *,
+        names: Sequence[str],
+        actor: str,
+        reason: str,
+    ) -> tuple[CapabilityResult, ...]:
+        if not names:
+            return ()
+        if self._capability_runtime is None:
+            return ()
+        prepare = getattr(self._capability_runtime, "prepare_capabilities", None)
+        if prepare is None:
+            raise CapabilityExecutionError(
+                "capability runtime does not support verified artifact preparation"
+            )
+        return prepare(names, actor=actor, reason=reason)
 
     def run_task(
         self,
