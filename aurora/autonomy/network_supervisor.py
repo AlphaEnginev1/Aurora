@@ -14,18 +14,26 @@ class NetworkSupervisorError(RuntimeError):
 class NetworkSupervisorPolicy:
     """Route-fence policy applied before workload privileges are dropped."""
 
-    proxy_host: str = "10.0.2.2"
+    # This is the host address where the egress proxy listens. The slirp
+    # gateway remains 10.0.2.2 and is used as the next hop to that host.
+    proxy_host: str = ""
     proxy_port: int = 3128
     interface: str = "tap0"
     bootstrap_timeout_checks: int = 500
 
     def validate(self) -> None:
         try:
-            ipaddress.ip_address(self.proxy_host)
+            address = ipaddress.ip_address(self.proxy_host)
         except ValueError as exc:
             raise NetworkSupervisorError("proxy_host must be an IP address") from exc
-        if self.proxy_host != "10.0.2.2":
-            raise NetworkSupervisorError("rootless slirp proxy gateway must be 10.0.2.2")
+        if not isinstance(address, ipaddress.IPv4Address):
+            raise NetworkSupervisorError("proxy_host must be an IPv4 address")
+        if address.is_loopback or address.is_unspecified or address.is_multicast:
+            raise NetworkSupervisorError("proxy_host must be a routable host IPv4 address")
+        if address.is_global and not address.is_private:
+            raise NetworkSupervisorError("proxy_host must not be a public Internet address")
+        if address == ipaddress.IPv4Address("10.0.2.2"):
+            raise NetworkSupervisorError("proxy_host must not be the slirp gateway")
         if not 1 <= self.proxy_port <= 65535:
             raise NetworkSupervisorError("invalid proxy port")
         if not self.interface.isidentifier():
@@ -63,7 +71,11 @@ class NetworkSupervisorPolicy:
             ("/bin/sh", "-c", wait),
             clear_v4_default,
             clear_slirp_subnet,
-            ("ip", "-4", "route", "replace", f"{self.proxy_host}/32", "dev", self.interface),
+            ("ip", "-4", "route", "replace", "10.0.2.2/32", "dev", self.interface),
+            (
+                "ip", "-4", "route", "replace", f"{self.proxy_host}/32",
+                "via", "10.0.2.2", "dev", self.interface, "onlink",
+            ),
             clear_v6_default,
         )
 
