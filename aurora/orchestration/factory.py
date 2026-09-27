@@ -18,7 +18,9 @@ from aurora.inference.router import ModelRouter
 from aurora.research.service import ResearchService
 from aurora.research.store import ResearchStore
 from aurora.organization import AgentSelector, OrganizationRegistry
-from aurora.skills import SkillAcquisitionRuntime, SkillEvaluator, SkillEvolutionEngine, SkillLearningStore, SkillRegistry, SkillAcquisitionPipeline, AutonomousSpecialistAcquisition
+from aurora.skills import SkillAcquisitionRuntime, SkillEvaluator, SkillEvolutionEngine, SkillLearningStore, SkillRegistry
+from aurora.skills.acquisition_pipeline import SkillAcquisitionPipeline
+from aurora.skills.autonomous_specialist_acquisition import AutonomousSpecialistAcquisition
 from .director import DirectorPlanner, DirectorService
 from .durable_director import DurableDirectorService
 from .engine import OrchestrationEngine
