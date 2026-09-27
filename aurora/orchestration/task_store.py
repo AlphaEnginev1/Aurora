@@ -25,6 +25,7 @@ class StoredTask:
     last_error: str | None = None
     claimed_by: str | None = None
     lease_until: str | None = None
+    result: dict | None = None
 
 
 @dataclass(frozen=True)
@@ -72,6 +73,7 @@ class DurableTaskStore:
                     last_error TEXT,
                     claimed_by TEXT,
                     lease_until TEXT,
+                    result_json TEXT,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     PRIMARY KEY (mission_id, task_id)
@@ -107,6 +109,8 @@ class DurableTaskStore:
                 db.execute("ALTER TABLE tasks ADD COLUMN claimed_by TEXT")
             if "lease_until" not in columns:
                 db.execute("ALTER TABLE tasks ADD COLUMN lease_until TEXT")
+            if "result_json" not in columns:
+                db.execute("ALTER TABLE tasks ADD COLUMN result_json TEXT")
             db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_tasks_lease ON tasks (status, lease_until)"
             )
@@ -424,6 +428,7 @@ class DurableTaskStore:
         error: str | None = None,
         payload: dict | None = None,
         worker_id: str | None = None,
+        result: dict | None = None,
     ) -> None:
         if status not in {"succeeded", "failed", "blocked"}:
             raise TaskStoreError(f"invalid terminal task status: {status}")
@@ -459,10 +464,17 @@ class DurableTaskStore:
                 """
                 UPDATE tasks
                 SET status = ?, last_error = ?, claimed_by = NULL,
-                    lease_until = NULL, updated_at = ?
+                    lease_until = NULL, result_json = ?, updated_at = ?
                 WHERE mission_id = ? AND task_id = ?
                 """,
-                (status, error, now, mission_id, task_id),
+                (
+                    status,
+                    error,
+                    json.dumps(result, sort_keys=True) if result is not None else None,
+                    now,
+                    mission_id,
+                    task_id,
+                ),
             )
             event_payload = dict(payload or {})
             if error:
@@ -758,6 +770,7 @@ class DurableTaskStore:
             args=tuple(json.loads(row["args_json"])),
             depends_on=tuple(json.loads(row["deps_json"])),
         )
+        raw_result = row["result_json"]
         return StoredTask(
             mission_id=row["mission_id"],
             task=task,
@@ -766,6 +779,7 @@ class DurableTaskStore:
             last_error=last_error if last_error is not None else row["last_error"],
             claimed_by=claimed_by if claimed_by is not None else row["claimed_by"],
             lease_until=lease_until if lease_until is not None else row["lease_until"],
+            result=json.loads(raw_result) if raw_result else None,
         )
 
     @classmethod
