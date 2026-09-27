@@ -731,6 +731,11 @@ class DurableTaskStore:
                 raise TaskStoreError(
                     f"event cursor cannot move backwards: {event_id} < {current}"
                 )
+            if event_id > current + 1:
+                db.rollback()
+                raise TaskStoreError(
+                    f"event cursor cannot skip events: {event_id} > {current + 1}"
+                )
             exists = db.execute(
                 "SELECT 1 FROM task_events WHERE event_id = ?",
                 (event_id,),
