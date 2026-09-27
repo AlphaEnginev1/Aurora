@@ -10,6 +10,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Sequence
 
+
 from aurora.autonomy.capability_runtime import CapabilityExecutionError
 from aurora.autonomy.models import CapabilityRequest
 from .engine import OrchestrationEngine, TaskResult
@@ -47,6 +48,7 @@ class DelegatedTaskResult:
     model_result: TaskResult | None = None
     capability_result: object | None = None
     error: str | None = None
+    skill_evaluations: tuple[object, ...] = ()
 
 
 @dataclass
@@ -150,17 +152,61 @@ class TaskEngine:
         try:
             result = self._execute_task(task)
         except (CapabilityExecutionError, RuntimeError, ValueError) as exc:
-            return DelegatedTaskResult(
+            result = DelegatedTaskResult(
                 task,
                 TaskStatus.FAILED,
                 error=str(exc),
             )
-        return DelegatedTaskResult(
+            return self._learn_from_result(result)
+        result = DelegatedTaskResult(
             task,
             TaskStatus.SUCCEEDED,
             model_result=result if isinstance(result, TaskResult) else None,
             capability_result=None if isinstance(result, TaskResult) else result,
         )
+        return self._learn_from_result(result)
+
+    def _learn_from_result(self, result: DelegatedTaskResult) -> DelegatedTaskResult:
+        """Evaluate and persist specialist learning immediately after execution."""
+        if (
+            self.skill_learning is None
+            or self.skill_registry is None
+            or self.organization is None
+            or not result.task.skills
+        ):
+            return result
+
+        try:
+            from aurora.skills.evaluation import SkillEvaluator
+            from aurora.skills.learning import SkillEvolutionEngine
+
+            agent = self.organization.resolve_agent(result.task.role)
+            evaluator = SkillEvaluator(self.skill_registry)
+            evaluations = evaluator.evaluate(
+                task=result.task,
+                result=result,
+                default_skill_ids=agent.skill_ids,
+                agent_capabilities=agent.capabilities,
+            )
+            evolution = SkillEvolutionEngine(self.skill_learning)
+            for evaluation in evaluations:
+                self.skill_learning.record(evaluation)
+                evolution.observe(
+                    evaluation,
+                    base_version=evaluation.skill_version,
+                )
+            return DelegatedTaskResult(
+                task=result.task,
+                status=result.status,
+                model_result=result.model_result,
+                capability_result=result.capability_result,
+                error=result.error,
+                skill_evaluations=evaluations,
+            )
+        except Exception:
+            # Learning must never turn a completed task into a false execution
+            # failure. The durable execution result remains authoritative.
+            return result
 
     def skill_assignment_for(self, task: DelegatedTask):
         if self.skill_registry is None or self.organization is None:
@@ -223,9 +269,6 @@ class TaskEngine:
                 actor=task.role,
                 reason=task.objective,
             )
-            # Managed capabilities are activated in the shared runtime root so
-            # stable acquisition paths (for example /workspace/managed-site)
-            # remain valid. Task-specific data must live in the task workspace.
             workspace = self.workspace_root
             return self.orchestration.run_capability_task(
                 task_id=task.task_id,
