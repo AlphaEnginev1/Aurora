@@ -8,6 +8,7 @@ from typing import Any
 
 from aurora.inference.models import InferenceRequest
 from aurora.inference.router import ModelRouter
+from aurora.organization import OrganizationConfigError, OrganizationRegistry
 from .task_engine import DelegatedTask, DelegatedTaskResult, TaskEngine
 
 
@@ -54,8 +55,13 @@ Rules:
 - Keep the plan minimal and directly related to the objective.
 """
 
-    def __init__(self, router: ModelRouter) -> None:
+    def __init__(
+        self,
+        router: ModelRouter,
+        organization: OrganizationRegistry | None = None,
+    ) -> None:
         self.router = router
+        self.organization = organization
 
     def plan(
         self,
@@ -84,6 +90,7 @@ Rules:
             capability="reasoning",
         )
         tasks = self._parse(response.content)
+        self._validate_organization(tasks)
         return DirectorPlan(objective=objective, tasks=tasks, model=response.model)
 
     _REVIEW_SYSTEM = """You are Aurora's Director reviewer.
@@ -124,12 +131,25 @@ Rules:
             capability="reasoning",
         )
         decision, rationale, tasks = self._parse_review(response.content)
+        self._validate_organization(tasks)
         return DirectorReview(
             decision=decision,
             rationale=rationale,
             tasks=tasks,
             model=response.model,
         )
+
+    def _validate_organization(self, tasks: tuple[DelegatedTask, ...]) -> None:
+        if self.organization is None:
+            return
+        try:
+            for task in tasks:
+                self.organization.validate_task(
+                    role=task.role,
+                    capability=task.capability,
+                )
+        except OrganizationConfigError as exc:
+            raise DirectorPlanError(str(exc)) from exc
 
     @staticmethod
     def _parse(content: str) -> tuple[DelegatedTask, ...]:
