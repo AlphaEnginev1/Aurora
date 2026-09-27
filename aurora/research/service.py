@@ -11,6 +11,7 @@ from .store import ResearchStore
 class ResearchService:
     """Retrieve and durably retain bounded source content through InternetGateway."""
     MAX_CONTENT_BYTES = 1_048_576
+
     def __init__(self,gateway:InternetGateway,store:ResearchStore,discovery:ResearchDiscoveryProvider | None = None)->None:
         self.gateway=gateway; self.store=store; self.discovery=discovery
 
@@ -22,9 +23,12 @@ class ResearchService:
         return tuple(item.url for item in results)
 
     def retrieve(self,request:ResearchRequest)->tuple[SourceRecord,...]:
-        if not request.request_id.strip() or not request.objective.strip(): raise ValueError("research request requires request_id and objective")
-        if request.max_sources<1: raise ValueError("max_sources must be positive")
-        if len(request.required_sources)>request.max_sources: raise ValueError("required_sources exceeds max_sources")
+        if not request.request_id.strip() or not request.objective.strip():
+            raise ValueError("research request requires request_id and objective")
+        if request.max_sources<1:
+            raise ValueError("max_sources must be positive")
+        if len(request.required_sources)>request.max_sources:
+            raise ValueError("required_sources exceeds max_sources")
         sources=[]
         for url in request.required_sources[:request.max_sources]:
             try:
@@ -32,15 +36,13 @@ class ResearchService:
             except AttributeError:
                 payload = self.gateway.get(url)
                 response = InternetResponse(
-                    requested_url=url,
-                    final_url=url,
-                    status_code=200,
-                    content_type=None,
-                    body=payload,
+                    requested_url=url, final_url=url, status_code=200,
+                    content_type=None, body=payload,
                 )
             except InternetPolicyError:
                 raise
-            if len(response.body)>self.MAX_CONTENT_BYTES: raise InternetPolicyError("research source exceeds maximum content size")
+            if len(response.body)>self.MAX_CONTENT_BYTES:
+                raise InternetPolicyError("research source exceeds maximum content size")
             source=SourceRecord(
                 source_id=f"src-{uuid4().hex}",
                 url=response.requested_url,
@@ -55,7 +57,8 @@ class ResearchService:
                     for hop in response.redirects
                 ),
             )
-            self.store.record_source(source); sources.append(source)
+            self.store.record_source(source)
+            sources.append(source)
         return tuple(sources)
 
     def empty_report(self,request:ResearchRequest)->ResearchReport:
