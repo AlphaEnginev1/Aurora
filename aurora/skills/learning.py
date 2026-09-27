@@ -187,6 +187,17 @@ class SkillLearningStore:
             suggested_change=suggested_change,
         )
         with self._connect() as db:
+            existing = db.execute(
+                """
+                SELECT 1
+                FROM skill_evolution_proposals
+                WHERE skill_id = ? AND base_version = ? AND status = 'pending'
+                LIMIT 1
+                """,
+                (proposal.skill_id, proposal.base_version),
+            ).fetchone()
+            if existing is not None:
+                return None
             db.execute(
                 """
                 INSERT INTO skill_evolution_proposals (
