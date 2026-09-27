@@ -5,6 +5,7 @@ import asyncio
 import os
 from pathlib import Path
 import shutil
+import subprocess
 import threading
 
 import pytest
@@ -24,8 +25,30 @@ def require_linux_network_stack():
         pytest.fail("E2E prerequisites missing: " + ", ".join(missing))
 
 
+def host_ipv4() -> str:
+    result = subprocess.run(
+        ["ip", "-4", "route", "get", "1.1.1.1"],
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        timeout=5,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"cannot discover host IPv4: {result.stderr.strip()}")
+    fields = result.stdout.split()
+    try:
+        host = fields[fields.index("src") + 1]
+    except (ValueError, IndexError) as exc:
+        raise RuntimeError(f"host IPv4 missing from route lookup: {result.stdout!r}") from exc
+    if ":" in host:
+        raise RuntimeError(f"host route lookup returned non-IPv4 address: {host}")
+    return host
+
+
 class ProxyHarness:
     def __init__(self):
+        self.host = host_ipv4()
         self.proxy = EgressProxy(EgressProxyPolicy(frozenset({"github.com"})))
         self.loop = asyncio.new_event_loop()
         self.ready = threading.Event()
@@ -36,7 +59,7 @@ class ProxyHarness:
         asyncio.set_event_loop(self.loop)
 
         async def start():
-            self.server = await self.proxy.serve("0.0.0.0", 3128)
+            self.server = await self.proxy.serve(self.host, 3128)
             self.ready.set()
             while self.server is not None:
                 await asyncio.sleep(0.05)
@@ -66,11 +89,11 @@ def proxy():
     harness.stop()
 
 
-def run_sandbox(tmp_path: Path, *args: str):
+def run_sandbox(tmp_path: Path, *args: str, proxy_host: str | None = None):
     return SandboxExecutor(
         SandboxPolicy(
             network=True,
-            egress_proxy_host="10.0.2.2",
+            egress_proxy_host=proxy_host or host_ipv4(),
             egress_proxy_port=3128,
             timeout_seconds=20,
         )
@@ -92,12 +115,18 @@ def controlled_network_enforcement_available(tmp_path_factory):
 
 
 def test_allowed_https_reaches_approved_host(controlled_network_enforcement_available, proxy, tmp_path: Path):
-    result = run_sandbox(tmp_path, "curl", "-fsS", "--max-time", "10", "-o", "/dev/null", "https://github.com/")
+    result = run_sandbox(
+        tmp_path, "curl", "-fsS", "--max-time", "10", "-o", "/dev/null",
+        "https://github.com/", proxy_host=proxy.host,
+    )
     assert result.returncode == 0, f"rc={result.returncode} stderr={result.stderr!r}"
 
 
 def test_disallowed_host_is_rejected_by_proxy(controlled_network_enforcement_available, proxy, tmp_path: Path):
-    result = run_sandbox(tmp_path, "curl", "-fsS", "--max-time", "5", "-o", "/dev/null", "https://example.com/")
+    result = run_sandbox(
+        tmp_path, "curl", "-fsS", "--max-time", "5", "-o", "/dev/null",
+        "https://example.com/", proxy_host=proxy.host,
+    )
     assert result.returncode != 0
 
 
@@ -134,7 +163,10 @@ def test_workload_cannot_create_or_join_namespaces(controlled_network_enforcemen
 
 
 def test_proxy_gateway_is_reachable(controlled_network_enforcement_available, proxy, tmp_path: Path):
-    result = run_sandbox(tmp_path, "curl", "-v", "--connect-timeout", "3", "--max-time", "5", "http://10.0.2.2:3128/")
+    result = run_sandbox(
+        tmp_path, "curl", "-v", "--connect-timeout", "3", "--max-time", "5",
+        f"http://{proxy.host}:3128/", proxy_host=proxy.host,
+    )
     assert result.returncode != 0
     assert "403" in result.stderr
 
