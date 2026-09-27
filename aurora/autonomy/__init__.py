@@ -7,6 +7,13 @@ from .capability_resolution import (
     CapabilityResolutionRuntime,
     HttpCapabilityDiscoveryProvider,
 )
+from .credential_broker import (
+    CredentialBroker,
+    CredentialBrokerError,
+    CredentialGrant,
+    CredentialPolicy,
+    SecretBackend,
+)
 from .computer_operator import (
     ComputerAction,
     ComputerOperator,
@@ -23,6 +30,11 @@ __all__ = [
     "CapabilityResolutionError",
     "CapabilityResolutionRuntime",
     "HttpCapabilityDiscoveryProvider",
+    "CredentialBroker",
+    "CredentialBrokerError",
+    "CredentialGrant",
+    "CredentialPolicy",
+    "SecretBackend",
     "ComputerAction",
     "ComputerOperator",
     "ComputerOperatorError",
