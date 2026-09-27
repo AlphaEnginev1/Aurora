@@ -88,6 +88,11 @@ class AcquisitionManager:
         return {"tool": tool_spec.name, "source": tool_spec.source, "action": "install"}
 
     def acquire(self, tool_spec: ToolSpec) -> AcquisitionResult:
+        tx = self._transaction(tool_spec)
+        with tx.lock():
+            return self._acquire_locked(tool_spec)
+
+    def _acquire_locked(self, tool_spec: ToolSpec) -> AcquisitionResult:
         self.plan(tool_spec)
         tx = self._transaction(tool_spec)
         try:
