@@ -1,3 +1,4 @@
+import pytest
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -79,3 +80,43 @@ def test_task_engine_assigns_distinct_attempt_workspaces(tmp_path):
     assert recorder.workspaces[0] != recorder.workspaces[1]
     assert all(path.parent.name == "tasks" for path in recorder.workspaces)
     assert all(path.is_dir() for path in recorder.workspaces)
+
+
+def test_stale_claim_cannot_complete_after_lease_recovery(tmp_path):
+    from aurora.orchestration.task_store import TaskStoreError
+
+    store = DurableTaskStore(tmp_path / "tasks.db")
+    task = DelegatedTask("fenced", "engineer", "fenced work")
+    store.enqueue("mission-fence", [task])
+
+    first = store.claim_next("mission-fence", "worker-a", lease_seconds=1)
+    assert first is not None
+    assert first.claim_token
+
+    store.recover_expired(
+        "mission-fence",
+        now="9999-01-01T00:00:00+00:00",
+    )
+    second = store.claim_next("mission-fence", "worker-b", lease_seconds=30)
+    assert second is not None
+    assert second.claim_token != first.claim_token
+
+    with pytest.raises(TaskStoreError):
+        store.complete(
+            "mission-fence",
+            "fenced",
+            status="succeeded",
+            worker_id="worker-a",
+            claim_token=first.claim_token,
+            result={"owner": "stale"},
+        )
+
+    store.complete(
+        "mission-fence",
+        "fenced",
+        status="succeeded",
+        worker_id="worker-b",
+        claim_token=second.claim_token,
+        result={"owner": "current"},
+    )
+    assert store.get("mission-fence", "fenced").result == {"owner": "current"}
