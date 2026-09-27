@@ -16,7 +16,7 @@ from aurora.autonomy.sandbox import SandboxExecutor, SandboxPolicy
 from aurora.inference.config import load_model_specs
 from aurora.inference.router import ModelRouter
 from aurora.organization import OrganizationRegistry
-from aurora.skills import SkillRegistry
+from aurora.skills import SkillEvaluator, SkillEvolutionEngine, SkillLearningStore, SkillRegistry
 from .director import DirectorPlanner, DirectorService
 from .durable_director import DurableDirectorService
 from .engine import OrchestrationEngine
@@ -49,6 +49,7 @@ def build_director_service(
     egress_proxy_port: int = 3128,
     organization_path: str | Path = "config/organization.json",
     skills_path: str | Path = "config/skills.json",
+    skill_learning_path: str | Path | None = None,
 ) -> DirectorService:
     """Build the complete Director -> tasks -> capabilities execution path.
 
@@ -139,11 +140,18 @@ def build_director_service(
         router,
         capability_runtime=capability_runtime,
     )
+    learning_path = (
+        Path(skill_learning_path).resolve()
+        if skill_learning_path is not None
+        else root / "skill-learning.db"
+    )
+    learning_store = SkillLearningStore(learning_path)
     task_engine = TaskEngine(
         orchestration,
         root,
         organization=organization,
         skill_registry=skill_registry,
+        skill_learning=learning_store,
     )
     planner = DirectorPlanner(
         router,
@@ -167,6 +175,7 @@ def build_director_runtime(
     worker_id: str | None = None,
     organization_path: str | Path = "config/organization.json",
     skills_path: str | Path = "config/skills.json",
+    skill_learning_path: str | Path | None = None,
 ) -> DirectorRuntime:
     """Build the durable 24/7 Director -> Event Bus -> Worker runtime."""
 
@@ -180,6 +189,7 @@ def build_director_runtime(
         egress_proxy_port=egress_proxy_port,
         organization_path=organization_path,
         skills_path=skills_path,
+        skill_learning_path=skill_learning_path,
     )
     runtime_root = Path(workspace_root).resolve()
     store_path = Path(task_db_path).resolve() if task_db_path else runtime_root / "tasks.db"
@@ -191,11 +201,23 @@ def build_director_runtime(
         store=store,
         event_bus=event_bus,
     )
-    return DirectorRuntime(
+    skill_learning = service.task_engine.skill_learning
+    if not isinstance(skill_learning, SkillLearningStore):
+        raise RuntimeError("skill learning store is not configured")
+    skill_registry = service.task_engine.skill_registry
+    if skill_registry is None:
+        raise RuntimeError("skill registry is not configured")
+    skill_evaluator = SkillEvaluator(skill_registry)
+    skill_evolution = SkillEvolutionEngine(skill_learning)
+    runtime = DirectorRuntime(
         director=durable_director,
         store=store,
         event_bus=event_bus,
         worker_policy=worker_policy,
         worker_id=worker_id,
+        skill_evaluator=skill_evaluator,
+        skill_learning=skill_learning,
+        skill_evolution=skill_evolution,
     )
+    return runtime
 
