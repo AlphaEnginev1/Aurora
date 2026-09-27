@@ -50,9 +50,9 @@ def host_ipv4() -> str:
 
 
 class ProxyHarness:
-    def __init__(self):
+    def __init__(self, allowed_hosts=frozenset({"github.com"})):
         self.host = host_ipv4()
-        self.proxy = EgressProxy(EgressProxyPolicy(frozenset({"github.com"})))
+        self.proxy = EgressProxy(EgressProxyPolicy(frozenset(allowed_hosts)))
         self.loop = asyncio.new_event_loop()
         self.ready = threading.Event()
         self.server = None
@@ -88,6 +88,14 @@ class ProxyHarness:
 @pytest.fixture
 def proxy():
     harness = ProxyHarness().start()
+    yield harness
+    harness.stop()
+
+@pytest.fixture
+def pypi_proxy():
+    harness = ProxyHarness(
+        frozenset({"pypi.org", "files.pythonhosted.org"})
+    ).start()
     yield harness
     harness.stop()
 
@@ -229,3 +237,80 @@ def test_real_pypi_acquisition_downloads_verifies_and_executes(
     )
     assert execution.returncode == 0, execution.stderr
     assert execution.stdout.strip() == "25.0"
+
+
+def test_real_pypi_dependency_closure(
+    controlled_network_enforcement_available,
+    pypi_proxy,
+    tmp_path: Path,
+):
+    gateway = InternetGateway(
+        InternetPolicy(
+            frozenset({"https"}),
+            frozenset({"pypi.org", "files.pythonhosted.org"}),
+        )
+    )
+    network_sandbox = SandboxExecutor(
+        SandboxPolicy(
+            network=True,
+            egress_proxy_host=pypi_proxy.host,
+            egress_proxy_port=3128,
+            timeout_seconds=30,
+        )
+    )
+    install_root = tmp_path / "managed-site"
+    manager = AcquisitionManager(
+        allowed_sources=frozenset({"pypi"}),
+        install_root=install_root,
+        internet_gateway=gateway,
+        transaction_dir=tmp_path / "transactions",
+        artifact_cache_dir=tmp_path / "artifact-cache",
+        sandbox=SandboxExecutor(SandboxPolicy(network=False, timeout_seconds=20)),
+        network_sandbox=network_sandbox,
+    )
+
+    result = manager.acquire(
+        ToolSpec(
+            "requests",
+            "runtime",
+            "pypi",
+            "requests",
+            version="2.31.0",
+        )
+    )
+
+    assert result.status == "installed"
+    assert result.version == "2.31.0"
+    assert result.verification == "verified"
+    assert result.artifact_sha256 and len(result.artifact_sha256) == 64
+
+    expected = {
+        "requests",
+        "certifi",
+        "charset_normalizer",
+        "idna",
+        "urllib3",
+    }
+    installed_names = set()
+    for metadata_path in install_root.glob("*.dist-info/METADATA"):
+        for line in metadata_path.read_text(encoding="utf-8").splitlines():
+            if line.startswith("Name: "):
+                installed_names.add(line.split(": ", 1)[1].strip().lower().replace("-", "_"))
+                break
+    assert expected.issubset(installed_names)
+
+    execution = SandboxExecutor(
+        SandboxPolicy(network=False, timeout_seconds=20)
+    ).execute(
+        [
+            "python3",
+            "-c",
+            (
+                "import sys; sys.path.insert(0, '/workspace/managed-site'); "
+                "import requests; print(requests.__version__)"
+            ),
+        ],
+        workspace=tmp_path,
+    )
+    assert execution.returncode == 0, execution.stderr
+    assert execution.stdout.strip() == "2.31.0"
