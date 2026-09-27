@@ -265,6 +265,18 @@ class TaskEngine:
             evolution = SkillEvolutionEngine(self.skill_learning)
             for evaluation in evaluations:
                 self.skill_learning.record(evaluation)
+                if self.model_performance is not None:
+                    self.model_performance.record(
+                        model=evaluation.model,
+                        skill_id=evaluation.skill_id,
+                        skill_version=evaluation.skill_version,
+                        task_type=evaluation.task_type,
+                        context_bucket=evaluation.context_bucket,
+                        score=evaluation.score,
+                        evidence_completeness=evaluation.evidence_completeness,
+                        evidence_state=evaluation.evidence_state,
+                        created_at=self._learning_timestamp(),
+                    )
                 evolution.observe(
                     evaluation,
                     base_version=evaluation.skill_version,
@@ -295,8 +307,8 @@ class TaskEngine:
         return assignment.tags
 
     @staticmethod
-    def _context_bucket(objective: str) -> str:
-        size = len(objective)
+    def _context_bucket(objective: str, extra_context: str = "") -> str:
+        size = len(objective) + len(extra_context)
         if size <= 120:
             return "small"
         if size <= 600:
@@ -381,12 +393,25 @@ class TaskEngine:
         skill_preferences = skill_assignment.model_preferences if skill_assignment else ()
         skill_tags = skill_assignment.tags if skill_assignment else ()
         skill_ids = skill_assignment.skill_ids if skill_assignment else ()
-        learned_model_scores = (
-            self.skill_learning.model_scores_for(skill_ids)
-            if self.skill_learning is not None and skill_ids
+        skill_versions = (
+            {skill.skill_id: skill.version for skill in skill_assignment.skills}
+            if skill_assignment is not None
             else {}
         )
         task_type = self._classify_task(task.objective, skill_tags)
+        context_bucket = self._context_bucket(task.objective)
+        learned_model_scores = {}
+        if self.model_performance is not None and skill_ids:
+            learned_model_scores = self.model_performance.trusted_scores_for(
+                skill_ids=skill_ids,
+                skill_versions=skill_versions,
+                task_type=task_type,
+                context_bucket=context_bucket,
+            )
+        if self.skill_learning is not None and skill_ids:
+            fallback_scores = self.skill_learning.model_scores_for(skill_ids)
+            for model, score in fallback_scores.items():
+                learned_model_scores.setdefault(model, score)
         organization_preferences = (
             self.organization.model_preferences_for(task.role)
             if self.organization is not None

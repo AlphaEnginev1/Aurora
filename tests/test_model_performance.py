@@ -82,3 +82,45 @@ def test_context_bucket_is_part_of_model_learning_scope(tmp_path: Path):
         skill_ids=("research",), task_type="research", context_bucket="large",
         minimum_evaluations=1,
     ) == {"model-a": 0.6, "model-b": 0.9}
+
+
+def test_skill_version_is_part_of_model_learning_scope(tmp_path: Path):
+    store = ModelPerformanceStore(tmp_path / "model-performance.db")
+    store.record(
+        model="model-a",
+        skill_id="research",
+        skill_version="1.0.0",
+        task_type="research",
+        context_bucket="medium",
+        score=0.95,
+        evidence_completeness=1.0,
+        evidence_state="evidence_complete",
+        created_at="2026-09-27T00:00:00+00:00",
+    )
+    store.record(
+        model="model-a",
+        skill_id="research",
+        skill_version="2.0.0",
+        task_type="research",
+        context_bucket="medium",
+        score=0.20,
+        evidence_completeness=1.0,
+        evidence_state="evidence_complete",
+        created_at="2026-09-27T00:01:00+00:00",
+    )
+
+    assert store.trusted_scores_for(
+        skill_ids=("research",),
+        skill_versions={"research": "1.0.0"},
+        task_type="research",
+        context_bucket="medium",
+        minimum_evaluations=1,
+    ) == {"model-a": 0.95}
+
+    assert store.trusted_scores_for(
+        skill_ids=("research",),
+        skill_versions={"research": "2.0.0"},
+        task_type="research",
+        context_bucket="medium",
+        minimum_evaluations=1,
+    ) == {"model-a": 0.20}
