@@ -90,7 +90,6 @@ class PypiDependencyResolver:
                 "download",
                 "--disable-pip-version-check",
                 "--no-input",
-                "--isolated",
                 "--no-cache-dir",
                 "--only-binary=:all:",
                 "--progress-bar",
