@@ -84,7 +84,7 @@ def controlled_network_enforcement_available(tmp_path_factory):
         return True
     if os.environ.get("AURORA_E2E_ALLOW_UNSUPPORTED") == "1":
         pytest.skip("runner cannot provide the required rootless network-enforcement capability")
-    pytest.fail(f"controlled network enforcement bootstrap failed: {probe.stderr}")
+    pytest.fail(\n        "controlled network enforcement bootstrap failed: "\n        f"rc={probe.returncode} stdout={probe.stdout!r} stderr={probe.stderr!r} "\n        f"args={probe.args!r}"\n    )
 
 
 def test_allowed_https_reaches_approved_host(controlled_network_enforcement_available, proxy, tmp_path: Path):
