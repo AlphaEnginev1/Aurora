@@ -70,6 +70,13 @@ def test_learning_store_builds_model_scores_and_proposal(tmp_path: Path):
     assert perf.evaluations == 3
     assert perf.average_score == 0.5
     assert store.model_scores_for(("research",)) == {"model/a": 0.5}
+    # Incomplete evidence is retained for learning/evolution, but must not
+    # become trusted routing history for model selection.
+    store.record(SkillEvaluation(
+        "research","1.0.0",None,"t-incomplete","researcher",0.95,"succeeded","model/b",
+        ("source_check",),(),("citation_check",),(),("citation_check",),None,0.5,"insufficient_evidence"
+    ))
+    assert store.model_scores_for(("research",)) == {"model/a": 0.5}
     proposal = SkillEvolutionEngine(store).observe(
         SkillEvaluation("research","1.0.0",None,"t-4","researcher",0.4,"failed","model/a",
                         (),(),("source_check",),(),(),("citation_check",),"boom",0.0,"execution_failed"),
