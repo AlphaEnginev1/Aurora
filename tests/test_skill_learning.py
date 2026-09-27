@@ -54,6 +54,8 @@ def test_skill_evaluator_scores_observable_evidence():
     assert evaluations[0].verification_missing == ()
     assert evaluations[0].quality_passed == ("citation_check",)
     assert evaluations[0].quality_missing == ()
+    assert evaluations[0].evidence_completeness == 1.0
+    assert evaluations[0].evidence_state == "evidence_complete"
 
 
 def test_learning_store_builds_model_scores_and_proposal(tmp_path: Path):
@@ -75,3 +77,25 @@ def test_learning_store_builds_model_scores_and_proposal(tmp_path: Path):
     )
     assert proposal is not None
     assert proposal.candidate_version == "1.0.1"
+
+
+
+def test_skill_evaluator_never_treats_missing_evidence_as_complete():
+    skills, _ = _registry()
+    evaluator = SkillEvaluator(skills)
+    task = DelegatedTask("missing", "researcher", "research")
+    response = InferenceResponse(model="model/a", provider="fake", content="result")
+    result = DelegatedTaskResult(
+        task=task,
+        status=TaskStatus.SUCCEEDED,
+        model_result=__import__("aurora.orchestration.engine", fromlist=["TaskResult"]).TaskResult(
+            task_id="missing", role="researcher", response=response
+        ),
+    )
+    evaluation = evaluator.evaluate(
+        task=task, result=result, default_skill_ids=("research",), agent_capabilities=frozenset()
+    )[0]
+    assert evaluation.evidence_state == "insufficient_evidence"
+    assert evaluation.evidence_completeness == 0.0
+    assert evaluation.verification_missing == ("source_check",)
+    assert evaluation.quality_missing == ("citation_check",)
