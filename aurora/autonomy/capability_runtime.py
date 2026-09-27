@@ -96,6 +96,7 @@ class CapabilityRuntime:
             status="succeeded" if result.returncode == 0 and not result.timed_out else "failed",
             returncode=result.returncode,
             timed_out=result.timed_out,
+            argument_count=len(extra),
         )
         return CapabilityExecutionResult(
             capability=capability,
@@ -114,6 +115,7 @@ class CapabilityRuntime:
         status: str,
         returncode: int | None = None,
         timed_out: bool = False,
+        argument_count: int | None = None,
     ) -> None:
         if not self.audit_path:
             return
@@ -131,9 +133,7 @@ class CapabilityRuntime:
                 "version": capability.version,
                 "returncode": returncode,
                 "timed_out": timed_out,
-                "argument_count": len(request.constraints.get("args", ()))
-                if isinstance(request.constraints.get("args"), (list, tuple))
-                else None,
+                "argument_count": argument_count,
             },
         )
 
