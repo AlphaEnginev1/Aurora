@@ -26,6 +26,7 @@ class StoredTask:
     claimed_by: str | None = None
     lease_until: str | None = None
     result: dict | None = None
+    phase: int = 0
 
 
 @dataclass(frozen=True)
@@ -74,6 +75,7 @@ class DurableTaskStore:
                     claimed_by TEXT,
                     lease_until TEXT,
                     result_json TEXT,
+                    phase INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     PRIMARY KEY (mission_id, task_id)
@@ -111,6 +113,8 @@ class DurableTaskStore:
                 db.execute("ALTER TABLE tasks ADD COLUMN lease_until TEXT")
             if "result_json" not in columns:
                 db.execute("ALTER TABLE tasks ADD COLUMN result_json TEXT")
+            if "phase" not in columns:
+                db.execute("ALTER TABLE tasks ADD COLUMN phase INTEGER NOT NULL DEFAULT 0")
             db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_tasks_lease ON tasks (status, lease_until)"
             )
@@ -128,12 +132,20 @@ class DurableTaskStore:
         if lease_seconds <= 0:
             raise TaskStoreError("lease_seconds must be positive")
 
-    def enqueue(self, mission_id: str, tasks: Sequence[DelegatedTask]) -> None:
+    def enqueue(
+        self,
+        mission_id: str,
+        tasks: Sequence[DelegatedTask],
+        *,
+        phase: int = 0,
+    ) -> None:
         if not mission_id.strip():
             raise TaskStoreError("mission_id is empty")
         tasks = tuple(tasks)
         if not tasks:
             raise TaskStoreError("cannot enqueue an empty task plan")
+        if phase < 0:
+            raise TaskStoreError("phase cannot be negative")
         ids = [task.task_id for task in tasks]
         if len(set(ids)) != len(ids):
             raise TaskStoreError("task ids must be unique")
@@ -151,8 +163,8 @@ class DurableTaskStore:
                         INSERT INTO tasks (
                             mission_id, task_id, role, objective, capability,
                             args_json, deps_json, status, attempts,
-                            last_error, claimed_by, lease_until, created_at, updated_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', 0, NULL, NULL, NULL, ?, ?)
+                            last_error, claimed_by, lease_until, result_json, phase, created_at, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', 0, NULL, NULL, NULL, NULL, ?, ?, ?)
                         """,
                         (
                             mission_id,
@@ -162,6 +174,7 @@ class DurableTaskStore:
                             task.capability,
                             json.dumps(list(task.args)),
                             json.dumps(list(task.depends_on)),
+                            phase,
                             now,
                             now,
                         ),
@@ -199,9 +212,12 @@ class DurableTaskStore:
                 """
                 SELECT * FROM tasks
                 WHERE mission_id = ? AND status = 'pending'
+                  AND phase = (
+                      SELECT MAX(phase) FROM tasks WHERE mission_id = ?
+                  )
                 ORDER BY created_at, task_id
                 """,
-                (mission_id,),
+                (mission_id, mission_id),
             ).fetchall()
 
             for row in rows:
@@ -554,8 +570,12 @@ class DurableTaskStore:
         return tuple(row["mission_id"] for row in rows)
 
     def mission_status(self, mission_id: str) -> str:
-        """Compute the current durable mission state from its task states."""
-        statuses = {task.status for task in self.list_tasks(mission_id)}
+        """Compute mission state from the latest durable planning phase."""
+        tasks = self.list_tasks(mission_id)
+        if not tasks:
+            raise TaskStoreError(f"unknown mission: {mission_id}")
+        latest_phase = max(task.phase for task in tasks)
+        statuses = {task.status for task in tasks if task.phase == latest_phase}
         if not statuses:
             raise TaskStoreError(f"unknown mission: {mission_id}")
         if "running" in statuses:
@@ -780,6 +800,7 @@ class DurableTaskStore:
             claimed_by=claimed_by if claimed_by is not None else row["claimed_by"],
             lease_until=lease_until if lease_until is not None else row["lease_until"],
             result=json.loads(raw_result) if raw_result else None,
+            phase=int(row["phase"]),
         )
 
     @classmethod
