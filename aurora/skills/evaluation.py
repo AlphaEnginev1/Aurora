@@ -168,7 +168,7 @@ class SkillEvaluator:
         verification: tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]],
         quality: tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]],
     ) -> float:
-        if result.status is not TaskStatus.SUCCEEDED:
+        if result.status.value != "succeeded":
             return 0.0
         total_checks = sum(len(part) for part in (*verification, *quality))
         if total_checks == 0:
