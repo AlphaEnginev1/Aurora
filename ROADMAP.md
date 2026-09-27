@@ -22,5 +22,10 @@ agent specializations, Director task-level skill assignment, capability compatib
 validation, model preference contribution, specialist context injection, durable skill
 persistence and replan preservation.
 
+Skill learning/evolution now records per-skill execution evaluations, maintains
+learned model performance, generates bounded pending evolution proposals from repeated
+evidence, and feeds learned performance plus skill/work affinity into dynamic model
+selection. Active skills are never silently mutated by this learning loop.
+
 ## Phase 4
 Failure injection, security regression, observability, recovery drills and controlled live authorization.
