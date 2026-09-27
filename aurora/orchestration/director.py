@@ -86,7 +86,6 @@ Rules:
         tasks = self._parse(response.content)
         return DirectorPlan(objective=objective, tasks=tasks, model=response.model)
 
-    @staticmethod
     _REVIEW_SYSTEM = """You are Aurora's Director reviewer.
 Review the current mission state and decide whether the objective is complete.
 Return ONLY a JSON object:
