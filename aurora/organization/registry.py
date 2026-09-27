@@ -187,8 +187,6 @@ class OrganizationRegistry:
                 raise OrganizationConfigError(
                     f"agent {agent.agent_id} references unknown department {agent.department}"
                 )
-            if agent not in self.agents.values():
-                raise OrganizationConfigError("internal organization registry error")
 
     def validate_model_preferences(self, configured_models: set[str]) -> None:
         for model_id in {
@@ -207,6 +205,10 @@ class OrganizationRegistry:
                 raise OrganizationConfigError(
                     f"organization references model not present in inference policy: {model_id}"
                 )
+
+    def agents_by_role(self) -> dict[str, AgentSpec]:
+        """Return the registered agent roles as an immutable-by-copy mapping."""
+        return {agent.role: agent for agent in self.agents.values()}
 
     def resolve_agent(self, role_or_agent_id: str) -> AgentSpec:
         key = role_or_agent_id.strip()
