@@ -64,7 +64,8 @@ class AutonomousSpecialistAcquisition:
 
     def _prepare(self, *, gap: SkillGap, skill: SkillSpec, sources: tuple[SourceRecord, ...],
                  tools: tuple[ToolSpec, ...], validation_command: tuple[str, ...],
-                 registry: SkillRegistry) -> PreparedSkillCandidate:
+                 registry: SkillRegistry,
+                 construction_evaluation: SkillConstructionEvaluation | None = None) -> PreparedSkillCandidate:
         if not sources:
             raise AutonomousSpecialistAcquisitionError("research returned no sources")
         acquired: list[AcquisitionResult]=[]
