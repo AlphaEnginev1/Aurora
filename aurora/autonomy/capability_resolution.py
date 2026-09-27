@@ -139,6 +139,10 @@ class CapabilityResolutionRuntime:
         if initial.status in {"installed", "already_available"}:
             return CapabilityResolution(request.name, initial, attempts=1)
 
+        if initial.status in {"denied", "blocked_source"}:
+            self._audit(request, initial, discovered=(), attempts=1)
+            return CapabilityResolution(request.name, initial, attempts=1)
+
         if self.discovery is None:
             self._audit(request, initial, discovered=(), attempts=1)
             return CapabilityResolution(request.name, initial, attempts=1)
@@ -181,28 +185,20 @@ class CapabilityResolutionRuntime:
             # Registration is deliberately after policy checks and before
             # acquisition so the normal broker remains the execution boundary.
             self.broker.registry[candidate.name] = candidate
-            if self.registrar is not None:
-                try:
-                    self.registrar(candidate)
-                except Exception as exc:
-                    last = CapabilityResult(
-                        request.name,
-                        "registration_failed",
-                        source=candidate.source,
-                        verification="registry",
-                    )
-                    self._audit(
-                        request,
-                        last,
-                        discovered=tuple(discovered),
-                        attempts=attempts,
-                        error=str(exc),
-                    )
-                    continue
-
             discovered.append(candidate.name)
             last = self.broker.ensure(request)
             if last.status in {"installed", "already_available"}:
+                if self.registrar is not None:
+                    try:
+                        self.registrar(candidate)
+                    except Exception as exc:
+                        self._audit(
+                            request,
+                            last,
+                            discovered=tuple(discovered),
+                            attempts=attempts,
+                            error=f"dynamic registry persistence failed: {exc}",
+                        )
                 self._audit(
                     request,
                     last,
