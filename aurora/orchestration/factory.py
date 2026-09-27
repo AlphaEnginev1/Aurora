@@ -16,6 +16,7 @@ from aurora.autonomy.sandbox import SandboxExecutor, SandboxPolicy
 from aurora.inference.config import load_model_specs
 from aurora.inference.router import ModelRouter
 from aurora.organization import OrganizationRegistry
+from aurora.skills import SkillRegistry
 from .director import DirectorPlanner, DirectorService
 from .durable_director import DurableDirectorService
 from .engine import OrchestrationEngine
@@ -59,10 +60,15 @@ def build_director_service(
         models=inference_specs,
         nvidia_api_key=os.getenv("NVIDIA_API_KEY"),
     )
+    skill_registry = SkillRegistry.from_file(
+        Path(organization_path).parent / "skills.json",
+        configured_models={model.id for model in inference_specs},
+    )
     organization = OrganizationRegistry.from_file(
         organization_path,
         configured_models={model.id for model in inference_specs},
     )
+    skill_registry.validate_organization(organization)
 
     autonomy_data = json.loads(Path(autonomy_policy_path).read_text(encoding="utf-8"))
     policy = Policy(
@@ -136,10 +142,12 @@ def build_director_service(
         orchestration,
         root,
         organization=organization,
+        skill_registry=skill_registry,
     )
     planner = DirectorPlanner(
         router,
         organization=organization,
+        skill_registry=skill_registry,
     )
 
     return DirectorService(planner, task_engine)
