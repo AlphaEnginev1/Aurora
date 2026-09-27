@@ -89,9 +89,6 @@ class DurableTaskStore:
                 CREATE INDEX IF NOT EXISTS idx_tasks_runnable
                     ON tasks (mission_id, status, created_at);
 
-                CREATE INDEX IF NOT EXISTS idx_tasks_lease
-                    ON tasks (status, lease_until);
-
                 CREATE INDEX IF NOT EXISTS idx_events_mission
                     ON task_events (mission_id, event_id);
                 """
@@ -104,6 +101,9 @@ class DurableTaskStore:
                 db.execute("ALTER TABLE tasks ADD COLUMN claimed_by TEXT")
             if "lease_until" not in columns:
                 db.execute("ALTER TABLE tasks ADD COLUMN lease_until TEXT")
+            db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_tasks_lease ON tasks (status, lease_until)"
+            )
 
     @staticmethod
     def _now() -> str:
@@ -384,6 +384,9 @@ class DurableTaskStore:
                     f"worker does not own running task: {mission_id}/{task_id}"
                 )
             now = self._now()
+            if row["lease_until"] is not None and row["lease_until"] <= now:
+                db.rollback()
+                raise TaskStoreError(f"task lease has expired: {mission_id}/{task_id}")
             db.execute(
                 """
                 UPDATE tasks
