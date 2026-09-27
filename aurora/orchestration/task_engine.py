@@ -65,6 +65,7 @@ class TaskEngine:
     organization: OrganizationRegistry | None = None
     skill_registry: SkillRegistry | None = None
     skill_learning: object | None = None
+    model_performance: object | None = None
     _results: dict[str, DelegatedTaskResult] = field(default_factory=dict, init=False)
 
     def validate(self, tasks: Sequence[DelegatedTask]) -> tuple[DelegatedTask, ...]:
@@ -258,6 +259,8 @@ class TaskEngine:
                 result=result,
                 default_skill_ids=agent.skill_ids,
                 agent_capabilities=agent.capabilities,
+                task_type=self._classify_task(result.task.objective, self._skill_tags(result.task)),
+                context_bucket=self._context_bucket(result.task.objective),
             )
             evolution = SkillEvolutionEngine(self.skill_learning)
             for evaluation in evaluations:
@@ -279,7 +282,7 @@ class TaskEngine:
             # failure. The durable execution result remains authoritative.
             return result
 
-    def _resolve_agent_task(self, task: DelegatedTask) -> DelegatedTask:
+    def _skill_tags(self, task: DelegatedTask) -> tuple[str, ...]:\n        if self.skill_registry is None or self.organization is None:\n            return ()\n        agent = self.organization.resolve_agent(task.role)\n        assignment = self.skill_registry.for_agent(\n            role=agent.role, agent_capabilities=agent.capabilities,\n            default_skill_ids=agent.skill_ids, requested_skill_ids=task.skills,\n        )\n        return assignment.tags\n\n    @staticmethod\n    def _context_bucket(objective: str) -> str:\n        size = len(objective)\n        if size <= 120: return "small"\n        if size <= 600: return "medium"\n        return "large"\n\n    @staticmethod\n    def _learning_timestamp() -> str:\n        from datetime import datetime, timezone\n        return datetime.now(timezone.utc).isoformat()\n    def _resolve_agent_task(self, task: DelegatedTask) -> DelegatedTask:
         """Resolve the Director's automatic-agent sentinel to a specialist role."""
         if task.role != "auto":
             return task
