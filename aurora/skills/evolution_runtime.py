@@ -63,6 +63,15 @@ class SkillEvolutionRuntime:
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 )"""
             )
+            db.execute(
+                """CREATE TABLE IF NOT EXISTS skill_evolution_snapshots (
+                    candidate_id TEXT PRIMARY KEY,
+                    skill_id TEXT NOT NULL,
+                    previous_version TEXT NOT NULL,
+                    previous_skill_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )"""
+            )
 
             db.execute(
                 """CREATE TABLE IF NOT EXISTS skill_validation_reports (
@@ -269,6 +278,21 @@ class SkillEvolutionRuntime:
             )
         promoted = SkillRegistry({**registry.skills, prepared.skill.skill_id: prepared.skill})
         with self._connect() as db:
+            previous_json = json.dumps({
+                "skill_id": active.skill_id, "version": active.version,
+                "name": active.name, "mission": active.mission,
+                "instructions": active.instructions,
+                "required_capabilities": sorted(active.required_capabilities),
+                "verification_requirements": list(active.verification_requirements),
+                "quality_checks": list(active.quality_checks), "tags": list(active.tags),
+                "dependencies": list(active.dependencies), "enabled": active.enabled,
+                "model_preferences": list(active.model_preferences),
+            }, sort_keys=True)
+            db.execute(
+                "INSERT OR REPLACE INTO skill_evolution_snapshots "
+                "(candidate_id, skill_id, previous_version, previous_skill_json) VALUES (?, ?, ?, ?)",
+                (prepared.candidate_id, active.skill_id, active.version, previous_json),
+            )
             changed = db.execute(
                 "UPDATE skill_evolution_candidates SET status='promoted' "
                 "WHERE candidate_id=? AND status='approved'",
@@ -280,3 +304,53 @@ class SkillEvolutionRuntime:
             prepared.proposal.proposal_id, decision="approved"
         )
         return promoted
+
+    def regression_status(
+        self,
+        *,
+        skill_id: str,
+        candidate_version: str,
+        baseline_version: str,
+        minimum_evaluations: int = 3,
+        regression_delta: float = 0.05,
+    ) -> str:
+        """Compare immutable version evidence and fail closed on insufficient data."""
+        candidate = self.learning.performance_for_version(skill_id, candidate_version)
+        baseline = self.learning.performance_for_version(skill_id, baseline_version)
+        if candidate.evaluations < minimum_evaluations or baseline.evaluations < minimum_evaluations:
+            return "insufficient_evidence"
+        if candidate.average_score + regression_delta < baseline.average_score:
+            return "regressed"
+        return "passed"
+
+    def rollback(self, candidate_id: str, registry: SkillRegistry) -> SkillRegistry:
+        """Restore the exact pre-promotion snapshot; never reconstruct from memory."""
+        with self._connect() as db:
+            row = db.execute(
+                "SELECT * FROM skill_evolution_snapshots WHERE candidate_id=?",
+                (candidate_id,),
+            ).fetchone()
+            candidate = db.execute(
+                "SELECT skill_id, status FROM skill_evolution_candidates WHERE candidate_id=?",
+                (candidate_id,),
+            ).fetchone()
+            if row is None or candidate is None:
+                raise SkillEvolutionRuntimeError("rollback snapshot is unavailable")
+            if candidate["status"] != "promoted":
+                raise SkillEvolutionRuntimeError("only promoted evolutions can be rolled back")
+            data = json.loads(row["previous_skill_json"])
+            restored = SkillSpec(
+                skill_id=data["skill_id"], version=data["version"], name=data["name"],
+                mission=data["mission"], instructions=data["instructions"],
+                required_capabilities=frozenset(data["required_capabilities"]),
+                verification_requirements=tuple(data["verification_requirements"]),
+                quality_checks=tuple(data["quality_checks"]), tags=tuple(data["tags"]),
+                dependencies=tuple(data["dependencies"]), enabled=bool(data["enabled"]),
+                model_preferences=tuple(data["model_preferences"]),
+            )
+            rolled = SkillRegistry({**registry.skills, restored.skill_id: restored})
+            db.execute(
+                "UPDATE skill_evolution_candidates SET status='rolled_back' WHERE candidate_id=?",
+                (candidate_id,),
+            )
+            return rolled
