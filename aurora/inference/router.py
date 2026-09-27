@@ -1,7 +1,7 @@
 """Capability-aware model router."""
 
 from dataclasses import dataclass
-from typing import Sequence
+from typing import Mapping, Sequence
 from .models import InferenceRequest, InferenceResponse, ModelSpec
 from .providers.nvidia_api import NVIDIAAPIProvider
 
@@ -38,16 +38,59 @@ class ModelRouter:
         if not candidates:
             raise ModelRoutingError(f"No enabled model satisfies capability={capability!r}")
 
-        if preferred_models:
-            preferred = {model_id: index for index, model_id in enumerate(preferred_models)}
-            ranked = [
-                model
-                for model in candidates
-                if model.id in preferred
-            ]
-            if ranked:
-                return min(ranked, key=lambda model: preferred[model.id])
-        return candidates[0]
+        return max(candidates, key=lambda model: self._score(
+            model,
+            request=request,
+            preferred_models=preferred_models or (),
+        ))
+
+    @staticmethod
+    def _score(
+        model: ModelSpec,
+        *,
+        request: InferenceRequest,
+        preferred_models: Sequence[str],
+    ) -> float:
+        metadata = request.metadata or {}
+        skill_tags = {
+            str(tag).strip().lower()
+            for tag in metadata.get("skill_tags", ())
+            if str(tag).strip()
+        }
+        work_type = str(metadata.get("task_type", "")).strip().lower()
+        specialties = {tag.lower() for tag in model.specialties}
+        tag_overlap = (
+            len(skill_tags & specialties) / max(len(skill_tags), 1)
+            if skill_tags else 0.0
+        )
+        work_match = 1.0 if work_type and work_type in specialties else 0.0
+        context_tokens = metadata.get("context_tokens")
+        context_fit = 1.0
+        if isinstance(context_tokens, int) and model.context_window:
+            if context_tokens > model.context_window:
+                return float("-inf")
+            context_fit = min(1.0, model.context_window / max(context_tokens, 1) / 4.0)
+        learned = metadata.get("learned_model_scores", {})
+        learned_score = 0.5
+        if isinstance(learned, Mapping) and model.id in learned:
+            try:
+                learned_score = max(0.0, min(1.0, float(learned[model.id])))
+            except (TypeError, ValueError):
+                pass
+        preference = 0.0
+        if model.id in preferred_models:
+            index = preferred_models.index(model.id)
+            preference = 1.0 / (index + 1)
+        return (
+            0.20 * model.quality_score
+            + 0.10 * model.latency_score
+            + 0.10 * model.cost_score
+            + 0.20 * tag_overlap
+            + 0.15 * work_match
+            + 0.10 * context_fit
+            + 0.15 * learned_score
+            + 0.10 * preference
+        )
 
     def generate(
         self,
