@@ -299,6 +299,7 @@ class DurableTaskStore:
         task_id: str,
         worker_id: str,
         *,
+        claim_token: str | None = None,
         lease_seconds: float = 300.0,
     ) -> str:
         if not worker_id.strip():
