@@ -49,7 +49,7 @@ class OrchestrationEngine:
         if not names:
             return ()
         if self._capability_runtime is None:
-            raise CapabilityExecutionError("required capability runtime is not configured")
+            return ()
         prepare = getattr(self._capability_runtime, "prepare_capabilities", None)
         if prepare is None:
             raise CapabilityExecutionError(
