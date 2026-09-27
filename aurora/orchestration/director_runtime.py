@@ -186,7 +186,7 @@ class DirectorRuntime:
             self._review_or_finalize(mission_id)
 
         for event in events:
-            if event.event_type in {"skill.evaluated", "skill.evolution_proposed"}:
+            if event.event_type in {"skill.evaluated", "skill.evolution_proposed", "team.adapted_runtime", "team.adaptation_failed"}:
                 try:
                     self.memory.append(
                         mission_id=event.mission_id,
@@ -262,6 +262,8 @@ class DirectorRuntime:
         if stored is None:
             return
         result = stored.result or {}
+        if cycle.action in {"failed", "retried"}:
+            self._adapt_team_after_runtime_signal(mission_id, stored.task.task_id)
         try:
             self.memory.append(
                 mission_id=mission_id,
@@ -282,6 +284,50 @@ class DirectorRuntime:
                 event_type="memory_write_failed",
                 payload={"error": str(exc)},
             )
+
+    def _adapt_team_after_runtime_signal(self, mission_id: str, trigger_task_id: str) -> None:
+        coordinator = getattr(self.director, "team_coordinator", None)
+        if coordinator is None:
+            return
+        objective = self._objective_from_memory(mission_id)
+        pending = tuple(
+            item.task
+            for item in self.store.list_tasks(mission_id)
+            if item.status in {"pending", "running"}
+        )
+        if not pending:
+            return
+        try:
+            state = coordinator.adapt_for_runtime(
+                mission_id=mission_id,
+                objective=objective,
+                current_team=None,
+                pending_tasks=pending,
+                trigger_task_id=trigger_task_id,
+            )
+        except Exception as exc:
+            self.event_bus.publish(
+                mission_id=mission_id,
+                task_id=trigger_task_id,
+                event_type="team.adaptation_failed",
+                payload={"error": str(exc), "trigger": trigger_task_id},
+            )
+            return
+        delta = state.reconfiguration
+        self.event_bus.publish(
+            mission_id=mission_id,
+            task_id=trigger_task_id,
+            event_type="team.adapted_runtime",
+            payload={
+                "trigger": trigger_task_id,
+                "roles": [member.role for member in state.team.members],
+                "required_skills": list(state.team.required_skills),
+                "covered_skills": list(state.team.covered_skills),
+                "missing_skills": list(state.team.missing_skills),
+                "added_roles": list(delta.added_roles) if delta else [],
+                "removed_roles": list(delta.removed_roles) if delta else [],
+            },
+        )
 
     def _review_or_finalize(self, mission_id: str) -> None:
         if self._is_finalized(mission_id):
