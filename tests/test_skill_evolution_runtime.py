@@ -127,3 +127,11 @@ def test_skill_evolution_rejects_candidate_without_measured_improvement(tmp_path
         assert "validation lab rejected candidate" in str(exc)
     else:
         raise AssertionError("non-improving candidate reached approval")
+
+
+def test_evidence_snapshot_retains_checks_for_validation_replay(tmp_path: Path):
+    store, _ = make_proposal(tmp_path)
+    evidence = store.evidence_for("research", skill_version="1.0.0", limit=1)[0]
+    assert evidence.verification_failed == ("source",)
+    assert evidence.quality_failed == ("accuracy",)
+    assert evidence.verification_passed == ()
