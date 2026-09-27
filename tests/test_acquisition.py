@@ -1,6 +1,8 @@
 import pytest
 
 from aurora.autonomy.acquisition import AcquisitionError, AcquisitionManager
+from aurora.autonomy.pypi_downloader import PypiArtifact
+from aurora.autonomy.sandbox import SandboxResult
 from aurora.autonomy.internet import InternetGateway, InternetPolicy
 from aurora.autonomy.provenance import PackageProvenance
 from aurora.autonomy.registry import ToolSpec
@@ -57,50 +59,68 @@ def test_gateway_blocks_unapproved_acquisition_source(tmp_path):
         manager.plan(ToolSpec("example", "runtime", "pypi", "example"))
 
 
-def test_pypi_installer_is_pinned_to_gateway_approved_index(tmp_path, monkeypatch):
+def test_pypi_installer_uses_verified_cached_artifact_and_offline_sandbox(tmp_path, monkeypatch):
     gateway = InternetGateway(
-        InternetPolicy(frozenset({"https"}), frozenset({"pypi.org"}))
+        InternetPolicy(
+            frozenset({"https"}),
+            frozenset({"pypi.org", "files.pythonhosted.org"}),
+        )
     )
     manager = AcquisitionManager(
         allowed_sources=frozenset({"pypi"}),
         install_root=tmp_path / "site",
         internet_gateway=gateway,
+        transaction_dir=tmp_path / "transactions",
     )
 
-    captured = {}
-
-    class Result:
-        returncode = 0
-        stderr = ""
-
+    artifact = PypiArtifact(
+        name="example",
+        version="1.0.0",
+        filename="example-1.0.0-py3-none-any.whl",
+        url="https://files.pythonhosted.org/packages/example.whl",
+        sha256="a" * 64,
+    )
+    artifact_path = tmp_path / "artifact.whl"
+    artifact_path.write_bytes(b"wheel-bytes")
     monkeypatch.setattr(
-        manager,
-        "_run",
-        lambda args, **kwargs: captured.update(
-            args=args, env=kwargs["env"]
-        ) or Result(),
+        "aurora.autonomy.acquisition.PypiArtifactDownloader.resolve",
+        lambda self, name, version=None: artifact,
+    )
+    monkeypatch.setattr(
+        "aurora.autonomy.acquisition.PypiArtifactDownloader.download",
+        lambda self, resolved: artifact_path,
     )
     monkeypatch.setattr(
         "shutil.which",
         lambda name: "/usr/bin/python3" if name == "python3" else None,
     )
-    monkeypatch.setattr(
-        "aurora.autonomy.acquisition.load_pip_report",
-        lambda path: PackageProvenance(
-            name="example",
-            version="1.0.0",
-            source="pypi",
-            artifact_sha256="abc123",
-            provenance_url="https://files.pythonhosted.org/example.whl",
-        ),
-    )
-    monkeypatch.setattr(manager, "_verify_installed_distribution_at", lambda *args: 1)
 
-    result = manager.acquire(ToolSpec("example", "runtime", "pypi", "example"))
+    class FakeSandbox:
+        def execute(self, command, *, workspace):
+            site = workspace / "site"
+            dist = site / "example-1.0.0.dist-info"
+            dist.mkdir()
+            (site / "example.py").write_bytes(b"example")
+            (dist / "METADATA").write_text(
+                "Name: example\nVersion: 1.0.0\n", encoding="utf-8"
+            )
+            (dist / "RECORD").write_text(
+                "example.py,,\nexample-1.0.0.dist-info/METADATA,,\nexample-1.0.0.dist-info/RECORD,,\n",
+                encoding="utf-8",
+            )
+            return SandboxResult(tuple(command), 0, "", "")
+
+    manager.sandbox = FakeSandbox()
+    monkeypatch.setattr(
+        manager,
+        "_verify_installed_distribution_at",
+        lambda *args: 1,
+    )
+
+    result = manager.acquire(
+        ToolSpec("example", "runtime", "pypi", "example", version="1.0.0")
+    )
     assert result.status == "installed"
     assert result.version == "1.0.0"
     assert result.verification == "verified"
-    assert "--index-url" in captured["args"]
-    assert "https://pypi.org/simple/" in captured["args"]
-    assert "--report" in captured["args"]
-    assert captured["env"]["PIP_NO_INPUT"] == "1"
+    assert result.artifact_sha256 == "a" * 64
