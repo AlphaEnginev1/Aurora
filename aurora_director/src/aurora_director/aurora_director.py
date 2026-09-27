@@ -132,6 +132,9 @@ async def aurora_director_function(config: AuroraDirectorFunctionConfig, builder
                     os.getenv("AURORA_TASK_DB", ".aurora-runtime/tasks.db")
                 ),
                 worker_id=os.getenv("AURORA_WORKER_ID"),
+                organization_path=Path(
+                    os.getenv("AURORA_ORGANIZATION_POLICY", "config/organization.json")
+                ),
             )
             submission = runtime.submit_mission(objective=objective)
             mission = runtime.run_until_terminal(submission)
