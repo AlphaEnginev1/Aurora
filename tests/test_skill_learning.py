@@ -110,3 +110,45 @@ def test_skill_evaluator_never_treats_missing_evidence_as_complete():
     assert evaluation.evidence_completeness == 0.0
     assert evaluation.verification_missing == ("source_check",)
     assert evaluation.quality_missing == ("citation_check",)
+
+
+def test_task_engine_automatically_evaluates_and_records_skill_learning(tmp_path: Path):
+    from aurora.orchestration.engine import TaskResult
+
+    skills, org = _registry()
+
+    class FakeOrchestration:
+        def run_task(self, **kwargs):
+            response = InferenceResponse(
+                model="model/a",
+                provider="fake",
+                content=(
+                    "result\n"
+                    "VERIFY:source_check=pass\n"
+                    "QUALITY:citation_check=pass"
+                ),
+            )
+            return TaskResult(
+                task_id=kwargs["task_id"],
+                role=kwargs["role"],
+                response=response,
+            )
+
+    store = SkillLearningStore(tmp_path / "runtime-learning.db")
+    from aurora.orchestration.task_engine import TaskEngine
+
+    engine = TaskEngine(
+        FakeOrchestration(),
+        tmp_path,
+        organization=org,
+        skill_registry=skills,
+        skill_learning=store,
+    )
+    result = engine.execute_one(
+        DelegatedTask("learn-1", "researcher", "research", skills=("research",))
+    )
+
+    assert result.status is TaskStatus.SUCCEEDED
+    assert len(result.skill_evaluations) == 1
+    assert result.skill_evaluations[0].evidence_state == "evidence_complete"
+    assert store.performance("research").evaluations == 1
