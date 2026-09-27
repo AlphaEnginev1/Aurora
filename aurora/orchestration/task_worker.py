@@ -7,6 +7,7 @@ from threading import Event, Thread
 from time import sleep
 from typing import Callable
 
+from .event_bus import DurableEventBus, EventBusError
 from .task_engine import DelegatedTaskResult, TaskEngine, TaskStatus
 from .task_store import DurableTaskStore, StoredTask, TaskStoreError
 
@@ -60,6 +61,7 @@ class TaskWorker:
         mission_id: str,
         worker_id: str,
         policy: WorkerPolicy | None = None,
+        event_bus: DurableEventBus | None = None,
         sleep_fn: Callable[[float], None] = sleep,
     ) -> None:
         if not mission_id.strip():
@@ -71,6 +73,7 @@ class TaskWorker:
         self.mission_id = mission_id
         self.worker_id = worker_id
         self.policy = policy or WorkerPolicy()
+        self.event_bus = event_bus
         self._sleep = sleep_fn
 
     def run_once(self) -> WorkerCycle:
@@ -100,6 +103,14 @@ class TaskWorker:
                 },
                 worker_id=self.worker_id,
             )
+            self._emit(
+                "worker.task_succeeded",
+                claimed.task.task_id,
+                {
+                    "worker_id": self.worker_id,
+                    "attempt": claimed.attempts,
+                },
+            )
             return WorkerCycle(
                 action="succeeded",
                 task_id=claimed.task.task_id,
@@ -115,6 +126,15 @@ class TaskWorker:
                 claimed.task.task_id,
                 worker_id=self.worker_id,
                 error=error,
+            )
+            self._emit(
+                "worker.task_retried",
+                claimed.task.task_id,
+                {
+                    "worker_id": self.worker_id,
+                    "attempt": claimed.attempts,
+                    "error": error,
+                },
             )
             return WorkerCycle(
                 action="retried",
@@ -133,6 +153,16 @@ class TaskWorker:
             worker_id=self.worker_id,
         )
         newly_blocked = self.store.block_dependents(self.mission_id)
+        self._emit(
+            "worker.task_failed",
+            claimed.task.task_id,
+            {
+                "worker_id": self.worker_id,
+                "attempt": claimed.attempts,
+                "blocked_tasks": newly_blocked,
+                "error": error,
+            },
+        )
         return WorkerCycle(
             action="failed",
             task_id=claimed.task.task_id,
@@ -195,6 +225,26 @@ class TaskWorker:
                 f"lease renewal failed for {claimed.task.task_id}: {heartbeat_errors[0]}"
             )
         return result
+
+    def _emit(
+        self,
+        event_type: str,
+        task_id: str,
+        payload: dict,
+    ) -> None:
+        if self.event_bus is None:
+            return
+        try:
+            self.event_bus.publish(
+                mission_id=self.mission_id,
+                task_id=task_id,
+                event_type=event_type,
+                payload=payload,
+            )
+        except EventBusError:
+            # Task state is authoritative in DurableTaskStore. Observability
+            # events must never turn a committed task transition into a retry.
+            return
 
     @staticmethod
     def _result_type(result: DelegatedTaskResult) -> str:
