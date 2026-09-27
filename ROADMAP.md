@@ -13,8 +13,9 @@ Sandbox, process manager, workspace isolation, network enforcement, persistence 
 Director, orchestrator, specialist agents, memory and task lifecycle.
 
 Current implementation includes the durable task queue, Event Bus, worker leases,
-shared mission memory/inbox, persisted task results, and adaptive Director
-review/replanning across durable mission phases.
+shared mission memory/inbox, persisted task results, adaptive Director
+review/replanning across durable mission phases, and the internal organization
+registry with role/capability authorization and model-preference routing.
 
 ## Phase 4
 Failure injection, security regression, observability, recovery drills and controlled live authorization.
