@@ -581,7 +581,7 @@ class DurableTaskStore:
             raise TaskStoreError("mission_id is empty")
         if not event_type.strip():
             raise TaskStoreError("event_type is empty")
-        if "\\x00" in mission_id or "\\x00" in event_type:
+        if "\x00" in mission_id or "\x00" in event_type:
             raise TaskStoreError("event identifiers contain a null byte")
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
