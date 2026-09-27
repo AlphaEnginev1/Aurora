@@ -112,7 +112,7 @@ def test_task_engine_passes_skill_tags_and_learned_scores_to_router(tmp_path: Pa
     for idx, score in enumerate((0.9, 0.9)):
         learning.record(SkillEvaluation(
             "research","1.0.0",None,f"t-a-{idx}","researcher",score,"succeeded","model/a",
-            (),(),(),(),(),(),None
+            (),(),(),(),(),(),None,1.0,"evidence_complete"
         ))
     router=CaptureRouter()
     engine=TaskEngine(
