@@ -9,7 +9,7 @@ from aurora.autonomy.capability_runtime import (
     CapabilityExecutionResult,
     CapabilityRuntime,
 )
-from aurora.autonomy.models import CapabilityRequest
+from aurora.autonomy.models import CapabilityRequest, CapabilityResult
 from aurora.inference.models import InferenceRequest, InferenceResponse
 from aurora.inference.router import ModelRouter
 
@@ -38,6 +38,21 @@ class OrchestrationEngine:
     ) -> None:
         self._router = router
         self._capability_runtime = capability_runtime
+
+    def prepare_capabilities(
+        self,
+        *,
+        names: Sequence[str],
+        actor: str,
+        reason: str,
+    ) -> tuple[CapabilityResult, ...]:
+        if self._capability_runtime is None:
+            if names:
+                raise CapabilityExecutionError("required capability runtime is not configured")
+            return ()
+        return self._capability_runtime.prepare_capabilities(
+            names, actor=actor, reason=reason
+        )
 
     def run_task(
         self,
