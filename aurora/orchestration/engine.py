@@ -57,11 +57,17 @@ class OrchestrationEngine:
             model=model,
             metadata={"task_id": task_id, "role": role},
         )
-        response = self._router.generate(
-            request,
-            capability=capability,
-            preferred_models=model_preferences,
-        )
+        if model_preferences:
+            response = self._router.generate(
+                request,
+                capability=capability,
+                preferred_models=model_preferences,
+            )
+        else:
+            response = self._router.generate(
+                request,
+                capability=capability,
+            )
         return TaskResult(task_id=task_id, role=role, response=response)
 
     def run_capability_task(
