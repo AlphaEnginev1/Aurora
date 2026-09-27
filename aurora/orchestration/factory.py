@@ -16,8 +16,13 @@ from aurora.autonomy.sandbox import SandboxExecutor, SandboxPolicy
 from aurora.inference.config import load_model_specs
 from aurora.inference.router import ModelRouter
 from .director import DirectorPlanner, DirectorService
+from .durable_director import DurableDirectorService
 from .engine import OrchestrationEngine
+from .event_bus import DurableEventBus
+from .director_runtime import DirectorRuntime
 from .task_engine import TaskEngine
+from .task_store import DurableTaskStore
+from .task_worker import WorkerPolicy
 
 
 def build_orchestration_engine(policy_path: str | Path) -> OrchestrationEngine:
@@ -125,3 +130,46 @@ def build_director_service(
     planner = DirectorPlanner(router)
 
     return DirectorService(planner, task_engine)
+
+def build_director_runtime(
+    *,
+    inference_policy_path: str | Path,
+    autonomy_policy_path: str | Path,
+    registry_path: str | Path,
+    network_policy_path: str | Path,
+    workspace_root: str | Path,
+    egress_proxy_host: str,
+    egress_proxy_port: int = 3128,
+    task_db_path: str | Path | None = None,
+    worker_policy: WorkerPolicy | None = None,
+    worker_id: str | None = None,
+) -> DirectorRuntime:
+    """Build the durable 24/7 Director -> Event Bus -> Worker runtime."""
+
+    service = build_director_service(
+        inference_policy_path=inference_policy_path,
+        autonomy_policy_path=autonomy_policy_path,
+        registry_path=registry_path,
+        network_policy_path=network_policy_path,
+        workspace_root=workspace_root,
+        egress_proxy_host=egress_proxy_host,
+        egress_proxy_port=egress_proxy_port,
+    )
+    runtime_root = Path(workspace_root).resolve()
+    store_path = Path(task_db_path).resolve() if task_db_path else runtime_root / "tasks.db"
+    store = DurableTaskStore(store_path)
+    event_bus = DurableEventBus(store)
+    durable_director = DurableDirectorService(
+        planner=service.planner,
+        task_engine=service.task_engine,
+        store=store,
+        event_bus=event_bus,
+    )
+    return DirectorRuntime(
+        director=durable_director,
+        store=store,
+        event_bus=event_bus,
+        worker_policy=worker_policy,
+        worker_id=worker_id,
+    )
+
