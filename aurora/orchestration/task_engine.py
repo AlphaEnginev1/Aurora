@@ -177,6 +177,39 @@ class TaskEngine:
                 raise TaskEngineError("task graph made no progress; refusing deadlock")
         return tuple(ordered)
 
+    def execute_team(self, team, tasks: Sequence[DelegatedTask], *, allow_missing_skills: bool = False) -> tuple[DelegatedTaskResult, ...]:
+        """Execute a validated task plan through a formed specialist team."""
+        if not team.members:
+            raise TaskEngineError("cannot execute an empty agent team")
+        if team.missing_skills and not allow_missing_skills:
+            raise TaskEngineError("agent team is incomplete; missing skills: " + ", ".join(team.missing_skills))
+        member_roles = {member.role for member in team.members}
+        normalized = []
+        for task in tasks:
+            if task.role == "auto":
+                candidates = [
+                    DelegatedTask(task.task_id, role, task.objective, task.capability, task.args, task.depends_on, task.skills)
+                    for role in member_roles
+                ]
+                selected = None
+                for candidate in candidates:
+                    try:
+                        self.validate((candidate,))
+                        selected = candidate
+                        break
+                    except Exception:
+                        continue
+                if selected is None:
+                    raise TaskEngineError("no viable team member for task " + task.task_id)
+                normalized.append(selected)
+            else:
+                if task.role not in member_roles:
+                    raise TaskEngineError(
+                        f"task {task.task_id} assigns role {task.role!r} outside formed team"
+                    )
+                normalized.append(task)
+        return self.execute(tuple(normalized))
+
     def execute_one(
         self,
         task: DelegatedTask,
