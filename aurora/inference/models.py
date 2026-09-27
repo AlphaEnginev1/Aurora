@@ -11,6 +11,10 @@ class ModelSpec:
     capabilities: tuple[str, ...] = ()
     context_window: int | None = None
     enabled: bool = True
+    specialties: tuple[str, ...] = ()
+    quality_score: float = 0.5
+    latency_score: float = 0.5
+    cost_score: float = 0.5
 
 @dataclass(frozen=True)
 class InferenceRequest:
