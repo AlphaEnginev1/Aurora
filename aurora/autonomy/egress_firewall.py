@@ -7,7 +7,12 @@ class FirewallPolicyError(RuntimeError):
 
 @dataclass(frozen=True)
 class EgressFirewallPolicy:
-    """Native nftables policy applied before workload privileges are dropped."""
+    """Native stateless nftables policy applied before workload privileges are dropped.
+
+    The policy avoids conntrack-dependent ``ct state`` rules. The filtered
+    direction is OUTPUT, and every non-loopback egress packet is dropped unless
+    its destination is the dedicated proxy endpoint.
+    """
 
     table: str = "aurora_egress"
     chain: str = "output"
@@ -33,10 +38,6 @@ class EgressFirewallPolicy:
                 "add", "rule", "inet", self.table, self.chain,
                 "ip", "daddr", self.proxy_host,
                 "tcp", "dport", str(self.proxy_port), "accept",
-            ),
-            (
-                "add", "rule", "inet", self.table, self.chain,
-                "ct", "state", "established,related", "accept",
             ),
         )
 
