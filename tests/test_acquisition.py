@@ -137,7 +137,7 @@ def test_pypi_installer_uses_verified_cached_artifact_and_offline_sandbox(tmp_pa
     assert result.verification == "verified"
     assert result.artifact_sha256 == "a" * 64
     assert len(manager.sandbox.calls) == 2
-    assert manager.sandbox.calls[0] == ("python3", "-m", "venv", "/workspace/prefix")
+    assert manager.sandbox.calls[0] == ("python3", "-m", "venv", "/workspace/managed-site")
     assert manager.sandbox.calls[1][0:4] == (
         "/workspace/prefix/bin/python",
         "-m",
