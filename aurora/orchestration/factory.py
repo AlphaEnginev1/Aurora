@@ -16,7 +16,7 @@ from aurora.autonomy.sandbox import SandboxExecutor, SandboxPolicy
 from aurora.inference.config import load_model_specs
 from aurora.inference.router import ModelRouter
 from aurora.organization import AgentSelector, OrganizationRegistry
-from aurora.skills import SkillEvaluator, SkillEvolutionEngine, SkillLearningStore, SkillRegistry
+from aurora.skills import SkillAcquisitionRuntime, SkillEvaluator, SkillEvolutionEngine, SkillLearningStore, SkillRegistry
 from .director import DirectorPlanner, DirectorService
 from .durable_director import DurableDirectorService
 from .engine import OrchestrationEngine
@@ -197,6 +197,7 @@ def build_director_runtime(
     store_path = Path(task_db_path).resolve() if task_db_path else runtime_root / "tasks.db"
     store = DurableTaskStore(store_path)
     event_bus = DurableEventBus(store)
+    skill_acquisition = SkillAcquisitionRuntime(runtime_root / "skill-acquisition.db")
     team_coordinator = TeamCoordinator(
         task_engine=service.task_engine,
         agent_selector=AgentSelector(
@@ -204,6 +205,7 @@ def build_director_runtime(
             service.task_engine.skill_registry,
             service.task_engine.skill_learning,
         ),
+        skill_acquisition=skill_acquisition,
     )
     durable_director = DurableDirectorService(
         planner=service.planner,
