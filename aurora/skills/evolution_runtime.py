@@ -129,9 +129,25 @@ class SkillEvolutionRuntime:
                 SkillValidationCase(
                     case_id=f"evidence-{item.task_id}-{index}",
                     objective=(
-                        "Reproduce the specialist outcome represented by the historical task. "
-                        + (f"Observed failure: {item.failure_signature}" if item.failure_signature else
-                           "Preserve the successful behavior while maintaining all evidence checks.")
+                        "Replay the historical specialist scenario and preserve its observable behavior. "
+                        f"Historical task: {item.task_id}. "
+                        + (
+                            f"Observed failure: {item.failure_signature}. "
+                            if item.failure_signature else
+                            "The historical execution completed without a failure signature. "
+                        )
+                        + (
+                            f"Previously passed checks: {', '.join(item.verification_passed + item.quality_passed)}. "
+                            if item.verification_passed or item.quality_passed else ""
+                        )
+                        + (
+                            f"Previously failed checks: {', '.join(item.verification_failed + item.quality_failed)}. "
+                            if item.verification_failed or item.quality_failed else ""
+                        )
+                        + (
+                            f"Previously missing checks: {', '.join(item.verification_missing + item.quality_missing)}."
+                            if item.verification_missing or item.quality_missing else ""
+                        )
                     ),
                     expected_evidence=tuple(active.verification_requirements) + tuple(active.quality_checks),
                 )

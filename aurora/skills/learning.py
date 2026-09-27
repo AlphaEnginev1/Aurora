@@ -48,6 +48,12 @@ class SkillEvidenceSnapshot:
     failure_signature: str | None
     evidence_completeness: float
     evidence_state: str
+    verification_passed: tuple[str, ...] = ()
+    verification_failed: tuple[str, ...] = ()
+    verification_missing: tuple[str, ...] = ()
+    quality_passed: tuple[str, ...] = ()
+    quality_failed: tuple[str, ...] = ()
+    quality_missing: tuple[str, ...] = ()
 
 
 class SkillLearningStore:
@@ -153,7 +159,9 @@ class SkillLearningStore:
             raise ValueError("limit must be at least 1")
         query = (
             "SELECT skill_id, skill_version, task_id, role, score, status, model, "
-            "failure_signature, evidence_completeness, evidence_state "
+            "failure_signature, evidence_completeness, evidence_state, "
+            "verification_passed_json, verification_failed_json, verification_missing_json, "
+            "quality_passed_json, quality_failed_json, quality_missing_json "
             "FROM skill_evaluations WHERE skill_id = ?"
         )
         params: list[object] = [skill_id]
@@ -176,6 +184,12 @@ class SkillLearningStore:
                 failure_signature=row["failure_signature"],
                 evidence_completeness=float(row["evidence_completeness"]),
                 evidence_state=row["evidence_state"],
+                verification_passed=tuple(json.loads(row["verification_passed_json"])),
+                verification_failed=tuple(json.loads(row["verification_failed_json"])),
+                verification_missing=tuple(json.loads(row["verification_missing_json"])),
+                quality_passed=tuple(json.loads(row["quality_passed_json"])),
+                quality_failed=tuple(json.loads(row["quality_failed_json"])),
+                quality_missing=tuple(json.loads(row["quality_missing_json"])),
             )
             for row in rows
         )
