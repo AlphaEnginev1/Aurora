@@ -345,6 +345,7 @@ def handoff_to_workload(workload: list[str]) -> None:
     argv = [
         setpriv,
         "--no-new-privs",
+        "--securebits=noroot,noroot_locked,no_setuid_fixup,no_setuid_fixup_locked",
         "--bounding-set=-all",
         "--inh-caps=-all",
         "--ambient-caps=-all",
