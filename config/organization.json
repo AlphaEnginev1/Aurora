@@ -1,0 +1,128 @@
+{
+  "version": 1,
+  "description": "Aurora organizational topology, role permissions and model routing preferences.",
+  "departments": [
+    {
+      "department_id": "research",
+      "mission": "Investigate external knowledge and gather evidence.",
+      "agent_ids": ["researcher"],
+      "model_preferences": ["meta/llama-3.1-8b-instruct"],
+      "allowed_capabilities": ["tool:curl", "tool:rg"]
+    },
+    {
+      "department_id": "engineering",
+      "mission": "Build, modify and validate Aurora software.",
+      "agent_ids": ["engineer"],
+      "model_preferences": ["meta/llama-3.1-8b-instruct"],
+      "allowed_capabilities": ["tool:git", "tool:rg", "tool:fd", "runtime:python", "python.package:pip"]
+    },
+    {
+      "department_id": "data",
+      "mission": "Process, transform and validate structured data.",
+      "agent_ids": ["data_engineer"],
+      "model_preferences": ["meta/llama-3.1-8b-instruct"],
+      "allowed_capabilities": ["runtime:python", "python.package:pip", "tool:rg", "tool:fd"]
+    },
+    {
+      "department_id": "verification",
+      "mission": "Independently verify claims, artifacts and execution results.",
+      "agent_ids": ["verifier"],
+      "model_preferences": ["meta/llama-3.1-8b-instruct"],
+      "allowed_capabilities": ["tool:curl", "tool:rg", "tool:fd", "runtime:python"]
+    },
+    {
+      "department_id": "security",
+      "mission": "Review safety, policy boundaries and security regressions.",
+      "agent_ids": ["security_reviewer"],
+      "model_preferences": ["meta/llama-3.1-8b-instruct"],
+      "allowed_capabilities": ["tool:rg", "tool:fd", "tool:git", "runtime:python"]
+    },
+    {
+      "department_id": "operations",
+      "mission": "Maintain runtime health, recovery and continuous execution.",
+      "agent_ids": ["operator"],
+      "model_preferences": ["meta/llama-3.1-8b-instruct"],
+      "allowed_capabilities": ["tool:rg", "tool:fd", "runtime:python", "tool:curl"]
+    },
+    {
+      "department_id": "discovery",
+      "mission": "Explore hypotheses, contradictions and opportunities beyond the initial plan.",
+      "agent_ids": ["discovery_agent"],
+      "model_preferences": ["meta/llama-3.1-8b-instruct"],
+      "allowed_capabilities": ["tool:curl", "tool:rg", "runtime:python", "python.package:pip"]
+    },
+    {
+      "department_id": "synthesis",
+      "mission": "Integrate evidence and produce cross-department decisions.",
+      "agent_ids": ["synthesizer"],
+      "model_preferences": ["meta/llama-3.1-8b-instruct"],
+      "allowed_capabilities": ["runtime:python", "tool:rg", "tool:curl"]
+    }
+  ],
+  "agents": [
+    {
+      "agent_id": "researcher",
+      "role": "researcher",
+      "department": "research",
+      "mission": "Find relevant evidence and distinguish source material from inference.",
+      "capabilities": ["tool:curl", "tool:rg"],
+      "model_preferences": ["meta/llama-3.1-8b-instruct"]
+    },
+    {
+      "agent_id": "engineer",
+      "role": "engineer",
+      "department": "engineering",
+      "mission": "Implement and test software changes through governed capabilities.",
+      "capabilities": ["tool:git", "tool:rg", "tool:fd", "runtime:python", "python.package:pip"],
+      "model_preferences": ["meta/llama-3.1-8b-instruct"]
+    },
+    {
+      "agent_id": "data_engineer",
+      "role": "data_engineer",
+      "department": "data",
+      "mission": "Transform, inspect and validate data reproducibly.",
+      "capabilities": ["runtime:python", "python.package:pip", "tool:rg", "tool:fd"],
+      "model_preferences": ["meta/llama-3.1-8b-instruct"]
+    },
+    {
+      "agent_id": "verifier",
+      "role": "verifier",
+      "department": "verification",
+      "mission": "Independently test evidence and identify missing or contradictory proof.",
+      "capabilities": ["tool:curl", "tool:rg", "tool:fd", "runtime:python"],
+      "model_preferences": ["meta/llama-3.1-8b-instruct"]
+    },
+    {
+      "agent_id": "security_reviewer",
+      "role": "security_reviewer",
+      "department": "security",
+      "mission": "Detect policy bypasses and security regressions.",
+      "capabilities": ["tool:rg", "tool:fd", "tool:git", "runtime:python"],
+      "model_preferences": ["meta/llama-3.1-8b-instruct"]
+    },
+    {
+      "agent_id": "operator",
+      "role": "operator",
+      "department": "operations",
+      "mission": "Monitor and recover the autonomous runtime.",
+      "capabilities": ["tool:rg", "tool:fd", "runtime:python", "tool:curl"],
+      "model_preferences": ["meta/llama-3.1-8b-instruct"]
+    },
+    {
+      "agent_id": "discovery_agent",
+      "role": "discovery_agent",
+      "department": "discovery",
+      "mission": "Explore new hypotheses and search for novel evidence or approaches.",
+      "capabilities": ["tool:curl", "tool:rg", "runtime:python", "python.package:pip"],
+      "model_preferences": ["meta/llama-3.1-8b-instruct"]
+    },
+    {
+      "agent_id": "synthesizer",
+      "role": "synthesizer",
+      "department": "synthesis",
+      "mission": "Synthesize validated information into decisions and next actions.",
+      "capabilities": ["runtime:python", "tool:rg", "tool:curl"],
+      "model_preferences": ["meta/llama-3.1-8b-instruct"]
+    }
+  ]
+}
