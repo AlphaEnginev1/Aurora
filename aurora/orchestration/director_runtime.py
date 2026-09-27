@@ -28,7 +28,10 @@ class RuntimeCycle:
 
     @property
     def did_work(self) -> bool:
-        return bool(self.worker_cycles) or bool(self.events)
+        return bool(self.events) or any(
+            cycle.action != "idle" or cycle.recovered_tasks or cycle.blocked_tasks
+            for cycle in self.worker_cycles
+        )
 
 
 @dataclass(frozen=True)
