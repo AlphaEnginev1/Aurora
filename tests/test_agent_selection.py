@@ -131,3 +131,38 @@ def test_agent_selector_scores_resolved_skill_tags():
     )
     assert decision.selected_role == "researcher"
     assert decision.factors["tag_match"] == 1.0
+
+
+def test_dynamic_agent_team_covers_multiple_specialties():
+    from aurora.organization import DynamicAgentTeamSelector
+
+    team = DynamicAgentTeamSelector(
+        registry(),
+        AgentSelector(registry()),
+    ).form(
+        objective="research and implement",
+        required_skill_ids=("research", "engineering"),
+        max_members=2,
+    )
+
+    assert team.complete
+    assert set(team.covered_skills) == {"research", "engineering"}
+    assert {member.role for member in team.members} == {"researcher", "engineer"}
+    assert len(team.members) == 2
+
+
+def test_dynamic_agent_team_fails_closed_when_skill_is_unavailable():
+    from aurora.organization import DynamicAgentTeamSelector
+
+    team = DynamicAgentTeamSelector(
+        registry(),
+        AgentSelector(registry()),
+    ).form(
+        objective="research",
+        required_skill_ids=("research", "unknown"),
+        max_members=2,
+    )
+
+    assert not team.complete
+    assert team.missing_skills == ("unknown",)
+    assert {member.role for member in team.members} == {"researcher"}
