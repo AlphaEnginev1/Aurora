@@ -231,6 +231,7 @@ Rules:
                     capability=capability,
                     args=tuple(args),
                     depends_on=tuple(depends_on),
+                    skills=tuple(skills),
                 )
             )
         return tuple(tasks)
@@ -303,6 +304,7 @@ Rules:
                     capability=capability,
                     args=tuple(args),
                     depends_on=tuple(depends_on),
+                    skills=tuple(skills),
                 )
             )
         return decision, rationale.strip(), tuple(tasks)
