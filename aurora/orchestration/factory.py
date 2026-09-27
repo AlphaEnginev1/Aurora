@@ -156,6 +156,7 @@ def build_director_runtime(
     task_db_path: str | Path | None = None,
     worker_policy: WorkerPolicy | None = None,
     worker_id: str | None = None,
+    organization_path: str | Path = "config/organization.json",
 ) -> DirectorRuntime:
     """Build the durable 24/7 Director -> Event Bus -> Worker runtime."""
 
@@ -167,6 +168,7 @@ def build_director_runtime(
         workspace_root=workspace_root,
         egress_proxy_host=egress_proxy_host,
         egress_proxy_port=egress_proxy_port,
+        organization_path=organization_path,
     )
     runtime_root = Path(workspace_root).resolve()
     store_path = Path(task_db_path).resolve() if task_db_path else runtime_root / "tasks.db"
