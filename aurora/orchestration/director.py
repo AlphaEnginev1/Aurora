@@ -131,6 +131,7 @@ Rules:
             model=response.model,
         )
 
+    @staticmethod
     def _parse(content: str) -> tuple[DelegatedTask, ...]:
         raw = content.strip()
         fence = chr(96) * 3
