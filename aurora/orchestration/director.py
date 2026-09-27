@@ -282,6 +282,7 @@ class DirectorService:
 __all__ = [
     "DirectorPlan",
     "DirectorPlanError",
+    "DirectorReview",
     "DirectorPlanner",
     "DirectorService",
     "MissionResult",
