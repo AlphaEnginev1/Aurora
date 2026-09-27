@@ -167,7 +167,7 @@ def test_proxy_gateway_is_reachable(controlled_network_enforcement_available, pr
         tmp_path, "curl", "-v", "--connect-timeout", "3", "--max-time", "5",
         f"http://{proxy.host}:3128/", proxy_host=proxy.host,
     )
-    assert result.returncode != 0
+    assert result.returncode == 0
     assert "403" in result.stderr
 
 
