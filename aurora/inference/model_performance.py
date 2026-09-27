@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Mapping
 import sqlite3
 
 
@@ -96,6 +97,7 @@ class ModelPerformanceStore:
         self,
         *,
         skill_ids: tuple[str, ...],
+        skill_versions: Mapping[str, str | None] | None = None,
         task_type: str,
         context_bucket: str,
         minimum_evaluations: int = 2,
@@ -107,21 +109,31 @@ class ModelPerformanceStore:
             raise ValueError("minimum_evaluations must be at least 1")
         if not 0.0 <= minimum_evidence_completeness <= 1.0:
             raise ValueError("minimum_evidence_completeness must be between 0 and 1")
-        placeholders = ",".join("?" for _ in skill_ids)
+        scope = skill_versions or {skill_id: None for skill_id in skill_ids}
+        predicates: list[str] = []
+        params: list[object] = []
+        for skill_id in skill_ids:
+            version = scope.get(skill_id)
+            if version is None:
+                predicates.append("(skill_id = ? AND skill_version IS NULL)")
+                params.append(skill_id)
+            else:
+                predicates.append("(skill_id = ? AND skill_version = ?)")
+                params.extend((skill_id, version))
         with self._connect() as db:
             rows = db.execute(
                 f"""
                 SELECT model, AVG(score) AS average_score, COUNT(*) AS evaluations,
                        AVG(evidence_completeness) AS evidence_completeness
                 FROM model_performance
-                WHERE skill_id IN ({placeholders})
+                WHERE ({" OR ".join(predicates)})
                   AND task_type = ?
                   AND context_bucket = ?
                   AND evidence_state = 'evidence_complete'
                 GROUP BY model
                 HAVING COUNT(*) >= ? AND AVG(evidence_completeness) >= ?
                 """,
-                (*skill_ids, task_type, context_bucket,
+                (*params, task_type, context_bucket,
                  minimum_evaluations, minimum_evidence_completeness),
             ).fetchall()
         return {str(row["model"]): float(row["average_score"]) for row in rows}
