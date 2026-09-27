@@ -47,6 +47,7 @@ class OrchestrationEngine:
         objective: str,
         capability: str = "reasoning",
         model: str | None = None,
+        model_preferences: Sequence[str] | None = None,
         context: list[dict[str, Any]] | None = None,
     ) -> TaskResult:
         messages = list(context or [])
@@ -56,7 +57,11 @@ class OrchestrationEngine:
             model=model,
             metadata={"task_id": task_id, "role": role},
         )
-        response = self._router.generate(request, capability=capability)
+        response = self._router.generate(
+            request,
+            capability=capability,
+            preferred_models=model_preferences,
+        )
         return TaskResult(task_id=task_id, role=role, response=response)
 
     def run_capability_task(
