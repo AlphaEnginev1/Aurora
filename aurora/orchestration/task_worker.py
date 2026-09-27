@@ -220,7 +220,12 @@ class TaskWorker:
         thread = Thread(target=heartbeat, name=f"aurora-heartbeat-{claimed.task.task_id}", daemon=True)
         thread.start()
         try:
-            result = self.task_engine.execute_one(claimed.task)
+            result = self.task_engine.execute_one(
+                claimed.task,
+                execution_scope=(
+                    f"{self.mission_id}:{claimed.task.task_id}:attempt:{claimed.attempts}"
+                ),
+            )
         except Exception as exc:
             result = DelegatedTaskResult(
                 claimed.task,
