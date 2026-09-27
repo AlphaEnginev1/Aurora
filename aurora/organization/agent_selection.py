@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from typing import Sequence
 
 from .registry import AgentSpec, OrganizationRegistry
-from aurora.skills import SkillRegistry, SkillRegistryError
 
 
 @dataclass(frozen=True)
@@ -29,7 +28,7 @@ class AgentSelector:
     def __init__(
         self,
         organization: OrganizationRegistry,
-        skill_registry: SkillRegistry | None = None,
+        skill_registry: object | None = None,
         skill_learning: object | None = None,
     ) -> None:
         self.organization = organization
@@ -62,6 +61,8 @@ class AgentSelector:
         tags: Sequence[str] = (),
         preferred_roles: Sequence[str] = (),
     ) -> AgentSelection:
+        from aurora.skills import SkillRegistryError
+
         required = tuple(dict.fromkeys(required_skill_ids))
         tagset = {tag.lower() for tag in tags}
         preferred = set(preferred_roles)
