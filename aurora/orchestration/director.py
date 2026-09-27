@@ -9,6 +9,7 @@ from typing import Any
 from aurora.inference.models import InferenceRequest
 from aurora.inference.router import ModelRouter
 from aurora.organization import OrganizationConfigError, OrganizationRegistry
+from aurora.skills import SkillRegistry, SkillRegistryError
 from .task_engine import DelegatedTask, DelegatedTaskResult, TaskEngine
 
 
@@ -43,7 +44,7 @@ class DirectorPlanner:
 
     _SYSTEM = """You are Aurora's Director planner.
 Return ONLY a JSON object with this exact shape:
-{"tasks":[{"task_id":"string","role":"string","objective":"string","capability":"string or null","args":["string"],"depends_on":["task_id"]}]}
+{"tasks":[{"task_id":"string","role":"string","objective":"string","capability":"string or null","args":["string"],"depends_on":["task_id"],"skills":["skill-id"]}]}
 Rules:
 - Create at most 16 tasks.
 - Every task_id must be unique, short, and contain no whitespace.
@@ -52,6 +53,8 @@ Rules:
 - Never invent executable paths, shell commands, URLs, credentials, or unregistered tools.
 - args are passed only to a registered executable and must be plain strings.
 - Use depends_on to express required ordering.
+- skills may contain registered specialist skills when the task benefits from specialist procedures.
+- Never invent skills; use only registered skills presented in the prompt.
 - Keep the plan minimal and directly related to the objective.
 """
 
@@ -59,9 +62,11 @@ Rules:
         self,
         router: ModelRouter,
         organization: OrganizationRegistry | None = None,
+        skill_registry: SkillRegistry | None = None,
     ) -> None:
         self.router = router
         self.organization = organization
+        self.skill_registry = skill_registry
 
     def plan(
         self,
@@ -78,6 +83,8 @@ Rules:
         if self.organization is not None:
             roles = ", ".join(sorted(self.organization.agents_by_role()))
             system += f"\nRegistered roles: {roles}\n"
+            if self.skill_registry is not None:
+                system += "\nRegistered skills:\n" + ", ".join(self.skill_registry.ids()) + "\n"
         messages = [
             {"role": "system", "content": system},
             *(context or []),
@@ -100,13 +107,14 @@ Rules:
     _REVIEW_SYSTEM = """You are Aurora's Director reviewer.
 Review the current mission state and decide whether the objective is complete.
 Return ONLY a JSON object:
-{"decision":"complete|continue|blocked","rationale":"string","tasks":[{"task_id":"string","role":"string","objective":"string","capability":"string or null","args":["string"],"depends_on":["task_id"]}]}
+{"decision":"complete|continue|blocked","rationale":"string","tasks":[{"task_id":"string","role":"string","objective":"string","capability":"string or null","args":["string"],"depends_on":["task_id"],"skills":["skill-id"]}]}
 Rules:
 - Choose complete only when the evidence in context is sufficient to satisfy the objective.
 - Choose blocked when safe progress is impossible under the current policies or available capabilities.
 - Choose continue when additional work is needed; provide the minimal next task graph.
 - Create at most 16 follow-up tasks.
-- Never invent executable paths, shell commands, URLs, credentials, or unregistered tools.
+- Never invent executable paths, shell commands, URLs, credentials, unregistered tools, or skills.
+- Use only registered skills presented in the prompt.
 """
     
     def review(
@@ -123,6 +131,8 @@ Rules:
         if self.organization is not None:
             roles = ", ".join(sorted(self.organization.agents_by_role()))
             system += f"\nRegistered roles: {roles}\n"
+            if self.skill_registry is not None:
+                system += "\nRegistered skills:\n" + ", ".join(self.skill_registry.ids()) + "\n"
         messages = [
             {"role": "system", "content": system},
             *(context or []),
@@ -158,6 +168,18 @@ Rules:
                 )
         except OrganizationConfigError as exc:
             raise DirectorPlanError(str(exc)) from exc
+        if self.skill_registry is not None and self.organization is not None:
+            try:
+                for task in tasks:
+                    agent = self.organization.resolve_agent(task.role)
+                    self.skill_registry.for_agent(
+                        role=agent.role,
+                        agent_capabilities=agent.capabilities,
+                        default_skill_ids=agent.skill_ids,
+                        requested_skill_ids=task.skills,
+                    )
+            except (OrganizationConfigError, SkillRegistryError) as exc:
+                raise DirectorPlanError(str(exc)) from exc
 
     @staticmethod
     def _parse(content: str) -> tuple[DelegatedTask, ...]:
@@ -190,6 +212,7 @@ Rules:
             capability = item.get("capability")
             args = item.get("args", [])
             depends_on = item.get("depends_on", [])
+            skills = item.get("skills", [])
             if not isinstance(task_id, str) or not isinstance(role, str) or not isinstance(task_objective, str):
                 raise DirectorPlanError("task identity, role, and objective must be strings")
             if capability is not None and not isinstance(capability, str):
@@ -198,6 +221,8 @@ Rules:
                 raise DirectorPlanError("task args must be a string array")
             if not isinstance(depends_on, list) or not all(isinstance(dep, str) for dep in depends_on):
                 raise DirectorPlanError("task depends_on must be a string array")
+            if not isinstance(skills, list) or not all(isinstance(skill, str) and skill.strip() for skill in skills):
+                raise DirectorPlanError("task skills must be a string array")
             tasks.append(
                 DelegatedTask(
                     task_id=task_id,
@@ -259,6 +284,7 @@ Rules:
             capability = item.get("capability")
             args = item.get("args", [])
             depends_on = item.get("depends_on", [])
+            skills = item.get("skills", [])
             if not isinstance(task_id, str) or not isinstance(role, str) or not isinstance(task_objective, str):
                 raise DirectorPlanError("review task identity, role, and objective must be strings")
             if capability is not None and not isinstance(capability, str):
@@ -267,6 +293,8 @@ Rules:
                 raise DirectorPlanError("review task args must be a string array")
             if not isinstance(depends_on, list) or not all(isinstance(dep, str) for dep in depends_on):
                 raise DirectorPlanError("review task depends_on must be a string array")
+            if not isinstance(skills, list) or not all(isinstance(skill, str) and skill.strip() for skill in skills):
+                raise DirectorPlanError("review task skills must be a string array")
             tasks.append(
                 DelegatedTask(
                     task_id=task_id,
