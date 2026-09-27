@@ -197,6 +197,20 @@ class SkillRegistry:
                 default_skill_ids=agent.skill_ids,
             )
 
+    def catalog(self) -> str:
+        """Return a compact trusted skill catalog for Director planning."""
+        lines = []
+        for skill_id in sorted(self.skills):
+            skill = self.skills[skill_id]
+            if not skill.enabled:
+                continue
+            required = ", ".join(sorted(skill.required_capabilities)) or "none"
+            lines.append(
+                f"- {skill.skill_id} v{skill.version}: {skill.name}; "
+                f"mission={skill.mission}; required_capabilities={required}"
+            )
+        return "\n".join(lines)
+
     def ids(self) -> tuple[str, ...]:
         return tuple(sorted(self.skills))
 
