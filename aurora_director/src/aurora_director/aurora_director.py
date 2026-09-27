@@ -12,7 +12,8 @@ from nat.plugin_api import LLMFrameworkEnum
 from nat.plugin_api import register_function
 
 from aurora.orchestration.director import DirectorPlanError, DirectorPlanner
-from aurora.orchestration.factory import build_director_service
+from aurora.orchestration.factory import build_director_runtime, build_director_service
+from aurora.orchestration.director_runtime import DirectorRuntimeError
 from aurora.inference.config import InferenceConfigError, load_model_specs
 from aurora.inference.models import InferenceRequest
 from aurora.inference.router import ModelRouter, ModelRoutingError
@@ -42,6 +43,21 @@ def _format_plan(plan) -> str:
 
 def _format_mission(result) -> str:
     lines = [_format_plan(result.plan), "", "Execution:"]
+    for item in result.tasks:
+        detail = item.error or "completed"
+        lines.append(f"- {item.task.task_id}: {item.status.value} ({detail})")
+    return "\n".join(lines)
+
+
+def _format_runtime_mission(result) -> str:
+    lines = [
+        _format_plan(result.submission.plan),
+        "",
+        f"Mission: {result.submission.mission_id}",
+        f"Final status: {result.status.value}",
+        "",
+        "Durable execution:",
+    ]
     for item in result.tasks:
         detail = item.error or "completed"
         lines.append(f"- {item.task.task_id}: {item.status.value} ({detail})")
@@ -96,7 +112,7 @@ async def aurora_director_function(config: AuroraDirectorFunctionConfig, builder
                     + suffix
                 )
 
-            service = build_director_service(
+            runtime = build_director_runtime(
                 inference_policy_path=inference_policy,
                 autonomy_policy_path=Path(
                     os.getenv("AURORA_AUTONOMY_POLICY", "config/autonomy-policy.json")
@@ -112,14 +128,19 @@ async def aurora_director_function(config: AuroraDirectorFunctionConfig, builder
                 ),
                 egress_proxy_host=proxy_host,
                 egress_proxy_port=int(os.getenv("AURORA_EGRESS_PROXY_PORT", "3128")),
+                task_db_path=Path(
+                    os.getenv("AURORA_TASK_DB", ".aurora-runtime/tasks.db")
+                ),
+                worker_id=os.getenv("AURORA_WORKER_ID"),
             )
-            mission = service.run_mission(objective=objective)
+            submission = runtime.submit_mission(objective=objective)
+            mission = runtime.run_until_terminal(submission)
             return (
                 f"{config.prefix}\nMISSION_ACCEPTED\n\nObjective:\n{objective}\n\n"
-                + _format_mission(mission)
+                + _format_runtime_mission(mission)
             )
 
-        except (ModelRoutingError, InferenceConfigError, DirectorPlanError, ValueError, OSError) as exc:
+        except (ModelRoutingError, InferenceConfigError, DirectorPlanError, DirectorRuntimeError, ValueError, OSError) as exc:
             logger.warning("Aurora Director unavailable: %s", exc)
             return (
                 f"{config.prefix}\nMISSION_ACCEPTED\n\nObjective:\n{objective}\n\n"
