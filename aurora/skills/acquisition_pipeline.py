@@ -1,4 +1,4 @@
-"""Governed autonomous skill acquisition pipeline."""
+"""Governed skill acquisition orchestration."""
 
 class SkillAcquisitionPipelineError(RuntimeError):
-    pass
+    """Raised when a governed acquisition stage fails."""
