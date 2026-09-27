@@ -30,6 +30,15 @@ class SkillAssignment:
     skills: tuple[SkillSpec, ...]
 
     @property
+    def tags(self) -> tuple[str, ...]:
+        ordered: list[str] = []
+        for skill in self.skills:
+            for tag in skill.tags:
+                if tag not in ordered:
+                    ordered.append(tag)
+        return tuple(ordered)
+
+    @property
     def model_preferences(self) -> tuple[str, ...]:
         ordered: list[str] = []
         for skill in self.skills:
