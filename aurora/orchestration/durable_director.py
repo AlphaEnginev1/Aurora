@@ -85,10 +85,16 @@ class DurableDirectorService:
                     "task_ids": [task.task_id for task in validated],
                 },
             )
-        except (TeamCoordinatorError, Exception) as exc:
+        except Exception as exc:
             raise DurableDirectorError(
                 f"mission could not be durably submitted: {exc}"
             ) from exc
+        if validated != plan.tasks:
+            plan = DirectorPlan(
+                objective=plan.objective,
+                tasks=validated,
+                model=plan.model,
+            )
         return MissionSubmission(mission_id=mission, plan=plan)
 
 
