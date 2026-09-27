@@ -54,22 +54,47 @@ def _record_hash(path: Path, algorithm: str, expected: str) -> bool:
 
 def verify_record(install_root: str | Path, record_path: str | Path) -> int:
     """Verify hashes in an installed distribution RECORD file."""
-    root = Path(install_root)
-    record = Path(record_path)
+    root = Path(install_root).resolve()
+    record = Path(record_path).resolve()
     if not record.is_file():
         raise ProvenanceError(f"missing RECORD file: {record}")
+    try:
+        record.relative_to(root)
+    except ValueError as exc:
+        raise ProvenanceError(f"RECORD is outside managed install root: {record}") from exc
+
+    # RECORD paths are relative to the directory containing the .dist-info
+    # directory, not necessarily the top-level installation root. Absolute
+    # paths are accepted only when they remain inside Aurora's managed root.
+    base = record.parent
     checked = 0
     with record.open(newline="", encoding="utf-8") as handle:
         for row in csv.reader(handle):
             if len(row) != 3:
                 raise ProvenanceError(f"invalid RECORD row in {record}: {row!r}")
-            relative, digest, _size = row
+            path_text, digest, _size = row
             if not digest:
                 continue
-            algorithm, expected = digest.split("=", 1)
-            target = root / relative
+            hash_text = digest
+            try:
+                target = (
+                    Path(path_text).resolve()
+                    if Path(path_text).is_absolute()
+                    else (base / path_text).resolve()
+                )
+                target.relative_to(root)
+            except (OSError, ValueError) as exc:
+                raise ProvenanceError(
+                    f"RECORD path escapes managed install root: {path_text}"
+                ) from exc
+            try:
+                algorithm, expected = hash_text.split("=", 1)
+            except ValueError as exc:
+                raise ProvenanceError(
+                    f"invalid RECORD digest: {hash_text}"
+                ) from exc
             if not target.is_file() or not _record_hash(target, algorithm, expected):
-                raise ProvenanceError(f"RECORD verification failed: {relative}")
+                raise ProvenanceError(f"RECORD verification failed: {path_text}")
             checked += 1
     return checked
 
