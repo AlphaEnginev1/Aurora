@@ -226,11 +226,9 @@ def test_real_pypi_acquisition_downloads_verifies_and_executes(
         SandboxPolicy(network=False, timeout_seconds=20)
     ).execute(
         [
-            "python3",
+            "/workspace/managed-site/bin/python",
             "-c",
-            (
-                "import packaging; print(packaging.__version__)"
-            ),
+            "import packaging; print(packaging.__version__)",
         ],
         workspace=tmp_path,
     )
