@@ -360,21 +360,30 @@ class AcquisitionManager:
 
         committed = False
         try:
+            venv_result = self.sandbox.execute(
+                [python, "-m", "venv", "/workspace/prefix"],
+                workspace=workspace,
+            )
+            if venv_result.returncode != 0:
+                snapshot.rollback(snapshot_state)
+                detail = venv_result.stderr.strip() or venv_result.stdout.strip()
+                raise AcquisitionError(
+                    f"sandboxed Python environment creation failed: "
+                    f"{detail or 'unknown venv error'}"
+                )
+
             sandbox_result = self.sandbox.execute(
                 [
-                    python,
+                    "/workspace/prefix/bin/python",
                     "-m",
                     "pip",
                     "install",
                     "--disable-pip-version-check",
                     "--no-input",
                     "--no-index",
-                    "--ignore-installed",
                     "--only-binary=:all:",
                     "--find-links",
                     "/workspace/wheels",
-                    "--prefix",
-                    "/workspace/prefix",
                     "--report",
                     "/workspace/pip-report.json",
                     spec.name if spec.version is None else f"{spec.name}=={spec.version}",
