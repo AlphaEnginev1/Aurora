@@ -64,3 +64,33 @@ def test_director_planner_rejects_invalid_plans(response):
 def test_director_planner_rejects_empty_objective():
     with pytest.raises(DirectorPlanError, match="empty"):
         DirectorPlanner(FakeRouter('{"tasks":[]}')).plan(objective="  ")
+
+
+def test_director_planner_parses_review_decision():
+    router = FakeRouter(
+        '{"decision":"continue","rationale":"Need verification",'
+        '"tasks":[{"task_id":"verify","role":"validator","objective":"Verify evidence",'
+        '"capability":null,"args":[],"depends_on":[]}]}'
+    )
+    review = DirectorPlanner(router).review(
+        objective="Research the target.",
+        context=[{"role": "user", "content": "Current state: incomplete"}],
+    )
+    assert review.decision == "continue"
+    assert review.rationale == "Need verification"
+    assert review.tasks[0].task_id == "verify"
+    assert router.requests[0][0].metadata["role"] == "director_reviewer"
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        '{"decision":"complete","rationale":"done","tasks":[{"task_id":"x","role":"a","objective":"x"}]}',
+        '{"decision":"continue","rationale":"more","tasks":[]}',
+        '{"decision":"blocked","rationale":"blocked","tasks":[{"task_id":"x","role":"a","objective":"x"}]}',
+        '{"decision":"unknown","rationale":"bad","tasks":[]}',
+    ],
+)
+def test_director_planner_rejects_invalid_reviews(response):
+    with pytest.raises(DirectorPlanError):
+        DirectorPlanner(FakeRouter(response)).review(objective="Do work.")
