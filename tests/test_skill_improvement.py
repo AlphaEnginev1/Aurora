@@ -49,6 +49,13 @@ def test_generator_uses_durable_evidence_and_returns_candidate_procedure(tmp_pat
     assert result.model == "improvement-model"
     assert "Cross-check independent sources" in result.instructions
 
+    # The model receives recent execution evidence, including failure signatures.
+    # FakeRouter intentionally does not expose the request, so this is asserted by
+    # the durable store API separately below.
+    recent = store.evidence_for("research", skill_version="1.0.0", limit=3)
+    assert len(recent) == 3
+    assert recent[0].failure_signature == "weak evidence"
+
 
 def test_generator_rejects_missing_instruction_section(tmp_path: Path):
     class BadRouter:
