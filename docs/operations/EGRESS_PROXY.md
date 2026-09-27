@@ -12,7 +12,7 @@ The seccomp policy does not block ordinary fork/thread creation. It blocks unsha
 
 After the dataplane is ready, the supervisor-owned route fence removes the default route and the slirp-connected subnet route, then installs a single host route to the dedicated proxy gateway 10.0.2.2/32 on tap0.
 
-The firewall is installed before workload privileges are dropped. It uses a native nftables base chain with policy drop, permitting only loopback, the dedicated proxy endpoint 10.0.2.2:3128, and established/related traffic. The workload cannot rely on a direct route or direct destination even if proxy environment variables are removed.
+The firewall is installed before workload privileges are dropped. It uses a native nftables base chain with policy drop, permitting only loopback and the dedicated proxy endpoint 10.0.2.2:3128. The OUTPUT-only policy deliberately does not depend on conntrack: every outbound non-loopback packet must target the dedicated proxy, while return traffic enters through the namespace interface and does not traverse OUTPUT. The workload cannot rely on a direct route or direct destination even if proxy environment variables are removed.
 
 The resulting dataplane is:
 
