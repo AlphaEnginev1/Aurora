@@ -2,7 +2,8 @@ from pathlib import Path
 from threading import Event
 
 from aurora.inference.models import InferenceResponse
-from aurora.orchestration.director import DirectorPlan
+from aurora.inference.models import InferenceResponse
+from aurora.orchestration.director import DirectorPlan, DirectorReview
 from aurora.orchestration.director_runtime import DirectorRuntime
 from aurora.orchestration.durable_director import DurableDirectorService
 from aurora.orchestration.event_bus import DurableEventBus
@@ -14,6 +15,10 @@ from aurora.orchestration.task_worker import WorkerPolicy
 class FakePlanner:
     def __init__(self):
         self.calls = []
+
+    def __init__(self):
+        self.calls = []
+        self.review_calls = 0
 
     def plan(self, **kwargs):
         self.calls.append(kwargs)
@@ -31,6 +36,22 @@ class FakePlanner:
             model="fake/model",
         )
 
+    def review(self, **kwargs):
+        self.review_calls += 1
+        if self.review_calls == 1 and "adapt" in kwargs["objective"]:
+            return DirectorReview(
+                decision="continue",
+                rationale="One more validation step is required.",
+                tasks=(DelegatedTask("validate", "validator", "validate the result"),),
+                model="fake/model",
+            )
+        return DirectorReview(
+            decision="complete",
+            rationale="Evidence is sufficient.",
+            tasks=(),
+            model="fake/model",
+        )
+
 
 class FakeOrchestration:
     def __init__(self):
@@ -38,7 +59,15 @@ class FakeOrchestration:
 
     def run_task(self, **kwargs):
         self.calls.append(kwargs)
-        return object()
+        return __import__("aurora.orchestration.engine", fromlist=["TaskResult"]).TaskResult(
+            task_id=kwargs["task_id"],
+            role=kwargs["role"],
+            response=InferenceResponse(
+                model="fake/model",
+                provider="fake",
+                content=f"completed {kwargs['task_id']}",
+            ),
+        )
 
     def run_capability_task(self, **kwargs):
         raise AssertionError("capability execution is not expected")
@@ -122,3 +151,25 @@ def test_runtime_stop_event_allows_clean_24x7_shutdown(tmp_path: Path):
     stop = Event()
     stop.set()
     runtime.run_forever(stop)
+
+
+def test_adaptive_director_replans_after_terminal_phase(tmp_path: Path):
+    runtime, store, planner, engine = make_runtime(tmp_path)
+    submission = runtime.submit_mission(objective="adapt this mission")
+    result = runtime.run_until_terminal(submission)
+
+    assert result.status is TaskStatus.SUCCEEDED
+    assert planner.review_calls == 2
+    task_ids = [item.task.task_id for item in result.tasks]
+    assert task_ids == ["collect", "review", "r1_validate"]
+    assert result.tasks[-1].status is TaskStatus.SUCCEEDED
+
+    events = [event.event_type for event in store.events(submission.mission_id)]
+    assert "director_review" in events
+    assert "mission_reopened" in events
+    assert events.count("mission_succeeded") == 1
+    assert [call["task_id"] for call in engine.orchestration.calls] == [
+        "collect",
+        "review",
+        "r1_validate",
+    ]
