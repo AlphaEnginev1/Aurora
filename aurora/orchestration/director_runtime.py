@@ -244,6 +244,21 @@ class DirectorRuntime:
                 "suggested_change": proposal.suggested_change,
                 "generation_model": generated_model,
                 "generation_evidence": generated_evidence,
+                "validation": (
+                    {
+                        "baseline_score": prepared.validation.baseline_score,
+                        "candidate_score": prepared.validation.candidate_score,
+                        "improvement": prepared.validation.improvement,
+                        "model": prepared.validation.model,
+                        "state": prepared.validation.state,
+                        "case_count": len(prepared.validation.cases),
+                        "evidence_complete_cases": sum(
+                            1 for case in prepared.validation.cases if case.evidence_complete
+                        ),
+                    }
+                    if prepared.validation is not None
+                    else None
+                ),
             },
         )
         return prepared
@@ -283,6 +298,17 @@ class DirectorRuntime:
             "version": approved.skill.version,
             "base_version": approved.proposal.base_version,
             "promoted": True,
+            "validation": (
+                {
+                    "baseline_score": approved.validation.baseline_score,
+                    "candidate_score": approved.validation.candidate_score,
+                    "improvement": approved.validation.improvement,
+                    "model": approved.validation.model,
+                    "state": approved.validation.state,
+                }
+                if approved.validation is not None
+                else None
+            ),
         }
         self.event_bus.publish(
             mission_id=mission_id,
