@@ -143,33 +143,23 @@ def test_bwrap_status_reader_accepts_child_pid():
         raise
 
 
-def test_bwrap_status_reader_accepts_fragmented_json():
-    import os
-    import threading
+def test_bwrap_status_reader_accepts_fragmented_json(monkeypatch):
+    import aurora.autonomy.sandbox as sandbox
 
-    read_fd, write_fd = os.pipe()
+    chunks = iter((b'{ "child-pid": 43', b'21 }\\n'))
 
     class DummyProcess:
         def poll(self):
             return None
 
-    def writer():
-        try:
-            os.write(write_fd, b'{ "child-pid": 43')
-            os.write(write_fd, b'21 }\\n')
-        finally:
-            os.close(write_fd)
+    monkeypatch.setattr(sandbox.select, "select", lambda *args: ([11], [], []))
+    monkeypatch.setattr(sandbox.os, "read", lambda fd, size: next(chunks, b""))
 
-    thread = threading.Thread(target=writer)
-    thread.start()
-    try:
-        assert SandboxExecutor._read_bwrap_child_pid(
-            read_fd,
-            DummyProcess(),
-            timeout_seconds=1,
-        ) == 4321
-    finally:
-        thread.join(timeout=1)
+    assert SandboxExecutor._read_bwrap_child_pid(
+        11,
+        DummyProcess(),
+        timeout_seconds=1,
+    ) == 4321
 
 
 def test_bwrap_status_reader_fails_on_empty_channel():
