@@ -243,8 +243,7 @@ class SandboxExecutor:
         """Read Bubblewrap's host-visible PID for the child in its new netns."""
         deadline = time.monotonic() + timeout_seconds
         buffer = b""
-        try:
-            while True:
+        while True:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     raise SandboxError("bubblewrap child-pid readiness timeout")
@@ -283,12 +282,10 @@ class SandboxExecutor:
                     child_pid = payload.get("child-pid")
                     if isinstance(child_pid, int) and child_pid > 0:
                         return child_pid
-        finally:
-            # Keep the status pipe open after child-pid is observed.
-            # bubblewrap writes a second JSON status record (exit-code) when the
-            # sandbox child exits. The caller owns the fd and closes it only
-            # after communicate() has collected the final status.
-            pass
+        # Keep the status pipe open after child-pid is observed.
+        # bubblewrap writes a second JSON status record (exit-code) when the
+        # sandbox child exits. The caller owns the fd and closes it only
+        # after communicate() has collected the final status.
 
     def _run(
         self,
