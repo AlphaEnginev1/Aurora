@@ -387,10 +387,11 @@ class DirectorRuntime:
         return tuple(result)
 
     def _review_rounds(self, mission_id: str) -> int:
+        """Count durable Director review attempts, including failed attempts."""
         return sum(
             1
             for event in self.store.events(mission_id)
-            if event.event_type == "director_review"
+            if event.event_type == "director_review_started"
         )
 
     def _is_finalized(self, mission_id: str) -> bool:
