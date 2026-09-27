@@ -121,3 +121,40 @@ def test_resolve_rejects_untrusted_artifact_host():
             gateway,
             cache_dir="/tmp/aurora-test-cache",
         ).resolve("demo", "1.0.0")
+
+
+def test_resolve_rejects_unsafe_filename(tmp_path):
+    metadata_url = "https://pypi.org/pypi/demo/1.0.0/json"
+    gateway = FakeGateway({
+        metadata_url: json.dumps({
+            "info": {"name": "demo", "version": "1.0.0"},
+            "urls": [{
+                "filename": "../demo-1.0.0-py3-none-any.whl",
+                "url": "https://files.pythonhosted.org/demo.whl",
+                "digests": {"sha256": "2" * 64},
+                "yanked": False,
+            }],
+        })
+    })
+    with pytest.raises(ArtifactDownloadError, match="no compatible wheel"):
+        PypiArtifactDownloader(gateway, cache_dir=tmp_path).resolve("demo", "1.0.0")
+
+
+def test_resolve_exact_requires_metadata_attestation(tmp_path):
+    filename = "demo-1.0.0-py3-none-any.whl"
+    metadata_url = "https://pypi.org/pypi/demo/1.0.0/json"
+    gateway = FakeGateway({
+        metadata_url: json.dumps({
+            "info": {"name": "demo", "version": "1.0.0"},
+            "urls": [{
+                "filename": filename,
+                "url": "https://files.pythonhosted.org/demo.whl",
+                "digests": {"sha256": "3" * 64},
+                "yanked": False,
+            }],
+        })
+    })
+    artifact = PypiArtifactDownloader(
+        gateway, cache_dir=tmp_path
+    ).resolve_exact("demo", "1.0.0", filename)
+    assert artifact.sha256 == "3" * 64
