@@ -214,6 +214,7 @@ class DurableTaskStore:
         mission_id: str,
         worker_id: str,
         *,
+        claim_token: str | None = None,
         lease_seconds: float = 300.0,
     ) -> StoredTask | None:
         if not worker_id.strip():
@@ -307,7 +308,7 @@ class DurableTaskStore:
             db.execute("BEGIN IMMEDIATE")
             row = db.execute(
                 """
-                SELECT status, claimed_by, lease_until
+                SELECT status, claimed_by, claim_token, lease_until
                 FROM tasks
                 WHERE mission_id = ? AND task_id = ?
                 """,
@@ -316,7 +317,7 @@ class DurableTaskStore:
             if row is None:
                 db.rollback()
                 raise TaskStoreError(f"unknown task: {mission_id}/{task_id}")
-            if row["status"] != "running" or row["claimed_by"] != worker_id:
+            if row["status"] != "running" or row["claimed_by"] != worker_id or (claim_token is not None and row["claim_token"] != claim_token):
                 db.rollback()
                 raise TaskStoreError(
                     f"worker does not own running task: {mission_id}/{task_id}"
@@ -333,8 +334,9 @@ class DurableTaskStore:
                 SET lease_until = ?, updated_at = ?
                 WHERE mission_id = ? AND task_id = ? AND status = 'running'
                   AND claimed_by = ?
+                  AND claim_token = ?
                 """,
-                (lease_until, now, mission_id, task_id, worker_id),
+                (lease_until, now, mission_id, task_id, worker_id, claim_token),
             )
             self._event_locked(
                 db,
@@ -374,6 +376,7 @@ class DurableTaskStore:
                     UPDATE tasks
                     SET status = 'pending',
                         claimed_by = NULL,
+                        claim_token = NULL,
                         lease_until = NULL,
                         updated_at = ?
                     WHERE mission_id = ? AND task_id = ? AND status = 'running'
