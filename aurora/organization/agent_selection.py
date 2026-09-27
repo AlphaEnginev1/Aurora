@@ -43,6 +43,7 @@ class AgentSelector:
         capability: str | None = None,
         tags: Sequence[str] = (),
         preferred_roles: Sequence[str] = (),
+        allowed_roles: Sequence[str] = (),
     ) -> str:
         return self.route(
             objective=objective,
@@ -50,6 +51,7 @@ class AgentSelector:
             capability=capability,
             tags=tags,
             preferred_roles=preferred_roles,
+            allowed_roles=allowed_roles,
         ).selected_role
 
     def route(
@@ -60,16 +62,20 @@ class AgentSelector:
         capability: str | None = None,
         tags: Sequence[str] = (),
         preferred_roles: Sequence[str] = (),
+        allowed_roles: Sequence[str] = (),
     ) -> AgentSelection:
         from aurora.skills import SkillRegistryError
 
         required = tuple(dict.fromkeys(required_skill_ids))
         tagset = {tag.lower() for tag in tags}
         preferred = set(preferred_roles)
+        allowed = set(allowed_roles)
         learned = self._learned_scores(required)
 
         viable: list[tuple[AgentSpec, float, dict[str, float]]] = []
         for agent in self.organization.agents.values():
+            if allowed and agent.role not in allowed:
+                continue
             if capability is not None and capability not in agent.capabilities:
                 continue
             assignment_skill_ids = tuple(agent.skill_ids)
