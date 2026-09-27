@@ -113,8 +113,8 @@ def test_pypi_installer_uses_verified_cached_artifact_and_offline_sandbox(tmp_pa
     manager.sandbox = FakeSandbox()
     monkeypatch.setattr(
         manager,
-        "_verify_installed_distribution_at",
-        lambda *args: 1,
+        "_verify_all_installed_distributions",
+        lambda *args, **kwargs: 1,
     )
 
     result = manager.acquire(
