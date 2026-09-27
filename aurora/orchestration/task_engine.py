@@ -446,10 +446,17 @@ class TaskEngine:
             if skill_assignment is not None
             else ()
         )
-        artifacts = self.orchestration.prepare_capabilities(
-            names=required_capabilities,
-            actor=task.role,
-            reason=task.objective,
+        prepare_capabilities = getattr(
+            self.orchestration, "prepare_capabilities", None
+        )
+        artifacts = (
+            prepare_capabilities(
+                names=required_capabilities,
+                actor=task.role,
+                reason=task.objective,
+            )
+            if prepare_capabilities is not None
+            else ()
         )
         if artifacts:
             manifest = "\n".join(
