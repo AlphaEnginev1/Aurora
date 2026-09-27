@@ -186,3 +186,25 @@ def test_dynamic_agent_team_rejects_task_outside_team():
         assert "outside formed team" in str(exc)
     else:
         raise AssertionError("team boundary was not enforced")
+
+
+def test_dynamic_agent_team_reconfiguration_reports_changes():
+    from aurora.organization import DynamicAgentTeamSelector, reconfigure_team
+
+    selector = DynamicAgentTeamSelector(registry(), AgentSelector(registry()))
+    current = selector.form(
+        objective="research",
+        required_skill_ids=("research",),
+    )
+    desired = selector.form(
+        objective="research and implement",
+        required_skill_ids=("research", "engineering"),
+        max_members=2,
+    )
+
+    delta = reconfigure_team(current, desired)
+    assert delta.added_roles == ("engineer",)
+    assert delta.retained_roles == ("researcher",)
+    assert delta.removed_roles == ()
+    assert delta.newly_required_skills == ("engineering",)
+    assert delta.changed
