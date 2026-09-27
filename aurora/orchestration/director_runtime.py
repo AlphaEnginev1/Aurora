@@ -314,7 +314,7 @@ class DirectorRuntime:
         tasks = self._phase_tasks(mission_id, round_number, review.tasks)
         try:
             validated = self.director.task_engine.validate(tasks)
-            self.store.enqueue(mission_id, validated)
+            self.store.enqueue(mission_id, validated, phase=round_number)
         except (TaskStoreError, ValueError) as exc:
             self._publish_terminal(
                 mission_id,
