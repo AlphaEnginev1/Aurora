@@ -121,6 +121,8 @@ class SkillLearningStore:
                     json.dumps(evaluation.quality_failed),
                     json.dumps(evaluation.quality_missing),
                     evaluation.failure_signature,
+                    evaluation.evidence_completeness,
+                    evaluation.evidence_state,
                     self._now(),
                 ),
             )
