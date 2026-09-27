@@ -229,7 +229,7 @@ def test_real_pypi_acquisition_downloads_verifies_and_executes(
             "python3",
             "-c",
             (
-                "import sys; sys.path.insert(0, '/workspace/managed-site'); "
+                "import sys, glob; sys.path[:0] = glob.glob('/workspace/managed-site/lib/python*/site-packages'); "
                 "import packaging; print(packaging.__version__)"
             ),
         ],
@@ -306,7 +306,7 @@ def test_real_pypi_dependency_closure(
             "python3",
             "-c",
             (
-                "import sys; sys.path.insert(0, '/workspace/managed-site'); "
+                "import sys, glob; sys.path[:0] = glob.glob('/workspace/managed-site/lib/python*/site-packages'); "
                 "import requests; print(requests.__version__)"
             ),
         ],
