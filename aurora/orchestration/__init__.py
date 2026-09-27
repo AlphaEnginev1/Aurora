@@ -18,4 +18,10 @@ __all__ = [
     "TaskEngineError",
     "TaskResult",
     "TaskStatus",
+    "DurableTaskStore",
+    "StoredTask",
+    "TaskEvent",
+    "TaskStoreError",
 ]
+
+from .task_store import DurableTaskStore, StoredTask, TaskEvent, TaskStoreError
