@@ -52,6 +52,9 @@ def main() -> int:
         egress_proxy_port=int(os.getenv("AURORA_EGRESS_PROXY_PORT", "3128")),
         task_db_path=_path_env("AURORA_TASK_DB", ".aurora-runtime/tasks.db"),
         worker_id=os.getenv("AURORA_WORKER_ID"),
+        organization_path=_path_env(
+            "AURORA_ORGANIZATION_POLICY", "config/organization.json"
+        ),
     )
 
     if args.objective:
