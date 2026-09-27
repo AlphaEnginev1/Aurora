@@ -5,9 +5,10 @@ from pathlib import Path
 from aurora.autonomy.acquisition import AcquisitionManager
 from aurora.autonomy.broker import CapabilityBroker
 from aurora.autonomy.capability_runtime import CapabilityRuntime
+from aurora.autonomy.capability_resolution import CapabilityResolutionRuntime, HttpCapabilityDiscoveryProvider
 from aurora.autonomy.internet import InternetGateway, InternetPolicy
 from aurora.autonomy.policy import Policy
-from aurora.autonomy.registry import load_registry
+from aurora.autonomy.registry import CapabilityRegistryStore, load_registry, merge_registries
 from aurora.autonomy.sandbox import SandboxExecutor, SandboxPolicy
 from aurora.inference.config import load_model_specs
 from aurora.inference.router import ModelRouter
@@ -50,9 +51,10 @@ def build_director_service(*, inference_policy_path: str | Path, autonomy_policy
     policy=Policy(allowed_capabilities=frozenset(autonomy_data.get("allowed_capabilities",[])),
                   allowed_sources=frozenset(autonomy_data.get("allowed_sources",[])),
                   require_verification=bool(autonomy_data.get("require_verification",True)))
-    registry=load_registry(registry_path)
-    gateway=InternetGateway(InternetPolicy.from_file(network_policy_path))
     root=Path(workspace_root).resolve(); root.mkdir(parents=True,exist_ok=True)
+    dynamic_registry=CapabilityRegistryStore(root/"capability-registry.json")
+    registry=merge_registries(registry_path,dynamic_registry.path)
+    gateway=InternetGateway(InternetPolicy.from_file(network_policy_path))
     install_root=root/"managed-site"; transaction_dir=root/"transactions"; audit_path=root/"audit.jsonl"
     sandbox_policy=SandboxPolicy(network=False,timeout_seconds=120,cpu_seconds=60,memory_bytes=1_073_741_824,
         max_processes=64,max_open_files=256,max_output_bytes=1_048_576,
@@ -66,7 +68,23 @@ def build_director_service(*, inference_policy_path: str | Path, autonomy_policy
         install_root=install_root,transaction_dir=transaction_dir,internet_gateway=gateway,
         sandbox=offline_sandbox,network_sandbox=network_sandbox)
     broker=CapabilityBroker(policy=policy,registry=registry,acquisition=acquisition)
-    capability_runtime=CapabilityRuntime(broker,offline_sandbox,audit_path=audit_path)
+    discovery_endpoint=os.getenv("AURORA_CAPABILITY_DISCOVERY_ENDPOINT")
+    discovery=(
+        HttpCapabilityDiscoveryProvider(discovery_endpoint,gateway)
+        if discovery_endpoint else None
+    )
+    resolution=CapabilityResolutionRuntime(
+        broker,
+        discovery=discovery,
+        registrar=dynamic_registry.register,
+        audit_path=audit_path,
+    )
+    capability_runtime=CapabilityRuntime(
+        broker,
+        offline_sandbox,
+        audit_path=audit_path,
+        resolution=resolution,
+    )
     orchestration=OrchestrationEngine(router,capability_runtime=capability_runtime)
     learning_path=Path(skill_learning_path).resolve() if skill_learning_path is not None else root/"skill-learning.db"
     learning_store=SkillLearningStore(learning_path)
@@ -90,7 +108,8 @@ def build_director_runtime(*, inference_policy_path: str | Path, autonomy_policy
     policy=Policy(allowed_capabilities=frozenset(autonomy_data.get("allowed_capabilities",[])),
                   allowed_sources=frozenset(autonomy_data.get("allowed_sources",[])),
                   require_verification=bool(autonomy_data.get("require_verification",True)))
-    registry=load_registry(registry_path)
+    dynamic_registry=CapabilityRegistryStore(runtime_root/"capability-registry.json")
+    registry=merge_registries(registry_path,dynamic_registry.path)
     gateway=InternetGateway(InternetPolicy.from_file(network_policy_path))
     install_root=runtime_root/"managed-site"
     transaction_dir=runtime_root/"transactions"
