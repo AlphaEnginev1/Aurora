@@ -22,6 +22,23 @@ enabled compatible model when no preferred candidate is available.
 This means the organization file can define multiple preferred NVIDIA/NIM models as
 the inference catalog grows without changing the orchestration code.
 
+## Specialist skills
+
+The skill registry is a separate specialization authority loaded from
+`config/skills.json`. Each skill is versioned and contains a mission, trusted
+operating procedure, required capabilities, verification requirements, quality checks,
+dependencies and optional model preferences.
+
+Agents receive default skills through `skill_ids`. The Director may add registered
+skills to individual tasks. The TaskEngine validates that every selected skill is
+compatible with the agent's already-authorized capabilities, injects the trusted
+procedure into reasoning tasks, and persists the assignment in the durable task store.
+Skills do not grant capabilities; they refine how authorized capabilities are used.
+
+Skill changes should be treated as policy changes and reviewed, tested and versioned
+before activation. Future skill-learning flows should create a new skill version or a
+new skill candidate rather than silently mutating an active skill.
+
 ## Security boundary
 
 The organization registry does not grant capability access by itself. A requested
