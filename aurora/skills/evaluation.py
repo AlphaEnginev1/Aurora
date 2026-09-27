@@ -30,6 +30,8 @@ class SkillEvaluation:
     failure_signature: str | None
     evidence_completeness: float
     evidence_state: str
+    task_type: str = "general"
+    context_bucket: str = "medium"
 
 
 class SkillEvaluator:
@@ -46,6 +48,8 @@ class SkillEvaluator:
         mission_id: str | None = None,
         default_skill_ids: tuple[str, ...] = (),
         agent_capabilities=frozenset(),
+        task_type: str = "general",
+        context_bucket: str = "medium",
     ) -> tuple[SkillEvaluation, ...]:
         assignment = self.registry.for_agent(
             role=task.role,
@@ -107,6 +111,8 @@ class SkillEvaluator:
                     failure_signature=failure_signature,
                     evidence_completeness=self._evidence_completeness(verification, quality),
                     evidence_state=self._evidence_state(result, verification, quality),
+                    task_type=task_type,
+                    context_bucket=context_bucket,
                 )
             )
         return tuple(evaluations)
