@@ -23,6 +23,8 @@ class SkillAcquisitionEvidence:
     validation_stdout: str
     validation_stderr: str
     state: str
+    construction_score: float = 0.0
+    construction_evidence_state: str = "unknown"
 
 
 @dataclass(frozen=True)
@@ -70,6 +72,8 @@ class SkillAcquisitionPipeline:
         validation_returncode: int,
         validation_stdout: str = "",
         validation_stderr: str = "",
+        construction_score: float = 0.0,
+        construction_evidence_state: str = "unknown",
     ) -> PreparedSkillCandidate:
         if not source_ids:
             raise SkillAcquisitionPipelineError("research evidence is required")
@@ -79,7 +83,8 @@ class SkillAcquisitionPipeline:
         candidate = self.runtime.validate_candidate(candidate, registry)
         evidence = SkillAcquisitionEvidence(
             source_ids, acquired_tools, validation_returncode,
-            validation_stdout, validation_stderr, "awaiting_approval"
+            validation_stdout, validation_stderr, "awaiting_approval",
+            construction_score, construction_evidence_state,
         )
         self._persist(candidate, evidence)
         return PreparedSkillCandidate(candidate, evidence)
