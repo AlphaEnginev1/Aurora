@@ -17,15 +17,51 @@ shared mission memory/inbox, persisted task results, adaptive Director
 review/replanning across durable mission phases, and the internal organization
 registry with role/capability authorization and model-preference routing.
 
-Specialist skill foundation is now implemented: versioned skill registry, default
+Specialist skill foundation is implemented: versioned skill registry, default
 agent specializations, Director task-level skill assignment, capability compatibility
 validation, model preference contribution, specialist context injection, durable skill
 persistence and replan preservation.
 
-Skill learning/evolution now records per-skill execution evaluations, maintains
-learned model performance, generates bounded pending evolution proposals from repeated
-evidence, and feeds learned performance plus skill/work affinity into dynamic model
-selection. Active skills are never silently mutated by this learning loop.
+## Phase 8 — Adaptive Agent Intelligence — CLOSED
+
+Phase 8 is closed on merge commit `d5621d08e0207eaa222620f3d6fc7f7f016b0edf`.
+
+Delivered:
+- skill evaluation with explicit evidence completeness/state;
+- durable skill learning history;
+- trusted model/agent performance history;
+- bounded evidence-backed skill evolution proposals with explicit approval;
+- dynamic model routing using skill/work affinity, context fit, model quality/latency/cost,
+  preferences and trusted learned performance;
+- auditable routing decisions;
+- automatic specialist-agent selection from required skills and capabilities;
+- deterministic/fail-closed selection behavior;
+- runtime feedback from executed tasks into skill learning.
+
+Active skills are never silently mutated by learning, and incomplete evidence is
+never promoted to trusted routing history.
+
+## Phase 9 — Knowledge & Research Intelligence — ACTIVE
+
+Objective: give Aurora an evidence-first research capability that can investigate
+the external world through governed network access and produce durable, auditable
+knowledge.
+
+Initial implementation:
+- research request/domain models;
+- source provenance records with content hashes and retrieval timestamps;
+- durable evidence storage;
+- fail-closed evidence states;
+- governed retrieval through the existing InternetGateway;
+- tests for evidence completeness and provenance.
+
+Next increments:
+1. retrieval metadata and redirect-safe provenance;
+2. source parsing and claim extraction;
+3. independent evidence verification and contradiction handling;
+4. trusted knowledge artifacts and citation graphs;
+5. Director/task-engine research delegation;
+6. research results feeding skill learning and model routing.
 
 ## Phase 4
 Failure injection, security regression, observability, recovery drills and controlled live authorization.
