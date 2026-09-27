@@ -6,13 +6,14 @@ executable inside Aurora's sandbox.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import hashlib
 from pathlib import Path
 from typing import Mapping, Sequence
 
 from .audit import append_event
 from .broker import CapabilityBroker
+from .capability_resolution import CapabilityResolutionRuntime
 from .models import CapabilityRequest, CapabilityResult
 from .sandbox import SandboxError, SandboxExecutor
 
@@ -40,10 +41,12 @@ class CapabilityRuntime:
         sandbox: SandboxExecutor,
         *,
         audit_path: str | Path | None = None,
+        resolution: CapabilityResolutionRuntime | None = None,
     ) -> None:
         self.broker = broker
         self.sandbox = sandbox
         self.audit_path = Path(audit_path) if audit_path else None
+        self.resolution = resolution
 
     def execute(
         self,
@@ -53,7 +56,7 @@ class CapabilityRuntime:
         args: Sequence[str] = (),
         environment: Mapping[str, str] | None = None,
     ) -> CapabilityExecutionResult:
-        capability = self.broker.ensure(request)
+        capability = self._ensure(request)
         if capability.status not in {"installed", "already_available"}:
             self._audit(request, capability, status="blocked")
             raise CapabilityExecutionError(
@@ -65,6 +68,7 @@ class CapabilityRuntime:
                 f"capability {request.name} is not verified: {capability.verification}"
             )
 
+        capability = replace(capability, artifact_id=self._artifact_id(request.name, capability))
         spec = self.broker.resolve(request)
         if spec is None:
             raise CapabilityExecutionError(
@@ -126,7 +130,7 @@ class CapabilityRuntime:
         """Acquire/verify required tools and return their immutable runtime manifest."""
         prepared = []
         for name in dict.fromkeys(names):
-            result = self.broker.ensure(
+            result = self._ensure(
                 CapabilityRequest(name=name, actor=actor, reason=reason)
             )
             if result.status not in {"installed", "already_available"}:
@@ -137,8 +141,17 @@ class CapabilityRuntime:
                 raise CapabilityExecutionError(
                     f"required capability {name} is not verified"
                 )
+            result = replace(
+                result,
+                artifact_id=self._artifact_id(name, result),
+            )
             prepared.append(result)
         return tuple(prepared)
+
+    def _ensure(self, request: CapabilityRequest) -> CapabilityResult:
+        if self.resolution is None:
+            return self.broker.ensure(request)
+        return self.resolution.ensure(request).result
 
     def _audit(
         self,
