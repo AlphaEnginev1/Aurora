@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from aurora.inference.models import InferenceResponse
+from aurora.inference.models import InferenceResponse, ModelSpec
 from aurora.inference.router import ModelRouter
 from aurora.orchestration.engine import OrchestrationEngine, TaskResult
 from aurora.orchestration.task_engine import DelegatedTask, TaskEngine, TaskEngineError
@@ -12,14 +12,12 @@ from aurora.organization import AgentSpec, DepartmentSpec, OrganizationRegistry
 class CaptureRouter(ModelRouter):
     def __init__(self):
         super().__init__([
-            type("Model", (), {
-                "id": "model/a",
-                "provider": "fake",
-                "endpoint": "https://example.invalid",
-                "capabilities": ("reasoning",),
-                "context_window": None,
-                "enabled": True,
-            })()
+            ModelSpec(
+                "model/a",
+                "fake",
+                "https://example.invalid",
+                capabilities=("reasoning",),
+            )
         ])
         self.received_preferences = None
 
