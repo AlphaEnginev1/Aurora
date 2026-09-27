@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass
+import fcntl
 import hashlib
 import json
 from pathlib import Path
@@ -37,6 +39,18 @@ class AcquisitionTransaction:
         self.target = target
         self.transaction_id = hashlib.sha256(operation_key.encode("utf-8")).hexdigest()[:24]
         self.path = self.journal_dir / f"{self.transaction_id}.jsonl"
+
+    @contextmanager
+    def lock(self):
+        """Hold an inter-process lock for one acquisition operation."""
+        self.journal_dir.mkdir(parents=True, exist_ok=True)
+        lock_path = self.journal_dir / f"{self.transaction_id}.lock"
+        with lock_path.open("a+", encoding="utf-8") as handle:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
     @property
     def latest(self) -> TransactionRecord | None:

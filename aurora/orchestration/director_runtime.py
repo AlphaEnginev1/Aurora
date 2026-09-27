@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from concurrent.futures import ThreadPoolExecutor
 import json
 from threading import Event
 from time import sleep
@@ -63,6 +64,7 @@ class DirectorRuntime:
         event_consumer_id: str = "aurora-director-runtime",
         event_batch_size: int = 100,
         idle_sleep_seconds: float = 0.5,
+        worker_concurrency: int = 4,
         max_review_rounds: int = 3,
         skill_evaluator: SkillEvaluator | None = None,
         skill_learning: SkillLearningStore | None = None,
@@ -77,6 +79,8 @@ class DirectorRuntime:
             raise DirectorRuntimeError("idle_sleep_seconds cannot be negative")
         if max_review_rounds < 1:
             raise DirectorRuntimeError("max_review_rounds must be at least 1")
+        if worker_concurrency < 1:
+            raise DirectorRuntimeError("worker_concurrency must be at least 1")
         self.director = director
         self.store = store
         self.event_bus = event_bus or DurableEventBus(store)
@@ -86,6 +90,7 @@ class DirectorRuntime:
         self.event_batch_size = event_batch_size
         self.idle_sleep_seconds = idle_sleep_seconds
         self.max_review_rounds = max_review_rounds
+        self.worker_concurrency = worker_concurrency
         self.skill_evaluator = skill_evaluator
         self.skill_learning = skill_learning
         self.skill_evolution = skill_evolution
@@ -139,7 +144,6 @@ class DirectorRuntime:
             and not self._is_finalized(mission_id)
         ]
 
-        cycles: list[WorkerCycle] = []
         for mission_id in active:
             if not self.store.has_event(mission_id, "mission_started"):
                 self.event_bus.publish(
@@ -147,12 +151,36 @@ class DirectorRuntime:
                     event_type="mission_started",
                     payload={"worker_id": self.worker_id},
                 )
-            worker = self._worker_for(mission_id)
-            cycle = worker.run_once()
-            cycles.append(cycle)
-            self._record_worker_result(mission_id, cycle)
-            if self.store.mission_status(mission_id) in self.TERMINAL:
-                terminal_candidates.append(mission_id)
+
+        assignments = [
+            (mission_id, slot)
+            for mission_id in active
+            for slot in range(self.worker_concurrency)
+        ]
+        cycles: list[WorkerCycle] = []
+        if assignments:
+            with ThreadPoolExecutor(
+                max_workers=min(self.worker_concurrency, len(assignments)),
+                thread_name_prefix="aurora-worker",
+            ) as pool:
+                futures = [
+                    pool.submit(self._worker_for(mission_id, slot).run_once)
+                    for mission_id, slot in assignments
+                ]
+                for (mission_id, _slot), future in zip(assignments, futures):
+                    try:
+                        cycle = future.result()
+                    except Exception as exc:
+                        cycle = WorkerCycle(action="error")
+                        self.event_bus.publish(
+                            mission_id=mission_id,
+                            event_type="worker.cycle_failed",
+                            payload={"worker_id": self.worker_id, "error": str(exc)},
+                        )
+                    cycles.append(cycle)
+                    self._record_worker_result(mission_id, cycle)
+                    if self.store.mission_status(mission_id) in self.TERMINAL:
+                        terminal_candidates.append(mission_id)
 
         for mission_id in sorted(set(terminal_candidates)):
             self._review_or_finalize(mission_id)
@@ -209,21 +237,22 @@ class DirectorRuntime:
             if not cycle.did_work and self.idle_sleep_seconds:
                 self._sleep(self.idle_sleep_seconds)
 
-    def _worker_for(self, mission_id: str) -> TaskWorker:
-        worker = self._workers.get(mission_id)
+    def _worker_for(self, mission_id: str, slot: int = 0) -> TaskWorker:
+        key = f"{mission_id}:{slot}"
+        worker = self._workers.get(key)
         if worker is None:
             worker = TaskWorker(
                 store=self.store,
                 task_engine=self.director.task_engine,
                 mission_id=mission_id,
-                worker_id=f"{self.worker_id}:{mission_id}",
+                worker_id=f"{self.worker_id}:{mission_id}:{slot}",
                 policy=self.worker_policy,
                 event_bus=self.event_bus,
                 skill_evaluator=self.skill_evaluator,
                 skill_learning=self.skill_learning,
                 skill_evolution=self.skill_evolution,
             )
-            self._workers[mission_id] = worker
+            self._workers[key] = worker
         return worker
 
     def _record_worker_result(self, mission_id: str, cycle: WorkerCycle) -> None:

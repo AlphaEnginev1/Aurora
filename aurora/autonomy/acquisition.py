@@ -1,6 +1,8 @@
 """Policy-controlled, non-interactive capability acquisition."""
 
+from contextlib import contextmanager
 from dataclasses import dataclass
+import fcntl
 import os
 from pathlib import Path
 import shutil
@@ -88,6 +90,24 @@ class AcquisitionManager:
         return {"tool": tool_spec.name, "source": tool_spec.source, "action": "install"}
 
     def acquire(self, tool_spec: ToolSpec) -> AcquisitionResult:
+        tx = self._transaction(tool_spec)
+        with self._target_lock():
+            with tx.lock():
+                return self._acquire_locked(tool_spec)
+
+    @contextmanager
+    def _target_lock(self):
+        """Serialize mutations of the shared managed installation target."""
+        self.transaction_dir.mkdir(parents=True, exist_ok=True)
+        lock_path = self.transaction_dir / "acquisition-target.lock"
+        with lock_path.open("a+", encoding="utf-8") as handle:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+    def _acquire_locked(self, tool_spec: ToolSpec) -> AcquisitionResult:
         self.plan(tool_spec)
         tx = self._transaction(tool_spec)
         try:

@@ -90,3 +90,34 @@ def test_commit_pending_requires_recovery(tmp_path):
     assert pending.state == "commit_pending"
     with pytest.raises(TransactionError, match="requires recovery"):
         tx.begin()
+
+
+def test_transaction_lock_serializes_parallel_holders(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Lock
+    from time import sleep
+
+    tx = AcquisitionTransaction(
+        journal_dir=tmp_path,
+        operation_key="parallel-operation",
+        tool="demo",
+        source="pypi",
+    )
+    guard = Lock()
+    active = 0
+    peak = 0
+
+    def hold():
+        nonlocal active, peak
+        with tx.lock():
+            with guard:
+                active += 1
+                peak = max(peak, active)
+            sleep(0.02)
+            with guard:
+                active -= 1
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        tuple(pool.map(lambda _: hold(), range(2)))
+
+    assert peak == 1

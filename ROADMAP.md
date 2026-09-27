@@ -41,6 +41,17 @@ Delivered:
 Active skills are never silently mutated by learning, and incomplete evidence is
 never promoted to trusted routing history.
 
+## Cross-cutting Runtime Hardening — IN PROGRESS
+
+Parallel agent execution is now treated as a transversal runtime capability:
+- bounded concurrent durable workers can claim independent tasks atomically;
+- execution attempts receive isolated deterministic workspaces;
+- acquisition mutations are serialized at the shared installation target;
+- append-only audit writes are serialized across concurrent workers;
+- concurrency regression tests cover duplicate claims, workspace isolation and acquisition locking.
+
+This hardening must pass CI and runtime stress validation before being declared production-verified.
+
 ## Phase 9 — Knowledge & Research Intelligence — ACTIVE
 
 Objective: give Aurora an evidence-first research capability that can investigate
