@@ -97,7 +97,7 @@ def test_pypi_installer_uses_verified_cached_artifact_and_offline_sandbox(tmp_pa
 
     class FakeSandbox:
         def execute(self, command, *, workspace):
-            site = workspace / "site"
+            site = workspace / "prefix" / "lib" / "python3.12" / "site-packages"
             dist = site / "example-1.0.0.dist-info"
             dist.mkdir()
             (site / "example.py").write_bytes(b"example")
