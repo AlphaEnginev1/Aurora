@@ -29,6 +29,8 @@ class SkillEvaluation:
     quality_failed: tuple[str, ...]
     quality_missing: tuple[str, ...]
     failure_signature: str | None
+    evidence_completeness: float
+    evidence_state: str
 
 
 class SkillEvaluator:
@@ -104,6 +106,8 @@ class SkillEvaluator:
                     quality_failed=quality[1],
                     quality_missing=quality[2],
                     failure_signature=failure_signature,
+                    evidence_completeness=self._evidence_completeness(verification, quality),
+                    evidence_state=self._evidence_state(result, verification, quality),
                 )
             )
         return tuple(evaluations)
@@ -128,6 +132,36 @@ class SkillEvaluator:
         return tuple(passed), tuple(failed), tuple(missing)
 
     @staticmethod
+    def _evidence_completeness(
+        verification: tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]],
+        quality: tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]],
+    ) -> float:
+        total = sum(len(part) for part in (*verification, *quality))
+        if total == 0:
+            return 1.0
+        observed = (
+            len(verification[0]) + len(verification[1])
+            + len(quality[0]) + len(quality[1])
+        )
+        return observed / total
+
+    @staticmethod
+    def _evidence_state(
+        result: DelegatedTaskResult,
+        verification: tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]],
+        quality: tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]],
+    ) -> str:
+        if result.status is not TaskStatus.SUCCEEDED:
+            return "execution_failed"
+        failed = len(verification[1]) + len(quality[1])
+        missing = len(verification[2]) + len(quality[2])
+        if failed:
+            return "evidence_failed"
+        if missing:
+            return "insufficient_evidence"
+        return "evidence_complete"
+
+    @staticmethod
     def _score(
         *,
         result: DelegatedTaskResult,
@@ -142,8 +176,8 @@ class SkillEvaluator:
             return 1.0 if has_content or result.capability_result is not None else 0.5
         passed = len(verification[0]) + len(quality[0])
         failed = len(verification[1]) + len(quality[1])
-        observable = passed + failed
         evidence_ratio = passed / total_checks
-        penalty = 0.25 * (failed / total_checks)
+        missing = total_checks - passed - failed
+        penalty = 0.25 * (failed / total_checks) + 0.10 * (missing / total_checks)
         execution_floor = 0.45 if has_content or result.capability_result is not None else 0.25
         return max(0.0, min(1.0, execution_floor + 0.55 * evidence_ratio - penalty))
