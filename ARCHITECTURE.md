@@ -38,3 +38,18 @@ The model router accepts an ordered preference list supplied by the resolved age
 It filters by enabled status and required inference capability, honors the preference
 order when possible, and falls back to another enabled compatible model when no
 preferred candidate is available.
+
+## Specialist skills
+
+Skills are a governed specialization layer between organizational roles and execution capabilities.
+Each versioned skill defines a mission, operating procedure, required capabilities,
+verification requirements, quality checks and optional model preferences. Agents can
+carry default skills; the Director can add registered skills to individual tasks.
+Task assignments are validated against the agent capabilities before execution,
+persisted in the durable task queue, applied as trusted specialist context to model
+work, and preserved across adaptive replanning phases.
+
+Skill definitions are treated as trusted policy artifacts. Adding or changing a skill
+is subject to the same acquisition, verification, audit and rollback principles as
+other autonomous policy changes; a skill never grants capabilities that the agent does
+not already possess.
