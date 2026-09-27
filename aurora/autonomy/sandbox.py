@@ -283,10 +283,12 @@ class SandboxExecutor:
                     child_pid = payload.get("child-pid")
                     if isinstance(child_pid, int) and child_pid > 0:
                         return child_pid
-        # Keep the status pipe open after child-pid is observed.
-        # bubblewrap writes a second JSON status record (exit-code) when the
-        # sandbox child exits. Closing the read end here would make that later
-        # write hit SIGPIPE and kill bubblewrap before it can complete.
+        finally:
+            # Keep the status pipe open after child-pid is observed.
+            # bubblewrap writes a second JSON status record (exit-code) when the
+            # sandbox child exits. The caller owns the fd and closes it only
+            # after communicate() has collected the final status.
+            pass
 
     def _run(
         self,
