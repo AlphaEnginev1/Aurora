@@ -13,4 +13,9 @@ __all__ = [
     "ResearchService",
     "ResearchStore",
     "SourceRecord",
+    "DiscoveredSource",
+    "HttpSearchProvider",
+    "ResearchDiscoveryProvider",
 ]
+
+from .discovery import DiscoveredSource, HttpSearchProvider, ResearchDiscoveryProvider
