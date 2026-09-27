@@ -1,4 +1,5 @@
 from pathlib import Path
+import sqlite3
 
 import pytest
 
@@ -106,4 +107,67 @@ def test_missing_dependency_is_rejected(tmp_path: Path):
         store.enqueue(
             "mission-1",
             [DelegatedTask("a", "agent", "work", depends_on=("missing",))],
+        )
+
+
+def test_store_migrates_existing_prelease_database(tmp_path: Path):
+    path = tmp_path / "tasks.db"
+    with sqlite3.connect(path) as db:
+        db.executescript(
+            """
+            CREATE TABLE tasks (
+                mission_id TEXT NOT NULL,
+                task_id TEXT NOT NULL,
+                role TEXT NOT NULL,
+                objective TEXT NOT NULL,
+                capability TEXT,
+                args_json TEXT NOT NULL,
+                deps_json TEXT NOT NULL,
+                status TEXT NOT NULL CHECK (status IN ('pending','running','succeeded','failed','blocked')),
+                attempts INTEGER NOT NULL DEFAULT 0,
+                last_error TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (mission_id, task_id)
+            );
+            CREATE TABLE task_events (
+                event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                mission_id TEXT NOT NULL,
+                task_id TEXT,
+                event_type TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            """
+        )
+
+    store = DurableTaskStore(path)
+    store.enqueue("mission-1", [DelegatedTask("a", "agent", "work")])
+    claimed = store.claim_next("mission-1", "worker-a", lease_seconds=30)
+
+    assert claimed is not None
+    assert claimed.lease_until is not None
+    assert claimed.claimed_by == "worker-a"
+
+
+def test_complete_rejects_an_expired_owned_lease(tmp_path: Path):
+    path = tmp_path / "tasks.db"
+    store = DurableTaskStore(path)
+    store.enqueue("mission-1", [DelegatedTask("a", "agent", "work")])
+    claimed = store.claim_next("mission-1", "worker-a", lease_seconds=30)
+    assert claimed is not None
+
+    future = datetime.now(timezone.utc) + timedelta(seconds=60)
+    # Recovering the lease models a different worker taking ownership after
+    # the original worker stopped heartbeating.
+    assert store.recover_expired("mission-1", now=future.isoformat()) == 1
+    replacement = store.claim_next("mission-1", "worker-b", lease_seconds=30)
+    assert replacement is not None
+
+    with pytest.raises(TaskStoreError, match="does not own"):
+        store.complete(
+            "mission-1",
+            "a",
+            status="succeeded",
+            worker_id="worker-a",
         )
