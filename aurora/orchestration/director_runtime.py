@@ -21,6 +21,7 @@ from aurora.skills.evaluation import SkillEvaluator
 from aurora.skills.learning import SkillEvolutionEngine, SkillLearningStore
 from aurora.skills.autonomous_specialist_acquisition import AutonomousSpecialistAcquisition
 from aurora.skills.acquisition_pipeline import PreparedSkillCandidate
+from aurora.skills.evolution_runtime import PreparedSkillEvolution, SkillEvolutionRuntime
 
 
 
@@ -73,6 +74,7 @@ class DirectorRuntime:
         skill_learning: SkillLearningStore | None = None,
         skill_evolution: SkillEvolutionEngine | None = None,
         autonomous_specialist_acquisition: AutonomousSpecialistAcquisition | None = None,
+        skill_evolution_runtime: SkillEvolutionRuntime | None = None,
         sleep_fn: Callable[[float], None] = sleep,
     ) -> None:
         if not event_consumer_id.strip():
@@ -99,6 +101,7 @@ class DirectorRuntime:
         self.skill_learning = skill_learning
         self.skill_evolution = skill_evolution
         self.autonomous_specialist_acquisition = autonomous_specialist_acquisition
+        self.skill_evolution_runtime = skill_evolution_runtime
         self._sleep = sleep_fn
         self._subscription: EventSubscription = self.event_bus.subscribe(event_consumer_id)
         self._workers: dict[str, TaskWorker] = {}
@@ -184,6 +187,137 @@ class DirectorRuntime:
         self.event_bus.publish(mission_id=mission_id, event_type="team.reformation_skipped",
             payload={"candidate_id": approved.candidate_id, "reason": "no pending tasks or team coordinator"})
         return promoted_registry
+    def prepare_skill_evolution(
+        self,
+        *,
+        mission_id: str,
+        proposal_id: str,
+        improved_instructions: str | None = None,
+    ) -> PreparedSkillEvolution:
+        """Prepare a versioned evolution candidate from durable learning evidence."""
+        if self.skill_learning is None or self.skill_evolution_runtime is None:
+            raise DirectorRuntimeError("skill evolution runtime is not configured")
+        registry = self.director.task_engine.skill_registry
+        if registry is None:
+            raise DirectorRuntimeError("skill registry is not configured")
+        proposals = self.skill_learning.pending_proposals()
+        proposal = next((item for item in proposals if item.proposal_id == proposal_id), None)
+        if proposal is None:
+            raise DirectorRuntimeError(f"unknown pending skill evolution proposal: {proposal_id}")
+        prepared = self.skill_evolution_runtime.prepare(
+            proposal=proposal,
+            registry=registry,
+            improved_instructions=improved_instructions,
+        )
+        self.event_bus.publish(
+            mission_id=mission_id,
+            event_type="skill.evolution.awaiting_approval",
+            payload={
+                "candidate_id": prepared.candidate_id,
+                "proposal_id": proposal.proposal_id,
+                "skill_id": prepared.skill.skill_id,
+                "base_version": proposal.base_version,
+                "candidate_version": prepared.skill.version,
+                "evidence_count": proposal.evidence_count,
+                "reason": proposal.reason,
+                "suggested_change": proposal.suggested_change,
+            },
+        )
+        return prepared
+
+    def approve_skill_evolution(
+        self,
+        *,
+        mission_id: str,
+        prepared: PreparedSkillEvolution,
+    ):
+        """Explicitly approve, promote and re-form the mission after skill evolution."""
+        if self.skill_evolution_runtime is None:
+            raise DirectorRuntimeError("skill evolution runtime is not configured")
+        registry = self.director.task_engine.skill_registry
+        if registry is None:
+            raise DirectorRuntimeError("skill registry is not configured")
+        try:
+            approved = self.skill_evolution_runtime.approve(prepared)
+            promoted = self.skill_evolution_runtime.promote(approved, registry)
+        except Exception as exc:
+            self.event_bus.publish(
+                mission_id=mission_id,
+                event_type="skill.evolution.promotion_failed",
+                payload={
+                    "candidate_id": prepared.candidate_id,
+                    "skill_id": prepared.skill.skill_id,
+                    "error": str(exc),
+                },
+            )
+            raise DirectorRuntimeError(f"skill evolution promotion failed: {exc}") from exc
+
+        self.director.task_engine.skill_registry = promoted
+        payload = {
+            "candidate_id": approved.candidate_id,
+            "proposal_id": approved.proposal.proposal_id,
+            "skill_id": approved.skill.skill_id,
+            "version": approved.skill.version,
+            "base_version": approved.proposal.base_version,
+            "promoted": True,
+        }
+        self.event_bus.publish(
+            mission_id=mission_id,
+            event_type="skill.evolution.promoted",
+            payload=payload,
+        )
+
+        pending = tuple(
+            item.task
+            for item in self.store.list_tasks(mission_id)
+            if item.status in {"pending", "running"}
+        )
+        coordinator = getattr(self.director, "team_coordinator", None)
+        if coordinator is not None and pending:
+            objective = self._objective_from_memory(mission_id)
+            try:
+                state = coordinator.prepare(
+                    mission_id=mission_id,
+                    objective=objective,
+                    tasks=pending,
+                )
+            except Exception as exc:
+                self.event_bus.publish(
+                    mission_id=mission_id,
+                    event_type="team.reformation_failed",
+                    payload={"candidate_id": approved.candidate_id, "error": str(exc)},
+                )
+                raise DirectorRuntimeError(f"team reformation after evolution failed: {exc}") from exc
+            delta = state.reconfiguration
+            self.event_bus.publish(
+                mission_id=mission_id,
+                event_type="team.reformed_after_skill_evolution",
+                payload={
+                    **payload,
+                    "roles": [member.role for member in state.team.members],
+                    "required_skills": list(state.team.required_skills),
+                    "covered_skills": list(state.team.covered_skills),
+                    "missing_skills": list(state.team.missing_skills),
+                    "added_roles": list(delta.added_roles) if delta else [],
+                    "removed_roles": list(delta.removed_roles) if delta else [],
+                },
+            )
+            self.memory.append(
+                mission_id=mission_id,
+                source="director",
+                kind="skill_evolution",
+                content=json.dumps(payload, sort_keys=True),
+                metadata={"candidate_id": approved.candidate_id},
+            )
+            return state
+
+        self.event_bus.publish(
+            mission_id=mission_id,
+            event_type="team.reformation_skipped",
+            payload={"candidate_id": approved.candidate_id, "reason": "no pending tasks or team coordinator"},
+        )
+        return promoted
+
     def submit_mission(self, **kwargs: Any) -> MissionSubmission:
         """Plan and durably submit a mission for the continuous worker loop."""
         submission = self.director.submit_mission(**kwargs)

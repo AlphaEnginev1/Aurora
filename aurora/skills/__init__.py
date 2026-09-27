@@ -3,6 +3,7 @@ from .models import SkillAssignment, SkillSpec
 from .registry import SkillRegistry, SkillRegistryError
 from .evaluation import SkillEvaluation, SkillEvaluator
 from .acquisition import SkillAcquisitionError, SkillAcquisitionRuntime, SkillCandidate, SkillGap
+from .evolution_runtime import PreparedSkillEvolution, SkillEvolutionRuntime, SkillEvolutionRuntimeError
 from .learning import (
     SkillEvolutionEngine,
     SkillEvolutionProposal,
@@ -16,6 +17,9 @@ __all__ = [
     "SkillEvaluation",
     "SkillEvaluator",
     "SkillEvolutionEngine",
+    "SkillEvolutionRuntime",
+    "SkillEvolutionRuntimeError",
+    "PreparedSkillEvolution",
     "SkillEvolutionProposal",
     "SkillLearningError",
     "SkillLearningStore",
