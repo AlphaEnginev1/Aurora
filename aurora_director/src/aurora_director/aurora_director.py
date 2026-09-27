@@ -17,6 +17,8 @@ from aurora.orchestration.director_runtime import DirectorRuntimeError
 from aurora.inference.config import InferenceConfigError, load_model_specs
 from aurora.inference.models import InferenceRequest
 from aurora.inference.router import ModelRouter, ModelRoutingError
+from aurora.organization import OrganizationRegistry
+from aurora.skills import SkillRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +95,20 @@ async def aurora_director_function(config: AuroraDirectorFunctionConfig, builder
                 models=models,
                 nvidia_api_key=os.getenv("NVIDIA_API_KEY"),
             )
-            planner = DirectorPlanner(router)
+            organization = OrganizationRegistry.from_file(
+                Path(os.getenv("AURORA_ORGANIZATION_POLICY", "config/organization.json")),
+                configured_models={model.id for model in models},
+            )
+            skills = SkillRegistry.from_file(
+                Path(os.getenv("AURORA_SKILLS_POLICY", "config/skills.json")),
+                configured_models={model.id for model in models},
+            )
+            skills.validate_organization(organization)
+            planner = DirectorPlanner(
+                router,
+                organization=organization,
+                skill_registry=skills,
+            )
 
             execution_enabled = os.getenv("AURORA_ENABLE_AUTONOMY_EXECUTION", "0") == "1"
             proxy_host = os.getenv("AURORA_EGRESS_PROXY_HOST")
