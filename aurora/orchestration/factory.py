@@ -15,8 +15,12 @@ from aurora.autonomy.registry import load_registry
 from aurora.autonomy.sandbox import SandboxExecutor, SandboxPolicy
 from aurora.inference.config import load_model_specs
 from aurora.inference.router import ModelRouter
+from aurora.research.service import ResearchService
+from aurora.research.store import ResearchStore
 from aurora.organization import AgentSelector, OrganizationRegistry
 from aurora.skills import SkillAcquisitionRuntime, SkillEvaluator, SkillEvolutionEngine, SkillLearningStore, SkillRegistry
+from aurora.skills.acquisition_pipeline import SkillAcquisitionPipeline
+from aurora.skills.autonomous_specialist_acquisition import AutonomousSpecialistAcquisition
 from .director import DirectorPlanner, DirectorService
 from .durable_director import DurableDirectorService
 from .engine import OrchestrationEngine
@@ -198,6 +202,14 @@ def build_director_runtime(
     store = DurableTaskStore(store_path)
     event_bus = DurableEventBus(store)
     skill_acquisition = SkillAcquisitionRuntime(runtime_root / "skill-acquisition.db")
+    research_service = ResearchService(gateway, ResearchStore(runtime_root / "research.db"))
+    acquisition_pipeline = SkillAcquisitionPipeline(skill_acquisition, runtime_root / "skill-acquisition-artifacts.db")
+    autonomous_specialist_acquisition = AutonomousSpecialistAcquisition(
+        research=research_service,
+        acquisition=acquisition,
+        pipeline=acquisition_pipeline,
+        sandbox=offline_sandbox,
+    )
     team_coordinator = TeamCoordinator(
         task_engine=service.task_engine,
         agent_selector=AgentSelector(
@@ -232,6 +244,7 @@ def build_director_runtime(
         skill_evaluator=skill_evaluator,
         skill_learning=skill_learning,
         skill_evolution=skill_evolution,
+        autonomous_specialist_acquisition=autonomous_specialist_acquisition,
     )
     return runtime
 

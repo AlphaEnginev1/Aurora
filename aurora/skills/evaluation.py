@@ -5,7 +5,6 @@ from dataclasses import dataclass
 import re
 from typing import Iterable
 
-from aurora.orchestration.task_engine import DelegatedTask, DelegatedTaskResult, TaskStatus
 from .registry import SkillRegistry
 
 
@@ -86,7 +85,7 @@ class SkillEvaluator:
             )
             failure_signature = (
                 result.error.strip()[:240]
-                if result.status is not TaskStatus.SUCCEEDED and result.error
+                if result.status.value != "succeeded" and result.error
                 else None
             )
             evaluations.append(
@@ -151,7 +150,7 @@ class SkillEvaluator:
         verification: tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]],
         quality: tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]],
     ) -> str:
-        if result.status is not TaskStatus.SUCCEEDED:
+        if result.status.value != "succeeded":
             return "execution_failed"
         failed = len(verification[1]) + len(quality[1])
         missing = len(verification[2]) + len(quality[2])
@@ -169,7 +168,7 @@ class SkillEvaluator:
         verification: tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]],
         quality: tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]],
     ) -> float:
-        if result.status is not TaskStatus.SUCCEEDED:
+        if result.status.value != "succeeded":
             return 0.0
         total_checks = sum(len(part) for part in (*verification, *quality))
         if total_checks == 0:
