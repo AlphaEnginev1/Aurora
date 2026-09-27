@@ -19,6 +19,7 @@ from aurora.skills import SkillAcquisitionRuntime, SkillEvaluator, SkillEvolutio
 from aurora.skills.acquisition_pipeline import SkillAcquisitionPipeline
 from aurora.skills.autonomous_specialist_acquisition import AutonomousSpecialistAcquisition
 from aurora.skills.evolution_runtime import SkillEvolutionRuntime
+from aurora.skills.validation_lab import SkillValidationLab
 from aurora.skills.improvement import SkillImprovementGenerator
 from aurora.skills.discovery import SkillDiscoveryService
 from .director import DirectorPlanner, DirectorService
@@ -124,7 +125,8 @@ def build_director_runtime(*, inference_policy_path: str | Path, autonomy_policy
     skill_registry=service.task_engine.skill_registry
     if skill_registry is None: raise RuntimeError("skill registry is not configured")
     skill_evaluator=SkillEvaluator(skill_registry); skill_evolution=SkillEvolutionEngine(skill_learning)
-    skill_evolution_runtime=SkillEvolutionRuntime(skill_learning, runtime_root/"skill-evolution.db")
+    skill_validation_lab=SkillValidationLab(service.planner.router)
+    skill_evolution_runtime=SkillEvolutionRuntime(skill_learning, runtime_root/"skill-evolution.db", validation_lab=skill_validation_lab)
     skill_improvement_generator=SkillImprovementGenerator(service.planner.router, skill_learning)
     return DirectorRuntime(director=durable_director,store=store,event_bus=event_bus,worker_policy=worker_policy,
         worker_id=worker_id,worker_concurrency=worker_concurrency,skill_evaluator=skill_evaluator,
