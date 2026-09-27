@@ -73,9 +73,6 @@ def verify_record(install_root: str | Path, record_path: str | Path) -> int:
             if len(row) != 3:
                 raise ProvenanceError(f"invalid RECORD row in {record}: {row!r}")
             path_text, digest, _size = row
-            if not digest:
-                continue
-            hash_text = digest
             try:
                 target = (
                     Path(path_text).resolve()
@@ -87,11 +84,13 @@ def verify_record(install_root: str | Path, record_path: str | Path) -> int:
                 raise ProvenanceError(
                     f"RECORD path escapes managed install root: {path_text}"
                 ) from exc
+            if not digest:
+                continue
             try:
-                algorithm, expected = hash_text.split("=", 1)
+                algorithm, expected = digest.split("=", 1)
             except ValueError as exc:
                 raise ProvenanceError(
-                    f"invalid RECORD digest: {hash_text}"
+                    f"invalid RECORD digest: {digest}"
                 ) from exc
             if not target.is_file() or not _record_hash(target, algorithm, expected):
                 raise ProvenanceError(f"RECORD verification failed: {path_text}")
