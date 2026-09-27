@@ -96,7 +96,19 @@ def test_pypi_installer_uses_verified_cached_artifact_and_offline_sandbox(tmp_pa
     )
 
     class FakeSandbox:
+        calls = []
+
         def execute(self, command, *, workspace):
+            self.calls.append(tuple(command))
+            if list(command) == ["python3", "-m", "venv", "/workspace/prefix"]:
+                return SandboxResult(tuple(command), 0, "", "")
+            if list(command[:4]) != [
+                "/workspace/prefix/bin/python",
+                "-m",
+                "pip",
+                "install",
+            ]:
+                raise AssertionError(f"unexpected sandbox command: {command!r}")
             site = workspace / "prefix" / "lib" / "python3.12" / "site-packages"
             dist = site / "example-1.0.0.dist-info"
             dist.mkdir(parents=True)
@@ -124,3 +136,11 @@ def test_pypi_installer_uses_verified_cached_artifact_and_offline_sandbox(tmp_pa
     assert result.version == "1.0.0"
     assert result.verification == "verified"
     assert result.artifact_sha256 == "a" * 64
+    assert len(manager.sandbox.calls) == 2
+    assert manager.sandbox.calls[0] == ("python3", "-m", "venv", "/workspace/prefix")
+    assert manager.sandbox.calls[1][0:4] == (
+        "/workspace/prefix/bin/python",
+        "-m",
+        "pip",
+        "install",
+    )
