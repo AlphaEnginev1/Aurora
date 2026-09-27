@@ -72,6 +72,8 @@ class AgentSelector:
         for agent in self.organization.agents.values():
             if capability is not None and capability not in agent.capabilities:
                 continue
+            assignment_skill_ids = tuple(agent.skill_ids)
+            assignment_tags: tuple[str, ...] = ()
             if self.skill_registry is not None:
                 try:
                     assignment = self.skill_registry.for_agent(
@@ -82,19 +84,21 @@ class AgentSelector:
                     )
                 except SkillRegistryError:
                     continue
-                available_skills = set(assignment.skill_ids)
+                assignment_skill_ids = assignment.skill_ids
+                assignment_tags = assignment.tags
+                available_skills = set(assignment_skill_ids)
                 if any(skill_id not in available_skills for skill_id in required):
                     continue
-            elif required and any(skill_id not in agent.skill_ids for skill_id in required):
+            elif required and any(skill_id not in assignment_skill_ids for skill_id in required):
                 continue
 
             skill_match = (
-                len(set(agent.skill_ids) & set(required)) / len(required)
+                len(set(assignment_skill_ids) & set(required)) / len(required)
                 if required
                 else 0.5
             )
             objective_match = self._text_match(objective, agent.mission)
-            tag_match = self._tag_match(tagset, agent.skill_ids)
+            tag_match = self._tag_match(tagset, assignment_tags or assignment_skill_ids)
             learned_score = learned.get(agent.role, 0.5)
             preference = 1.0 if agent.role in preferred else 0.0
             capability_fit = 1.0 if capability is None or capability in agent.capabilities else 0.0
