@@ -74,7 +74,7 @@ def test_learning_store_builds_model_scores_and_proposal(tmp_path: Path):
     # become trusted routing history for model selection.
     store.record(SkillEvaluation(
         "research","1.0.0",None,"t-incomplete","researcher",0.95,"succeeded","model/b",
-        ("source_check",),(),("citation_check",),(),("citation_check",),None,0.5,"insufficient_evidence"
+        ("source_check",),(),(),(),(),("citation_check",),None,0.5,"insufficient_evidence"
     ))
     assert store.model_scores_for(("research",)) == {"model/a": 0.5}
     proposal = SkillEvolutionEngine(store).observe(
