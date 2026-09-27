@@ -351,7 +351,7 @@ class AcquisitionManager:
         if workspace.exists():
             shutil.rmtree(workspace)
         wheels = workspace / "wheels"
-        installed = workspace / "site"
+        installed = workspace / "prefix"
         workspace.mkdir(parents=True, exist_ok=False)
         wheels.mkdir()
         installed.mkdir()
@@ -372,8 +372,8 @@ class AcquisitionManager:
                     "--only-binary=:all:",
                     "--find-links",
                     "/workspace/wheels",
-                    "--target",
-                    "/workspace/site",
+                    "--prefix",
+                    "/workspace/prefix",
                     "--report",
                     "/workspace/pip-report.json",
                     spec.name if spec.version is None else f"{spec.name}=={spec.version}",
@@ -437,7 +437,7 @@ class AcquisitionManager:
         *,
         expected_root: tuple[str, str],
     ) -> int:
-        metadata_paths = sorted(install_root.glob("*.dist-info/METADATA"))
+        metadata_paths = sorted(install_root.rglob("*.dist-info/METADATA"))
         if not metadata_paths:
             raise ProvenanceError("no installed distribution metadata found")
 
