@@ -26,9 +26,22 @@ def _registry() -> tuple[SkillRegistry, OrganizationRegistry]:
 def test_skill_evaluator_scores_observable_evidence():
     skills, org = _registry()
     evaluator = SkillEvaluator(skills)
+    from aurora.orchestration.engine import OrchestrationEngine, TaskResult
+    from aurora.inference.models import InferenceRequest
+
+    response = InferenceResponse(
+        model="model/a",
+        provider="fake",
+        content="result\nVERIFY:source_check=pass\nQUALITY:citation_check=pass",
+    )
     result = DelegatedTaskResult(
         task=DelegatedTask("t","researcher","research"),
         status=TaskStatus.SUCCEEDED,
+        model_result=TaskResult(
+            task_id="t",
+            role="researcher",
+            response=response,
+        ),
     )
     evaluations = evaluator.evaluate(
         task=result.task,
