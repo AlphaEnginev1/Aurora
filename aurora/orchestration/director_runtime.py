@@ -86,9 +86,6 @@ class DirectorRuntime:
         )
         event_missions = {event.mission_id for event in events}
 
-        for event in events:
-            self.event_bus.ack(self._subscription, event.event_id)
-
         mission_ids = set(self.store.list_missions())
         mission_ids.update(event_missions)
         active = [
@@ -108,6 +105,9 @@ class DirectorRuntime:
             worker = self._worker_for(mission_id)
             cycles.append(worker.run_once())
             self._finalize_mission(mission_id)
+
+        for event in events:
+            self.event_bus.ack(self._subscription, event.event_id)
 
         return RuntimeCycle(
             worker_cycles=tuple(cycles),
