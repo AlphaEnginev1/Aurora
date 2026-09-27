@@ -150,7 +150,7 @@ class SkillEvaluator:
         verification: tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]],
         quality: tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]],
     ) -> str:
-        if result.status is not TaskStatus.SUCCEEDED:
+        if result.status.value != "succeeded":
             return "execution_failed"
         failed = len(verification[1]) + len(quality[1])
         missing = len(verification[2]) + len(quality[2])
