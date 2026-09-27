@@ -67,14 +67,10 @@ class InternetGateway:
         self.authorize(url)
         handler = _PolicyRedirectHandler(self)
         opener = urllib.request.build_opener(handler)
-        request = urllib.request.Request(
-            url,
-            method="GET",
-            headers={"User-Agent": "Aurora/0.1"},
-        )
+        request = urllib.request.Request(url, method="GET", headers={"User-Agent": "Aurora/0.1"})
         try:
             with opener.open(request, timeout=self.timeout) as response:
-                final_url = response.geturl()
+                final_url = response.url
                 self.authorize(final_url)
                 return InternetResponse(
                     requested_url=url,
