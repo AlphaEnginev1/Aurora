@@ -102,7 +102,7 @@ def test_verify_record_resolves_paths_from_dist_info_and_allows_managed_scripts(
     dist.mkdir()
     record = dist / "RECORD"
     record.write_text(
-        f"../../../../bin/normalizer,{_record_digest(b'script')},6\n",
+        f"../../../bin/normalizer,{_record_digest(b'script')},6\n",
         encoding="utf-8",
     )
     assert verify_record(root, record) == 1
@@ -118,7 +118,7 @@ def test_verify_record_rejects_path_escape(tmp_path):
     dist.mkdir()
     record = dist / "RECORD"
     record.write_text(
-        f"../../../../../outside,{_record_digest(b'not managed')},11\n",
+        f"../../../../outside,{_record_digest(b'not managed')},11\n",
         encoding="utf-8",
     )
     with pytest.raises(ProvenanceError, match="escapes managed install root"):
