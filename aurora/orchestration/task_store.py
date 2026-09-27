@@ -422,7 +422,7 @@ class DurableTaskStore:
             db.execute("BEGIN IMMEDIATE")
             row = db.execute(
                 """
-                SELECT status, claimed_by
+                SELECT status, claimed_by, lease_until
                 FROM tasks
                 WHERE mission_id = ? AND task_id = ?
                 """,
