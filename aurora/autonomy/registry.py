@@ -53,3 +53,48 @@ def load_registry(path: str | Path) -> dict[str, ToolSpec]:
             raise RegistryError(f"duplicate tool: {spec.name}")
         result[spec.name] = spec
     return result
+
+
+class CapabilityRegistryStore:
+    """Durable store for capabilities discovered at runtime.
+
+    The dynamic registry is kept separate from the static policy registry so
+    discovery never rewrites the operator-managed baseline configuration.
+    """
+
+    def __init__(self, path: str | Path) -> None:
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+
+    def register(self, spec: ToolSpec) -> None:
+        if not isinstance(spec, ToolSpec):
+            raise RegistryError("dynamic registry accepts only ToolSpec values")
+        current = load_registry(self.path) if self.path.exists() else {}
+        current[spec.name] = spec
+        payload = {
+            "tools": [
+                {
+                    "name": item.name,
+                    "kind": item.kind,
+                    "source": item.source,
+                    "executable": item.executable,
+                    "version": item.version,
+                    "artifact_sha256": item.artifact_sha256,
+                }
+                for item in sorted(current.values(), key=lambda item: item.name)
+            ]
+        }
+        temporary = self.path.with_suffix(self.path.suffix + ".tmp")
+        temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        temporary.replace(self.path)
+
+
+def merge_registries(
+    static_path: str | Path,
+    dynamic_path: str | Path | None = None,
+) -> dict[str, ToolSpec]:
+    """Load the operator registry and overlay previously discovered capabilities."""
+    result = load_registry(static_path)
+    if dynamic_path is not None and Path(dynamic_path).exists():
+        result.update(load_registry(dynamic_path))
+    return result
