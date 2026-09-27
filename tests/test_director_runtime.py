@@ -2,20 +2,17 @@ from pathlib import Path
 from threading import Event
 
 from aurora.inference.models import InferenceResponse
-from aurora.inference.models import InferenceResponse
 from aurora.orchestration.director import DirectorPlan, DirectorReview
 from aurora.orchestration.director_runtime import DirectorRuntime
 from aurora.orchestration.durable_director import DurableDirectorService
 from aurora.orchestration.event_bus import DurableEventBus
+from aurora.orchestration.engine import TaskResult
 from aurora.orchestration.task_engine import DelegatedTask, TaskEngine, TaskStatus
 from aurora.orchestration.task_store import DurableTaskStore
 from aurora.orchestration.task_worker import WorkerPolicy
 
 
 class FakePlanner:
-    def __init__(self):
-        self.calls = []
-
     def __init__(self):
         self.calls = []
         self.review_calls = 0
@@ -59,7 +56,7 @@ class FakeOrchestration:
 
     def run_task(self, **kwargs):
         self.calls.append(kwargs)
-        return __import__("aurora.orchestration.engine", fromlist=["TaskResult"]).TaskResult(
+        return TaskResult(
             task_id=kwargs["task_id"],
             role=kwargs["role"],
             response=InferenceResponse(
