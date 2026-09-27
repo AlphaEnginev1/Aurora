@@ -13,7 +13,7 @@ from .pypi_downloader import (
     PypiArtifact,
     PypiArtifactDownloader,
 )
-from .sandbox import SandboxError, SandboxExecutor
+from .sandbox import SandboxExecutor
 
 
 class PypiResolutionError(RuntimeError):
@@ -129,9 +129,9 @@ class PypiDependencyResolver:
             package_name, package_version = self._wheel_identity(wheel_path)
             normalized = package_name.lower().replace("-", "_")
             prior = seen.get(normalized)
-            if prior is not None and prior != package_version:
+            if prior is not None:
                 raise PypiResolutionError(
-                    f"resolver produced multiple versions of {package_name}: "
+                    f"resolver produced multiple wheel artifacts for {package_name}: "
                     f"{prior} and {package_version}"
                 )
             seen[normalized] = package_version
