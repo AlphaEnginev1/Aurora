@@ -25,3 +25,16 @@ Bus events.
 Mission memory is a durable shared inbox/context layer backed by the same
 SQLite trust boundary. Worker results are stored in bounded form so later
 Director decisions can inspect actual outputs rather than only task status.
+
+
+## Internal organization
+
+Aurora's internal organization is represented by a declarative Organization Registry.
+The registry maps each agent role to a department, mission boundary, allowed broker
+capabilities, and preferred inference models. The Director and TaskEngine validate
+delegated work against this registry before execution.
+
+The model router accepts an ordered preference list supplied by the resolved agent.
+It filters by enabled status and required inference capability, honors the preference
+order when possible, and falls back to another enabled compatible model when no
+preferred candidate is available.
