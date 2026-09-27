@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 from threading import Event
 from time import sleep
 from typing import Any, Callable
@@ -157,6 +158,18 @@ class DirectorRuntime:
             self._review_or_finalize(mission_id)
 
         for event in events:
+            if event.event_type in {"skill.evaluated", "skill.evolution_proposed"}:
+                try:
+                    self.memory.append(
+                        mission_id=event.mission_id,
+                        task_id=event.task_id,
+                        source="skill-learning",
+                        kind=event.event_type,
+                        content=json.dumps(event.payload, sort_keys=True),
+                        metadata={"event_id": event.event_id},
+                    )
+                except MissionMemoryError:
+                    pass
             self.event_bus.ack(self._subscription, event.event_id)
 
         return RuntimeCycle(
