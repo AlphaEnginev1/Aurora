@@ -10,7 +10,10 @@ import threading
 
 import pytest
 
+from aurora.autonomy.acquisition import AcquisitionManager
 from aurora.autonomy.egress_proxy import EgressProxy, EgressProxyPolicy
+from aurora.autonomy.internet import InternetGateway, InternetPolicy
+from aurora.autonomy.registry import ToolSpec
 from aurora.autonomy.sandbox import SandboxExecutor, SandboxPolicy
 
 REQUIRED = ("bwrap", "slirp4netns", "nft", "ip", "setpriv", "curl")
@@ -105,8 +108,6 @@ def controlled_network_enforcement_available(tmp_path_factory):
     probe = run_sandbox(tmp_path_factory.mktemp("network-probe"), "true")
     if probe.returncode == 0:
         return True
-    if os.environ.get("AURORA_E2E_ALLOW_UNSUPPORTED") == "1":
-        pytest.skip("runner cannot provide the required rootless network-enforcement capability")
     pytest.fail(
         "controlled network enforcement bootstrap failed: "
         f"rc={probe.returncode} stdout={probe.stdout!r} stderr={probe.stderr!r} "
@@ -175,3 +176,56 @@ def test_ipv6_has_no_default_route(controlled_network_enforcement_available, tmp
     result = run_sandbox(tmp_path, "ip", "-6", "route")
     assert result.returncode == 0, result.stderr
     assert not any(line.startswith("default") for line in result.stdout.splitlines())
+
+
+
+def test_real_pypi_acquisition_downloads_verifies_and_executes(
+    controlled_network_enforcement_available, tmp_path: Path
+):
+    gateway = InternetGateway(
+        InternetPolicy(
+            frozenset({"https"}),
+            frozenset({"pypi.org", "files.pythonhosted.org"}),
+        )
+    )
+    install_root = tmp_path / "managed-site"
+    manager = AcquisitionManager(
+        allowed_sources=frozenset({"pypi"}),
+        install_root=install_root,
+        internet_gateway=gateway,
+        transaction_dir=tmp_path / "transactions",
+        artifact_cache_dir=tmp_path / "artifact-cache",
+    )
+
+    result = manager.acquire(
+        ToolSpec(
+            "packaging",
+            "runtime",
+            "pypi",
+            "packaging",
+            version="25.0",
+        )
+    )
+
+    assert result.status == "installed"
+    assert result.version == "25.0"
+    assert result.verification == "verified"
+    assert result.artifact_sha256 and len(result.artifact_sha256) == 64
+    assert result.provenance_url.startswith("https://files.pythonhosted.org/")
+    assert any(install_root.glob("packaging-25.0.dist-info/RECORD"))
+
+    execution = SandboxExecutor(
+        SandboxPolicy(network=False, timeout_seconds=20)
+    ).execute(
+        [
+            "python3",
+            "-c",
+            (
+                "import sys; sys.path.insert(0, '/workspace/managed-site'); "
+                "import packaging; print(packaging.__version__)"
+            ),
+        ],
+        workspace=tmp_path,
+    )
+    assert execution.returncode == 0, execution.stderr
+    assert execution.stdout.strip() == "25.0"
