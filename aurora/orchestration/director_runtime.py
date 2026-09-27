@@ -15,6 +15,8 @@ from .mission_memory import MissionMemory, MissionMemoryError
 from .task_engine import DelegatedTask, DelegatedTaskResult, TaskStatus
 from .task_store import DurableTaskStore, TaskEvent, TaskStoreError
 from .task_worker import TaskWorker, WorkerCycle, WorkerPolicy
+from aurora.skills.evaluation import SkillEvaluator
+from aurora.skills.learning import SkillEvolutionEngine, SkillLearningStore
 
 
 class DirectorRuntimeError(RuntimeError):
@@ -61,6 +63,9 @@ class DirectorRuntime:
         event_batch_size: int = 100,
         idle_sleep_seconds: float = 0.5,
         max_review_rounds: int = 3,
+        skill_evaluator: SkillEvaluator | None = None,
+        skill_learning: SkillLearningStore | None = None,
+        skill_evolution: SkillEvolutionEngine | None = None,
         sleep_fn: Callable[[float], None] = sleep,
     ) -> None:
         if not event_consumer_id.strip():
@@ -80,6 +85,9 @@ class DirectorRuntime:
         self.event_batch_size = event_batch_size
         self.idle_sleep_seconds = idle_sleep_seconds
         self.max_review_rounds = max_review_rounds
+        self.skill_evaluator = skill_evaluator
+        self.skill_learning = skill_learning
+        self.skill_evolution = skill_evolution
         self._sleep = sleep_fn
         self._subscription: EventSubscription = self.event_bus.subscribe(event_consumer_id)
         self._workers: dict[str, TaskWorker] = {}
@@ -198,6 +206,9 @@ class DirectorRuntime:
                 worker_id=f"{self.worker_id}:{mission_id}",
                 policy=self.worker_policy,
                 event_bus=self.event_bus,
+                skill_evaluator=self.skill_evaluator,
+                skill_learning=self.skill_learning,
+                skill_evolution=self.skill_evolution,
             )
             self._workers[mission_id] = worker
         return worker
