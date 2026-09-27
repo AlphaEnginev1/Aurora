@@ -74,8 +74,12 @@ Rules:
         if not objective:
             raise DirectorPlanError("objective is empty")
 
+        system = self._SYSTEM
+        if self.organization is not None:
+            roles = ", ".join(sorted(self.organization.agents_by_role()))
+            system += f"\nRegistered roles: {roles}\n"
         messages = [
-            {"role": "system", "content": self._SYSTEM},
+            {"role": "system", "content": system},
             *(context or []),
             {"role": "user", "content": objective},
         ]
@@ -115,8 +119,12 @@ Rules:
         objective = objective.strip()
         if not objective:
             raise DirectorPlanError("objective is empty")
+        system = self._REVIEW_SYSTEM
+        if self.organization is not None:
+            roles = ", ".join(sorted(self.organization.agents_by_role()))
+            system += f"\nRegistered roles: {roles}\n"
         messages = [
-            {"role": "system", "content": self._REVIEW_SYSTEM},
+            {"role": "system", "content": system},
             *(context or []),
             {"role": "user", "content": objective},
         ]
