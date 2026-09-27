@@ -7,6 +7,7 @@ from .registry import (
     OrganizationRegistry,
 )
 from .agent_selection import AgentSelection, AgentSelectionError, AgentSelector
+from .agent_team import AgentTeam, AgentTeamError, DynamicAgentTeamSelector, TeamMember
 
 __all__ = [
     "AgentSpec",
@@ -16,4 +17,8 @@ __all__ = [
     "AgentSelection",
     "AgentSelectionError",
     "AgentSelector",
+    "AgentTeam",
+    "AgentTeamError",
+    "DynamicAgentTeamSelector",
+    "TeamMember",
 ]
