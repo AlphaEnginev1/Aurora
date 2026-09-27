@@ -11,6 +11,7 @@ from aurora.autonomy.registry import load_registry
 from aurora.autonomy.sandbox import SandboxExecutor, SandboxPolicy
 from aurora.inference.config import load_model_specs
 from aurora.inference.router import ModelRouter
+from aurora.inference.model_performance import ModelPerformanceStore
 from aurora.research.discovery import ResearchSourceCatalog
 from aurora.research.service import ResearchService
 from aurora.research.store import ResearchStore
@@ -69,7 +70,8 @@ def build_director_service(*, inference_policy_path: str | Path, autonomy_policy
     orchestration=OrchestrationEngine(router,capability_runtime=capability_runtime)
     learning_path=Path(skill_learning_path).resolve() if skill_learning_path is not None else root/"skill-learning.db"
     learning_store=SkillLearningStore(learning_path)
-    task_engine=TaskEngine(orchestration,root,organization=organization,skill_registry=skill_registry,skill_learning=learning_store)
+    model_performance=ModelPerformanceStore(root/"model-performance.db")
+    task_engine=TaskEngine(orchestration,root,organization=organization,skill_registry=skill_registry,skill_learning=learning_store,model_performance=model_performance)
     planner=DirectorPlanner(router,organization=organization,skill_registry=skill_registry)
     return DirectorService(planner,task_engine)
 
