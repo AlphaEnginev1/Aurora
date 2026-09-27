@@ -109,17 +109,21 @@ class ModelPerformanceStore:
             raise ValueError("minimum_evaluations must be at least 1")
         if not 0.0 <= minimum_evidence_completeness <= 1.0:
             raise ValueError("minimum_evidence_completeness must be between 0 and 1")
-        scope = skill_versions or {skill_id: None for skill_id in skill_ids}
         predicates: list[str] = []
         params: list[object] = []
-        for skill_id in skill_ids:
-            version = scope.get(skill_id)
-            if version is None:
-                predicates.append("(skill_id = ? AND skill_version IS NULL)")
-                params.append(skill_id)
-            else:
-                predicates.append("(skill_id = ? AND skill_version = ?)")
-                params.extend((skill_id, version))
+        if skill_versions is None:
+            placeholders = ",".join("?" for _ in skill_ids)
+            predicates.append(f"skill_id IN ({placeholders})")
+            params.extend(skill_ids)
+        else:
+            for skill_id in skill_ids:
+                version = skill_versions.get(skill_id)
+                if version is None:
+                    predicates.append("(skill_id = ? AND skill_version IS NULL)")
+                    params.append(skill_id)
+                else:
+                    predicates.append("(skill_id = ? AND skill_version = ?)")
+                    params.extend((skill_id, version))
         with self._connect() as db:
             rows = db.execute(
                 f"""
