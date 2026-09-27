@@ -44,6 +44,31 @@ class TeamCoordinator:
         self.agent_selector = agent_selector
         self.max_members = max_members
 
+    def adapt_for_runtime(
+        self,
+        *,
+        mission_id: str,
+        objective: str,
+        current_team: AgentTeam | None,
+        pending_tasks: Sequence[DelegatedTask],
+        trigger_task_id: str,
+    ) -> MissionTeamState:
+        """Re-form a live mission team from the remaining DAG after runtime evidence.
+
+        The adaptation is deliberately evidence-driven: the pending DAG defines the
+        skills that must still be covered, while the existing selector/learning
+        scores choose the specialists. No active skill is mutated here.
+        """
+        if not trigger_task_id.strip():
+            raise TeamCoordinatorError("trigger_task_id is empty")
+        state = self.prepare(
+            mission_id=mission_id,
+            objective=objective,
+            tasks=pending_tasks,
+            previous_team=current_team,
+        )
+        return state
+
     def prepare(
         self,
         *,
