@@ -132,6 +132,9 @@ class DirectorRuntime:
                 "skill_id": prepared.candidate.skill.skill_id if prepared.candidate.skill else gap_skill_id,
                 "source_ids": list(prepared.evidence.source_ids),
                 "acquired_tools": list(prepared.evidence.acquired_tools),
+                "construction_score": prepared.evidence.construction_score,
+                "construction_evidence_state": prepared.evidence.construction_evidence_state,
+                "candidate_version": prepared.candidate.candidate_version,
                 "state": prepared.evidence.state,
             },
         )
