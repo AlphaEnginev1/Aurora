@@ -6,6 +6,7 @@ import json
 import sqlite3
 from pathlib import Path
 from uuid import uuid4
+from datetime import datetime, timezone
 
 from .learning import SkillEvolutionProposal, SkillLearningStore
 from .models import SkillSpec
@@ -60,6 +61,19 @@ class SkillEvolutionRuntime:
                     skill_json TEXT NOT NULL,
                     status TEXT NOT NULL,
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )"""
+            )
+
+            db.execute(
+                """CREATE TABLE IF NOT EXISTS skill_validation_reports (
+                    candidate_id TEXT PRIMARY KEY,
+                    baseline_score REAL NOT NULL,
+                    candidate_score REAL NOT NULL,
+                    improvement REAL NOT NULL,
+                    model TEXT NOT NULL,
+                    state TEXT NOT NULL,
+                    report_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL
                 )"""
             )
 
@@ -171,6 +185,41 @@ class SkillEvolutionRuntime:
                     }, sort_keys=True),
                 ),
             )
+            if validation is not None:
+                db.execute(
+                    """INSERT INTO skill_validation_reports
+                       (candidate_id, baseline_score, candidate_score, improvement,
+                        model, state, report_json, created_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        candidate_id,
+                        validation.baseline_score,
+                        validation.candidate_score,
+                        validation.improvement,
+                        validation.model,
+                        validation.state,
+                        json.dumps({
+                            "baseline_score": validation.baseline_score,
+                            "candidate_score": validation.candidate_score,
+                            "improvement": validation.improvement,
+                            "model": validation.model,
+                            "state": validation.state,
+                            "cases": [
+                                {
+                                    "case_id": item.case_id,
+                                    "score": item.score,
+                                    "model": item.model,
+                                    "evidence_complete": item.evidence_complete,
+                                    "passed": list(item.passed),
+                                    "failed": list(item.failed),
+                                    "missing": list(item.missing),
+                                }
+                                for item in validation.cases
+                            ],
+                        }, sort_keys=True),
+                        datetime.now(timezone.utc).isoformat(),
+                    ),
+                )
         return PreparedSkillEvolution(candidate_id, proposal, skill, "validated", validation)
 
     def approve(self, prepared: PreparedSkillEvolution) -> PreparedSkillEvolution:
