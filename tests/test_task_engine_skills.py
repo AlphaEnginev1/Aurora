@@ -127,3 +127,32 @@ def test_task_engine_passes_skill_tags_and_learned_scores_to_router(tmp_path: Pa
     assert router.request.metadata["skill_tags"] == ["research"]
     assert router.request.metadata["task_type"] == "research"
     assert router.request.metadata["learned_model_scores"] == {"model/a": 0.9}
+
+
+def test_task_engine_automatically_selects_specialist_agent(tmp_path: Path):
+    skill_registry = SkillRegistry({
+        "research": SkillSpec(
+            "research", "1.0.0", "Research", "m", "i",
+            frozenset(), (), (), ("research",)
+        )
+    })
+    organization = OrganizationRegistry(
+        agents={"researcher": AgentSpec(
+            "researcher", "researcher", "research", "research papers and evidence",
+            frozenset(), (), ("research",)
+        )},
+        departments={"research": DepartmentSpec(
+            "research", "research", ("researcher",), (), frozenset()
+        )},
+    )
+    engine = TaskEngine(
+        OrchestrationEngine(CaptureRouter()),
+        tmp_path / "workspace",
+        organization=organization,
+        skill_registry=skill_registry,
+    )
+    result = engine.execute([
+        DelegatedTask("t", "auto", "research papers and evidence", skills=("research",))
+    ])
+    assert result[0].status.value == "succeeded"
+    assert result[0].task.role == "researcher"
