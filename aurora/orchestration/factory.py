@@ -48,6 +48,7 @@ def build_director_service(
     egress_proxy_host: str,
     egress_proxy_port: int = 3128,
     organization_path: str | Path = "config/organization.json",
+    skills_path: str | Path = "config/skills.json",
 ) -> DirectorService:
     """Build the complete Director -> tasks -> capabilities execution path.
 
@@ -61,7 +62,7 @@ def build_director_service(
         nvidia_api_key=os.getenv("NVIDIA_API_KEY"),
     )
     skill_registry = SkillRegistry.from_file(
-        Path(organization_path).parent / "skills.json",
+        skills_path,
         configured_models={model.id for model in inference_specs},
     )
     organization = OrganizationRegistry.from_file(
@@ -165,6 +166,7 @@ def build_director_runtime(
     worker_policy: WorkerPolicy | None = None,
     worker_id: str | None = None,
     organization_path: str | Path = "config/organization.json",
+    skills_path: str | Path = "config/skills.json",
 ) -> DirectorRuntime:
     """Build the durable 24/7 Director -> Event Bus -> Worker runtime."""
 
@@ -177,6 +179,7 @@ def build_director_runtime(
         egress_proxy_host=egress_proxy_host,
         egress_proxy_port=egress_proxy_port,
         organization_path=organization_path,
+        skills_path=skills_path,
     )
     runtime_root = Path(workspace_root).resolve()
     store_path = Path(task_db_path).resolve() if task_db_path else runtime_root / "tasks.db"
