@@ -84,9 +84,9 @@ Initial implementation:
 Completed increments:
 1. retrieval metadata and redirect-safe provenance;
 2. source parsing and claim extraction — implemented in PR #48 with deterministic visible-text parsing, stable provenance-bound candidate claims, durable claim storage and fail-closed parsing tests.
+3. independent evidence verification and contradiction handling — implemented in the current verification increment with explicit independent-source requirements, contradiction precedence, durable evidence states and fail-closed verification tests.
 
 Next increments:
-3. independent evidence verification and contradiction handling;
 4. trusted knowledge artifacts and citation graphs;
 5. Director/task-engine research delegation;
 6. research results feeding skill learning and model routing.
