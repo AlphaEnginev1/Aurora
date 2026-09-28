@@ -12,6 +12,9 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Sequence
 
+from aurora.research.models import ResearchRequest
+from aurora.research.service import ResearchService
+
 
 from aurora.autonomy.capability_runtime import CapabilityExecutionError
 from aurora.autonomy.models import CapabilityRequest
@@ -25,6 +28,15 @@ from aurora.skills import SkillRegistry, SkillRegistryError
 
 class TaskEngineError(RuntimeError):
     """Raised when a delegated task graph is invalid or cannot execute safely."""
+
+
+@dataclass(frozen=True)
+class ResearchTaskResult:
+    """Durable result summary for a governed research task."""
+
+    request_id: str
+    source_ids: tuple[str, ...]
+    claim_ids: tuple[str, ...]
 
 
 class TaskStatus(StrEnum):
@@ -66,6 +78,7 @@ class TaskEngine:
     skill_registry: SkillRegistry | None = None
     skill_learning: object | None = None
     model_performance: object | None = None
+    research_service: ResearchService | None = None
     _results: dict[str, DelegatedTaskResult] = field(default_factory=dict, init=False)
 
     def validate(self, tasks: Sequence[DelegatedTask]) -> tuple[DelegatedTask, ...]:
@@ -418,6 +431,33 @@ class TaskEngine:
             else ()
         )
         model_preferences = tuple(dict.fromkeys((*skill_preferences, *organization_preferences)))
+        if task.capability == "research":
+            if self.research_service is None:
+                raise TaskEngineError("research task requires a configured research service")
+            request = ResearchRequest(
+                request_id=f"research-{task.task_id}",
+                objective=task.objective,
+                required_sources=tuple(task.args),
+                max_sources=max(1, len(task.args)) if task.args else 10,
+            )
+            if task.args:
+                sources, claims = self.research_service.retrieve_and_extract(request)
+            else:
+                urls = self.research_service.discover(request)
+                discovered = ResearchRequest(
+                    request_id=request.request_id,
+                    objective=request.objective,
+                    required_sources=urls,
+                    constraints=request.constraints,
+                    max_sources=request.max_sources,
+                )
+                sources, claims = self.research_service.retrieve_and_extract(discovered)
+            return ResearchTaskResult(
+                request_id=request.request_id,
+                source_ids=tuple(source.source_id for source in sources),
+                claim_ids=tuple(claim.claim_id for claim in claims),
+            )
+
         if task.capability:
             request = CapabilityRequest(
                 name=task.capability,
