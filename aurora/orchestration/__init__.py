@@ -8,6 +8,7 @@ from .director_provider import (
     DirectorToolSpec,
     InferenceDirectorProvider,
 )
+from .gemini_provider import GeminiDirectorConfig, GeminiDirectorError, GeminiDirectorProvider
 from .durable_director import DurableDirectorError, DurableDirectorService, MissionSubmission
 from .engine import CapabilityTaskResult, OrchestrationEngine, TaskResult
 from .event_bus import DurableEventBus, EventBusError, EventSubscription
@@ -34,6 +35,9 @@ __all__ = [
     "InferenceDirectorProvider",
     "DirectorToolCall",
     "DirectorToolSpec",
+    "GeminiDirectorConfig",
+    "GeminiDirectorError",
+    "GeminiDirectorProvider",
     "DurableDirectorError",
     "DurableDirectorService",
     "MissionSubmission",
