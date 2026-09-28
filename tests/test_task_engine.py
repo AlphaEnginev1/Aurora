@@ -294,7 +294,6 @@ def test_task_engine_delegates_governed_research(tmp_path):
     assert research.claim_ids == ("claim-1",)
 
 
-
 def test_untrusted_research_reference_fails_closed_before_model_execution(tmp_path):
     from aurora.inference.model_performance import ModelPerformanceStore
     from aurora.organization import AgentSpec, DepartmentSpec, OrganizationRegistry
@@ -349,7 +348,7 @@ def test_untrusted_research_reference_fails_closed_before_model_execution(tmp_pa
         research_learning_gate=gate,
     )
 
-    with pytest.raises(ResearchLearningError, match="knowledge artifact not found"):
+    with pytest.raises(ResearchLearningError, match="unknown knowledge artifact"):
         task_engine.execute_one(
             DelegatedTask(
                 "blocked-untrusted",
