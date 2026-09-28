@@ -292,3 +292,173 @@ def test_task_engine_delegates_governed_research(tmp_path):
     assert research.request_id == "research-research-1"
     assert research.source_ids == ("src-1",)
     assert research.claim_ids == ("claim-1",)
+
+
+
+def test_verified_research_teaches_model_routing(tmp_path):
+    from aurora.inference.model_performance import ModelPerformanceStore
+    from aurora.organization import AgentSpec, DepartmentSpec, OrganizationRegistry
+    from aurora.research.knowledge import TrustedKnowledgeBuilder
+    from aurora.research.learning import ResearchLearningGate
+    from aurora.research.models import EvidenceRecord, EvidenceState, ResearchFinding, SourceRecord
+    from aurora.research.store import ResearchStore
+    from aurora.skills import SkillRegistry
+    from aurora.skills.models import SkillSpec
+
+    research_store = ResearchStore(tmp_path / "research.db")
+    research_store.record_source(
+        SourceRecord(
+            source_id="src-trusted",
+            url="https://example.test/trusted",
+            retrieved_at="2026-09-28T00:00:00+00:00",
+            content_sha256="sha-trusted",
+            status_code=200,
+            content_text="Verified research finding.",
+        )
+    )
+    evidence = EvidenceRecord(
+        evidence_id="ev-trusted",
+        source_id="src-trusted",
+        claim="Verified research finding.",
+    ).verify("independently verified")
+    research_store.record_evidence(evidence)
+    finding = ResearchFinding(
+        finding_id="finding-trusted",
+        claim="Verified research finding.",
+        evidence_ids=("ev-trusted",),
+        confidence=1.0,
+        state=EvidenceState.VERIFIED,
+    )
+    artifact, _ = TrustedKnowledgeBuilder(research_store).build(
+        finding,
+        (evidence,),
+    )
+    gate = ResearchLearningGate(research_store)
+
+    skills = SkillRegistry({
+        "research": SkillSpec(
+            "research",
+            "1.0.0",
+            "Research specialist",
+            "Use verified evidence.",
+            frozenset(),
+            ("source_check",),
+            ("citation_check",),
+            ("research",),
+            model_preferences=("model/b", "model/a"),
+        )
+    })
+    organization = OrganizationRegistry(
+        agents={
+            "researcher": AgentSpec(
+                "researcher",
+                "researcher",
+                "research",
+                "Use evidence.",
+                frozenset(),
+                (),
+                ("research",),
+            )
+        },
+        departments={
+            "research": DepartmentSpec(
+                "research",
+                "Research",
+                ("researcher",),
+                (),
+                frozenset(),
+            )
+        },
+    )
+
+    class LearningOrchestration:
+        def __init__(self):
+            self.calls = []
+
+        def run_task(self, **kwargs):
+            learned = kwargs.get("learned_model_scores", {})
+            selected = (
+                max(learned, key=learned.get)
+                if learned
+                else "model/b"
+            )
+            self.calls.append((selected, kwargs.get("context")))
+            return TaskResult(
+                task_id=kwargs["task_id"],
+                role=kwargs["role"],
+                response=InferenceResponse(
+                    model=selected,
+                    provider="fake",
+                    content=(
+                        "result\n"
+                        "VERIFY:source_check=pass\n"
+                        "QUALITY:citation_check=pass"
+                    ),
+                ),
+            )
+
+    orchestration = LearningOrchestration()
+    skill_learning = __import__(
+        "aurora.skills.learning", fromlist=["SkillLearningStore"]
+    ).SkillLearningStore(tmp_path / "skills.db")
+    model_performance = ModelPerformanceStore(tmp_path / "model-performance.db")
+    task_engine = TaskEngine(
+        orchestration,
+        tmp_path / "workspace",
+        organization=organization,
+        skill_registry=skills,
+        skill_learning=skill_learning,
+        model_performance=model_performance,
+        research_learning_gate=gate,
+    )
+
+    artifact_arg = (f"artifact:{artifact.artifact_id}",)
+    first = task_engine.execute_one(
+        DelegatedTask(
+            "learn-research-1",
+            "researcher",
+            "analyze verified research evidence",
+            args=artifact_arg,
+            skills=("research",),
+        )
+    )
+    second = task_engine.execute_one(
+        DelegatedTask(
+            "learn-research-2",
+            "researcher",
+            "analyze verified research evidence",
+            args=artifact_arg,
+            skills=("research",),
+        )
+    )
+
+    scope = {
+        "research": "1.0.0",
+    }
+    assert first.status is TaskStatus.SUCCEEDED
+    assert second.status is TaskStatus.SUCCEEDED
+    assert first.research_trust_state is EvidenceState.VERIFIED
+    assert first.trusted_research_artifact_ids == (artifact.artifact_id,)
+    assert orchestration.calls[0][0] == "model/b"
+    assert orchestration.calls[1][0] == "model/b"
+    assert model_performance.trusted_scores_for(
+        skill_ids=("research",),
+        skill_versions=scope,
+        task_type="research",
+        context_bucket="medium",
+    ) == {"model/b": 1.0}
+
+    third = task_engine.execute_one(
+        DelegatedTask(
+            "learn-research-3",
+            "researcher",
+            "analyze verified research evidence",
+            args=artifact_arg,
+            skills=("research",),
+        )
+    )
+    assert third.status is TaskStatus.SUCCEEDED
+    assert orchestration.calls[2][0] == "model/b"
+    assert "Verified research knowledge authorized for this task." in (
+        orchestration.calls[0][1][0]["content"]
+    )
