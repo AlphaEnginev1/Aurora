@@ -89,7 +89,7 @@ Completed increments:
 6. research results feeding skill learning and model routing — trust-gated on the current branch: retrieval/extraction remains non-learning, only VERIFIED knowledge artifacts can authorize adaptive feedback, and the existing skill/model routing stores remain the learning sinks.
 
 Next increments:
-7. verified research-to-learning execution bridge — implemented: research tasks can carry durable `artifact:<id>` references, the learning gate validates VERIFIED knowledge, TaskEngine owns evaluation/model-performance writes, and TaskWorker avoids duplicate learning. Model routing consumes only evidence-complete model-performance history.
+7. verified research-to-learning execution bridge — VALIDATED in CI 1069 on commit `5c5deb00d8a3ecf8911de5cb9ca62e14991f3232`: research tasks carry durable `artifact:<id>` references, the learning gate validates VERIFIED knowledge, TaskEngine owns evaluation/model-performance writes, TaskWorker avoids duplicate learning, and the real `ModelRouter` consumes evidence-complete model-performance history on a subsequent execution. The E2E proof uses a fake provider behind the real router; it does not claim live NVIDIA NIM execution.
 
 ## Phase 4
 Failure injection, security regression, observability, recovery drills and controlled live authorization.
