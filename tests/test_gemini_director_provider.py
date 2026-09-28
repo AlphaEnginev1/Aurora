@@ -71,7 +71,12 @@ def test_gemini_provider_translates_text_and_tool_calls(monkeypatch):
             DirectorToolSpec(
                 name="delegate_task",
                 description="delegate",
-                parameters={"type": "object"},
+                parameters={
+                    "type": "object",
+                    "properties": {"task_id": {"type": "string"}},
+                    "required": ["task_id"],
+                    "additionalProperties": False,
+                },
             ),
         ),
     )
@@ -83,7 +88,9 @@ def test_gemini_provider_translates_text_and_tool_calls(monkeypatch):
     assert response.tool_calls[0].name == "delegate_task"
     body = json.loads(captured["request"].data)
     assert body["systemInstruction"]["parts"][0]["text"] == "You are Aurora's Director."
-    assert body["tools"][0]["functionDeclarations"][0]["name"] == "delegate_task"
+    declaration = body["tools"][0]["functionDeclarations"][0]
+    assert declaration["name"] == "delegate_task"
+    assert "additionalProperties" not in declaration["parameters"]
     assert captured["request"].get_header("X-goog-api-key") == "test-key"
 
 
