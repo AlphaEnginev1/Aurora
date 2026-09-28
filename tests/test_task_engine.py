@@ -442,25 +442,64 @@ def test_verified_research_teaches_model_routing(tmp_path):
             self.calls = []
 
         def run_task(self, **kwargs):
-            learned = kwargs.get("learned_model_scores", {})
-            selected = (
-                max(learned, key=learned.get)
-                if learned
-                else "model/b"
+            from aurora.inference.models import InferenceRequest, ModelSpec
+            from aurora.inference.router import ModelRouter
+
+            class CapturingRouter(ModelRouter):
+                def generate(self, request, capability=None, preferred_models=None):
+                    decision = self.route(
+                        request,
+                        capability=capability,
+                        preferred_models=preferred_models,
+                    )
+                    return InferenceResponse(
+                        model=decision.selected_model,
+                        provider="fake",
+                        content=(
+                            "result\n"
+                            "VERIFY:source_check=pass\n"
+                            "QUALITY:citation_check=pass"
+                        ),
+                    )
+
+            router = CapturingRouter([
+                ModelSpec(
+                    "model/a",
+                    "fake",
+                    "https://example.invalid/a",
+                    quality_score=0.90,
+                    latency_score=0.90,
+                    cost_score=0.90,
+                    specialties=("research",),
+                ),
+                ModelSpec(
+                    "model/b",
+                    "fake",
+                    "https://example.invalid/b",
+                    quality_score=0.60,
+                    latency_score=0.60,
+                    cost_score=0.60,
+                    specialties=("research",),
+                ),
+            ])
+            request = InferenceRequest(
+                task_id=kwargs["task_id"],
+                prompt=kwargs["objective"],
+                metadata={
+                    "skill_tags": kwargs.get("skill_tags", ()),
+                    "task_type": kwargs.get("task_type", ""),
+                    "learned_model_scores": kwargs.get("learned_model_scores", {}),
+                },
             )
-            self.calls.append((selected, kwargs.get("context")))
+            response = router.generate(
+                request,
+                preferred_models=kwargs.get("model_preferences", ()),
+            )
+            self.calls.append((response.model, kwargs.get("context")))
             return TaskResult(
                 task_id=kwargs["task_id"],
                 role=kwargs["role"],
-                response=InferenceResponse(
-                    model=selected,
-                    provider="fake",
-                    content=(
-                        "result\n"
-                        "VERIFY:source_check=pass\n"
-                        "QUALITY:citation_check=pass"
-                    ),
-                ),
+                response=response,
             )
 
     orchestration = LearningOrchestration()
