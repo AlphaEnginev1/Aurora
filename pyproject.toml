@@ -9,3 +9,6 @@ requires-python = ">=3.11"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "live: opt-in tests that call external live providers",
+]
