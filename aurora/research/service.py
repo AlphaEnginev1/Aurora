@@ -4,9 +4,10 @@ import hashlib
 from datetime import datetime, timezone
 from uuid import uuid4
 from aurora.autonomy.internet import InternetGateway, InternetPolicyError, InternetResponse
-from .models import RedirectHop, ResearchRequest, ResearchReport, SourceRecord
+from .models import ClaimRecord, RedirectHop, ResearchRequest, ResearchReport, SourceRecord
 from .discovery import ResearchDiscoveryProvider
 from .store import ResearchStore
+from .parser import extract_claims, parse_source
 
 class ResearchService:
     """Retrieve and durably retain bounded source content through InternetGateway."""
@@ -60,6 +61,26 @@ class ResearchService:
             self.store.record_source(source)
             sources.append(source)
         return tuple(sources)
+
+    def extract_claims(self, source: SourceRecord) -> tuple[ClaimRecord, ...]:
+        """Parse one retrieved source and durably retain candidate claims."""
+        parsed = parse_source(source)
+        claims = extract_claims(parsed)
+        for claim in claims:
+            self.store.record_claim(claim)
+        return claims
+
+    def retrieve_and_extract(
+        self, request: ResearchRequest
+    ) -> tuple[tuple[SourceRecord, ...], tuple[ClaimRecord, ...]]:
+        """Retrieve sources and extract only pending candidate claims."""
+        sources = self.retrieve(request)
+        claims = tuple(
+            claim
+            for source in sources
+            for claim in self.extract_claims(source)
+        )
+        return sources, claims
 
     def empty_report(self,request:ResearchRequest)->ResearchReport:
         return ResearchReport(request_id=request.request_id,findings=(),source_ids=())
