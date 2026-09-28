@@ -8,6 +8,7 @@ from .models import ClaimRecord, RedirectHop, ResearchRequest, ResearchReport, S
 from .discovery import ResearchDiscoveryProvider
 from .store import ResearchStore
 from .parser import extract_claims, parse_source
+from .verification import EvidenceRelation, ResearchVerifier, VerificationAssessment, VerificationError
 
 class ResearchService:
     """Retrieve and durably retain bounded source content through InternetGateway."""
@@ -81,6 +82,45 @@ class ResearchService:
             for claim in self.extract_claims(source)
         )
         return sources, claims
+
+    def verify_claim(
+        self,
+        claim: ClaimRecord,
+        independent_sources: tuple[str, ...],
+        relation_classifier,
+    ) -> VerificationAssessment:
+        """Retrieve independent sources, classify their relation, and persist evidence.
+
+        The classifier is an explicit trust boundary: it must return support,
+        contradict, or unclear for each independent source. No extraction score
+        or single-source observation can promote a claim.
+        """
+        unique_urls = tuple(dict.fromkeys(url.strip() for url in independent_sources if url.strip()))
+        if len(unique_urls) < 2:
+            raise VerificationError("verification requires at least two independent sources")
+
+        sources = self.retrieve(
+            ResearchRequest(
+                request_id=f"verify-{claim.claim_id}",
+                objective=claim.claim,
+                required_sources=unique_urls,
+                max_sources=len(unique_urls),
+            )
+        )
+        relations = []
+        for source in sources:
+            parsed = parse_source(source)
+            relation = relation_classifier(claim, source, parsed.text)
+            if not isinstance(relation, EvidenceRelation):
+                raise VerificationError("relation classifier returned invalid evidence relation")
+            if relation.source_id != source.source_id:
+                raise VerificationError("relation classifier source identity mismatch")
+            relations.append(relation)
+
+        assessment = ResearchVerifier().assess(claim, relations)
+        for evidence in ResearchVerifier().build_evidence(claim, assessment):
+            self.store.record_evidence(evidence)
+        return assessment
 
     def empty_report(self,request:ResearchRequest)->ResearchReport:
         return ResearchReport(request_id=request.request_id,findings=(),source_ids=())
