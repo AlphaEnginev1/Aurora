@@ -99,3 +99,33 @@ def test_service_requires_two_independent_urls(tmp_path: Path):
     service = ResearchService(gateway=object(), store=__import__("aurora.research.store", fromlist=["ResearchStore"]).ResearchStore(tmp_path / "research.db"))
     with pytest.raises(VerificationError, match="at least two"):
         service.verify_claim(claim(), ("https://one.invalid",), lambda *_: None)
+
+from aurora.autonomy.internet import InternetResponse
+from aurora.research.store import ResearchStore
+
+
+class _Gateway:
+    def get_with_metadata(self, url: str):
+        return InternetResponse(
+            requested_url=url,
+            final_url=url,
+            status_code=200,
+            content_type="text/plain",
+            body=b"Independent source provides verification evidence for Aurora research.",
+        )
+
+
+def test_service_retrieves_and_persists_independent_verification(tmp_path: Path):
+    store = ResearchStore(tmp_path / "research.db")
+    service = ResearchService(gateway=_Gateway(), store=store)
+
+    def classifier(candidate, source, text):
+        return EvidenceRelation(source.source_id, "support", text)
+
+    assessment = service.verify_claim(
+        claim(),
+        ("https://one.invalid", "https://two.invalid"),
+        classifier,
+    )
+    assert assessment.state is EvidenceState.VERIFIED
+    assert len(store.evidence_for_source(assessment.evidence_ids[0])) == 1
