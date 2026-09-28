@@ -7,6 +7,7 @@ from .discovery import DiscoveredSource, HttpSearchProvider, ResearchDiscoveryPr
 from .parser import ParsedSource, SourceParsingError, extract_claims, parse_source
 from .verification import EvidenceRelation, ResearchVerifier, VerificationAssessment, VerificationError
 from .knowledge import CitationEdge, CitationRelation, KnowledgeArtifact, KnowledgeError, TrustedKnowledgeBuilder
+from .learning import ResearchLearningError, ResearchLearningGate, ResearchLearningSignal
 
 __all__ = [
     "ClaimRecord",
@@ -34,4 +35,7 @@ __all__ = [
     "KnowledgeArtifact",
     "KnowledgeError",
     "TrustedKnowledgeBuilder",
+    "ResearchLearningError",
+    "ResearchLearningGate",
+    "ResearchLearningSignal",
 ]
