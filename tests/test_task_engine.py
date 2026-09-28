@@ -166,3 +166,54 @@ def test_task_engine_runs_independent_ready_nodes_in_parallel(tmp_path):
     assert [item.task.task_id for item in result[:2]] == ["a", "b"]
     assert result[2].task.task_id == "c"
     assert all(item.status is TaskStatus.SUCCEEDED for item in result)
+
+
+def test_task_engine_delegates_governed_research(tmp_path):
+    from aurora.research.models import ClaimRecord, SourceRecord
+
+    class FakeResearchService:
+        def retrieve_and_extract(self, request):
+            source = SourceRecord(
+                source_id="src-1",
+                url="https://example.test/source",
+                retrieved_at="2026-09-28T00:00:00+00:00",
+                content_sha256="sha-1",
+                status_code=200,
+                content_text="Aurora evidence.",
+            )
+            claim = ClaimRecord(
+                claim_id="claim-1",
+                source_id="src-1",
+                source_content_sha256="sha-1",
+                claim="Aurora evidence.",
+                start_offset=0,
+                end_offset=16,
+                extraction_confidence=1.0,
+            )
+            assert request.objective == "investigate Aurora"
+            return (source,), (claim,)
+
+        def discover(self, request):
+            raise AssertionError("explicit sources should not require discovery")
+
+    result = TaskEngine(
+        engine(),
+        tmp_path,
+        research_service=FakeResearchService(),
+    ).execute(
+        [
+            DelegatedTask(
+                "research-1",
+                "researcher",
+                "investigate Aurora",
+                capability="research",
+                args=("https://example.test/source",),
+            )
+        ]
+    )
+
+    assert result[0].status is TaskStatus.SUCCEEDED
+    research = result[0].capability_result
+    assert research.request_id == "research-research-1"
+    assert research.source_ids == ("src-1",)
+    assert research.claim_ids == ("claim-1",)
