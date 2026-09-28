@@ -7,7 +7,12 @@ from dataclasses import dataclass
 from typing import Any
 
 from aurora.inference.router import ModelRouter
-from .director_provider import DirectorProvider, InferenceDirectorProvider
+from .director_provider import (
+    DirectorProvider,
+    DirectorToolCall,
+    DirectorToolSpec,
+    InferenceDirectorProvider,
+)
 from aurora.organization import OrganizationConfigError, OrganizationRegistry
 from aurora.skills import SkillRegistry, SkillRegistryError
 from .task_engine import DelegatedTask, DelegatedTaskResult, TaskEngine
@@ -41,6 +46,25 @@ class MissionResult:
 
 class DirectorPlanner:
     """Ask the inference fabric for a machine-valid, policy-filterable task plan."""
+
+    _DELEGATE_TOOL = DirectorToolSpec(
+        name="delegate_task",
+        description="Request Aurora to validate and enqueue one delegated task. The tool never executes the task itself.",
+        parameters={
+            "type": "object",
+            "required": ["task_id", "role", "objective"],
+            "properties": {
+                "task_id": {"type": "string"},
+                "role": {"type": "string"},
+                "objective": {"type": "string"},
+                "capability": {"type": ["string", "null"]},
+                "args": {"type": "array", "items": {"type": "string"}},
+                "depends_on": {"type": "array", "items": {"type": "string"}},
+                "skills": {"type": "array", "items": {"type": "string"}},
+            },
+            "additionalProperties": False,
+        },
+    )
 
     _SYSTEM = """You are Aurora's Director planner.
 Return ONLY a JSON object with this exact shape:
@@ -97,8 +121,13 @@ Rules:
             messages=messages,
             model=model,
             role="director_planner",
+            tools=(self._DELEGATE_TOOL,),
         )
-        tasks = self._parse(response.content)
+        tasks = (
+            self._parse_tool_calls(response.tool_calls)
+            if response.tool_calls
+            else self._parse(response.content)
+        )
         self._validate_organization(tasks)
         return DirectorPlan(objective=objective, tasks=tasks, model=response.model)
 
@@ -141,14 +170,75 @@ Rules:
             messages=messages,
             model=model,
             role="director_reviewer",
+            tools=(self._DELEGATE_TOOL,),
         )
-        decision, rationale, tasks = self._parse_review(response.content)
+        if response.tool_calls:
+            decision, rationale, tasks = self._parse_review_tool_calls(response.tool_calls)
+        else:
+            decision, rationale, tasks = self._parse_review(response.content)
         self._validate_organization(tasks)
         return DirectorReview(
             decision=decision,
             rationale=rationale,
             tasks=tasks,
             model=response.model,
+        )
+
+    @classmethod
+    def _parse_tool_calls(cls, calls: tuple[DirectorToolCall, ...]) -> tuple[DelegatedTask, ...]:
+        """Convert provider proposals into tasks; no tool is executed here."""
+        if not calls or len(calls) > 16:
+            raise DirectorPlanError("Director tool-call plan must contain 1 to 16 calls")
+        tasks = []
+        for call in calls:
+            if call.name != cls._DELEGATE_TOOL.name:
+                raise DirectorPlanError(f"Director requested unregistered tool: {call.name}")
+            tasks.append(cls._task_from_tool_call(call))
+        return tuple(tasks)
+
+    @classmethod
+    def _parse_review_tool_calls(
+        cls, calls: tuple[DirectorToolCall, ...],
+    ) -> tuple[str, str, tuple[DelegatedTask, ...]]:
+        tasks = cls._parse_tool_calls(calls)
+        return "continue", "Director requested additional delegated work.", tasks
+
+    @staticmethod
+    def _task_from_tool_call(call: DirectorToolCall) -> DelegatedTask:
+        args = call.arguments
+        if not isinstance(args, dict):
+            raise DirectorPlanError("Director tool arguments must be an object")
+        required = ("task_id", "role", "objective")
+        if any(key not in args for key in required):
+            missing = next(key for key in required if key not in args)
+            raise DirectorPlanError(f"delegate_task missing required argument: {missing}")
+        task_id, role, objective = (args[key] for key in required)
+        capability = args.get("capability")
+        task_args = args.get("args", [])
+        depends_on = args.get("depends_on", [])
+        skills = args.get("skills", [])
+        if not all(isinstance(value, str) for value in (task_id, role, objective)):
+            raise DirectorPlanError("delegate_task identity, role, and objective must be strings")
+        if capability is not None and not isinstance(capability, str):
+            raise DirectorPlanError("delegate_task capability must be a string or null")
+        if not isinstance(task_args, list) or not all(isinstance(value, str) for value in task_args):
+            raise DirectorPlanError("delegate_task args must be a string array")
+        if not isinstance(depends_on, list) or not all(isinstance(value, str) for value in depends_on):
+            raise DirectorPlanError("delegate_task depends_on must be a string array")
+        if not isinstance(skills, list) or not all(isinstance(value, str) and value.strip() for value in skills):
+            raise DirectorPlanError("delegate_task skills must be a string array")
+        if not task_id.strip() or any(char.isspace() for char in task_id):
+            raise DirectorPlanError("delegate_task task_id must be short and contain no whitespace")
+        if not role.strip() or not objective.strip():
+            raise DirectorPlanError("delegate_task role and objective must be non-empty")
+        return DelegatedTask(
+            task_id=task_id,
+            role=role,
+            objective=objective,
+            capability=capability,
+            args=tuple(task_args),
+            depends_on=tuple(depends_on),
+            skills=tuple(skills),
         )
 
     def _validate_organization(self, tasks: tuple[DelegatedTask, ...]) -> None:
