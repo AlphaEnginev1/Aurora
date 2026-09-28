@@ -12,6 +12,7 @@ from aurora.orchestration.task_engine import (
     TaskEngine,
     TaskEngineError,
     TaskStatus,
+    ResearchTaskResult,
 )
 
 
@@ -166,6 +167,27 @@ def test_task_engine_runs_independent_ready_nodes_in_parallel(tmp_path):
     assert [item.task.task_id for item in result[:2]] == ["a", "b"]
     assert result[2].task.task_id == "c"
     assert all(item.status is TaskStatus.SUCCEEDED for item in result)
+
+
+def test_research_result_is_not_learning_authorized_until_trusted(tmp_path):
+    from aurora.research.models import EvidenceState
+
+    pending = ResearchTaskResult(
+        request_id="research-1",
+        source_ids=("src-1",),
+        claim_ids=("claim-1",),
+    )
+    assert pending.trust_state is EvidenceState.INSUFFICIENT
+    assert pending.learning_authorized is False
+
+    trusted = ResearchTaskResult(
+        request_id="research-1",
+        source_ids=("src-1",),
+        claim_ids=("claim-1",),
+        trust_state=EvidenceState.VERIFIED,
+        knowledge_artifact_ids=("kart-1",),
+    )
+    assert trusted.learning_authorized is True
 
 
 def test_task_engine_delegates_governed_research(tmp_path):
