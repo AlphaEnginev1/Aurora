@@ -80,7 +80,7 @@ class GeminiDirectorProvider:
                     {
                         "name": tool.name,
                         "description": tool.description,
-                        "parameters": tool.parameters,
+                        "parameters": self._gemini_schema(tool.parameters),
                     }
                     for tool in tools
                 ],
@@ -121,6 +121,31 @@ class GeminiDirectorProvider:
             execution_id=uuid4().hex,
             tool_calls=tool_calls,
         )
+
+    @staticmethod
+    def _gemini_schema(schema: dict[str, Any]) -> dict[str, Any]:
+        """Translate Aurora's JSON Schema subset to Gemini's schema shape."""
+        if not isinstance(schema, dict):
+            raise GeminiDirectorError("Gemini tool parameters must be an object")
+
+        translated: dict[str, Any] = {}
+        for key, value in schema.items():
+            if key == "additionalProperties":
+                # Gemini's generateContent schema does not accept this JSON
+                # Schema keyword even when it is set to false.
+                continue
+            if key == "properties" and isinstance(value, dict):
+                translated[key] = {
+                    name: GeminiDirectorProvider._gemini_schema(prop)
+                    for name, prop in value.items()
+                    if isinstance(prop, dict)
+                }
+                continue
+            if key == "items" and isinstance(value, dict):
+                translated[key] = GeminiDirectorProvider._gemini_schema(value)
+                continue
+            translated[key] = value
+        return translated
 
     @staticmethod
     def _translate_messages(
