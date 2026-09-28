@@ -12,7 +12,7 @@ from aurora.orchestration.director_provider import (
 class FakeDirectorProvider:
     provider_id = "fake_director"
 
-    def generate(self, *, messages, model, role):
+    def generate(self, *, messages, model, role, tools=()):
         assert role in {"director_planner", "director_reviewer"}
         return DirectorModelResponse(
             content='{"tasks":[{"task_id":"research","role":"researcher","objective":"research evidence","capability":null,"args":[],"depends_on":[],"skills":[]}]}'
