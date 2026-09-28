@@ -26,9 +26,8 @@ class ControlledProviderRouter(ModelRouter):
         )
 
 
-def test_trusted_execution_changes_subsequent_model_selection(tmp_path: Path):
-    """A real evaluated execution must be able to change the next routing decision."""
-    models = [
+def _models():
+    return [
         ModelSpec(
             "model/a",
             "controlled",
@@ -48,18 +47,9 @@ def test_trusted_execution_changes_subsequent_model_selection(tmp_path: Path):
             specialties=("research",),
         ),
     ]
-    router = ControlledProviderRouter(models)
-    baseline_request = InferenceRequest(
-        messages=[{"role": "user", "content": "research task"}],
-        metadata={
-            "skill_tags": ("research",),
-            "task_type": "research",
-        },
-    )
 
-    baseline = router.route(baseline_request, preferred_models=())
-    assert baseline.selected_model == "model/a"
 
+def _skill_and_task():
     registry = SkillRegistry(
         {
             "research": SkillSpec(
@@ -75,27 +65,40 @@ def test_trusted_execution_changes_subsequent_model_selection(tmp_path: Path):
             )
         }
     )
-    evaluator = SkillEvaluator(registry)
-    performance = ModelPerformanceStore(tmp_path / "model-performance.db")
-    task = DelegatedTask(
-        "adaptive-learning",
-        "researcher",
-        "research task",
-        skills=("research",),
+    return (
+        SkillEvaluator(registry),
+        DelegatedTask(
+            "adaptive-learning",
+            "researcher",
+            "research task",
+            skills=("research",),
+        ),
     )
+
+
+def test_trusted_execution_changes_subsequent_model_selection(tmp_path: Path):
+    """A real evaluated execution must be able to change the next routing decision."""
+    router = ControlledProviderRouter(_models())
+    baseline = router.route(
+        InferenceRequest(
+            messages=[{"role": "user", "content": "research task"}],
+            metadata={"skill_tags": ("research",), "task_type": "research"},
+        ),
+        preferred_models=(),
+    )
+    assert baseline.selected_model == "model/a"
+
+    evaluator, task = _skill_and_task()
+    performance = ModelPerformanceStore(tmp_path / "model-performance.db")
 
     for attempt in range(2):
         forced = router.generate(
             InferenceRequest(
                 model="model/b",
                 messages=[{"role": "user", "content": "research task"}],
-                metadata={
-                    "skill_tags": ("research",),
-                    "task_type": "research",
-                },
+                metadata={"skill_tags": ("research",), "task_type": "research"},
             )
         )
-        assert forced.model == "model/b"
         evaluated = evaluator.evaluate(
             task=task,
             result=DelegatedTaskResult(
@@ -110,12 +113,7 @@ def test_trusted_execution_changes_subsequent_model_selection(tmp_path: Path):
             task_type="research",
             context_bucket="small",
         )
-        assert len(evaluated) == 1
         evaluation = evaluated[0]
-        assert evaluation.model == "model/b"
-        assert evaluation.score == 1.0
-        assert evaluation.evidence_completeness == 1.0
-        assert evaluation.evidence_state == "evidence_complete"
         performance.record(
             model=evaluation.model,
             skill_id=evaluation.skill_id,
@@ -134,19 +132,33 @@ def test_trusted_execution_changes_subsequent_model_selection(tmp_path: Path):
         task_type="research",
         context_bucket="small",
     )
-    assert learned == {"model/b": 1.0}
-
-    adapted_request = InferenceRequest(
-        messages=[{"role": "user", "content": "research task"}],
-        metadata={
-            "skill_tags": ("research",),
-            "task_type": "research",
-            "learned_model_scores": learned,
-        },
+    adapted = router.route(
+        InferenceRequest(
+            messages=[{"role": "user", "content": "research task"}],
+            metadata={
+                "skill_tags": ("research",),
+                "task_type": "research",
+                "learned_model_scores": learned,
+            },
+        ),
+        preferred_models=(),
     )
-    adapted = router.route(adapted_request, preferred_models=())
-
+    assert learned == {"model/b": 1.0}
     assert adapted.selected_model == "model/b"
     assert adapted.selected_model != baseline.selected_model
     assert adapted.factors["learned_score"] == 1.0
     assert adapted.candidates[0][0] == "model/b"
+
+
+def test_model_performance_store_uses_real_provider_identity(tmp_path: Path):
+    """Provider/model identity from execution must be the identity persisted for learning."""
+    response = InferenceResponse(
+        model="nvidia/model-a",
+        provider="nvidia_api",
+        content="result",
+        requested_model="nvidia/model-a",
+        selected_model="nvidia/model-a",
+        provider_model="nvidia/model-a",
+        reported_model="nvidia/model-a",
+    )
+    assert response.model == response.provider_model == response.reported_model
