@@ -222,7 +222,7 @@ def test_research_task_accepts_verified_artifact_references(tmp_path):
             )
 
     engine = TaskEngine(
-        FakeOrchestration(),
+        engine(),
         tmp_path / "workspace",
         research_service=FakeResearchService(),
         research_learning_gate=FakeResearchLearningGate(),
