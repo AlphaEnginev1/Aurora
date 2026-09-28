@@ -9,7 +9,12 @@ from .models import InferenceTelemetry
 
 @dataclass(frozen=True)
 class InferenceAuditEvent:
-    # Keep the original positional constructor stable; 9A appends identity.
+    """Audit event with backward-compatible positional construction.
+
+    request_id/execution_id are appended so the pre-9A five-argument
+    constructor remains valid while identity is carried in telemetry.
+    """
+
     model: str
     provider: str
     success: bool
