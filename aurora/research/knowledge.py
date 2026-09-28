@@ -89,7 +89,7 @@ class TrustedKnowledgeBuilder:
         by_id = {item.evidence_id: item for item in evidence}
         selected = tuple(by_id[evidence_id] for evidence_id in finding.evidence_ids)
 
-        if any(item.state is not EvidenceState.VERIFIED for item in selected) is False:
+        if not all(item.state is EvidenceState.VERIFIED for item in selected):
             raise KnowledgeError("trusted knowledge requires verified evidence")
         if any(item.claim != finding.claim for item in selected):
             raise KnowledgeError("trusted knowledge evidence claim must match the finding")
