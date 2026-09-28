@@ -6,7 +6,7 @@ from .engine import CapabilityTaskResult, OrchestrationEngine, TaskResult
 from .event_bus import DurableEventBus, EventBusError, EventSubscription
 from .mission_memory import MissionMemory, MissionMemoryError, MissionMessage
 from .director_runtime import DirectorRuntime, DirectorRuntimeError, MissionRuntimeResult, RuntimeCycle
-from .task_engine import DelegatedTask, DelegatedTaskResult, TaskEngine, TaskEngineError, TaskStatus
+from .task_engine import DelegatedTask, DelegatedTaskResult, ResearchTaskResult, TaskEngine, TaskEngineError, TaskStatus
 from .task_store import DurableTaskStore, StoredTask, TaskEvent, TaskStoreError
 from .task_worker import TaskWorker, TaskWorkerError, WorkerCycle, WorkerPolicy
 from .team_runtime import MissionTeamState, TeamCoordinator, TeamCoordinatorError
@@ -15,6 +15,7 @@ __all__ = [
     "CapabilityTaskResult",
     "DelegatedTask",
     "DelegatedTaskResult",
+    "ResearchTaskResult",
     "DirectorPlan",
     "DirectorPlanError",
     "DirectorPlanner",
