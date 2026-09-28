@@ -85,9 +85,9 @@ Completed increments:
 2. source parsing and claim extraction — implemented in PR #48 with deterministic visible-text parsing, stable provenance-bound candidate claims, durable claim storage and fail-closed parsing tests.
 3. independent evidence verification and contradiction handling — implemented in the verification increment with explicit independent-source requirements, contradiction precedence, durable evidence states and fail-closed verification tests.
 4. trusted knowledge artifacts and citation graph — implemented on the current branch with verified-only artifact creation, immutable source-content provenance, durable citation edges and fail-closed trust-boundary tests.
+5. Director/task-engine research delegation — implemented on the current branch with a first-class durable `research` task path through the governed ResearchService, bounded source/claim result summaries, and task-engine coverage.
 
 Next increments:
-5. Director/task-engine research delegation;
 6. research results feeding skill learning and model routing.
 
 ## Phase 4
