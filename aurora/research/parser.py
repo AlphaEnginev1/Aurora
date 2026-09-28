@@ -90,7 +90,7 @@ def parse_source(source: SourceRecord) -> ParsedSource:
     )
 
 
-_SENTENCE_END = re.compile(r"[.!?](?:["'’”’\)\]]+)?(?=\s|$)")
+_SENTENCE_END = re.compile(r"""[.!?](?:["'’”’)\]]+)?(?=\s|$)""")
 _WHITESPACE = re.compile(r"\s+")
 
 
