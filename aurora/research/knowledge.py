@@ -88,8 +88,11 @@ class TrustedKnowledgeBuilder:
 
         by_id = {item.evidence_id: item for item in evidence}
         selected = tuple(by_id[evidence_id] for evidence_id in finding.evidence_ids)
+
         if any(item.state is not EvidenceState.VERIFIED for item in selected) is False:
             raise KnowledgeError("trusted knowledge requires verified evidence")
+        if any(item.claim != finding.claim for item in selected):
+            raise KnowledgeError("trusted knowledge evidence claim must match the finding")
 
         source_ids = tuple(dict.fromkeys(item.source_id for item in selected))
         provenance: list[tuple[str, str]] = []
@@ -120,18 +123,22 @@ class TrustedKnowledgeBuilder:
             )
         ]
         for evidence_record in selected:
-            edges.append(CitationEdge.deterministic(
-                artifact.artifact_id,
-                artifact.artifact_id,
-                evidence_record.evidence_id,
-                CitationRelation.SUPPORTED_BY,
-            ))
-            edges.append(CitationEdge.deterministic(
-                artifact.artifact_id,
-                evidence_record.evidence_id,
-                evidence_record.source_id,
-                CitationRelation.CITES,
-            ))
+            edges.append(
+                CitationEdge.deterministic(
+                    artifact.artifact_id,
+                    artifact.artifact_id,
+                    evidence_record.evidence_id,
+                    CitationRelation.SUPPORTED_BY,
+                )
+            )
+            edges.append(
+                CitationEdge.deterministic(
+                    artifact.artifact_id,
+                    evidence_record.evidence_id,
+                    evidence_record.source_id,
+                    CitationRelation.CITES,
+                )
+            )
 
         self.store.record_knowledge_artifact(artifact)
         for edge in edges:
