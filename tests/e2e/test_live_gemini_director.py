@@ -2,9 +2,12 @@ import os
 
 import pytest
 
+from aurora.inference.models import InferenceRequest, InferenceResponse
 from aurora.orchestration.director import DirectorPlanner, DirectorService
 from aurora.orchestration.director_provider import DirectorModelResponse, DirectorToolSpec
+from aurora.orchestration.engine import OrchestrationEngine
 from aurora.orchestration.gemini_provider import GeminiDirectorProvider
+from aurora.orchestration.task_engine import TaskEngine, TaskStatus
 
 
 @pytest.fixture(scope="module")
@@ -70,33 +73,56 @@ class ReplayDirectorProvider:
         return self.response
 
 
-class RecordingTaskEngine:
-    def __init__(self):
-        self.received = None
+class ControlledRouter:
+    """Deterministic model boundary for real TaskEngine execution."""
 
-    def execute(self, tasks):
-        self.received = tuple(tasks)
-        return self.received
+    def __init__(self):
+        self.requests: list[InferenceRequest] = []
+
+    def generate(self, request, *, capability="reasoning", preferred_models=None):
+        self.requests.append(request)
+        return InferenceResponse(
+            model="controlled-task-model",
+            provider="controlled",
+            content="controlled execution result",
+            request_id=request.request_id,
+            execution_id="controlled-execution",
+        )
 
 
 @pytest.mark.live
-def test_live_gemini_director_integrates_with_director_service(live_gemini_response):
-    task_engine = RecordingTaskEngine()
+def test_live_gemini_director_executes_through_real_task_engine(
+    live_gemini_response,
+    tmp_path,
+):
+    router = ControlledRouter()
+    orchestration = OrchestrationEngine(router)
+    task_engine = TaskEngine(
+        orchestration=orchestration,
+        workspace_root=tmp_path,
+    )
     planner = DirectorPlanner(
         provider=ReplayDirectorProvider(live_gemini_response),
         router=None,
     )
-
     service = DirectorService(planner, task_engine)
+
     result = service.run_mission(
         objective="Create exactly one research task to investigate Aurora architecture.",
     )
 
     assert result.plan.model
-    assert result.plan.tasks
     assert len(result.plan.tasks) == 1
     task = result.plan.tasks[0]
-    assert task.task_id
-    assert task.role
-    assert task.objective
-    assert task_engine.received == result.plan.tasks
+
+    assert len(result.tasks) == 1
+    execution = result.tasks[0]
+    assert execution.task == task
+    assert execution.status is TaskStatus.SUCCEEDED
+    assert execution.model_result is not None
+    assert execution.model_result.response.content == "controlled execution result"
+
+    assert len(router.requests) == 1
+    request = router.requests[0]
+    assert request.metadata["task_id"] == task.task_id
+    assert request.metadata["role"] == task.role
