@@ -13,6 +13,7 @@ class EvidenceState(StrEnum):
     VERIFIED = "verified"
     INSUFFICIENT = "insufficient"
     REJECTED = "rejected"
+    CONTRADICTED = "contradicted"
 
 @dataclass(frozen=True)
 class ResearchRequest:
