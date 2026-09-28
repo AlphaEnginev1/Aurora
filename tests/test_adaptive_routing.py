@@ -33,9 +33,9 @@ def test_trusted_execution_changes_subsequent_model_selection(tmp_path: Path):
             "model/a",
             "controlled",
             "https://example.invalid/a",
-            quality_score=0.80,
-            latency_score=0.80,
-            cost_score=0.80,
+            quality_score=0.75,
+            latency_score=0.75,
+            cost_score=0.75,
             specialties=("research",),
         ),
         ModelSpec(
