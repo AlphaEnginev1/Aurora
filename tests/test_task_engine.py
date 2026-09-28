@@ -494,7 +494,7 @@ def test_verified_research_teaches_model_routing(tmp_path):
                 request,
                 preferred_models=kwargs.get("model_preferences", ()),
             )
-            self.calls.append((response.model, kwargs.get("context")))
+            self.calls.append((response.model, kwargs.get("context"), kwargs.get("learned_model_scores", {})))
             return TaskResult(
                 task_id=kwargs["task_id"],
                 role=kwargs["role"],
@@ -550,7 +550,7 @@ def test_verified_research_teaches_model_routing(tmp_path):
         skill_versions=scope,
         task_type="research",
         context_bucket="small",
-    ) == {"model/b": 1.0}
+    ) == {"model/a": 1.0}
 
     third = task_engine.execute_one(
         DelegatedTask(
@@ -562,7 +562,10 @@ def test_verified_research_teaches_model_routing(tmp_path):
         )
     )
     assert third.status is TaskStatus.SUCCEEDED
-    assert orchestration.calls[2][0] == "model/b"
+    assert orchestration.calls[2][0] == "model/a"
+    assert orchestration.calls[0][2] == {}
+    assert orchestration.calls[1][2] == {}
+    assert orchestration.calls[2][2] == {"model/a": 1.0}
     assert "Verified research knowledge authorized for this task." in (
         orchestration.calls[0][1][0]["content"]
     )
