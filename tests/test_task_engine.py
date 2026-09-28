@@ -221,7 +221,7 @@ def test_research_task_accepts_verified_artifact_references(tmp_path):
                 ),),
             )
 
-    engine = TaskEngine(
+    task_engine = TaskEngine(
         engine(),
         tmp_path / "workspace",
         research_service=FakeResearchService(),
@@ -235,7 +235,7 @@ def test_research_task_accepts_verified_artifact_references(tmp_path):
         args=("url:https://example.test/source", "artifact:kart-1"),
     )
 
-    result = engine.execute_one(task)
+    result = task_engine.execute_one(task)
     research = result.capability_result
 
     assert research.trust_state is EvidenceState.VERIFIED
