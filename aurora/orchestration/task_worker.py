@@ -251,8 +251,9 @@ class TaskWorker:
         # TaskEngine is the authoritative learning sink when it is configured
         # with SkillLearningStore/ModelPerformanceStore. Avoid recording the same
         # evaluation twice from the durable worker.
-        if result.skill_evaluations:
-            for evaluation in result.skill_evaluations:
+        skill_evaluations = getattr(result, "skill_evaluations", ())
+        if skill_evaluations:
+            for evaluation in skill_evaluations:
                 self._emit(
                     "skill.evaluated",
                     claimed.task.task_id,
