@@ -467,9 +467,9 @@ def test_verified_research_teaches_model_routing(tmp_path):
                     "model/a",
                     "fake",
                     "https://example.invalid/a",
-                    quality_score=0.90,
-                    latency_score=0.90,
-                    cost_score=0.90,
+                    quality_score=0.80,
+                    latency_score=0.80,
+                    cost_score=0.80,
                     specialties=("research",),
                 ),
                 ModelSpec(
@@ -543,8 +543,8 @@ def test_verified_research_teaches_model_routing(tmp_path):
     assert second.status is TaskStatus.SUCCEEDED
     assert first.research_trust_state is EvidenceState.VERIFIED
     assert first.trusted_research_artifact_ids == (artifact.artifact_id,)
-    assert orchestration.calls[0][0] == "model/b"
-    assert orchestration.calls[1][0] == "model/b"
+    assert orchestration.calls[0][0] == "model/a"
+    assert orchestration.calls[1][0] == "model/a"
     assert model_performance.trusted_scores_for(
         skill_ids=("research",),
         skill_versions=scope,
