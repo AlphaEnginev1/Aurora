@@ -340,7 +340,7 @@ def test_verified_research_teaches_model_routing(tmp_path):
             "research",
             "1.0.0",
             "Research specialist",
-            "Use verified evidence.",
+            "Research using verified evidence.",
             frozenset(),
             ("source_check",),
             ("citation_check",),
