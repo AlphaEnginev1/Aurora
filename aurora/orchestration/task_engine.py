@@ -12,7 +12,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Sequence
 
-from aurora.research.models import ResearchRequest
+from aurora.research.models import EvidenceState, ResearchRequest
 from aurora.research.service import ResearchService
 
 
@@ -37,6 +37,16 @@ class ResearchTaskResult:
     request_id: str
     source_ids: tuple[str, ...]
     claim_ids: tuple[str, ...]
+    trust_state: EvidenceState = EvidenceState.INSUFFICIENT
+    knowledge_artifact_ids: tuple[str, ...] = ()
+
+    @property
+    def learning_authorized(self) -> bool:
+        """Only verified research backed by trusted knowledge may teach agents."""
+        return (
+            self.trust_state is EvidenceState.VERIFIED
+            and bool(self.knowledge_artifact_ids)
+        )
 
 
 class TaskStatus(StrEnum):
@@ -259,6 +269,15 @@ class TaskEngine:
             or self.organization is None
             or not result.task.skills
         ):
+            return result
+
+        if (
+            isinstance(result.capability_result, ResearchTaskResult)
+            and not result.capability_result.learning_authorized
+        ):
+            # Retrieval/extraction is observational. Until independent verification
+            # produces trusted knowledge, research must not influence skill history,
+            # model performance, or skill evolution.
             return result
 
         try:
