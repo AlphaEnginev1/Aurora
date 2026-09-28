@@ -19,11 +19,17 @@ jobs:
     runs-on: ubuntu-latest
     environment: gemini-live
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout Increment 10 Director implementation
+        uses: actions/checkout@v4
+        with:
+          ref: runtime/increment-10-director-contract
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
       - run: python -m pip install --upgrade pip pytest
+
       - name: Run real Gemini Director gate
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
