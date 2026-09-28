@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any
 
-from aurora.inference.models import InferenceRequest
 from aurora.inference.router import ModelRouter
 from .director_provider import DirectorProvider, InferenceDirectorProvider
 from aurora.organization import OrganizationConfigError, OrganizationRegistry
