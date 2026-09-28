@@ -2,17 +2,18 @@ import os
 
 import pytest
 
-from aurora.orchestration.director import DirectorPlanner
-from aurora.orchestration.director_provider import DirectorToolSpec
+from aurora.orchestration.director import DirectorPlanner, DirectorService
+from aurora.orchestration.director_provider import DirectorModelResponse, DirectorToolSpec
 from aurora.orchestration.gemini_provider import GeminiDirectorProvider
 
 
-@pytest.mark.live
-def test_live_gemini_director_tool_call():
+@pytest.fixture(scope="module")
+def live_gemini_response() -> DirectorModelResponse:
     if not os.getenv("NVIDIA_GEMINI_LIVE"):
         pytest.skip("live Gemini gate is disabled")
+
     provider = GeminiDirectorProvider()
-    response = provider.generate(
+    return provider.generate(
         messages=[
             {
                 "role": "system",
@@ -45,10 +46,28 @@ def test_live_gemini_director_tool_call():
             ),
         ),
     )
+
+
+@pytest.mark.live
+def test_live_gemini_director_tool_call(live_gemini_response):
+    response = live_gemini_response
+
     assert response.provider == "gemini"
     assert response.tool_calls
     assert response.tool_calls[0].name == "delegate_task"
     assert response.tool_calls[0].arguments["task_id"]
+
+
+class ReplayDirectorProvider:
+    """Replay a real Gemini response without issuing a second external API call."""
+
+    provider_id = "gemini"
+
+    def __init__(self, response: DirectorModelResponse):
+        self.response = response
+
+    def generate(self, messages, model, role, tools=()):
+        return self.response
 
 
 class RecordingTaskEngine:
@@ -61,13 +80,12 @@ class RecordingTaskEngine:
 
 
 @pytest.mark.live
-def test_live_gemini_director_integrates_with_director_service():
-    if not os.getenv("NVIDIA_GEMINI_LIVE"):
-        pytest.skip("live Gemini gate is disabled")
-
+def test_live_gemini_director_integrates_with_director_service(live_gemini_response):
     task_engine = RecordingTaskEngine()
-    planner = DirectorPlanner(provider=GeminiDirectorProvider(), router=None)
-    from aurora.orchestration.director import DirectorService
+    planner = DirectorPlanner(
+        provider=ReplayDirectorProvider(live_gemini_response),
+        router=None,
+    )
 
     service = DirectorService(planner, task_engine)
     result = service.run_mission(
