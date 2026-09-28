@@ -190,6 +190,59 @@ def test_research_result_is_not_learning_authorized_until_trusted(tmp_path):
     assert trusted.learning_authorized is True
 
 
+class FakeResearchLearningGate:
+    def authorize(self, artifact_ids):
+        from aurora.research.learning import ResearchLearningSignal
+        return ResearchLearningSignal(tuple(artifact_ids))
+
+
+def test_research_task_accepts_verified_artifact_references(tmp_path):
+    from aurora.research.models import ClaimRecord, SourceRecord, EvidenceState
+
+    class FakeResearchService:
+        def retrieve_and_extract(self, request):
+            return (
+                (SourceRecord(
+                    source_id="src-1",
+                    url="https://example.test/source",
+                    retrieved_at="2026-09-28T00:00:00+00:00",
+                    content_sha256="sha-1",
+                    status_code=200,
+                    content_text="evidence",
+                ),),
+                (ClaimRecord(
+                    claim_id="claim-1",
+                    source_id="src-1",
+                    source_content_sha256="sha-1",
+                    claim="evidence",
+                    start_offset=0,
+                    end_offset=8,
+                    extraction_confidence=1.0,
+                ),),
+            )
+
+    engine = TaskEngine(
+        FakeOrchestration(),
+        tmp_path / "workspace",
+        research_service=FakeResearchService(),
+        research_learning_gate=FakeResearchLearningGate(),
+    )
+    task = DelegatedTask(
+        "research-1",
+        "researcher",
+        "collect evidence",
+        capability="research",
+        args=("url:https://example.test/source", "artifact:kart-1"),
+    )
+
+    result = engine.execute_one(task)
+    research = result.capability_result
+
+    assert research.trust_state is EvidenceState.VERIFIED
+    assert research.knowledge_artifact_ids == ("kart-1",)
+    assert research.learning_authorized is True
+
+
 def test_task_engine_delegates_governed_research(tmp_path):
     from aurora.research.models import ClaimRecord, SourceRecord
 
