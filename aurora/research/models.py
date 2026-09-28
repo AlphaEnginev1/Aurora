@@ -42,6 +42,28 @@ class SourceRecord:
     redirect_chain: tuple[RedirectHop, ...] = ()
 
 @dataclass(frozen=True)
+class ClaimRecord:
+    """A candidate claim extracted from a specific immutable source snapshot."""
+
+    claim_id: str
+    source_id: str
+    source_content_sha256: str
+    claim: str
+    start_offset: int
+    end_offset: int
+    extraction_confidence: float
+    state: EvidenceState = EvidenceState.PENDING
+
+    def __post_init__(self) -> None:
+        if self.start_offset < 0 or self.end_offset <= self.start_offset:
+            raise ValueError("claim source span must be non-empty")
+        if not 0.0 <= self.extraction_confidence <= 1.0:
+            raise ValueError("extraction_confidence must be between 0 and 1")
+        if not self.claim.strip():
+            raise ValueError("claim text must be non-empty")
+
+
+@dataclass(frozen=True)
 class EvidenceRecord:
     evidence_id: str
     source_id: str
