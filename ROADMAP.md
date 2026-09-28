@@ -86,9 +86,10 @@ Completed increments:
 3. independent evidence verification and contradiction handling — implemented in the verification increment with explicit independent-source requirements, contradiction precedence, durable evidence states and fail-closed verification tests.
 4. trusted knowledge artifacts and citation graph — implemented on the current branch with verified-only artifact creation, immutable source-content provenance, durable citation edges and fail-closed trust-boundary tests.
 5. Director/task-engine research delegation — implemented on the current branch with a first-class durable `research` task path through the governed ResearchService, bounded source/claim result summaries, and task-engine coverage.
+6. research results feeding skill learning and model routing — trust-gated on the current branch: retrieval/extraction remains non-learning, only VERIFIED knowledge artifacts can authorize adaptive feedback, and the existing skill/model routing stores remain the learning sinks.
 
 Next increments:
-6. research results feeding skill learning and model routing.
+7. verified research-to-learning execution bridge and end-to-end model-routing feedback.
 
 ## Phase 4
 Failure injection, security regression, observability, recovery drills and controlled live authorization.
