@@ -248,6 +248,24 @@ class TaskWorker:
         return result
 
     def _learn_from_result(self, claimed: StoredTask, result: DelegatedTaskResult) -> None:
+        # TaskEngine is the authoritative learning sink when it is configured
+        # with SkillLearningStore/ModelPerformanceStore. Avoid recording the same
+        # evaluation twice from the durable worker.
+        if result.skill_evaluations:
+            for evaluation in result.skill_evaluations:
+                self._emit(
+                    "skill.evaluated",
+                    claimed.task.task_id,
+                    {
+                        "skill_id": evaluation.skill_id,
+                        "skill_version": evaluation.skill_version,
+                        "score": evaluation.score,
+                        "status": evaluation.status,
+                        "model": evaluation.model,
+                        "evidence_state": evaluation.evidence_state,
+                    },
+                )
+            return
         if self.skill_evaluator is None or self.skill_learning is None:
             return
         organization = self.task_engine.organization
@@ -346,6 +364,8 @@ class TaskWorker:
                 "request_id": capability.request_id,
                 "source_ids": list(capability.source_ids),
                 "claim_ids": list(capability.claim_ids),
+                "trust_state": capability.trust_state.value,
+                "knowledge_artifact_ids": list(capability.knowledge_artifact_ids),
             }
         if capability is not None:
             execution = getattr(capability, "execution", None)
@@ -368,6 +388,8 @@ class TaskWorker:
     def _result_type(result: DelegatedTaskResult) -> str:
         if result.model_result is not None:
             return "model"
+        if isinstance(result.capability_result, ResearchTaskResult):
+            return "research"
         if result.capability_result is not None:
             return "capability"
         return "none"
