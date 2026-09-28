@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from pathlib import Path
-from .models import EvidenceRecord, EvidenceState, RedirectHop, ResearchFinding, SourceRecord
+from .models import ClaimRecord, EvidenceRecord, EvidenceState, RedirectHop, ResearchFinding, SourceRecord
 
 class ResearchStore:
     def __init__(self, path: str | Path) -> None:
@@ -18,6 +18,12 @@ class ResearchStore:
                 content_sha256 TEXT NOT NULL,status_code INTEGER NOT NULL,content_type TEXT,title TEXT,
                 content_text TEXT NOT NULL DEFAULT '',
                 final_url TEXT,redirect_chain_json TEXT NOT NULL DEFAULT '[]'
+            );
+            CREATE TABLE IF NOT EXISTS claims (
+                claim_id TEXT PRIMARY KEY,source_id TEXT NOT NULL,source_content_sha256 TEXT NOT NULL,
+                claim TEXT NOT NULL,start_offset INTEGER NOT NULL,end_offset INTEGER NOT NULL,
+                extraction_confidence REAL NOT NULL,state TEXT NOT NULL,
+                FOREIGN KEY(source_id) REFERENCES sources(source_id)
             );
             CREATE TABLE IF NOT EXISTS evidence (
                 evidence_id TEXT PRIMARY KEY,source_id TEXT NOT NULL,claim TEXT NOT NULL,state TEXT NOT NULL,
@@ -48,6 +54,31 @@ class ResearchStore:
             VALUES (?,?,?,?,?,?,?,?,?,?)
             """,(source.source_id,source.url,source.retrieved_at,source.content_sha256,source.status_code,
                  source.content_type,source.title,source.content_text,source.final_url,redirect_chain))
+
+    def record_claim(self, claim: ClaimRecord):
+        with self._connect() as db:
+            db.execute("""
+            INSERT OR REPLACE INTO claims
+            (claim_id,source_id,source_content_sha256,claim,start_offset,end_offset,extraction_confidence,state)
+            VALUES (?,?,?,?,?,?,?,?)
+            """,(claim.claim_id,claim.source_id,claim.source_content_sha256,claim.claim,claim.start_offset,
+                 claim.end_offset,claim.extraction_confidence,claim.state.value))
+
+    def claims_for_source(self, source_id: str):
+        with self._connect() as db:
+            rows=db.execute("""
+                SELECT claim_id,source_id,source_content_sha256,claim,start_offset,end_offset,
+                       extraction_confidence,state
+                FROM claims WHERE source_id=? ORDER BY start_offset,claim_id
+            """,(source_id,)).fetchall()
+        return tuple(
+            ClaimRecord(
+                row["claim_id"],row["source_id"],row["source_content_sha256"],row["claim"],
+                row["start_offset"],row["end_offset"],row["extraction_confidence"],
+                EvidenceState(row["state"])
+            )
+            for row in rows
+        )
 
     def record_evidence(self,evidence:EvidenceRecord):
         with self._connect() as db:
