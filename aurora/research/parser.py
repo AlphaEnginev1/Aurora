@@ -32,7 +32,7 @@ class _VisibleHtmlParser(HTMLParser):
         "h6", "header", "li", "main", "nav", "ol", "p", "pre", "section",
         "table", "td", "th", "tr", "ul",
     }
-    _IGNORED_TAGS = {"script", "style", "template", "noscript", "svg"}
+    _IGNORED_TAGS = {"script", "style", "template", "noscript", "svg", "title"}
 
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
