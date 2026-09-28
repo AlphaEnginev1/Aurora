@@ -470,6 +470,7 @@ class TaskEngine:
             else ()
         )
         model_preferences = tuple(dict.fromkeys((*skill_preferences, *organization_preferences)))
+        artifact_ids, source_args = self._research_args(task.args)
         if task.capability == "research":
             if self.research_service is None:
                 raise TaskEngineError("research task requires a configured research service")
