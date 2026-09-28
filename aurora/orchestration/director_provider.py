@@ -10,6 +10,24 @@ from aurora.inference.router import ModelRouter
 
 
 @dataclass(frozen=True)
+class DirectorToolSpec:
+    """Provider-neutral declaration of a tool the Director may request."""
+
+    name: str
+    description: str
+    parameters: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class DirectorToolCall:
+    """Unexecuted tool request returned by a Director provider."""
+
+    call_id: str
+    name: str
+    arguments: dict[str, Any]
+
+
+@dataclass(frozen=True)
 class DirectorModelResponse:
     """Minimal response contract required by planning and review."""
 
@@ -18,6 +36,7 @@ class DirectorModelResponse:
     provider: str
     request_id: str
     execution_id: str
+    tool_calls: tuple[DirectorToolCall, ...] = ()
 
 
 class DirectorProvider(Protocol):
@@ -31,6 +50,7 @@ class DirectorProvider(Protocol):
         messages: list[dict[str, Any]],
         model: str | None,
         role: str,
+        tools: tuple[DirectorToolSpec, ...] = (),
     ) -> DirectorModelResponse:
         ...
 
@@ -55,7 +75,7 @@ class InferenceDirectorProvider:
             model=model,
             temperature=0.0,
             max_tokens=3000,
-            metadata={"role": role},
+            metadata={"role": role, "director_tools": [tool.name for tool in tools]},
             request_id=uuid4().hex,
         )
         response: InferenceResponse = self._router.generate(
@@ -68,11 +88,14 @@ class InferenceDirectorProvider:
             provider=response.provider,
             request_id=response.request_id,
             execution_id=response.execution_id,
+            tool_calls=(),
         )
 
 
 __all__ = [
     "DirectorModelResponse",
+    "DirectorToolCall",
+    "DirectorToolSpec",
     "DirectorProvider",
     "InferenceDirectorProvider",
 ]
