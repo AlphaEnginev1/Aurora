@@ -21,3 +21,4 @@ __all__ = [
 
 from .discovery import DiscoveredSource, HttpSearchProvider, ResearchDiscoveryProvider
 from .parser import ParsedSource, SourceParsingError, extract_claims, parse_source
+from .verification import EvidenceRelation, ResearchVerifier, VerificationAssessment, VerificationError
