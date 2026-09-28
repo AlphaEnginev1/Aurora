@@ -446,7 +446,7 @@ def test_verified_research_teaches_model_routing(tmp_path):
         skill_ids=("research",),
         skill_versions=scope,
         task_type="research",
-        context_bucket="medium",
+        context_bucket="small",
     ) == {"model/b": 1.0}
 
     third = task_engine.execute_one(
