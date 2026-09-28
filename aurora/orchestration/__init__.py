@@ -1,6 +1,7 @@
 """Aurora orchestration contracts."""
 
 from .director import DirectorPlan, DirectorPlanError, DirectorPlanner, DirectorReview, DirectorService, MissionResult
+from .director_provider import DirectorModelResponse, DirectorProvider, InferenceDirectorProvider
 from .durable_director import DurableDirectorError, DurableDirectorService, MissionSubmission
 from .engine import CapabilityTaskResult, OrchestrationEngine, TaskResult
 from .event_bus import DurableEventBus, EventBusError, EventSubscription
@@ -22,6 +23,9 @@ __all__ = [
     "DirectorReview",
     "DirectorService",
     "MissionResult",
+    "DirectorModelResponse",
+    "DirectorProvider",
+    "InferenceDirectorProvider",
     "DurableDirectorError",
     "DurableDirectorService",
     "MissionSubmission",
