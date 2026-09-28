@@ -123,3 +123,80 @@ def test_gemini_provider_requires_api_key(monkeypatch):
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     with pytest.raises(GeminiDirectorError, match="GEMINI_API_KEY"):
         GeminiDirectorProvider()
+
+
+
+def test_gemini_provider_translates_nullable_and_array_schema(monkeypatch):
+    captured = {}
+
+    def fake_urlopen(request, timeout):
+        captured["request"] = request
+        return FakeHTTPResponse({
+            "candidates": [{
+                "content": {"parts": [{"text": "ok"}]}
+            }]
+        })
+
+    monkeypatch.setattr("aurora.orchestration.gemini_provider.urlopen", fake_urlopen)
+    provider = GeminiDirectorProvider(api_key="test-key")
+    provider.generate(
+        messages=[{"role": "user", "content": "plan"}],
+        model=None,
+        role="director_planner",
+        tools=(
+            DirectorToolSpec(
+                name="delegate_task",
+                description="delegate",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "capability": {"type": ["string", "null"]},
+                        "args": {"type": "array", "items": {"type": "string"}},
+                    },
+                },
+            ),
+        ),
+    )
+    body = json.loads(captured["request"].data)
+    parameters = body["tools"][0]["functionDeclarations"][0]["parameters"]
+    assert parameters["properties"]["capability"] == {
+        "type": "string",
+        "nullable": True,
+    }
+    assert parameters["properties"]["args"] == {
+        "type": "array",
+        "items": {"type": "string"},
+    }
+
+
+def test_gemini_provider_retries_transient_http_errors(monkeypatch):
+    calls = {"count": 0}
+
+    def fake_urlopen(request, timeout):
+        calls["count"] += 1
+        if calls["count"] < 2:
+            from urllib.error import HTTPError
+            raise HTTPError(
+                request.full_url,
+                503,
+                "temporary",
+                {},
+                None,
+            )
+        return FakeHTTPResponse({
+            "candidates": [{
+                "content": {"parts": [{"text": "recovered"}]}
+            }]
+        })
+
+    monkeypatch.setattr("aurora.orchestration.gemini_provider.urlopen", fake_urlopen)
+    provider = GeminiDirectorProvider(
+        GeminiDirectorConfig(api_key="test-key", max_retries=1)
+    )
+    response = provider.generate(
+        messages=[{"role": "user", "content": "recover"}],
+        model=None,
+        role="director_planner",
+    )
+    assert response.content == "recovered"
+    assert calls["count"] == 2
