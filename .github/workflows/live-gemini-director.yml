@@ -1,0 +1,33 @@
+name: Live Gemini Director Gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      model_id:
+        description: "Gemini Director model ID"
+        required: false
+        default: "gemini-3.7-flash"
+        type: string
+      endpoint:
+        description: "Gemini API base endpoint"
+        required: false
+        default: "https://generativelanguage.googleapis.com/v1beta"
+        type: string
+
+jobs:
+  live-gemini-director:
+    runs-on: ubuntu-latest
+    environment: gemini-live
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip pytest
+      - name: Run real Gemini Director gate
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL_ID: ${{ inputs.model_id }}
+          GEMINI_API_ENDPOINT: ${{ inputs.endpoint }}
+          NVIDIA_GEMINI_LIVE: "1"
+        run: python -m pytest -q tests/e2e/test_live_gemini_director.py -m live
