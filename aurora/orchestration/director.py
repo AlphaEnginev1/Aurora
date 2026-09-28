@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol
 
 from aurora.inference.models import InferenceRequest
 from aurora.inference.router import ModelRouter
+from .director_provider import DirectorProvider, InferenceDirectorProvider
 from aurora.organization import OrganizationConfigError, OrganizationRegistry
 from aurora.skills import SkillRegistry, SkillRegistryError
 from .task_engine import DelegatedTask, DelegatedTaskResult, TaskEngine
@@ -63,8 +64,10 @@ Rules:
         router: ModelRouter,
         organization: OrganizationRegistry | None = None,
         skill_registry: SkillRegistry | None = None,
+        provider: DirectorProvider | None = None,
     ) -> None:
         self.router = router
+        self.provider = provider or InferenceDirectorProvider(router)
         self.organization = organization
         self.skill_registry = skill_registry
 
@@ -91,15 +94,10 @@ Rules:
             *(context or []),
             {"role": "user", "content": objective},
         ]
-        response = self.router.generate(
-            InferenceRequest(
-                messages=messages,
-                model=model,
-                temperature=0.0,
-                max_tokens=3000,
-                metadata={"role": "director_planner"},
-            ),
-            capability="reasoning",
+        response = self.provider.generate(
+            messages=messages,
+            model=model,
+            role="director_planner",
         )
         tasks = self._parse(response.content)
         self._validate_organization(tasks)
@@ -140,15 +138,10 @@ Rules:
             *(context or []),
             {"role": "user", "content": objective},
         ]
-        response = self.router.generate(
-            InferenceRequest(
-                messages=messages,
-                model=model,
-                temperature=0.0,
-                max_tokens=3000,
-                metadata={"role": "director_reviewer"},
-            ),
-            capability="reasoning",
+        response = self.provider.generate(
+            messages=messages,
+            model=model,
+            role="director_reviewer",
         )
         decision, rationale, tasks = self._parse_review(response.content)
         self._validate_organization(tasks)
