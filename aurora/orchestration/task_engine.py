@@ -491,7 +491,7 @@ class TaskEngine:
                 task_type=task_type,
                 context_bucket=context_bucket,
             )
-        if self.skill_learning is not None and skill_ids:
+        if self.model_performance is None and self.skill_learning is not None and skill_ids:
             fallback_scores = self.skill_learning.model_scores_for(skill_ids)
             for model, score in fallback_scores.items():
                 learned_model_scores.setdefault(model, score)
