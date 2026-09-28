@@ -2,7 +2,8 @@
 
 from dataclasses import dataclass
 from typing import Mapping, Sequence
-from .models import InferenceRequest, InferenceResponse, ModelSpec
+
+from .models import InferenceRequest, InferenceResponse, ModelSpec, new_execution_id
 from .providers.nvidia_api import NVIDIAAPIProvider
 
 
@@ -222,8 +223,15 @@ class ModelRouter:
             capability,
             preferred_models=preferred_models,
         )
+        execution_id = new_execution_id()
         if spec.provider == "nvidia_api":
-            return NVIDIAAPIProvider(spec, api_key=self.nvidia_api_key).generate(request)
+            return NVIDIAAPIProvider(
+                spec, api_key=self.nvidia_api_key
+            ).generate(
+                request,
+                selected_model=spec.id,
+                execution_id=execution_id,
+            )
         raise ModelRoutingError(f"Unsupported provider: {spec.provider}")
 
 
