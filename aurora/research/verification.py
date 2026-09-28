@@ -16,7 +16,7 @@ class VerificationError(ValueError):
 class VerificationAssessment:
     claim_id: str
     state: EvidenceState
-    evidence_ids: tuple[str, ...]
+    source_ids: tuple[str, ...]
     supporting_source_ids: tuple[str, ...]
     contradicting_source_ids: tuple[str, ...]
     rationale: str
@@ -106,7 +106,7 @@ class ResearchVerifier:
             raise VerificationError("assessment does not belong to claim")
 
         records = []
-        for source_id in assessment.evidence_ids:
+        for source_id in assessment.source_ids:
             relation = (
                 "contradicts" if source_id in assessment.contradicting_source_ids
                 else "supports" if source_id in assessment.supporting_source_ids
