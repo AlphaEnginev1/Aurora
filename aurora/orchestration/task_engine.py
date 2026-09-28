@@ -14,6 +14,7 @@ from typing import Sequence
 
 from aurora.research.models import EvidenceState, ResearchRequest
 from aurora.research.service import ResearchService
+from aurora.research.learning import ResearchLearningGate
 
 
 from aurora.autonomy.capability_runtime import CapabilityExecutionError
@@ -89,6 +90,7 @@ class TaskEngine:
     skill_learning: object | None = None
     model_performance: object | None = None
     research_service: ResearchService | None = None
+    research_learning_gate: ResearchLearningGate | None = None
     _results: dict[str, DelegatedTaskResult] = field(default_factory=dict, init=False)
 
     def validate(self, tasks: Sequence[DelegatedTask]) -> tuple[DelegatedTask, ...]:
@@ -412,6 +414,24 @@ class TaskEngine:
                 return name
         return "general"
 
+    @staticmethod
+    def _research_args(args: Sequence[str]) -> tuple[tuple[str, ...], tuple[str, ...]]:
+        """Separate trusted-artifact references from source URLs without ambiguity."""
+        artifacts: list[str] = []
+        sources: list[str] = []
+        for raw in args:
+            value = raw.strip()
+            if value.startswith("artifact:"):
+                artifact_id = value.removeprefix("artifact:").strip()
+                if artifact_id:
+                    artifacts.append(artifact_id)
+                continue
+            if value.startswith("url:"):
+                value = value.removeprefix("url:").strip()
+            if value:
+                sources.append(value)
+        return tuple(dict.fromkeys(artifacts)), tuple(dict.fromkeys(sources))
+
     def _execute_task(self, task: DelegatedTask, *, workspace: Path | None = None):
         skill_assignment = None
         if self.skill_registry is not None and self.organization is not None:
@@ -456,10 +476,10 @@ class TaskEngine:
             request = ResearchRequest(
                 request_id=f"research-{task.task_id}",
                 objective=task.objective,
-                required_sources=tuple(task.args),
-                max_sources=max(1, len(task.args)) if task.args else 10,
+                required_sources=tuple(source_args),
+                max_sources=max(1, len(source_args)) if source_args else 10,
             )
-            if task.args:
+            if source_args:
                 sources, claims = self.research_service.retrieve_and_extract(request)
             else:
                 urls = self.research_service.discover(request)
@@ -471,10 +491,20 @@ class TaskEngine:
                     max_sources=request.max_sources,
                 )
                 sources, claims = self.research_service.retrieve_and_extract(discovered)
+            trust_state = EvidenceState.INSUFFICIENT
+            trusted_artifacts: tuple[str, ...] = ()
+            if artifact_ids:
+                if self.research_learning_gate is None:
+                    raise TaskEngineError("trusted research artifacts require a configured research learning gate")
+                signal = self.research_learning_gate.authorize(tuple(artifact_ids))
+                trust_state = signal.state
+                trusted_artifacts = signal.artifact_ids
             return ResearchTaskResult(
                 request_id=request.request_id,
                 source_ids=tuple(source.source_id for source in sources),
                 claim_ids=tuple(claim.claim_id for claim in claims),
+                trust_state=trust_state,
+                knowledge_artifact_ids=trusted_artifacts,
             )
 
         if task.capability:
