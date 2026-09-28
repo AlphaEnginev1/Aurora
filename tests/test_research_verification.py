@@ -34,6 +34,7 @@ def test_two_independent_sources_verify_claim():
     assert assessment.state is EvidenceState.VERIFIED
     assert assessment.independently_supported
     assert assessment.supporting_source_ids == ("source-a", "source-b")
+    assert assessment.source_ids == ("source-a", "source-b")
 
 
 def test_single_support_is_insufficient():
@@ -128,4 +129,4 @@ def test_service_retrieves_and_persists_independent_verification(tmp_path: Path)
         classifier,
     )
     assert assessment.state is EvidenceState.VERIFIED
-    assert len(store.evidence_for_source(assessment.evidence_ids[0])) == 1
+    assert len(store.evidence_for_source(assessment.source_ids[0])) == 1
