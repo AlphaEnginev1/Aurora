@@ -295,6 +295,72 @@ def test_task_engine_delegates_governed_research(tmp_path):
 
 
 
+def test_untrusted_research_reference_fails_closed_before_model_execution(tmp_path):
+    from aurora.inference.model_performance import ModelPerformanceStore
+    from aurora.organization import AgentSpec, DepartmentSpec, OrganizationRegistry
+    from aurora.research.learning import ResearchLearningGate, ResearchLearningError
+    from aurora.research.store import ResearchStore
+    from aurora.skills import SkillRegistry
+    from aurora.skills.models import SkillSpec
+
+    research_store = ResearchStore(tmp_path / "research.db")
+    gate = ResearchLearningGate(research_store)
+    skills = SkillRegistry({
+        "research": SkillSpec(
+            "research",
+            "1.0.0",
+            "Research specialist",
+            "Research using verified evidence.",
+            "Use verified evidence.",
+            frozenset(),
+            ("source_check",),
+            ("citation_check",),
+            ("research",),
+        )
+    })
+    organization = OrganizationRegistry(
+        agents={
+            "researcher": AgentSpec(
+                "researcher", "researcher", "research", "Use evidence.",
+                frozenset(), (), ("research",),
+            )
+        },
+        departments={
+            "research": DepartmentSpec(
+                "research", "Research", ("researcher",), (), frozenset(),
+            )
+        },
+    )
+
+    class MustNotExecute:
+        def run_task(self, **kwargs):
+            raise AssertionError("untrusted research must not reach model execution")
+
+        def run_capability_task(self, **kwargs):
+            raise AssertionError("untrusted research must not reach capability execution")
+
+    task_engine = TaskEngine(
+        MustNotExecute(),
+        tmp_path / "workspace",
+        organization=organization,
+        skill_registry=skills,
+        skill_learning=__import__("aurora.skills.learning", fromlist=["SkillLearningStore"]).SkillLearningStore(tmp_path / "skills.db"),
+        model_performance=ModelPerformanceStore(tmp_path / "model-performance.db"),
+        research_learning_gate=gate,
+    )
+
+    with pytest.raises(ResearchLearningError, match="knowledge artifact not found"):
+        task_engine.execute_one(
+            DelegatedTask(
+                "blocked-untrusted",
+                "researcher",
+                "analyze untrusted research",
+                args=("artifact:does-not-exist",),
+                skills=("research",),
+            )
+        )
+
+
 def test_verified_research_teaches_model_routing(tmp_path):
     from aurora.inference.model_performance import ModelPerformanceStore
     from aurora.organization import AgentSpec, DepartmentSpec, OrganizationRegistry
