@@ -1,4 +1,4 @@
-"""Durable SQLite storage for research provenance and evidence."""
+"""Durable SQLite storage for research provenance, evidence and trusted knowledge."""
 from __future__ import annotations
 import json
 import sqlite3
@@ -32,6 +32,24 @@ class ResearchStore:
             CREATE TABLE IF NOT EXISTS findings (
                 finding_id TEXT PRIMARY KEY,claim TEXT NOT NULL,evidence_ids TEXT NOT NULL,
                 confidence REAL NOT NULL,state TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS knowledge_artifacts (
+                artifact_id TEXT PRIMARY KEY,
+                finding_id TEXT NOT NULL,
+                claim TEXT NOT NULL,
+                evidence_ids TEXT NOT NULL,
+                source_ids TEXT NOT NULL,
+                source_content_sha256 TEXT NOT NULL,
+                state TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS citation_edges (
+                edge_id TEXT PRIMARY KEY,
+                artifact_id TEXT NOT NULL,
+                from_id TEXT NOT NULL,
+                to_id TEXT NOT NULL,
+                relation TEXT NOT NULL,
+                FOREIGN KEY(artifact_id) REFERENCES knowledge_artifacts(artifact_id)
             );
             """)
             columns={row["name"] for row in db.execute("PRAGMA table_info(sources)").fetchall()}
@@ -91,6 +109,63 @@ class ResearchStore:
         with self._connect() as db:
             db.execute("INSERT OR REPLACE INTO findings (finding_id,claim,evidence_ids,confidence,state) VALUES (?,?,?,?,?)",
                        (finding.finding_id,finding.claim,json.dumps(finding.evidence_ids),finding.confidence,finding.state.value))
+
+    def record_knowledge_artifact(self, artifact) -> None:
+        with self._connect() as db:
+            db.execute("""
+            INSERT OR REPLACE INTO knowledge_artifacts
+            (artifact_id,finding_id,claim,evidence_ids,source_ids,source_content_sha256,state,created_at)
+            VALUES (?,?,?,?,?,?,?,?)
+            """,(
+                artifact.artifact_id, artifact.finding_id, artifact.claim,
+                json.dumps(artifact.evidence_ids), json.dumps(artifact.source_ids),
+                json.dumps(artifact.source_content_sha256), artifact.state.value,
+                artifact.created_at,
+            ))
+
+    def record_citation_edge(self, edge) -> None:
+        with self._connect() as db:
+            db.execute("""
+            INSERT OR REPLACE INTO citation_edges
+            (edge_id,artifact_id,from_id,to_id,relation) VALUES (?,?,?,?,?)
+            """,(edge.edge_id,edge.artifact_id,edge.from_id,edge.to_id,edge.relation.value))
+
+    def knowledge_artifact(self, artifact_id: str):
+        from .knowledge import KnowledgeArtifact
+        with self._connect() as db:
+            row=db.execute("""
+                SELECT artifact_id,finding_id,claim,evidence_ids,source_ids,
+                       source_content_sha256,state,created_at
+                FROM knowledge_artifacts WHERE artifact_id=?
+            """,(artifact_id,)).fetchone()
+        if row is None:
+            return None
+        return KnowledgeArtifact(
+            artifact_id=row["artifact_id"],
+            finding_id=row["finding_id"],
+            claim=row["claim"],
+            evidence_ids=tuple(json.loads(row["evidence_ids"])),
+            source_ids=tuple(json.loads(row["source_ids"])),
+            source_content_sha256=tuple(tuple(item) for item in json.loads(row["source_content_sha256"])),
+            state=EvidenceState(row["state"]),
+            created_at=row["created_at"],
+        )
+
+    def citation_edges(self, artifact_id: str):
+        from .knowledge import CitationEdge, CitationRelation
+        with self._connect() as db:
+            rows=db.execute("""
+                SELECT edge_id,artifact_id,from_id,to_id,relation
+                FROM citation_edges WHERE artifact_id=? ORDER BY rowid
+            """,(artifact_id,)).fetchall()
+        return tuple(
+            CitationEdge(
+                edge_id=row["edge_id"], artifact_id=row["artifact_id"],
+                from_id=row["from_id"], to_id=row["to_id"],
+                relation=CitationRelation(row["relation"]),
+            )
+            for row in rows
+        )
 
     def evidence_for_source(self,source_id:str):
         with self._connect() as db:
