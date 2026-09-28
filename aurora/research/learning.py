@@ -69,6 +69,17 @@ class ResearchLearningGate:
 
         return ResearchLearningSignal(artifact_ids=normalized)
 
+    def context_for(self, artifact_ids: tuple[str, ...]) -> tuple[tuple[str, str], ...]:
+        """Return verified artifact claims for governed model-task context."""
+        signal = self.authorize(artifact_ids)
+        context: list[tuple[str, str]] = []
+        for artifact_id in signal.artifact_ids:
+            artifact = self.store.knowledge_artifact(artifact_id)
+            if artifact is None:
+                raise ResearchLearningError(f"unknown trusted knowledge artifact: {artifact_id}")
+            context.append((artifact.artifact_id, artifact.claim))
+        return tuple(context)
+
 
 __all__ = [
     "ResearchLearningError",
