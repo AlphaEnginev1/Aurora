@@ -69,6 +69,7 @@ class InferenceDirectorProvider:
         messages: list[dict[str, Any]],
         model: str | None,
         role: str,
+        tools: tuple[DirectorToolSpec, ...] = (),
     ) -> DirectorModelResponse:
         request = InferenceRequest(
             messages=messages,
