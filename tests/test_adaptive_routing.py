@@ -162,3 +162,107 @@ def test_model_performance_store_uses_real_provider_identity(tmp_path: Path):
         reported_model="nvidia/model-a",
     )
     assert response.model == response.provider_model == response.reported_model
+
+
+def test_provider_bound_execution_evaluates_and_changes_next_route(tmp_path: Path, monkeypatch):
+    """The real NVIDIA adapter path must feed evaluation, storage, and the next route."""
+
+    class _Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return b'{"model":"nvidia/model-a","choices":[{"message":{"content":"result\\nVERIFY:source_check=pass\\nQUALITY:citation_check=pass"}}],"usage":{"prompt_tokens":8,"completion_tokens":6,"total_tokens":14}}'
+
+    def _urlopen(request, timeout):
+        assert request.get_header("Authorization") == "Bearer test-key"
+        assert request.full_url.endswith("/chat/completions")
+        return _Response()
+
+    monkeypatch.setattr(
+        "aurora.inference.providers.nvidia_api.urllib.request.urlopen",
+        _urlopen,
+    )
+
+    model = ModelSpec(
+        "nvidia/model-a",
+        "nvidia_api",
+        "https://integrate.invalid/v1",
+        quality_score=0.60,
+        latency_score=0.60,
+        cost_score=0.60,
+        specialties=("research",),
+    )
+    router = ModelRouter([model], nvidia_api_key="test-key")
+    request = InferenceRequest(
+        messages=[{"role": "user", "content": "research task"}],
+        metadata={"skill_tags": ("research",), "task_type": "research"},
+    )
+
+    response = router.generate(request)
+    assert response.provider == "nvidia_api"
+    assert response.model == "nvidia/model-a"
+    assert response.provider_model == "nvidia/model-a"
+    assert response.reported_model == "nvidia/model-a"
+    assert response.usage.total_tokens == 14
+    assert response.telemetry is not None
+    assert response.telemetry.success is True
+    assert response.telemetry.request_id == request.request_id
+    assert response.telemetry.execution_id == response.execution_id
+
+    evaluator, task = _skill_and_task()
+    performance = ModelPerformanceStore(tmp_path / "model-performance.db")
+
+    for attempt in range(2):
+        evaluated = evaluator.evaluate(
+            task=task,
+            result=DelegatedTaskResult(
+                task=task,
+                status=TaskStatus.SUCCEEDED,
+                model_result=TaskResult(
+                    task_id=f"provider-bound-{attempt}",
+                    role="researcher",
+                    response=response,
+                ),
+            ),
+            task_type="research",
+            context_bucket="small",
+        )
+        evaluation = evaluated[0]
+        assert evaluation.model == "nvidia/model-a"
+        assert evaluation.evidence_state == "evidence_complete"
+        performance.record(
+            model=evaluation.model,
+            skill_id=evaluation.skill_id,
+            skill_version=evaluation.skill_version,
+            task_type=evaluation.task_type,
+            context_bucket=evaluation.context_bucket,
+            score=evaluation.score,
+            evidence_completeness=evaluation.evidence_completeness,
+            evidence_state=evaluation.evidence_state,
+            created_at=f"2026-09-28T00:00:1{attempt}+00:00",
+        )
+
+    learned = performance.trusted_scores_for(
+        skill_ids=("research",),
+        skill_versions={"research": "1.0.0"},
+        task_type="research",
+        context_bucket="small",
+    )
+    assert learned == {"nvidia/model-a": 1.0}
+
+    adapted = router.route(
+        InferenceRequest(
+            messages=[{"role": "user", "content": "research task"}],
+            metadata={
+                "skill_tags": ("research",),
+                "task_type": "research",
+                "learned_model_scores": learned,
+            },
+        )
+    )
+    assert adapted.selected_model == "nvidia/model-a"
+    assert adapted.factors["learned_score"] == 1.0
