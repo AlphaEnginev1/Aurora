@@ -52,7 +52,6 @@ Parallel agent execution is now treated as a transversal runtime capability:
 
 This hardening must pass CI and runtime stress validation before being declared production-verified.
 
-
 ### Mission Team Runtime — IMPLEMENTED
 
 The operational team layer is now connected across the mission lifecycle:
@@ -84,10 +83,10 @@ Initial implementation:
 Completed increments:
 1. retrieval metadata and redirect-safe provenance;
 2. source parsing and claim extraction — implemented in PR #48 with deterministic visible-text parsing, stable provenance-bound candidate claims, durable claim storage and fail-closed parsing tests.
-3. independent evidence verification and contradiction handling — implemented in the current verification increment with explicit independent-source requirements, contradiction precedence, durable evidence states and fail-closed verification tests.
+3. independent evidence verification and contradiction handling — implemented in the verification increment with explicit independent-source requirements, contradiction precedence, durable evidence states and fail-closed verification tests.
+4. trusted knowledge artifacts and citation graph — implemented on the current branch with verified-only artifact creation, immutable source-content provenance, durable citation edges and fail-closed trust-boundary tests.
 
 Next increments:
-4. trusted knowledge artifacts and citation graphs;
 5. Director/task-engine research delegation;
 6. research results feeding skill learning and model routing.
 
