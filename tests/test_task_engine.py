@@ -483,8 +483,7 @@ def test_verified_research_teaches_model_routing(tmp_path):
                 ),
             ])
             request = InferenceRequest(
-                task_id=kwargs["task_id"],
-                prompt=kwargs["objective"],
+                messages=[{"role": "user", "content": kwargs["objective"]}],
                 metadata={
                     "skill_tags": kwargs.get("skill_tags", ()),
                     "task_type": kwargs.get("task_type", ""),
