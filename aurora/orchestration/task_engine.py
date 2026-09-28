@@ -77,6 +77,8 @@ class DelegatedTaskResult:
     capability_result: object | None = None
     error: str | None = None
     skill_evaluations: tuple[object, ...] = ()
+    trusted_research_artifact_ids: tuple[str, ...] = ()
+    research_trust_state: EvidenceState = EvidenceState.INSUFFICIENT
 
 
 @dataclass
@@ -245,14 +247,31 @@ class TaskEngine:
         """Execute one already-dependency-resolved task for a durable worker."""
         self._validate_task_fields(task)
         task = self._resolve_agent_task(task)
+        artifact_ids, _ = self._research_args(task.args)
+        trusted_artifacts: tuple[str, ...] = ()
+        research_trust_state = EvidenceState.INSUFFICIENT
+        if artifact_ids:
+            if self.research_learning_gate is None:
+                raise TaskEngineError(
+                    "trusted research artifacts require a configured research learning gate"
+                )
+            signal = self.research_learning_gate.authorize(artifact_ids)
+            trusted_artifacts = signal.artifact_ids
+            research_trust_state = signal.state
         try:
             workspace = self._workspace_for_task(task, execution_scope)
-            result = self._execute_task(task, workspace=workspace)
+            result = self._execute_task(
+                task,
+                workspace=workspace,
+                trusted_artifact_ids=trusted_artifacts,
+            )
         except (CapabilityExecutionError, RuntimeError, ValueError) as exc:
             result = DelegatedTaskResult(
                 task,
                 TaskStatus.FAILED,
                 error=str(exc),
+                trusted_research_artifact_ids=trusted_artifacts,
+                research_trust_state=research_trust_state,
             )
             return self._learn_from_result(result)
         result = DelegatedTaskResult(
@@ -260,6 +279,8 @@ class TaskEngine:
             TaskStatus.SUCCEEDED,
             model_result=result if isinstance(result, TaskResult) else None,
             capability_result=None if isinstance(result, TaskResult) else result,
+            trusted_research_artifact_ids=trusted_artifacts,
+            research_trust_state=research_trust_state,
         )
         return self._learn_from_result(result)
 
@@ -280,6 +301,8 @@ class TaskEngine:
             # Retrieval/extraction is observational. Until independent verification
             # produces trusted knowledge, research must not influence skill history,
             # model performance, or skill evolution.
+            return result
+        if result.trusted_research_artifact_ids and result.research_trust_state is not EvidenceState.VERIFIED:
             return result
 
         try:
@@ -432,7 +455,13 @@ class TaskEngine:
                 sources.append(value)
         return tuple(dict.fromkeys(artifacts)), tuple(dict.fromkeys(sources))
 
-    def _execute_task(self, task: DelegatedTask, *, workspace: Path | None = None):
+    def _execute_task(
+        self,
+        task: DelegatedTask,
+        *,
+        workspace: Path | None = None,
+        trusted_artifact_ids: tuple[str, ...] = (),
+    ):
         skill_assignment = None
         if self.skill_registry is not None and self.organization is not None:
             agent = self.organization.resolve_agent(task.role)
@@ -527,6 +556,22 @@ class TaskEngine:
             if skill_assignment is not None
             else ""
         )
+        if trusted_artifact_ids:
+            if self.research_learning_gate is None:
+                raise TaskEngineError("trusted research artifacts require a configured research learning gate")
+            research_context = self.research_learning_gate.context_for(trusted_artifact_ids)
+            research_block = "\n".join(
+                f"- artifact_id={artifact_id}: {claim}"
+                for artifact_id, claim in research_context
+            )
+            skill_context = (
+                skill_context + "\n\n"
+                if skill_context else ""
+            ) + (
+                "Verified research knowledge authorized for this task. Treat these claims "
+                "as governed evidence and do not extend them beyond their stated content:\n"
+                + research_block
+            )
         required_capabilities = (
             tuple(sorted({
                 capability
