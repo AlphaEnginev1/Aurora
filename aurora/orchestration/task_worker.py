@@ -8,7 +8,7 @@ from time import sleep
 from typing import Callable
 
 from .event_bus import DurableEventBus, EventBusError
-from .task_engine import DelegatedTaskResult, TaskEngine, TaskStatus
+from .task_engine import DelegatedTaskResult, ResearchTaskResult, TaskEngine, TaskStatus
 from .task_store import DurableTaskStore, StoredTask, TaskStoreError
 from aurora.skills.evaluation import SkillEvaluator
 from aurora.skills.learning import SkillEvolutionEngine, SkillLearningStore
@@ -340,6 +340,13 @@ class TaskWorker:
                 "truncated": len(content) > limit,
             }
         capability = result.capability_result
+        if isinstance(capability, ResearchTaskResult):
+            return {
+                "type": "research",
+                "request_id": capability.request_id,
+                "source_ids": list(capability.source_ids),
+                "claim_ids": list(capability.claim_ids),
+            }
         if capability is not None:
             execution = getattr(capability, "execution", None)
             if execution is not None:
