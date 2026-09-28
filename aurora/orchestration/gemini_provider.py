@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
-from time import monotonic
+from time import monotonic, sleep
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -27,6 +27,7 @@ class GeminiDirectorConfig:
     model: str = "gemini-3.7-flash"
     endpoint: str = "https://generativelanguage.googleapis.com/v1beta"
     timeout_seconds: float = 30.0
+    max_retries: int = 2
 
 
 class GeminiDirectorProvider:
@@ -42,6 +43,7 @@ class GeminiDirectorProvider:
         model: str | None = None,
         endpoint: str | None = None,
         timeout_seconds: float = 30.0,
+        max_retries: int = 2,
     ) -> None:
         self.config = config or GeminiDirectorConfig(
             api_key=api_key or os.getenv("GEMINI_API_KEY", ""),
@@ -51,6 +53,7 @@ class GeminiDirectorProvider:
                 "https://generativelanguage.googleapis.com/v1beta",
             ),
             timeout_seconds=timeout_seconds,
+            max_retries=max_retries,
         )
         if not self.config.api_key.strip():
             raise GeminiDirectorError("GEMINI_API_KEY is not configured")
@@ -58,6 +61,8 @@ class GeminiDirectorProvider:
             raise GeminiDirectorError("Gemini model is empty")
         if self.config.timeout_seconds <= 0:
             raise GeminiDirectorError("Gemini timeout must be positive")
+        if self.config.max_retries < 0:
+            raise GeminiDirectorError("Gemini max_retries must be non-negative")
 
     def generate(
         self,
@@ -99,18 +104,27 @@ class GeminiDirectorProvider:
             },
             method="POST",
         )
-        try:
-            with urlopen(request, timeout=self.config.timeout_seconds) as response:
-                payload = json.loads(response.read().decode("utf-8"))
-        except HTTPError as exc:
-            detail = exc.read().decode("utf-8", errors="replace")[:500]
-            raise GeminiDirectorError(
-                f"Gemini HTTP {exc.code}: {detail}"
-            ) from exc
-        except (URLError, TimeoutError, OSError) as exc:
-            raise GeminiDirectorError(f"Gemini transport failure: {exc}") from exc
-        except json.JSONDecodeError as exc:
-            raise GeminiDirectorError("Gemini returned invalid JSON") from exc
+        payload = None
+        for attempt in range(self.config.max_retries + 1):
+            try:
+                with urlopen(request, timeout=self.config.timeout_seconds) as response:
+                    payload = json.loads(response.read().decode("utf-8"))
+                break
+            except HTTPError as exc:
+                detail = exc.read().decode("utf-8", errors="replace")[:500]
+                if exc.code not in {429, 500, 502, 503, 504} or attempt >= self.config.max_retries:
+                    raise GeminiDirectorError(
+                        f"Gemini HTTP {exc.code}: {detail}"
+                    ) from exc
+                sleep(0.5 * (2**attempt))
+            except (URLError, TimeoutError, OSError) as exc:
+                if attempt >= self.config.max_retries:
+                    raise GeminiDirectorError(f"Gemini transport failure: {exc}") from exc
+                sleep(0.5 * (2**attempt))
+            except json.JSONDecodeError as exc:
+                raise GeminiDirectorError("Gemini returned invalid JSON") from exc
+        if payload is None:
+            raise GeminiDirectorError("Gemini returned no response payload")
 
         content, tool_calls = self._parse_response(payload)
         return DirectorModelResponse(
@@ -134,6 +148,13 @@ class GeminiDirectorProvider:
                 # Gemini's generateContent schema does not accept this JSON
                 # Schema keyword even when it is set to false.
                 continue
+            if key == "type" and isinstance(value, list):
+                non_null = [item for item in value if item != "null"]
+                if len(value) == 2 and len(non_null) == 1 and "null" in value:
+                    translated["type"] = non_null[0]
+                    translated["nullable"] = True
+                    continue
+                raise GeminiDirectorError("Gemini schema type unions must be string|null")
             if key == "properties" and isinstance(value, dict):
                 translated[key] = {
                     name: GeminiDirectorProvider._gemini_schema(prop)
