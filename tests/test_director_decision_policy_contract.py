@@ -93,3 +93,36 @@ def test_contract_record_is_stable_for_auditing():
     assert record["authorized_by"] == "director-governance"
     assert record["advisory_only"] is True
     assert record["must_re_evaluate_current_evidence"] is True
+
+
+def test_contract_directive_tracks_observed_direction():
+    base = _contract()
+    worse = DirectorDecisionPolicyContract.from_proposal(
+        proposal_id=base.proposal_id,
+        validation_id=base.validation_id,
+        knowledge_id=base.knowledge_id,
+        alternative=base.candidate_decision,
+        chosen_decision=base.baseline_decision,
+        observed_direction="worse",
+        comparability_basis=base.comparability_basis,
+        proposed_change=base.proposed_change,
+        evidence_summary=base.evidence_summary,
+        authorized_by=base.authorized_by,
+        created_at="2026-09-29T20:31:00+00:00",
+    )
+    same = DirectorDecisionPolicyContract.from_proposal(
+        proposal_id=base.proposal_id,
+        validation_id=base.validation_id,
+        knowledge_id=base.knowledge_id,
+        alternative=base.candidate_decision,
+        chosen_decision=base.baseline_decision,
+        observed_direction="same",
+        comparability_basis=base.comparability_basis,
+        proposed_change=base.proposed_change,
+        evidence_summary=base.evidence_summary,
+        authorized_by=base.authorized_by,
+        created_at="2026-09-29T20:32:00+00:00",
+    )
+
+    assert worse.directive == "avoid_candidate"
+    assert same.directive == "no_change"
