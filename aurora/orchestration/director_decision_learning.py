@@ -69,7 +69,23 @@ class DirectorDecisionLearning:
         attribution = "temporal_outcome_alignment"
 
         if terminal is None:
-            return None
+            return DirectorDecisionEvaluation(
+                decision_event_id=decision_event.event_id,
+                round=int(decision_event.payload.get("round", 0)),
+                decision=decision,
+                score=None,
+                outcome="outcome_not_observed",
+                evidence=observed,
+                quality="evaluation_pending",
+                evidence_state="insufficient_evidence",
+                attribution="insufficient_evidence_for_quality_attribution",
+                evidence_completeness="insufficient",
+                sufficiency_reasons=(
+                    "decision_review_evidence_available",
+                    "result_not_observed",
+                    "critical_information_missing",
+                ),
+            )
 
         reasons.append("result_observed")
         reasons.append("decision_review_evidence_available")
