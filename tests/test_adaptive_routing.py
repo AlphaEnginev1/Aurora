@@ -32,6 +32,7 @@ def _models():
             "model/a",
             "controlled",
             "https://example.invalid/a",
+            capabilities=("reasoning",),
             quality_score=0.75,
             latency_score=0.75,
             cost_score=0.75,
@@ -41,6 +42,7 @@ def _models():
             "model/b",
             "controlled",
             "https://example.invalid/b",
+            capabilities=("reasoning",),
             quality_score=0.60,
             latency_score=0.60,
             cost_score=0.60,
@@ -271,7 +273,6 @@ def test_provider_bound_execution_evaluates_and_changes_next_route(tmp_path: Pat
 
 def test_task_engine_closes_execute_evaluate_learn_select_execute_cycle(tmp_path: Path):
     """The real task-engine path must consume learned evidence on the next mission."""
-    from aurora.inference.router import ModelRouter
     from aurora.organization import AgentSpec, DepartmentSpec, OrganizationRegistry
     from aurora.orchestration.engine import OrchestrationEngine
     from aurora.orchestration.task_engine import TaskEngine
