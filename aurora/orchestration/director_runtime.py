@@ -914,10 +914,18 @@ class DirectorRuntime:
             # when the next Director review happens before those tasks finish.
             # Associate their durable terminal events by task_id instead of
             # extending the generic evidence window across later decisions.
+            durable_tasks = self.store.list_tasks(mission_id)
+            if not decision_task_ids:
+                decision_round = int(decision_event.payload.get("round", 0))
+                decision_task_ids.update(
+                    task.task.task_id
+                    for task in durable_tasks
+                    if task.phase == decision_round and decision_round > 0
+                )
             if decision_task_ids:
                 # The durable task row is authoritative even when its terminal
                 # journal event falls after a subsequent Director review.
-                for task in self.store.list_tasks(mission_id):
+                for task in durable_tasks:
                     if task.task.task_id in decision_task_ids and task.status in {
                         "succeeded",
                         "failed",
