@@ -19,7 +19,11 @@ class DirectorDecisionPerformance:
 
 
 class DirectorDecisionPerformanceStore:
-    """SQLite ledger aggregating observed outcomes of Director decisions."""
+    """SQLite ledger for evidence-backed Director decision performance.
+
+    All evaluations are persisted, including partial/insufficient evidence.
+    Only evidence-complete evaluations contribute to performance aggregates.
+    """
 
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
@@ -42,13 +46,31 @@ class DirectorDecisionPerformanceStore:
                     decision_event_id INTEGER NOT NULL UNIQUE,
                     round INTEGER NOT NULL,
                     decision TEXT NOT NULL,
-                    score REAL NOT NULL,
+                    score REAL,
                     outcome TEXT NOT NULL,
                     evidence_json TEXT NOT NULL,
+                    evidence_completeness TEXT NOT NULL DEFAULT 'complete',
+                    sufficiency_reasons_json TEXT NOT NULL DEFAULT '[]',
                     created_at TEXT NOT NULL
                 )
                 """
             )
+            columns = {
+                row["name"]
+                for row in db.execute(
+                    "PRAGMA table_info(director_decision_performance)"
+                ).fetchall()
+            }
+            if "evidence_completeness" not in columns:
+                db.execute(
+                    "ALTER TABLE director_decision_performance "
+                    "ADD COLUMN evidence_completeness TEXT NOT NULL DEFAULT 'complete'"
+                )
+            if "sufficiency_reasons_json" not in columns:
+                db.execute(
+                    "ALTER TABLE director_decision_performance "
+                    "ADD COLUMN sufficiency_reasons_json TEXT NOT NULL DEFAULT '[]'"
+                )
             db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_director_decision_perf_decision "
                 "ON director_decision_performance(decision)"
@@ -60,26 +82,40 @@ class DirectorDecisionPerformanceStore:
         decision_event_id: int,
         round: int,
         decision: str,
-        score: float,
+        score: float | None,
         outcome: str,
         evidence: Iterable[str],
+        evidence_completeness: str,
+        sufficiency_reasons: Iterable[str],
         created_at: str,
     ) -> None:
+        if evidence_completeness not in {"complete", "partial", "insufficient"}:
+            raise ValueError("invalid evidence_completeness")
+        normalized_score = (
+            None
+            if score is None
+            else max(0.0, min(1.0, float(score)))
+        )
+        if evidence_completeness == "complete" and normalized_score is None:
+            raise ValueError("complete evidence requires a score")
         with self._connect() as db:
             db.execute(
                 """
                 INSERT OR IGNORE INTO director_decision_performance (
                     decision_event_id, round, decision, score, outcome,
-                    evidence_json, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    evidence_json, evidence_completeness,
+                    sufficiency_reasons_json, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     int(decision_event_id),
                     int(round),
                     decision,
-                    max(0.0, min(1.0, float(score))),
+                    normalized_score,
                     outcome,
                     json.dumps(list(evidence), sort_keys=True),
+                    evidence_completeness,
+                    json.dumps(list(sufficiency_reasons), sort_keys=True),
                     created_at,
                 ),
             )
@@ -100,6 +136,8 @@ class DirectorDecisionPerformanceStore:
                        SUM(CASE WHEN score >= 1.0 THEN 1 ELSE 0 END)
                            AS successful_evaluations
                 FROM director_decision_performance
+                WHERE evidence_completeness = 'complete'
+                  AND score IS NOT NULL
                 GROUP BY decision
                 HAVING COUNT(*) >= ?
                 ORDER BY decision
@@ -111,9 +149,9 @@ class DirectorDecisionPerformanceStore:
                 decision=str(row["decision"]),
                 evaluations=int(row["evaluations"]),
                 average_score=float(row["average_score"]),
-                successful_evaluations=int(row["successful_evaluations"]),
+                successful_evaluations=int(row["successful_evaluations"] or 0),
                 success_rate=(
-                    float(row["successful_evaluations"]) / int(row["evaluations"])
+                    float(row["successful_evaluations"] or 0) / int(row["evaluations"])
                 ),
             )
             for row in rows
