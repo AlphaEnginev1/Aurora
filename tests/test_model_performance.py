@@ -124,3 +124,33 @@ def test_skill_version_is_part_of_model_learning_scope(tmp_path: Path):
         context_bucket="medium",
         minimum_evaluations=1,
     ) == {"model-a": 0.20}
+
+def test_model_performance_persists_routing_decision_evidence(tmp_path: Path):
+    store = ModelPerformanceStore(tmp_path / "model-performance.db")
+    store.record(
+        model="model-a",
+        skill_id="research",
+        skill_version="1.0.0",
+        task_type="research",
+        context_bucket="medium",
+        score=0.91,
+        evidence_completeness=1.0,
+        evidence_state="evidence_complete",
+        created_at="2026-09-29T00:00:00+00:00",
+        routing_score=0.83,
+        routing_factors={"learned_score": 0.9, "quality": 0.8},
+        routing_candidates=(("model-a", 0.83), ("model-b", 0.71)),
+    )
+
+    import sqlite3
+    with sqlite3.connect(store.path) as db:
+        row = db.execute(
+            "SELECT routing_score, routing_factors, routing_candidates "
+            "FROM model_performance WHERE model = ?",
+            ("model-a",),
+        ).fetchone()
+
+    assert row is not None
+    assert row[0] == 0.83
+    assert row[1] == '{"learned_score": 0.9, "quality": 0.8}'
+    assert row[2] == '[["model-a", 0.83], ["model-b", 0.71]]'
