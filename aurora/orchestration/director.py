@@ -28,6 +28,7 @@ class DirectorReview:
     rationale: str
     tasks: tuple[DelegatedTask, ...]
     model: str
+    considered_alternatives: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -134,11 +135,13 @@ Rules:
     _REVIEW_SYSTEM = """You are Aurora's Director reviewer.
 Review the current mission state and decide whether the objective is complete.
 Return ONLY a JSON object:
-{"decision":"complete|continue|blocked","rationale":"string","tasks":[{"task_id":"string","role":"string","objective":"string","capability":"string or null","args":["string"],"depends_on":["task_id"],"skills":["skill-id"]}]}
+{"decision":"complete|continue|blocked","rationale":"string","considered_alternatives":["string"],"tasks":[{"task_id":"string","role":"string","objective":"string","capability":"string or null","args":["string"],"depends_on":["task_id"],"skills":["skill-id"]}]}
 Rules:
 - Choose complete only when the evidence in context is sufficient to satisfy the objective.
 - Choose blocked when safe progress is impossible under the current policies or available capabilities.
 - Choose continue when additional work is needed; provide the minimal next task graph.
+- considered_alternatives lists only materially plausible alternatives that were explicitly considered for this decision; an empty list is valid.
+- Never claim an alternative was tested unless the context contains evidence that it was executed or observed.
 - Create at most 16 follow-up tasks.
 - Never invent executable paths, shell commands, URLs, credentials, unregistered tools, or skills.
 - Use only registered skills presented in the prompt.
@@ -173,15 +176,16 @@ Rules:
             tools=(self._DELEGATE_TOOL,),
         )
         if response.tool_calls:
-            decision, rationale, tasks = self._parse_review_tool_calls(response.tool_calls)
+            decision, rationale, tasks, considered_alternatives = self._parse_review_tool_calls(response.tool_calls)
         else:
-            decision, rationale, tasks = self._parse_review(response.content)
+            decision, rationale, tasks, considered_alternatives = self._parse_review(response.content)
         self._validate_organization(tasks)
         return DirectorReview(
             decision=decision,
             rationale=rationale,
             tasks=tasks,
             model=response.model,
+            considered_alternatives=considered_alternatives,
         )
 
     @classmethod
@@ -199,9 +203,9 @@ Rules:
     @classmethod
     def _parse_review_tool_calls(
         cls, calls: tuple[DirectorToolCall, ...],
-    ) -> tuple[str, str, tuple[DelegatedTask, ...]]:
+    ) -> tuple[str, str, tuple[DelegatedTask, ...], tuple[str, ...]]:
         tasks = cls._parse_tool_calls(calls)
-        return "continue", "Director requested additional delegated work.", tasks
+        return "continue", "Director requested additional delegated work.", tasks, ()
 
     @staticmethod
     def _task_from_tool_call(call: DirectorToolCall) -> DelegatedTask:
@@ -339,6 +343,14 @@ Rules:
         decision = payload.get("decision")
         rationale = payload.get("rationale", "")
         tasks_payload = payload.get("tasks", [])
+        alternatives_payload = payload.get("considered_alternatives", [])
+        if not isinstance(alternatives_payload, list) or not all(
+            isinstance(item, str) and item.strip() for item in alternatives_payload
+        ):
+            raise DirectorPlanError("Director review considered_alternatives must be a string array")
+        if len(alternatives_payload) > 8:
+            raise DirectorPlanError("Director review cannot contain more than 8 alternatives")
+        considered_alternatives = tuple(dict.fromkeys(item.strip() for item in alternatives_payload))
         if decision not in {"complete", "continue", "blocked"}:
             raise DirectorPlanError("Director review decision is invalid")
         if not isinstance(rationale, str) or not rationale.strip():
@@ -391,7 +403,7 @@ Rules:
                     skills=tuple(skills),
                 )
             )
-        return decision, rationale.strip(), tuple(tasks)
+        return decision, rationale.strip(), tuple(tasks), considered_alternatives
 
 
 class DirectorService:
