@@ -47,16 +47,24 @@ class DirectorDecisionPolicy:
             raise ValueError("active policy proposal does not match active registry")
         if proposal.state != "proposed":
             raise ValueError("active registry may only reference a governed proposal")
+        contract = DirectorDecisionPolicyContract.from_proposal(
+            proposal_id=proposal.proposal_id,
+            validation_id=active.validation_id,
+            knowledge_id=proposal.knowledge_id,
+            alternative=proposal.alternative,
+            chosen_decision=proposal.chosen_decision,
+            observed_direction=proposal.observed_direction,
+            comparability_basis=getattr(proposal, "comparability_basis", (proposal.alternative, proposal.chosen_decision)),
+            proposed_change=proposal.proposed_change,
+            evidence_summary=proposal.evidence_summary,
+            authorized_by=active.authorized_by,
+        )
         return (
-            "Active Director policy guidance (governed and advisory; it does not "
-            "override current evidence or automatically choose a decision): "
-            f"proposal_id={proposal.proposal_id}; "
-            f"observed_direction={proposal.observed_direction}; "
-            f"evidence={proposal.evidence_summary}; "
-            f"proposed_change={proposal.proposed_change}. "
-            "Apply this guidance only when the current mission context is materially "
-            "comparable to the evidence that produced the policy. Re-evaluate current "
-            "evidence before deciding."
+            "Active Director policy contract (governed and advisory; never an "
+            "automatic decision rule): "
+            + __import__("json").dumps(contract.advisory_record(), sort_keys=True)
+            + " Apply only when the current mission context is materially "
+              "comparable to the governed evidence, then re-evaluate current evidence."
         )
 
     @staticmethod
