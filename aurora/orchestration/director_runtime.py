@@ -789,7 +789,19 @@ class DirectorRuntime:
                     ),
                 }
             )
-        comparisons = self.decision_comparison_store.list_for_decision(decision_event_id)
+        decision_event_id = max(
+            (
+                int(item["decision_event_id"])
+                for item in decision_learning
+                if item.get("decision_event_id") is not None
+            ),
+            default=None,
+        )
+        comparisons = (
+            self.decision_comparison_store.list_for_decision(decision_event_id)
+            if decision_event_id is not None
+            else ()
+        )
         if comparisons:
             context.append(
                 {
