@@ -129,3 +129,40 @@ class DirectorDecisionPolicyLifecycleActivationShim:
             authorized_by=value.authorized_by,
             created_at=value.created_at,
         )
+
+def test_policy_lifecycle_canary_can_be_rolled_back():
+    proposal = _proposal()
+    validation = DirectorDecisionPolicyLifecycle.validate(
+        proposal,
+        holdout_observations=3,
+        baseline_consistent=True,
+        candidate_consistent=True,
+    )
+    canary = DirectorDecisionPolicyLifecycle.enter_canary(
+        proposal,
+        validation,
+        authorized_by="director-governance",
+    )
+
+    rolled_back = DirectorDecisionPolicyLifecycle.rollback(
+        canary,
+        reason="shadow integrity violation",
+        authorized_by="shadow-canary-guard",
+    )
+
+    assert rolled_back.state == "rolled_back"
+    assert rolled_back.proposal_id == canary.proposal_id
+    assert rolled_back.validation_id == canary.validation_id
+
+    with pytest.raises(DirectorDecisionPolicyLifecycleError, match="canary state"):
+        from aurora.orchestration.director_decision_policy_canary import (
+            DirectorDecisionPolicyShadowCanary,
+        )
+
+        DirectorDecisionPolicyShadowCanary.observe(
+            rolled_back,
+            decision_event_id=101,
+            baseline_decision="continue",
+            candidate_decision="complete",
+            actual_outcome="mission_succeeded",
+        )
