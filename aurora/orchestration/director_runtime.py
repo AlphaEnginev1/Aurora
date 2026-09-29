@@ -915,13 +915,14 @@ class DirectorRuntime:
             # Associate their durable terminal events by task_id instead of
             # extending the generic evidence window across later decisions.
             durable_tasks = self.store.list_tasks(mission_id)
+            decision_round = int(decision_event.payload.get("round", 0))
+            phase_tasks = [
+                task
+                for task in durable_tasks
+                if task.phase == decision_round and decision_round > 0
+            ]
             if not decision_task_ids:
-                decision_round = int(decision_event.payload.get("round", 0))
-                decision_task_ids.update(
-                    task.task.task_id
-                    for task in durable_tasks
-                    if task.phase == decision_round and decision_round > 0
-                )
+                decision_task_ids.update(task.task.task_id for task in phase_tasks)
             if decision_task_ids:
                 # The durable task row is authoritative even when its terminal
                 # journal event falls after a subsequent Director review.
@@ -932,6 +933,16 @@ class DirectorRuntime:
                         "blocked",
                     }:
                         observed_events.append(task.status)
+            if phase_tasks and all(
+                task.status in {"succeeded", "failed", "blocked"}
+                for task in phase_tasks
+            ):
+                if any(task.status == "failed" for task in phase_tasks):
+                    observed_events.append("task_failed")
+                elif any(task.status == "blocked" for task in phase_tasks):
+                    observed_events.append("task_blocked")
+                else:
+                    observed_events.append("task_completed")
 
             if terminal_event is not None and terminal_event.event_id > decision_event.event_id:
                 observed_events.append(terminal_event.event_type)
