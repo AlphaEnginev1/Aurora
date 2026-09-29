@@ -648,6 +648,17 @@ class DirectorRuntime:
         team_context = self._team_state_text(mission_id)
         if team_context:
             context.append({"role": "user", "content": team_context})
+        routing_evidence = self._routing_evidence(mission_id)
+        if routing_evidence:
+            context.append(
+                {
+                    "role": "user",
+                    "content": (
+                        "Immutable routing evidence for Director review: "
+                        + json.dumps(routing_evidence, sort_keys=True)
+                    ),
+                }
+            )
         self.event_bus.publish(
             mission_id=mission_id,
             event_type="director_review_started",
@@ -680,6 +691,7 @@ class DirectorRuntime:
                 "decision": review.decision,
                 "rationale": review.rationale,
                 "model": review.model,
+                "routing_evidence": routing_evidence,
             },
         )
         try:
@@ -688,7 +700,11 @@ class DirectorRuntime:
                 source="director",
                 kind="review",
                 content=f"Decision={review.decision}; rationale={review.rationale}",
-                metadata={"round": round_number, "model": review.model},
+                metadata={
+                    "round": round_number,
+                    "model": review.model,
+                    "routing_evidence": routing_evidence,
+                },
             )
         except MissionMemoryError:
             pass
@@ -863,6 +879,33 @@ class DirectorRuntime:
         if not events:
             return ""
         return "Current specialist team state: " + json.dumps(events[-1].payload, sort_keys=True)
+
+    def _routing_evidence(self, mission_id: str) -> list[dict[str, Any]]:
+        """Return the immutable routing snapshots available to the Director review."""
+        evidence: list[dict[str, Any]] = []
+        for item in self.store.list_tasks(mission_id):
+            result = item.result or {}
+            routing = result.get("routing")
+            if not isinstance(routing, dict):
+                continue
+            evidence.append(
+                {
+                    "task_id": item.task.task_id,
+                    "status": item.status,
+                    "selected_model": routing.get("selected_model"),
+                    "score": routing.get("score"),
+                    "factors": dict(routing.get("factors") or {}),
+                    "candidates": [
+                        {
+                            "model": candidate.get("model"),
+                            "score": candidate.get("score"),
+                        }
+                        for candidate in (routing.get("candidates") or [])
+                        if isinstance(candidate, dict)
+                    ],
+                }
+            )
+        return evidence
 
     def _task_state_text(self, mission_id: str) -> str:
         tasks = self.store.list_tasks(mission_id)
