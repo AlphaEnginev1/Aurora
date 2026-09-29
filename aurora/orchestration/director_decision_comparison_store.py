@@ -10,6 +10,19 @@ from typing import Iterable
 
 
 @dataclass(frozen=True)
+class DirectorDecisionComparisonSummary:
+    alternative: str
+    chosen_decision: str | None
+    observations: int
+    better_observations: int
+    worse_observations: int
+    same_observations: int
+    undetermined_observations: int
+    consistent_direction: str
+    sources: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class StoredDirectorDecisionComparison:
     comparison_id: int
     decision_event_id: int
@@ -126,6 +139,44 @@ class DirectorDecisionComparisonStore:
                 ),
             )
 
+    def summarize_for_decision(
+        self, decision_event_id: int
+    ) -> tuple[DirectorDecisionComparisonSummary, ...]:
+        """Summarize repeated observations without asserting causality."""
+        rows = self.list_for_decision(decision_event_id)
+        grouped: dict[tuple[str, str], list[StoredDirectorDecisionComparison]] = {}
+        for row in rows:
+            grouped.setdefault((row.alternative, row.chosen_decision), []).append(row)
+
+        summaries: list[DirectorDecisionComparisonSummary] = []
+        for (alternative, chosen_decision), items in grouped.items():
+            directions = [item.observed_direction for item in items]
+            better = directions.count("better")
+            worse = directions.count("worse")
+            same = directions.count("same")
+            undetermined = directions.count("undetermined")
+            observed = {d for d in directions if d in {"better", "worse", "same"}}
+            if len(observed) == 1 and undetermined == 0:
+                consistent = next(iter(observed))
+            elif len(observed) == 0:
+                consistent = "undetermined"
+            else:
+                consistent = "mixed"
+            summaries.append(
+                DirectorDecisionComparisonSummary(
+                    alternative=alternative,
+                    chosen_decision=chosen_decision,
+                    observations=len(items),
+                    better_observations=better,
+                    worse_observations=worse,
+                    same_observations=same,
+                    undetermined_observations=undetermined,
+                    consistent_direction=consistent,
+                    sources=tuple(sorted({item.source for item in items})),
+                )
+            )
+        return tuple(summaries)
+
     def list_for_decision(
         self, decision_event_id: int
     ) -> tuple[StoredDirectorDecisionComparison, ...]:
@@ -162,4 +213,4 @@ class DirectorDecisionComparisonStore:
         )
 
 
-__all__ = ["DirectorDecisionComparisonStore", "StoredDirectorDecisionComparison"]
+__all__ = ["DirectorDecisionComparisonStore", "DirectorDecisionComparisonSummary", "StoredDirectorDecisionComparison"]
