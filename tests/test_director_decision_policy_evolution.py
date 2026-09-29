@@ -35,7 +35,7 @@ def test_policy_evolution_creates_non_active_proposal():
     )
     assert proposal.state == "proposed"
     assert proposal.knowledge_id == "dkn-1"
-    assert proposal.comparability_basis == _knowledge().comparability_basis
+    assert proposal.comparability_basis == tuple(sorted(_knowledge().comparability_basis))
     assert DirectorDecisionPolicyEvolution.approval_boundary(proposal) == "explicit_policy_approval_required"
 
 
