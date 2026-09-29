@@ -5,6 +5,10 @@ from aurora.inference.models import InferenceResponse
 from aurora.orchestration.director import DirectorPlan, DirectorReview
 from aurora.orchestration.director_decision_comparison import DirectorDecisionComparativeEvidence
 from aurora.orchestration.director_runtime import DirectorRuntime
+from aurora.orchestration.director_decision_knowledge import DirectorDecisionKnowledge
+from aurora.orchestration.director_decision_policy_canary_store import DirectorDecisionPolicyShadowCanaryStore
+from aurora.orchestration.director_decision_policy_evolution import DirectorDecisionPolicyEvolution
+from aurora.orchestration.director_decision_policy_lifecycle import DirectorDecisionPolicyLifecycle
 from aurora.orchestration.durable_director import DurableDirectorService
 from aurora.orchestration.event_bus import DurableEventBus
 from aurora.orchestration.engine import TaskResult
@@ -102,6 +106,88 @@ def make_runtime(tmp_path: Path, *, max_continue_reviews: int = 1):
         event_consumer_id="director-events",
     )
     return runtime, store, planner, engine
+
+
+def test_policy_shadow_canary_integrates_with_terminal_director_cycle(tmp_path: Path):
+    store = DurableTaskStore(tmp_path / "tasks.db")
+    bus = DurableEventBus(store)
+    planner = FakePlanner(max_continue_reviews=1)
+    engine = TaskEngine(FakeOrchestration(), tmp_path / "workspace")
+    director = DurableDirectorService(
+        planner=planner,
+        task_engine=engine,
+        store=store,
+        event_bus=bus,
+    )
+    knowledge = DirectorDecisionKnowledge(
+        knowledge_id="dkn-runtime-canary",
+        alternative="complete",
+        chosen_decision="continue",
+        comparability_basis=("same_objective", "same_environment_class"),
+        observed_direction="better",
+        decision_events=2,
+        observations=2,
+        sources=("independent_execution",),
+        claim="Repeated empirical observation.",
+        created_at="2026-09-29T19:00:00+00:00",
+    )
+    proposal = DirectorDecisionPolicyEvolution.propose(
+        knowledge,
+        proposed_change="Test the complete decision in this recurring comparable context.",
+        created_at="2026-09-29T19:01:00+00:00",
+    )
+    validation = DirectorDecisionPolicyLifecycle.validate(
+        proposal,
+        holdout_observations=4,
+        baseline_consistent=True,
+        candidate_consistent=True,
+        created_at="2026-09-29T19:02:00+00:00",
+    )
+    canary = DirectorDecisionPolicyLifecycle.enter_canary(
+        proposal,
+        validation,
+        authorized_by="director-governance",
+        created_at="2026-09-29T19:03:00+00:00",
+    )
+    shadow_store = DirectorDecisionPolicyShadowCanaryStore(tmp_path / "tasks.db")
+    runtime = DirectorRuntime(
+        director=director,
+        store=store,
+        event_bus=bus,
+        worker_policy=WorkerPolicy(
+            lease_seconds=30,
+            max_attempts=2,
+            idle_sleep_seconds=0,
+        ),
+        worker_id="director-a",
+        event_consumer_id="director-events",
+        policy_shadow_activation=canary,
+        policy_shadow_proposal=proposal,
+        policy_shadow_store=shadow_store,
+        policy_shadow_decider=lambda _objective, _context, _proposal: "blocked",
+    )
+
+    submission = runtime.submit_mission(objective="research Aurora")
+    result = runtime.run_until_terminal(submission)
+
+    assert result.status is TaskStatus.SUCCEEDED
+    observations = shadow_store.list_for_proposal(proposal.proposal_id)
+    assert len(observations) == 1
+    observation = observations[0]
+    assert observation.baseline_decision == "complete"
+    assert observation.candidate_decision == "blocked"
+    assert observation.actual_outcome == "mission_succeeded"
+    assert observation.decision_agreement is False
+    assert observation.baseline_executed is True
+    assert observation.candidate_executed is False
+
+    shadow_events = [
+        event for event in store.events(submission.mission_id)
+        if event.event_type == "director_decision_policy_shadow_observed"
+    ]
+    assert len(shadow_events) == 1
+    assert shadow_events[0].payload["candidate_executed"] is False
+    assert shadow_events[0].payload["decision_event_id"] == observation.decision_event_id
 
 
 def test_full_director_event_bus_worker_cycle(tmp_path: Path):
