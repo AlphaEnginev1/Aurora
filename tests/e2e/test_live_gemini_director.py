@@ -11,6 +11,11 @@ from aurora.autonomy.registry import ToolSpec
 from aurora.autonomy.sandbox import SandboxResult
 from aurora.inference.models import InferenceRequest, InferenceResponse
 from aurora.orchestration.director import DirectorPlanner, DirectorService
+from aurora.orchestration.durable_director import DurableDirectorService
+from aurora.orchestration.director_runtime import DirectorRuntime
+from aurora.orchestration.event_bus import DurableEventBus
+from aurora.orchestration.task_store import DurableTaskStore
+from aurora.orchestration.task_worker import WorkerPolicy
 from aurora.orchestration.director_provider import DirectorModelResponse, DirectorToolSpec
 from aurora.orchestration.engine import OrchestrationEngine
 from aurora.orchestration.gemini_provider import GeminiDirectorProvider
@@ -208,3 +213,82 @@ def test_live_gemini_director_executes_through_real_registered_capability(
     assert capability_sandbox.calls[0][0] == (str(executable),)
 
     assert router.requests == []
+
+
+class MissionReplayDirectorProvider(ReplayDirectorProvider):
+    """Replay the live plan, then return a deterministic completion review."""
+
+    def __init__(self, response: DirectorModelResponse):
+        super().__init__(response)
+        self.calls = 0
+
+    def generate(self, messages, model, role, tools=()):
+        self.calls += 1
+        if role == "director_planner":
+            return self.response
+        if role == "director_reviewer":
+            return DirectorModelResponse(
+                content='{"decision":"complete","rationale":"Controlled execution result satisfies the mission objective.","tasks":[]}',
+                model=self.response.model,
+                provider="gemini",
+                request_id="replay-review",
+                execution_id="replay-review",
+                tool_calls=(),
+            )
+        raise AssertionError(f"unexpected Director role: {role}")
+
+
+@pytest.mark.live
+def test_live_gemini_director_closes_mission_after_execution_and_review(
+    live_gemini_response,
+    tmp_path,
+):
+    provider = MissionReplayDirectorProvider(live_gemini_response)
+    planner = DirectorPlanner(provider=provider, router=None)
+
+    router = ControlledRouter()
+    orchestration = OrchestrationEngine(router)
+    task_engine = TaskEngine(
+        orchestration=orchestration,
+        workspace_root=tmp_path / "workspace",
+    )
+    store = DurableTaskStore(tmp_path / "tasks.db")
+    event_bus = DurableEventBus(store)
+    durable_director = DurableDirectorService(
+        planner=planner,
+        task_engine=task_engine,
+        store=store,
+        event_bus=event_bus,
+    )
+    runtime = DirectorRuntime(
+        director=durable_director,
+        store=store,
+        event_bus=event_bus,
+        worker_policy=WorkerPolicy(
+            lease_seconds=30,
+            max_attempts=2,
+            idle_sleep_seconds=0,
+        ),
+        worker_id="live-gemini-director",
+        event_consumer_id="live-gemini-director-events",
+        worker_concurrency=1,
+        max_review_rounds=1,
+    )
+
+    submission = runtime.submit_mission(
+        objective="Create exactly one research task to investigate Aurora architecture.",
+    )
+    result = runtime.run_until_terminal(submission, max_cycles=20)
+
+    assert result.status is TaskStatus.SUCCEEDED
+    assert len(result.tasks) == 1
+    assert result.tasks[0].status is TaskStatus.SUCCEEDED
+    assert provider.calls == 2
+    assert len(router.requests) == 1
+
+    events = [event.event_type for event in store.events(submission.mission_id)]
+    assert "mission_submitted" in events
+    assert "worker.task_succeeded" in events
+    assert "director_review_started" in events
+    assert "director_review" in events
+    assert "mission_succeeded" in events
