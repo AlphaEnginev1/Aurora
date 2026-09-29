@@ -1,0 +1,25 @@
+name: Live Research Discovery Gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      endpoint:
+        description: "Real SearXNG-compatible JSON search endpoint"
+        required: true
+        default: "https://searx.oloke.xyz/search?format=json"
+        type: string
+
+jobs:
+  live-research-discovery:
+    runs-on: ubuntu-latest
+    env:
+      AURORA_LIVE_RESEARCH_GATE: "1"
+      AURORA_RESEARCH_DISCOVERY_ENDPOINT: ${{ inputs.endpoint }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip pytest
+      - name: Run real research discovery gate
+        run: python -m pytest -q tests/e2e/test_live_research_discovery.py
