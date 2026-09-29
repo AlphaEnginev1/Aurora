@@ -135,3 +135,67 @@ def test_comparison_store_persists_observation_without_performance_aggregation(t
     assert rows[0].state == "potentially_better_observed"
     assert rows[0].causal_attribution == "unsupported"
     assert rows[0].observed_direction == "better"
+
+
+def test_comparison_store_deduplicates_and_summarizes_repeated_observations(tmp_path):
+    store = DirectorDecisionComparisonStore(tmp_path / "tasks.db")
+    common = {
+        "decision_event_id": 16,
+        "chosen_decision": "continue",
+        "alternative": "complete",
+        "source": "independent_execution",
+        "chosen_outcome": "mission_succeeded",
+        "alternative_outcome": "mission_succeeded_with_lower_cost",
+        "comparability_basis": ("same_objective", "same_environment_class"),
+        "observed_direction": "better",
+        "causal_attribution": "unsupported",
+        "state": "potentially_better_observed",
+        "reason": "comparable_observed_difference_with_no_causal_attribution",
+        "evidence": ("independent_execution", "same_objective"),
+        "created_at": "2026-09-29T15:10:00+00:00",
+    }
+    store.record(**common, alternative_execution_id="alt-1", chosen_execution_id="chosen-1")
+    store.record(**common, alternative_execution_id="alt-1", chosen_execution_id="chosen-1")
+    store.record(
+        **common,
+        alternative_execution_id="alt-2",
+        chosen_execution_id="chosen-2",
+        created_at="2026-09-29T15:11:00+00:00",
+    )
+    rows = store.list_for_decision(16)
+    assert len(rows) == 2
+    summary = store.summarize_for_decision(16)
+    assert len(summary) == 1
+    assert summary[0].observations == 2
+    assert summary[0].better_observations == 2
+    assert summary[0].worse_observations == 0
+    assert summary[0].consistent_direction == "better"
+    assert summary[0].sources == ("independent_execution",)
+
+
+def test_comparison_summary_marks_mixed_direction_without_selecting_a_winner(tmp_path):
+    store = DirectorDecisionComparisonStore(tmp_path / "tasks.db")
+    for index, direction in enumerate(("better", "worse"), start=1):
+        store.record(
+            decision_event_id=17,
+            chosen_decision="continue",
+            alternative="complete",
+            source="historical_comparable",
+            alternative_execution_id=f"alt-{index}",
+            chosen_execution_id=f"chosen-{index}",
+            chosen_outcome="observed",
+            alternative_outcome="observed",
+            comparability_basis=("same_objective",),
+            observed_direction=direction,
+            causal_attribution="unsupported",
+            state="observational_difference",
+            reason="comparable_observed_difference_with_no_causal_attribution",
+            evidence=("historical_comparable",),
+            created_at=f"2026-09-29T15:1{index}:00+00:00",
+        )
+    summary = store.summarize_for_decision(17)
+    assert len(summary) == 1
+    assert summary[0].observations == 2
+    assert summary[0].better_observations == 1
+    assert summary[0].worse_observations == 1
+    assert summary[0].consistent_direction == "mixed"
