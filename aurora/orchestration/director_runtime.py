@@ -756,6 +756,7 @@ class DirectorRuntime:
                 "rationale": review.rationale,
                 "model": review.model,
                 "routing_evidence": routing_evidence,
+                "considered_alternatives": list(review.considered_alternatives),
             },
         )
         try:
@@ -768,6 +769,7 @@ class DirectorRuntime:
                     "round": round_number,
                     "model": review.model,
                     "routing_evidence": routing_evidence,
+                    "considered_alternatives": list(review.considered_alternatives),
                 },
             )
         except MissionMemoryError:
