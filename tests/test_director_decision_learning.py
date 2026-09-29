@@ -62,6 +62,24 @@ def test_failed_follow_up_requires_complete_execution_and_task_evidence():
     assert evaluation.evidence_completeness == "complete"
 
 
+def test_continue_with_canonical_durable_task_success_is_complete():
+    evaluation = DirectorDecisionLearning.evaluate(
+        decision_event=event(15, "continue"),
+        observed_event_types=(
+            "director_decision_executed",
+            "mission_reopened",
+            "succeeded",
+            "mission_succeeded",
+        ),
+    )
+
+    assert evaluation is not None
+    assert evaluation.score == 1.0
+    assert evaluation.outcome == "follow_up_succeeded"
+    assert evaluation.quality == "supported_success"
+    assert evaluation.evidence_completeness == "complete"
+
+
 def test_blocked_decision_has_explicit_quality():
     evaluation = DirectorDecisionLearning.evaluate(
         decision_event=event(12, "blocked"),
