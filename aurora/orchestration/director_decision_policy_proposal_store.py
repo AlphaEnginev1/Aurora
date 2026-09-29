@@ -33,10 +33,22 @@ class DirectorDecisionPolicyProposalStore:
                     observed_direction TEXT NOT NULL,
                     proposed_change TEXT NOT NULL,
                     evidence_summary TEXT NOT NULL,
+                    comparability_basis_json TEXT NOT NULL DEFAULT '[]',
                     state TEXT NOT NULL,
                     created_at TEXT NOT NULL
                 )
             """)
+            columns = {
+                str(row["name"])
+                for row in db.execute(
+                    "PRAGMA table_info(director_decision_policy_proposals)"
+                ).fetchall()
+            }
+            if "comparability_basis_json" not in columns:
+                db.execute(
+                    "ALTER TABLE director_decision_policy_proposals "
+                    "ADD COLUMN comparability_basis_json TEXT NOT NULL DEFAULT '[]'"
+                )
 
     def record(self, proposal: DirectorDecisionPolicyProposal) -> None:
         if proposal.state != "proposed":
@@ -47,8 +59,8 @@ class DirectorDecisionPolicyProposalStore:
                 INSERT OR IGNORE INTO director_decision_policy_proposals (
                     proposal_id, knowledge_id, alternative, chosen_decision,
                     observed_direction, proposed_change, evidence_summary,
-                    state, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    comparability_basis_json, state, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     proposal.proposal_id,
@@ -58,6 +70,7 @@ class DirectorDecisionPolicyProposalStore:
                     proposal.observed_direction,
                     proposal.proposed_change,
                     proposal.evidence_summary,
+                    json.dumps(proposal.comparability_basis, sort_keys=True),
                     proposal.state,
                     proposal.created_at,
                 ),
@@ -88,6 +101,7 @@ class DirectorDecisionPolicyProposalStore:
             observed_direction=str(row["observed_direction"]),
             proposed_change=str(row["proposed_change"]),
             evidence_summary=str(row["evidence_summary"]),
+            comparability_basis=tuple(json.loads(row["comparability_basis_json"])),
             state=str(row["state"]),
             created_at=str(row["created_at"]),
         )

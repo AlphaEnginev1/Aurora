@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 
 from .director_decision_performance import DirectorDecisionPerformance
 from .director_decision_policy_active_store import DirectorDecisionPolicyActive
 from .director_decision_policy_evolution import DirectorDecisionPolicyProposal
+from .director_decision_policy_contract import DirectorDecisionPolicyContract
 
 
 @dataclass(frozen=True)
@@ -54,7 +56,7 @@ class DirectorDecisionPolicy:
             alternative=proposal.alternative,
             chosen_decision=proposal.chosen_decision,
             observed_direction=proposal.observed_direction,
-            comparability_basis=getattr(proposal, "comparability_basis", (proposal.alternative, proposal.chosen_decision)),
+            comparability_basis=proposal.comparability_basis,
             proposed_change=proposal.proposed_change,
             evidence_summary=proposal.evidence_summary,
             authorized_by=active.authorized_by,
@@ -62,8 +64,9 @@ class DirectorDecisionPolicy:
         return (
             "Active Director policy contract (governed and advisory; never an "
             "automatic decision rule): "
-            + __import__("json").dumps(contract.advisory_record(), sort_keys=True)
-            + " Apply only when the current mission context is materially "
+            + json.dumps(contract.advisory_record(), sort_keys=True)
+            + f" proposed_change={proposal.proposed_change}. "
+            + "Apply only when the current mission context is materially "
               "comparable to the governed evidence, then re-evaluate current evidence."
         )
 
