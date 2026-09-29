@@ -268,7 +268,7 @@ def test_adaptive_director_replans_after_terminal_phase(tmp_path: Path):
 
 def test_comparative_evidence_is_advisory_in_next_director_cycle(tmp_path: Path):
     runtime, store, planner, _ = make_runtime(tmp_path)
-    submission = runtime.submit_mission(objective="compare safely")
+    submission = runtime.submit_mission(objective="adapt compare safely")
 
     for _ in range(50):
         runtime.run_once()
