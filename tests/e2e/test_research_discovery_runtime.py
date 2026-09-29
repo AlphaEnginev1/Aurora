@@ -5,8 +5,6 @@ from threading import Thread
 from urllib.parse import parse_qs, urlparse
 
 from aurora.orchestration.factory import build_director_runtime
-from aurora.orchestration.task_store import TaskStatus
-
 
 class DiscoveryHandler(BaseHTTPRequestHandler):
     queries: list[str] = []
@@ -29,7 +27,8 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
             body = (
                 b"- Configure the governed research procedure before execution.\n"
                 b"- Verify the resulting evidence against the recorded source snapshot.\n"
-                b"Preserve provenance and record the validation result.\n"
+                b"- Record the validation result in the durable research evidence store.\n"
+                b"- Compare the evidence with the recorded source snapshot.\n"
             )
         else:
             self.send_response(404)
@@ -86,7 +85,6 @@ def test_director_runtime_uses_http_research_discovery_end_to_end(tmp_path: Path
             egress_proxy_host="127.0.0.1",
             egress_proxy_port=3128,
             worker_id="research-discovery-e2e",
-            event_consumer_id="research-discovery-e2e-events",
             worker_concurrency=1,
         )
 
