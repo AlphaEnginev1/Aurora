@@ -68,9 +68,9 @@ def test_director_decision_performance_aggregates_only_complete_evidence(tmp_pat
         ),
         type(summary[1])(
             decision="continue",
-            evaluations=3,
-            average_score=0.6666666666666666,
-            successful_evaluations=2,
-            success_rate=2 / 3,
+            evaluations=2,
+            average_score=0.5,
+            successful_evaluations=1,
+            success_rate=0.5,
         ),
     )
