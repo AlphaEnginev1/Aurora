@@ -146,3 +146,38 @@ def test_shadow_canary_store_dedupes_and_summarizes(tmp_path):
     assert summary.candidate_execution_attempts == 0
     assert summary.state == "shadow_integrity_intact"
     assert summary.baseline_outcomes == ("mission_succeeded",)
+
+def test_shadow_canary_readiness_needs_observations_and_integrity(tmp_path):
+    store = DirectorDecisionPolicyShadowCanaryStore(tmp_path / "runtime.sqlite")
+    canary = _canary()
+
+    first = DirectorDecisionPolicyShadowCanary.observe(
+        canary,
+        decision_event_id=41,
+        baseline_decision="continue",
+        candidate_decision="continue",
+        actual_outcome="mission_succeeded",
+    )
+    store.record(first)
+
+    insufficient = store.readiness(canary.proposal_id, min_observations=2)
+    assert insufficient.governance_review_ready is False
+    assert insufficient.reason == "insufficient_shadow_observations"
+    assert insufficient.agreement_rate == 1.0
+
+    second = DirectorDecisionPolicyShadowCanary.observe(
+        canary,
+        decision_event_id=42,
+        baseline_decision="continue",
+        candidate_decision="blocked",
+        actual_outcome="mission_succeeded",
+    )
+    store.record(second)
+
+    ready = store.readiness(canary.proposal_id, min_observations=2)
+    assert ready.governance_review_ready is True
+    assert ready.reason == "sufficient_shadow_observations_for_governance_review"
+    assert ready.observations == 2
+    assert ready.agreements == 1
+    assert ready.disagreements == 1
+    assert ready.agreement_rate == 0.5
