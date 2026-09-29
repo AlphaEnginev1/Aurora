@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping
+import json
 import sqlite3
 
 
@@ -52,10 +53,31 @@ class ModelPerformanceStore:
                     score REAL NOT NULL,
                     evidence_completeness REAL NOT NULL,
                     evidence_state TEXT NOT NULL,
-                    created_at TEXT NOT NULL
+                    created_at TEXT NOT NULL,
+                    routing_score REAL,
+                    routing_factors TEXT NOT NULL DEFAULT '{}',
+                    routing_candidates TEXT NOT NULL DEFAULT '[]'
                 )
                 """
             )
+            columns = {
+                str(row["name"])
+                for row in db.execute("PRAGMA table_info(model_performance)").fetchall()
+            }
+            migrations = {
+                "routing_score": "ALTER TABLE model_performance ADD COLUMN routing_score REAL",
+                "routing_factors": (
+                    "ALTER TABLE model_performance ADD COLUMN "
+                    "routing_factors TEXT NOT NULL DEFAULT '{}'"
+                ),
+                "routing_candidates": (
+                    "ALTER TABLE model_performance ADD COLUMN "
+                    "routing_candidates TEXT NOT NULL DEFAULT '[]'"
+                ),
+            }
+            for column, statement in migrations.items():
+                if column not in columns:
+                    db.execute(statement)
             db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_model_perf_scope "
                 "ON model_performance(skill_id, skill_version, task_type, context_bucket, model)"
@@ -73,6 +95,9 @@ class ModelPerformanceStore:
         evidence_completeness: float,
         evidence_state: str,
         created_at: str,
+        routing_score: float | None = None,
+        routing_factors: Mapping[str, float] | None = None,
+        routing_candidates: tuple[tuple[str, float], ...] = (),
     ) -> None:
         if not model:
             return
@@ -81,8 +106,9 @@ class ModelPerformanceStore:
                 """
                 INSERT INTO model_performance (
                     model, skill_id, skill_version, task_type, context_bucket,
-                    score, evidence_completeness, evidence_state, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    score, evidence_completeness, evidence_state, created_at,
+                    routing_score, routing_factors, routing_candidates
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     model, skill_id, skill_version, task_type, context_bucket,
@@ -90,6 +116,9 @@ class ModelPerformanceStore:
                     max(0.0, min(1.0, float(evidence_completeness))),
                     evidence_state,
                     created_at,
+                    routing_score,
+                    json.dumps(dict(routing_factors or {}), sort_keys=True),
+                    json.dumps(list(routing_candidates)),
                 ),
             )
 
