@@ -76,7 +76,7 @@ class DirectorDecisionPolicy:
             + "The active guidance does not override current evidence and must "
               "never automatically choose a decision. Apply only when the current "
               "mission context is materially comparable to the governed evidence, "
-              "then re-evaluate current evidence before deciding."
+              "then Re-evaluate current evidence before deciding."
         )
 
     @staticmethod
