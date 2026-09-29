@@ -4,7 +4,7 @@ Autonomous multi-agent engineering system.
 
 ## Current status
 
-**CONSOLIDATION GATE — FINAL RECORD**
+**CONSOLIDATION COMPLETE — FINAL RECORD**
 
 Aurora has one authoritative engineering line:
 
@@ -15,7 +15,7 @@ Aurora has one authoritative engineering line:
 - CI 1291–1296: SUCCESS
 - consolidation issue: #50
 
-No new functionality has been authorized during the consolidation gate.
+No new functionality was authorized during the consolidation gate; Increment 11 remains explicitly unapproved.
 
 ## Source of truth
 
