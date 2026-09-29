@@ -37,6 +37,14 @@ from .director_decision_policy_canary_store import (
     DirectorDecisionPolicyShadowCanaryStore,
     DirectorDecisionPolicyShadowSummary,
 )
+from .director_decision_policy_canary_evaluation import (
+    DirectorDecisionPolicyCanaryEvaluation,
+    DirectorDecisionPolicyCanaryEvaluationError,
+    DirectorDecisionPolicyCanaryEvaluator,
+)
+from .director_decision_policy_canary_evaluation_store import (
+    DirectorDecisionPolicyCanaryEvaluationStore,
+)
 from .director_decision_knowledge import (
     DirectorDecisionKnowledge,
     DirectorDecisionKnowledgeError,
@@ -93,6 +101,10 @@ __all__ = [
     "DirectorDecisionPolicyCanaryReadiness",
     "DirectorDecisionPolicyShadowCanaryStore",
     "DirectorDecisionPolicyShadowSummary",
+    "DirectorDecisionPolicyCanaryEvaluation",
+    "DirectorDecisionPolicyCanaryEvaluationError",
+    "DirectorDecisionPolicyCanaryEvaluator",
+    "DirectorDecisionPolicyCanaryEvaluationStore",
     "DirectorDecisionKnowledge",
     "DirectorDecisionKnowledgeError",
     "DirectorDecisionKnowledgePromotion",
