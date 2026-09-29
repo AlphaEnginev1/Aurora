@@ -2,6 +2,7 @@ import pytest
 
 from aurora.orchestration.director_decision_knowledge import DirectorDecisionKnowledge
 from aurora.orchestration.director_decision_policy_evolution import DirectorDecisionPolicyEvolution
+from aurora.orchestration.director_decision_policy_canary import DirectorDecisionPolicyCanaryError, DirectorDecisionPolicyShadowCanary
 from aurora.orchestration.director_decision_policy_lifecycle import (
     DirectorDecisionPolicyLifecycle,
     DirectorDecisionPolicyLifecycleError,
