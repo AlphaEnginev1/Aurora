@@ -9,7 +9,9 @@ from aurora.research.models import ResearchRequest
 from aurora.skills.acquisition import SkillGap
 
 
-def test_live_research_discovery_uses_real_search_provider_and_persists_source(tmp_path: Path, monkeypatch):
+def test_live_research_discovery_uses_real_search_provider_and_persists_source(
+    tmp_path: Path, monkeypatch
+):
     import pytest
 
     if os.environ.get("AURORA_LIVE_RESEARCH_GATE") != "1":
@@ -19,6 +21,8 @@ def test_live_research_discovery_uses_real_search_provider_and_persists_source(t
         "AURORA_RESEARCH_DISCOVERY_ENDPOINT",
         "https://searx.party/search?format=json",
     )
+    provider_host = urlparse(endpoint).hostname
+    assert provider_host, "live search endpoint must contain a hostname"
     monkeypatch.setenv("AURORA_RESEARCH_DISCOVERY_ENDPOINT", endpoint)
 
     network_policy = tmp_path / "network-policy.json"
@@ -71,7 +75,17 @@ def test_live_research_discovery_uses_real_search_provider_and_persists_source(t
 
     urls = discovery.source_discovery(gap)
     assert urls, "live search provider returned no candidate sources"
-    first_source_host = urlparse(urls[0]).hostname\n    assert first_source_host, "live search provider returned an invalid source URL"\n    assert urlparse(urls[0]).scheme in {"http", "https"}\n\n    research_service.gateway = InternetGateway(\n        InternetPolicy(\n            protocols=frozenset({"https"}),\n            allowed_hosts=frozenset({provider_host, first_source_host}),\n        )\n    )
+
+    first_source_host = urlparse(urls[0]).hostname
+    assert first_source_host, "live search provider returned an invalid source URL"
+    assert urlparse(urls[0]).scheme in {"http", "https"}
+
+    research_service.gateway = InternetGateway(
+        InternetPolicy(
+            protocols=frozenset({"https"}),
+            allowed_hosts=frozenset({provider_host, first_source_host}),
+        )
+    )
 
     sources = research_service.retrieve(
         ResearchRequest(
