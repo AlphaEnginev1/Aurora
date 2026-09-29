@@ -38,7 +38,8 @@ class FakePlanner:
     def review(self, **kwargs):
         self.review_calls += 1
         self.review_contexts.append(kwargs["context"])
-        if kwargs["objective"] == "adapt compare safely" and self.review_calls <= 2:
+        max_continue_reviews = 2 if kwargs["objective"] == "adapt compare safely" else 1
+        if "adapt" in kwargs["objective"] and self.review_calls <= max_continue_reviews:
             return DirectorReview(
                 decision="continue",
                 rationale="One more validation step is required.",
