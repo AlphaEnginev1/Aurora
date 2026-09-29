@@ -874,12 +874,17 @@ class DirectorRuntime:
                 continue
             if decision_event.event_id in evaluated_ids:
                 continue
-            observed_events = [
-                event.event_type
-                for event in events
-                if event.event_id > decision_event.event_id
-            ]
-            if terminal_event is not None:
+            # Scope evidence to this decision's review interval. A later
+            # Director review must never satisfy an earlier decision's
+            # execution/evidence requirements.
+            observed_events = []
+            for event in events:
+                if event.event_id <= decision_event.event_id:
+                    continue
+                if event.event_type == "director_review":
+                    break
+                observed_events.append(event.event_type)
+            if terminal_event is not None and terminal_event.event_id > decision_event.event_id:
                 observed_events.append(terminal_event.event_type)
             evaluation = DirectorDecisionLearning.evaluate(
                 decision_event=decision_event,
@@ -899,6 +904,8 @@ class DirectorRuntime:
                     "quality": evaluation.quality,
                     "evidence_state": evaluation.evidence_state,
                     "attribution": evaluation.attribution,
+                    "evidence_completeness": evaluation.evidence_completeness,
+                    "sufficiency_reasons": list(evaluation.sufficiency_reasons),
                     "evidence": list(evaluation.evidence),
                 },
             )
@@ -909,6 +916,8 @@ class DirectorRuntime:
                 score=evaluation.score,
                 outcome=evaluation.outcome,
                 evidence=evaluation.evidence,
+                evidence_completeness=evaluation.evidence_completeness,
+                sufficiency_reasons=evaluation.sufficiency_reasons,
                 created_at=decision_event.created_at,
             )
             try:
@@ -924,6 +933,8 @@ class DirectorRuntime:
                             "quality": evaluation.quality,
                             "evidence_state": evaluation.evidence_state,
                             "attribution": evaluation.attribution,
+                            "evidence_completeness": evaluation.evidence_completeness,
+                            "sufficiency_reasons": list(evaluation.sufficiency_reasons),
                         },
                         sort_keys=True,
                     ),
