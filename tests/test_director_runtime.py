@@ -447,3 +447,13 @@ def test_cross_decision_replication_is_advisory(tmp_path: Path):
     assert '"consistent_direction": "better"' in replication_messages[-1]
     assert "causality" in replication_messages[-1]
 
+    knowledge_messages = [
+        item["content"]
+        for context in planner.review_contexts
+        for item in context
+        if "Promoted empirical Director knowledge advisory." in item["content"]
+    ]
+    assert knowledge_messages
+    assert '"observed_direction": "better"' in knowledge_messages[-1]
+    assert '"state": "promoted_empirical"' in knowledge_messages[-1]
+
