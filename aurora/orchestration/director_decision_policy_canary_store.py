@@ -21,6 +21,17 @@ class DirectorDecisionPolicyShadowSummary:
     state: str
 
 
+@dataclass(frozen=True)
+class DirectorDecisionPolicyCanaryReadiness:
+    proposal_id: str
+    observations: int
+    agreements: int
+    disagreements: int
+    agreement_rate: float
+    governance_review_ready: bool
+    reason: str
+
+
 class DirectorDecisionPolicyShadowCanaryStore:
     """Persist shadow observations separately from active policy state."""
 
@@ -137,6 +148,50 @@ class DirectorDecisionPolicyShadowCanaryStore:
             state=integrity_state,
         )
 
+    def readiness(
+        self,
+        proposal_id: str,
+        *,
+        min_observations: int = 5,
+    ) -> DirectorDecisionPolicyCanaryReadiness:
+        if min_observations < 1:
+            raise ValueError("min_observations must be at least 1")
+        summary = self.summarize_for_proposal(proposal_id)
+        agreement_rate = (
+            summary.agreements / summary.observations
+            if summary.observations
+            else 0.0
+        )
+        if summary.state == "shadow_integrity_violation":
+            return DirectorDecisionPolicyCanaryReadiness(
+                proposal_id=proposal_id,
+                observations=summary.observations,
+                agreements=summary.agreements,
+                disagreements=summary.disagreements,
+                agreement_rate=agreement_rate,
+                governance_review_ready=False,
+                reason="shadow_integrity_violation",
+            )
+        if summary.observations < min_observations:
+            return DirectorDecisionPolicyCanaryReadiness(
+                proposal_id=proposal_id,
+                observations=summary.observations,
+                agreements=summary.agreements,
+                disagreements=summary.disagreements,
+                agreement_rate=agreement_rate,
+                governance_review_ready=False,
+                reason="insufficient_shadow_observations",
+            )
+        return DirectorDecisionPolicyCanaryReadiness(
+            proposal_id=proposal_id,
+            observations=summary.observations,
+            agreements=summary.agreements,
+            disagreements=summary.disagreements,
+            agreement_rate=agreement_rate,
+            governance_review_ready=True,
+            reason="sufficient_shadow_observations_for_governance_review",
+        )
+
     @staticmethod
     def _row(row: sqlite3.Row) -> DirectorDecisionPolicyShadowObservation:
         return DirectorDecisionPolicyShadowObservation(
@@ -156,6 +211,7 @@ class DirectorDecisionPolicyShadowCanaryStore:
 
 
 __all__ = [
+    "DirectorDecisionPolicyCanaryReadiness",
     "DirectorDecisionPolicyShadowCanaryStore",
     "DirectorDecisionPolicyShadowSummary",
 ]
