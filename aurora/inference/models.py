@@ -73,3 +73,6 @@ class InferenceResponse:
     reported_model: str | None = None
     usage: InferenceUsage = field(default_factory=InferenceUsage)
     telemetry: InferenceTelemetry | None = None
+    routing_score: float | None = None
+    routing_factors: dict[str, float] = field(default_factory=dict)
+    routing_candidates: tuple[tuple[str, float], ...] = ()
