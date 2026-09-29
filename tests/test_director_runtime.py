@@ -16,6 +16,7 @@ class FakePlanner:
     def __init__(self):
         self.calls = []
         self.review_calls = 0
+        self.review_contexts = []
 
     def plan(self, **kwargs):
         self.calls.append(kwargs)
@@ -35,6 +36,7 @@ class FakePlanner:
 
     def review(self, **kwargs):
         self.review_calls += 1
+        self.review_contexts.append(kwargs["context"])
         if self.review_calls == 1 and "adapt" in kwargs["objective"]:
             return DirectorReview(
                 decision="continue",
@@ -63,6 +65,10 @@ class FakeOrchestration:
                 model="fake/model",
                 provider="fake",
                 content=f"completed {kwargs['task_id']}",
+                selected_model="fake/model",
+                routing_score=0.83,
+                routing_factors={"learned_score": 0.9, "quality": 0.8},
+                routing_candidates=(("fake/model", 0.83), ("fallback/model", 0.71)),
             ),
         )
 
@@ -116,6 +122,47 @@ def test_full_director_event_bus_worker_cycle(tmp_path: Path):
     assert event_types.count("worker.task_succeeded") == 2
     assert "mission_succeeded" in event_types
     assert [call["task_id"] for call in engine.orchestration.calls] == ["collect", "review"]
+
+    review_context = planner.review_contexts[0]
+    routing_messages = [
+        item["content"]
+        for item in review_context
+        if "Immutable routing evidence for Director review:" in item["content"]
+    ]
+    assert len(routing_messages) == 1
+    assert '"selected_model": "fake/model"' in routing_messages[0]
+    assert '"score": 0.83' in routing_messages[0]
+    assert '"learned_score": 0.9' in routing_messages[0]
+    assert '"fallback/model"' in routing_messages[0]
+
+    review_event = next(
+        event for event in store.events(submission.mission_id)
+        if event.event_type == "director_review"
+    )
+    assert review_event.payload["routing_evidence"] == [
+        {
+            "task_id": "collect",
+            "status": "succeeded",
+            "selected_model": "fake/model",
+            "score": 0.83,
+            "factors": {"learned_score": 0.9, "quality": 0.8},
+            "candidates": [
+                {"model": "fake/model", "score": 0.83},
+                {"model": "fallback/model", "score": 0.71},
+            ],
+        },
+        {
+            "task_id": "review",
+            "status": "succeeded",
+            "selected_model": "fake/model",
+            "score": 0.83,
+            "factors": {"learned_score": 0.9, "quality": 0.8},
+            "candidates": [
+                {"model": "fake/model", "score": 0.83},
+                {"model": "fallback/model", "score": 0.71},
+            ],
+        },
+    ]
 
 
 def test_runtime_restarts_and_recovers_running_mission(tmp_path: Path):
