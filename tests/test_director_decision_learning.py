@@ -84,3 +84,12 @@ def test_continue_without_execution_or_task_evidence_is_partial():
     assert evaluation.score is None
     assert evaluation.evidence_completeness == "partial"
     assert evaluation.evidence_state == "evaluation_pending"
+
+
+def test_insufficient_evidence_is_reserved_for_no_observed_result():
+    evaluation = DirectorDecisionLearning.evaluate(
+        decision_event=event(14, "complete"),
+        observed_event_types=(),
+    )
+
+    assert evaluation is None
