@@ -266,3 +266,105 @@ def test_provider_bound_execution_evaluates_and_changes_next_route(tmp_path: Pat
     )
     assert adapted.selected_model == "nvidia/model-a"
     assert adapted.factors["learned_score"] == 1.0
+
+
+
+def test_task_engine_closes_execute_evaluate_learn_select_execute_cycle(tmp_path: Path):
+    """The real task-engine path must consume learned evidence on the next mission."""
+    from aurora.inference.router import ModelRouter
+    from aurora.organization import AgentSpec, DepartmentSpec, OrganizationRegistry
+    from aurora.orchestration.engine import OrchestrationEngine
+    from aurora.orchestration.task_engine import TaskEngine
+    from aurora.skills.learning import SkillLearningStore
+
+    router = ControlledProviderRouter(_models())
+    orchestration = OrchestrationEngine(router)
+    organization = OrganizationRegistry(
+        agents={
+            "researcher": AgentSpec(
+                agent_id="researcher",
+                role="researcher",
+                department="research",
+                mission="research",
+                capabilities=frozenset({"reasoning"}),
+                model_preferences=("model/b",),
+                skill_ids=("research",),
+            )
+        },
+        departments={
+            "research": DepartmentSpec(
+                department_id="research",
+                mission="research",
+                agent_ids=("researcher",),
+                model_preferences=(),
+                allowed_capabilities=frozenset({"reasoning"}),
+            )
+        },
+    )
+    registry = SkillRegistry(
+        {
+            "research": SkillSpec(
+                "research",
+                "1.0.0",
+                "Research specialist",
+                "Research using verified evidence.",
+                "Use verified evidence.",
+                frozenset(),
+                ("source_check",),
+                ("citation_check",),
+                ("research",),
+            )
+        }
+    )
+    learning = SkillLearningStore(tmp_path / "skill-learning.db")
+    performance = ModelPerformanceStore(tmp_path / "model-performance.db")
+    engine = TaskEngine(
+        orchestration,
+        tmp_path,
+        organization=organization,
+        skill_registry=registry,
+        skill_learning=learning,
+        model_performance=performance,
+    )
+
+    def mission_task(task_id: str) -> DelegatedTask:
+        return DelegatedTask(
+            task_id,
+            "researcher",
+            "research task",
+            skills=("research",),
+        )
+
+    first = engine.execute((mission_task("mission-1"),))[0]
+    second = engine.execute((mission_task("mission-2"),))[0]
+    assert first.status is TaskStatus.SUCCEEDED
+    assert second.status is TaskStatus.SUCCEEDED
+    assert first.model_result is not None
+    assert second.model_result is not None
+    assert first.model_result.response.model == "model/b"
+    assert second.model_result.response.model == "model/b"
+
+    learned = performance.trusted_scores_for(
+        skill_ids=("research",),
+        skill_versions={"research": "1.0.0"},
+        task_type="research",
+        context_bucket="small",
+    )
+    assert learned == {"model/b": 1.0}
+
+    # Remove the exploratory preference. The next mission must now be driven
+    # by ModelPerformanceStore evidence rather than the organization preference.
+    organization.agents["researcher"] = AgentSpec(
+        agent_id="researcher",
+        role="researcher",
+        department="research",
+        mission="research",
+        capabilities=frozenset({"reasoning"}),
+        model_preferences=(),
+        skill_ids=("research",),
+    )
+
+    third = engine.execute((mission_task("mission-3"),))[0]
+    assert third.status is TaskStatus.SUCCEEDED
+    assert third.model_result is not None
+    assert third.model_result.response.model == "model/b"
