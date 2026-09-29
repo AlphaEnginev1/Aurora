@@ -873,6 +873,20 @@ class DirectorRuntime:
                 f"- {item.task.task_id}: {item.status}; attempts={item.attempts}; "
                 f"error={item.last_error or 'none'}; result={detail}"
             )
+        evaluations = [
+            event for event in self.store.events(mission_id)
+            if event.event_type == "skill.evaluated"
+        ]
+        if evaluations:
+            lines.append("Observed specialist evaluations:")
+            for event in evaluations:
+                lines.append(
+                    f"- task={event.task_id}; skill={event.payload.get('skill_id')}; "
+                    f"version={event.payload.get('skill_version')}; "
+                    f"score={event.payload.get('score')}; "
+                    f"evidence_state={event.payload.get('evidence_state')}; "
+                    f"model={event.payload.get('model')}"
+                )
         return "\n".join(lines)
 
     @staticmethod
