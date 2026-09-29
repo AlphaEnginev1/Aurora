@@ -199,3 +199,53 @@ def test_comparison_summary_marks_mixed_direction_without_selecting_a_winner(tmp
     assert summary[0].better_observations == 1
     assert summary[0].worse_observations == 1
     assert summary[0].consistent_direction == "mixed"
+
+
+def test_comparison_store_replication_across_distinct_decisions_requires_same_comparability_basis(tmp_path):
+    store = DirectorDecisionComparisonStore(tmp_path / "tasks.db")
+    for decision_event_id in (18, 19):
+        store.record(
+            decision_event_id=decision_event_id,
+            chosen_decision="continue",
+            alternative="complete",
+            source="independent_execution",
+            alternative_execution_id=f"alt-{decision_event_id}",
+            chosen_execution_id=f"chosen-{decision_event_id}",
+            chosen_outcome="mission_succeeded",
+            alternative_outcome="mission_succeeded_with_lower_cost",
+            comparability_basis=("same_objective", "same_environment_class"),
+            observed_direction="better",
+            causal_attribution="unsupported",
+            state="potentially_better_observed",
+            reason="comparable_observed_difference_with_no_causal_attribution",
+            evidence=("independent_execution",),
+            created_at=f"2026-09-29T16:{decision_event_id}:00+00:00",
+        )
+    store.record(
+        decision_event_id=20,
+        chosen_decision="continue",
+        alternative="complete",
+        source="independent_execution",
+        alternative_execution_id="alt-20",
+        chosen_execution_id="chosen-20",
+        chosen_outcome="mission_succeeded",
+        alternative_outcome="mission_succeeded_with_lower_cost",
+        comparability_basis=("same_objective", "different_environment"),
+        observed_direction="better",
+        causal_attribution="unsupported",
+        state="potentially_better_observed",
+        reason="comparable_observed_difference_with_no_causal_attribution",
+        evidence=("independent_execution",),
+        created_at="2026-09-29T16:20:00+00:00",
+    )
+    summaries = store.summarize_across_decisions(
+        alternative="complete",
+        chosen_decision="continue",
+        comparability_basis=("same_objective", "same_environment_class"),
+    )
+    assert len(summaries) == 1
+    assert summaries[0].decision_events == 2
+    assert summaries[0].observations == 2
+    assert summaries[0].better_observations == 2
+    assert summaries[0].consistent_direction == "better"
+    assert summaries[0].sources == ("independent_execution",)
