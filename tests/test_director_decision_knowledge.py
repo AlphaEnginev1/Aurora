@@ -143,3 +143,41 @@ def test_knowledge_store_deduplicates_promoted_cohort(tmp_path: Path):
     rows = store.list_all()
     assert len(rows) == 1
     assert store.get(knowledge.knowledge_id) == knowledge
+
+
+def test_knowledge_store_refreshes_existing_promoted_cohort(tmp_path: Path):
+    comparisons = DirectorDecisionComparisonStore(tmp_path / "tasks.db")
+    _record(comparisons, decision_event_id=32, execution_suffix="a")
+    _record(comparisons, decision_event_id=33, execution_suffix="b")
+
+    promoter = DirectorDecisionKnowledgePromoter(comparisons)
+    summary = comparisons.summarize_across_decisions(
+        alternative="complete",
+        chosen_decision="continue",
+        comparability_basis=("same_objective", "same_environment_class"),
+    )[0]
+    first = promoter.promote(summary).knowledge
+    assert first is not None
+
+    knowledge_store = DirectorDecisionKnowledgeStore(tmp_path / "tasks.db")
+    knowledge_store.record(first)
+
+    _record(comparisons, decision_event_id=34, execution_suffix="c")
+    refreshed_summary = comparisons.summarize_across_decisions(
+        alternative="complete",
+        chosen_decision="continue",
+        comparability_basis=("same_objective", "same_environment_class"),
+    )[0]
+    refreshed = promoter.promote(refreshed_summary).knowledge
+    assert refreshed is not None
+    assert refreshed.knowledge_id == first.knowledge_id
+    assert refreshed.decision_events == 3
+    assert refreshed.observations == 3
+
+    knowledge_store.record(refreshed)
+
+    stored = knowledge_store.get(first.knowledge_id)
+    assert stored is not None
+    assert stored.decision_events == 3
+    assert stored.observations == 3
+    assert stored.created_at == first.created_at
