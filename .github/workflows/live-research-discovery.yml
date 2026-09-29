@@ -1,0 +1,19 @@
+name: Live Research Discovery Gate
+
+on:
+  push:
+    branches:
+      - runtime/live-research-discovery
+  workflow_dispatch:
+
+jobs:
+  live-research-discovery:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip pytest
+      - name: Run real research discovery gate
+        run: python -m pytest -q tests/e2e/test_live_research_discovery.py
