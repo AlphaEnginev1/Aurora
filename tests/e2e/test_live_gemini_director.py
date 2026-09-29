@@ -2,6 +2,13 @@ import os
 
 import pytest
 
+from aurora.autonomy.acquisition import AcquisitionResult
+from aurora.autonomy.broker import CapabilityBroker
+from aurora.autonomy.capability_runtime import CapabilityRuntime
+from aurora.autonomy.models import CapabilityRequest
+from aurora.autonomy.policy import Policy
+from aurora.autonomy.registry import ToolSpec
+from aurora.autonomy.sandbox import SandboxResult
 from aurora.inference.models import InferenceRequest, InferenceResponse
 from aurora.orchestration.director import DirectorPlanner, DirectorService
 from aurora.orchestration.director_provider import DirectorModelResponse, DirectorToolSpec
@@ -27,7 +34,11 @@ def live_gemini_response() -> DirectorModelResponse:
             },
             {
                 "role": "user",
-                "content": "Create exactly one research task to investigate Aurora architecture.",
+                "content": (
+                    "Create exactly one research task to investigate Aurora architecture. "
+                    "Set capability exactly to tool:git. The task must use the registered "
+                    "git capability; do not omit capability."
+                ),
             },
         ],
         model=None,
@@ -35,14 +46,18 @@ def live_gemini_response() -> DirectorModelResponse:
         tools=(
             DirectorToolSpec(
                 name="delegate_task",
-                description="Request Aurora to validate and enqueue one delegated task.",
+                description=(
+                    "Request Aurora to validate and enqueue one delegated task using a "
+                    "registered capability."
+                ),
                 parameters={
                     "type": "object",
-                    "required": ["task_id", "role", "objective"],
+                    "required": ["task_id", "role", "objective", "capability"],
                     "properties": {
                         "task_id": {"type": "string"},
                         "role": {"type": "string"},
                         "objective": {"type": "string"},
+                        "capability": {"type": "string"},
                     },
                     "additionalProperties": False,
                 },
@@ -59,6 +74,7 @@ def test_live_gemini_director_tool_call(live_gemini_response):
     assert response.tool_calls
     assert response.tool_calls[0].name == "delegate_task"
     assert response.tool_calls[0].arguments["task_id"]
+    assert response.tool_calls[0].arguments["capability"] == "tool:git"
 
 
 class ReplayDirectorProvider:
@@ -74,7 +90,7 @@ class ReplayDirectorProvider:
 
 
 class ControlledRouter:
-    """Deterministic model boundary for real TaskEngine execution."""
+    """Deterministic model boundary retained for non-capability execution checks."""
 
     def __init__(self):
         self.requests: list[InferenceRequest] = []
@@ -90,13 +106,72 @@ class ControlledRouter:
         )
 
 
+class ControlledCapabilityAcquisition:
+    """Return a verified registered artifact without downloading anything."""
+
+    def __init__(self, executable):
+        self.executable = executable
+        self.calls: list[str] = []
+
+    def acquire(self, spec):
+        self.calls.append(spec.name)
+        return AcquisitionResult(
+            spec.name,
+            "installed",
+            spec.source,
+            spec.executable,
+            str(self.executable),
+            version=spec.version,
+            artifact_sha256="a" * 64,
+            verification="verified",
+        )
+
+
+class ControlledCapabilitySandbox:
+    """Capture brokered execution while keeping the E2E side-effect free."""
+
+    def __init__(self):
+        self.calls = []
+
+    def execute(self, command, *, workspace, environment=None):
+        self.calls.append((tuple(command), workspace, environment))
+        return SandboxResult(tuple(command), 0, "registered capability executed", "")
+
+
 @pytest.mark.live
-def test_live_gemini_director_executes_through_real_task_engine(
+def test_live_gemini_director_executes_through_real_registered_capability(
     live_gemini_response,
     tmp_path,
 ):
+    executable = tmp_path / "git"
+    executable.write_text("#!/bin/sh\necho controlled\n", encoding="utf-8")
+
+    capability_spec = ToolSpec(
+        name="git",
+        kind="system",
+        source="ubuntu-apt",
+        executable="git",
+    )
+    acquisition = ControlledCapabilityAcquisition(executable)
+    capability_sandbox = ControlledCapabilitySandbox()
+    capability_runtime = CapabilityRuntime(
+        CapabilityBroker(
+            Policy(
+                frozenset({"tool:git"}),
+                frozenset({"ubuntu-apt"}),
+                require_verification=True,
+            ),
+            {"git": capability_spec},
+            acquisition,
+        ),
+        capability_sandbox,
+    )
+
     router = ControlledRouter()
-    orchestration = OrchestrationEngine(router)
+    orchestration = OrchestrationEngine(
+        router,
+        capability_runtime=capability_runtime,
+    )
     task_engine = TaskEngine(
         orchestration=orchestration,
         workspace_root=tmp_path,
@@ -114,15 +189,22 @@ def test_live_gemini_director_executes_through_real_task_engine(
     assert result.plan.model
     assert len(result.plan.tasks) == 1
     task = result.plan.tasks[0]
+    assert task.capability == "tool:git"
 
     assert len(result.tasks) == 1
     execution = result.tasks[0]
     assert execution.task == task
     assert execution.status is TaskStatus.SUCCEEDED
-    assert execution.model_result is not None
-    assert execution.model_result.response.content == "controlled execution result"
+    assert execution.capability_result is not None
+    assert execution.model_result is None
 
-    assert len(router.requests) == 1
-    request = router.requests[0]
-    assert request.metadata["task_id"] == task.task_id
-    assert request.metadata["role"] == task.role
+    capability_result = execution.capability_result
+    assert capability_result.execution.returncode == 0
+    assert capability_result.execution.stdout == "registered capability executed"
+    assert capability_result.execution.capability.name == "tool:git"
+    assert capability_result.execution.capability.verification == "verified"
+    assert acquisition.calls == ["git"]
+    assert len(capability_sandbox.calls) == 1
+    assert capability_sandbox.calls[0][0] == (str(executable),)
+
+    assert router.requests == []
