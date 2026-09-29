@@ -11,6 +11,7 @@ from typing import Any, Callable
 from uuid import uuid4
 
 from .director import DirectorPlanError
+from .director_decision_learning import DirectorDecisionLearning
 from .durable_director import DurableDirectorService, MissionSubmission
 from .event_bus import DurableEventBus, EventSubscription
 from .mission_memory import MissionMemory, MissionMemoryError
@@ -628,6 +629,8 @@ class DirectorRuntime:
         if self._is_finalized(mission_id):
             return
 
+        self._evaluate_pending_director_decisions(mission_id)
+
         round_number = self._review_rounds(mission_id) + 1
         if round_number > self.max_review_rounds:
             self._publish_terminal(
@@ -649,6 +652,9 @@ class DirectorRuntime:
         if team_context:
             context.append({"role": "user", "content": team_context})
         routing_evidence = self._routing_evidence(mission_id)
+        decision_learning = DirectorDecisionLearning.learned_evidence(
+            self.store.events(mission_id)
+        )
         if routing_evidence:
             context.append(
                 {
@@ -656,6 +662,16 @@ class DirectorRuntime:
                     "content": (
                         "Immutable routing evidence for Director review: "
                         + json.dumps(routing_evidence, sort_keys=True)
+                    ),
+                }
+            )
+        if decision_learning:
+            context.append(
+                {
+                    "role": "user",
+                    "content": (
+                        "Durable Director decision learning evidence: "
+                        + json.dumps(decision_learning, sort_keys=True)
                     ),
                 }
             )
@@ -710,18 +726,38 @@ class DirectorRuntime:
             pass
 
         if review.decision == "complete":
+            self.event_bus.publish(
+                mission_id=mission_id,
+                event_type="director_decision_executed",
+                payload={
+                    "round": round_number,
+                    "decision": review.decision,
+                    "execution": "mission_terminal",
+                },
+            )
             self._publish_terminal(
                 mission_id,
                 status="succeeded",
                 reason=review.rationale,
             )
+            self._evaluate_pending_director_decisions(mission_id)
             return
         if review.decision == "blocked":
+            self.event_bus.publish(
+                mission_id=mission_id,
+                event_type="director_decision_executed",
+                payload={
+                    "round": round_number,
+                    "decision": review.decision,
+                    "execution": "mission_terminal",
+                },
+            )
             self._publish_terminal(
                 mission_id,
                 status="blocked",
                 reason=review.rationale,
             )
+            self._evaluate_pending_director_decisions(mission_id)
             return
 
         tasks = self._phase_tasks(mission_id, round_number, review.tasks)
@@ -757,6 +793,16 @@ class DirectorRuntime:
 
         self.event_bus.publish(
             mission_id=mission_id,
+            event_type="director_decision_executed",
+            payload={
+                "round": round_number,
+                "decision": review.decision,
+                "execution": "follow_up_tasks_enqueued",
+                "task_ids": [task.task_id for task in validated],
+            },
+        )
+        self.event_bus.publish(
+            mission_id=mission_id,
             event_type="mission_reopened",
             payload={
                 "round": round_number,
@@ -774,6 +820,75 @@ class DirectorRuntime:
             )
         except MissionMemoryError:
             pass
+
+    def _evaluate_pending_director_decisions(self, mission_id: str) -> None:
+        events = self.store.events(mission_id)
+        evaluated_ids = {
+            int(event.payload.get("decision_event_id"))
+            for event in events
+            if event.event_type == "director_decision_evaluated"
+            and event.payload.get("decision_event_id") is not None
+        }
+        terminal_types = {
+            "mission_succeeded",
+            "mission_failed",
+            "mission_blocked",
+        }
+        terminal_event = next(
+            (event for event in reversed(events) if event.event_type in terminal_types),
+            None,
+        )
+        for decision_event in events:
+            if decision_event.event_type != "director_review":
+                continue
+            if decision_event.event_id in evaluated_ids:
+                continue
+            observed_events = [
+                event.event_type
+                for event in events
+                if event.event_id > decision_event.event_id
+            ]
+            if terminal_event is not None:
+                observed_events.append(terminal_event.event_type)
+            evaluation = DirectorDecisionLearning.evaluate(
+                decision_event=decision_event,
+                observed_event_types=observed_events,
+            )
+            if evaluation is None:
+                continue
+            self.event_bus.publish(
+                mission_id=mission_id,
+                event_type="director_decision_evaluated",
+                payload={
+                    "decision_event_id": evaluation.decision_event_id,
+                    "round": evaluation.round,
+                    "decision": evaluation.decision,
+                    "score": evaluation.score,
+                    "outcome": evaluation.outcome,
+                    "evidence": list(evaluation.evidence),
+                },
+            )
+            try:
+                self.memory.append(
+                    mission_id=mission_id,
+                    source="director-learning",
+                    kind="decision_evaluation",
+                    content=json.dumps(
+                        {
+                            "decision": evaluation.decision,
+                            "score": evaluation.score,
+                            "outcome": evaluation.outcome,
+                        },
+                        sort_keys=True,
+                    ),
+                    metadata={
+                        "decision_event_id": evaluation.decision_event_id,
+                        "round": evaluation.round,
+                        "evidence": list(evaluation.evidence),
+                    },
+                )
+            except MissionMemoryError:
+                pass
 
     def _phase_tasks(
         self,
