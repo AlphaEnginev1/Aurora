@@ -27,6 +27,15 @@ from .director_decision_policy_lifecycle import (
     DirectorDecisionPolicyValidation,
 )
 from .director_decision_policy_lifecycle_store import DirectorDecisionPolicyLifecycleStore
+from .director_decision_policy_canary import (
+    DirectorDecisionPolicyCanaryError,
+    DirectorDecisionPolicyShadowCanary,
+    DirectorDecisionPolicyShadowObservation,
+)
+from .director_decision_policy_canary_store import (
+    DirectorDecisionPolicyShadowCanaryStore,
+    DirectorDecisionPolicyShadowSummary,
+)
 from .director_decision_knowledge import (
     DirectorDecisionKnowledge,
     DirectorDecisionKnowledgeError,
@@ -77,6 +86,11 @@ __all__ = [
     "DirectorDecisionPolicyLifecycleError",
     "DirectorDecisionPolicyValidation",
     "DirectorDecisionPolicyLifecycleStore",
+    "DirectorDecisionPolicyCanaryError",
+    "DirectorDecisionPolicyShadowCanary",
+    "DirectorDecisionPolicyShadowObservation",
+    "DirectorDecisionPolicyShadowCanaryStore",
+    "DirectorDecisionPolicyShadowSummary",
     "DirectorDecisionKnowledge",
     "DirectorDecisionKnowledgeError",
     "DirectorDecisionKnowledgePromotion",
