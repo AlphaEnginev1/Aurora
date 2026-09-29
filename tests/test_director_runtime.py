@@ -7,6 +7,7 @@ from aurora.orchestration.director_decision_comparison import DirectorDecisionCo
 from aurora.orchestration.director_runtime import DirectorRuntime
 from aurora.orchestration.director_decision_policy_active_store import DirectorDecisionPolicyActiveStore, DirectorDecisionPolicyActive
 from aurora.orchestration.director_decision_policy_proposal_store import DirectorDecisionPolicyProposalStore
+from aurora.orchestration.director_decision_policy_contract_store import DirectorDecisionPolicyContractStore
 from aurora.orchestration.director_decision_policy_evolution import DirectorDecisionPolicyEvolution
 from aurora.orchestration.director_decision_knowledge import DirectorDecisionKnowledge
 from aurora.orchestration.director_decision_knowledge import DirectorDecisionKnowledge
@@ -246,6 +247,12 @@ def test_runtime_consumes_durable_active_policy_as_advisory_guidance(tmp_path: P
     assert "governed and advisory" in messages[0]
     assert "does not override current evidence" in messages[0]
     assert "Re-evaluate current evidence before deciding" in messages[0]
+
+    contracts = DirectorDecisionPolicyContractStore(tmp_path / "tasks.db").list_all()
+    assert len(contracts) == 1
+    assert contracts[0].proposal_id == proposal.proposal_id
+    assert contracts[0].validation_id == "dpv-runtime-active"
+    assert contracts[0].advisory_record()["advisory_only"] is True
 
 
 def test_full_director_event_bus_worker_cycle(tmp_path: Path):
