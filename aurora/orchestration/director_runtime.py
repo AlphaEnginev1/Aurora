@@ -891,6 +891,12 @@ class DirectorRuntime:
                 continue
             if decision_event.event_id in evaluated_ids:
                 continue
+            # Do not finalize a decision evaluation before the mission has a
+            # terminal result. A pending terminal outcome must be observed
+            # first; otherwise an early insufficient record could suppress the
+            # later evidence-complete evaluation.
+            if terminal_event is None:
+                continue
             # Scope evidence to this decision's review interval. A later
             # Director review must never satisfy an earlier decision's
             # execution/evidence requirements.
