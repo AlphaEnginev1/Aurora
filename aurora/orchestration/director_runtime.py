@@ -886,16 +886,20 @@ class DirectorRuntime:
             (event for event in reversed(events) if event.event_type in terminal_types),
             None,
         )
+        durable_terminal_type = None
+        if terminal_event is None:
+            durable_status = self.store.mission_status(mission_id)
+            if durable_status in self.TERMINAL:
+                durable_terminal_type = f"mission_{durable_status}"
         for decision_event in events:
             if decision_event.event_type != "director_review":
                 continue
             if decision_event.event_id in evaluated_ids:
                 continue
-            # Do not finalize a decision evaluation before the mission has a
-            # terminal result. A pending terminal outcome must be observed
-            # first; otherwise an early insufficient record could suppress the
-            # later evidence-complete evaluation.
-            if terminal_event is None:
+            # Do not finalize a decision evaluation before a terminal
+            # result is observed either as a durable mission event or as the
+            # authoritative terminal task state.
+            if terminal_event is None and durable_terminal_type is None:
                 continue
             # Scope evidence to this decision's review interval. A later
             # Director review must never satisfy an earlier decision's
@@ -952,6 +956,8 @@ class DirectorRuntime:
 
             if terminal_event is not None and terminal_event.event_id > decision_event.event_id:
                 observed_events.append(terminal_event.event_type)
+            elif durable_terminal_type is not None:
+                observed_events.append(durable_terminal_type)
             evaluation = DirectorDecisionLearning.evaluate(
                 decision_event=decision_event,
                 observed_event_types=observed_events,
