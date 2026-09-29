@@ -807,6 +807,20 @@ class DirectorRuntime:
             if decision_event_id is not None
             else ()
         )
+        replication_summaries = []
+        seen_replication = set()
+        for item in comparisons:
+            key = (item.alternative, item.chosen_decision, item.comparability_basis)
+            if key in seen_replication:
+                continue
+            seen_replication.add(key)
+            replication_summaries.extend(
+                self.decision_comparison_store.summarize_across_decisions(
+                    alternative=item.alternative,
+                    chosen_decision=item.chosen_decision,
+                    comparability_basis=item.comparability_basis,
+                )
+            )
         if comparisons:
             context.append(
                 {
@@ -855,6 +869,37 @@ class DirectorRuntime:
                                     "sources": item.sources,
                                 }
                                 for item in comparison_summaries
+                            ],
+                            sort_keys=True,
+                        )
+                    ),
+                }
+            )
+        if replication_summaries:
+            context.append(
+                {
+                    "role": "user",
+                    "content": (
+                        "Cross-decision comparative replication advisory. "
+                        "Repeated observations across distinct decisions with the same "
+                        "comparability basis establish consistency only; they do not "
+                        "establish causality or authorize an automatic policy rule: "
+                        + json.dumps(
+                            [
+                                {
+                                    "alternative": item.alternative,
+                                    "chosen_decision": item.chosen_decision,
+                                    "comparability_basis": item.comparability_basis,
+                                    "decision_events": item.decision_events,
+                                    "observations": item.observations,
+                                    "better_observations": item.better_observations,
+                                    "worse_observations": item.worse_observations,
+                                    "same_observations": item.same_observations,
+                                    "undetermined_observations": item.undetermined_observations,
+                                    "consistent_direction": item.consistent_direction,
+                                    "sources": item.sources,
+                                }
+                                for item in replication_summaries
                             ],
                             sort_keys=True,
                         )
