@@ -436,7 +436,7 @@ def test_live_gemini_director_replans_after_review_and_completes(
         skill_ids=("research.validation",),
         skill_versions={"research.validation": "1.0.0"},
         task_type="research",
-        context_bucket="medium",
+        context_bucket="small",
         minimum_evaluations=1,
         minimum_evidence_completeness=1.0,
     )
