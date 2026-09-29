@@ -127,20 +127,25 @@ class DirectorDecisionKnowledgePromoter:
             )
 
         basis = tuple(summary.comparability_basis)
-        rows = []
-        with self.comparison_store._connect() as db:
-            raw_rows = db.execute(
-                """
-                SELECT * FROM director_decision_comparisons
-                WHERE alternative = ? AND chosen_decision = ?
-                ORDER BY comparison_id
-                """,
-                (summary.alternative, summary.chosen_decision),
-            ).fetchall()
-        for row in raw_rows:
-            item = self.comparison_store._row(row)
-            if item.comparability_basis == basis:
-                rows.append(item)
+        rows = list(
+            self.comparison_store.list_for_cohort(
+                alternative=summary.alternative,
+                chosen_decision=summary.chosen_decision,
+                comparability_basis=basis,
+            )
+        )
+        if len(rows) != summary.observations:
+            return DirectorDecisionKnowledgePromotion(
+                promoted=False,
+                knowledge=None,
+                reason="summary_snapshot_is_stale",
+            )
+        if len({item.decision_event_id for item in rows}) != summary.decision_events:
+            return DirectorDecisionKnowledgePromotion(
+                promoted=False,
+                knowledge=None,
+                reason="summary_snapshot_is_stale",
+            )
 
         if len({item.decision_event_id for item in rows}) < self.min_decision_events:
             return DirectorDecisionKnowledgePromotion(
