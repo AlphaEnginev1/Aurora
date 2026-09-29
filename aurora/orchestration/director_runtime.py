@@ -13,6 +13,11 @@ from uuid import uuid4
 from .director import DirectorPlanError
 from .director_decision_learning import DirectorDecisionLearning
 from .director_decision_performance import DirectorDecisionPerformanceStore
+from .director_decision_comparison import (
+    DirectorDecisionComparativeEvidence,
+    DirectorDecisionComparisonEvaluator,
+)
+from .director_decision_comparison_store import DirectorDecisionComparisonStore
 from .director_decision_policy import DirectorDecisionPolicy
 from .durable_director import DurableDirectorService, MissionSubmission
 from .event_bus import DurableEventBus, EventSubscription
@@ -81,6 +86,7 @@ class DirectorRuntime:
         skill_evolution_runtime: SkillEvolutionRuntime | None = None,
         skill_improvement_generator: SkillImprovementGenerator | None = None,
         decision_performance: DirectorDecisionPerformanceStore | None = None,
+        decision_comparison_store: DirectorDecisionComparisonStore | None = None,
         sleep_fn: Callable[[float], None] = sleep,
     ) -> None:
         if not event_consumer_id.strip():
@@ -110,10 +116,73 @@ class DirectorRuntime:
         self.skill_evolution_runtime = skill_evolution_runtime
         self.skill_improvement_generator = skill_improvement_generator
         self.decision_performance = decision_performance or DirectorDecisionPerformanceStore(store.path)
+        self.decision_comparison_store = (
+            decision_comparison_store
+            or DirectorDecisionComparisonStore(store.path)
+        )
         self._sleep = sleep_fn
         self._subscription: EventSubscription = self.event_bus.subscribe(event_consumer_id)
         self._workers: dict[str, TaskWorker] = {}
 
+
+    def record_decision_comparison(
+        self,
+        *,
+        mission_id: str,
+        decision_event_id: int,
+        chosen_decision: str,
+        alternative: str,
+        comparative_evidence: DirectorDecisionComparativeEvidence,
+        evidence: tuple[str, ...] = (),
+        created_at: str,
+    ):
+        """Evaluate and durably record explicit comparative evidence.
+
+        Comparative findings remain advisory: they never modify the decision
+        performance aggregate and never assert causal superiority.
+        """
+        result = DirectorDecisionComparisonEvaluator.evaluate(
+            decision_event_id=decision_event_id,
+            chosen_decision=chosen_decision,
+            alternative=alternative,
+            chosen_outcome=comparative_evidence.chosen_outcome,
+            alternative_outcome=comparative_evidence.alternative_outcome,
+            evidence=evidence,
+            comparable=True,
+            alternative_executed=True,
+            comparative_evidence=comparative_evidence,
+        )
+        self.decision_comparison_store.record(
+            decision_event_id=result.decision_event_id,
+            chosen_decision=result.chosen_decision,
+            alternative=result.alternative,
+            source=comparative_evidence.source,
+            alternative_execution_id=comparative_evidence.alternative_execution_id,
+            chosen_execution_id=comparative_evidence.chosen_execution_id,
+            chosen_outcome=comparative_evidence.chosen_outcome,
+            alternative_outcome=comparative_evidence.alternative_outcome,
+            comparability_basis=comparative_evidence.comparability_basis,
+            observed_direction=result.observed_direction,
+            causal_attribution=result.causal_attribution,
+            state=result.state,
+            reason=result.reason,
+            evidence=result.evidence,
+            created_at=created_at,
+        )
+        self.event_bus.publish(
+            mission_id=mission_id,
+            event_type="director_decision_comparison_observed",
+            payload={
+                "decision_event_id": result.decision_event_id,
+                "chosen_decision": result.chosen_decision,
+                "alternative": result.alternative,
+                "state": result.state,
+                "observed_direction": result.observed_direction,
+                "causal_attribution": result.causal_attribution,
+                "evidence": list(result.evidence),
+            },
+        )
+        return result
 
     def acquire_specialist(
         self,
