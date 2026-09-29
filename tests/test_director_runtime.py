@@ -14,10 +14,11 @@ from aurora.orchestration.task_worker import WorkerPolicy
 
 
 class FakePlanner:
-    def __init__(self):
+    def __init__(self, *, max_continue_reviews: int = 1):
         self.calls = []
         self.review_calls = 0
         self.review_contexts = []
+        self.max_continue_reviews = max_continue_reviews
 
     def plan(self, **kwargs):
         self.calls.append(kwargs)
@@ -38,8 +39,7 @@ class FakePlanner:
     def review(self, **kwargs):
         self.review_calls += 1
         self.review_contexts.append(kwargs["context"])
-        max_continue_reviews = 2 if kwargs["objective"] == "adapt compare safely" else 1
-        if "adapt" in kwargs["objective"] and self.review_calls <= max_continue_reviews:
+        if "adapt" in kwargs["objective"] and self.review_calls <= self.max_continue_reviews:
             return DirectorReview(
                 decision="continue",
                 rationale="One more validation step is required.",
@@ -78,10 +78,10 @@ class FakeOrchestration:
         raise AssertionError("capability execution is not expected")
 
 
-def make_runtime(tmp_path: Path):
+def make_runtime(tmp_path: Path, *, max_continue_reviews: int = 1):
     store = DurableTaskStore(tmp_path / "tasks.db")
     bus = DurableEventBus(store)
-    planner = FakePlanner()
+    planner = FakePlanner(max_continue_reviews=max_continue_reviews)
     engine = TaskEngine(FakeOrchestration(), tmp_path / "workspace")
     director = DurableDirectorService(
         planner=planner,
@@ -369,7 +369,7 @@ def test_comparative_evidence_aggregate_is_advisory(tmp_path: Path):
 
 
 def test_cross_decision_replication_is_advisory(tmp_path: Path):
-    runtime, store, planner, _ = make_runtime(tmp_path)
+    runtime, store, planner, _ = make_runtime(tmp_path, max_continue_reviews=2)
     submission = runtime.submit_mission(objective="adapt compare safely")
 
     def reviews():
