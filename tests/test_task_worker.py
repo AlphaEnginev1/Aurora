@@ -1,7 +1,9 @@
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from aurora.orchestration.task_engine import DelegatedTask, TaskEngine, TaskStatus
+from aurora.inference.models import InferenceResponse
+from aurora.orchestration.engine import TaskResult
+from aurora.orchestration.task_engine import DelegatedTask, DelegatedTaskResult, TaskEngine, TaskStatus
 from aurora.orchestration.task_store import DurableTaskStore, TaskStoreError
 from aurora.orchestration.task_worker import TaskWorker, WorkerPolicy
 
@@ -162,3 +164,31 @@ def test_run_until_idle_rejects_nonconvergent_worker(tmp_path: Path):
         assert "max_cycles" in str(exc)
     else:
         raise AssertionError("worker unexpectedly reported convergence")
+
+def test_worker_persists_routing_evidence_for_director_review(tmp_path: Path):
+    response = InferenceResponse(
+        model="model-a",
+        provider="nvidia",
+        content="completed",
+        selected_model="model-a",
+        routing_score=0.83,
+        routing_factors={"learned_score": 0.9, "quality": 0.8},
+        routing_candidates=(("model-a", 0.83), ("model-b", 0.71)),
+    )
+    result = DelegatedTaskResult(
+        task=DelegatedTask("a", "agent", "work"),
+        status=TaskStatus.SUCCEEDED,
+        model_result=TaskResult(task_id="a", role="agent", response=response),
+    )
+
+    payload = TaskWorker._result_payload(result)
+
+    assert payload["routing"] == {
+        "selected_model": "model-a",
+        "score": 0.83,
+        "factors": {"learned_score": 0.9, "quality": 0.8},
+        "candidates": [
+            {"model": "model-a", "score": 0.83},
+            {"model": "model-b", "score": 0.71},
+        ],
+    }
