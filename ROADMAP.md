@@ -1,152 +1,134 @@
 # Aurora Roadmap
 
-## Current Gate — CONSOLIDATION FREEZE ACTIVE
+## Canonical status
 
-Aurora is temporarily frozen against new functionality while the repository is reconciled into
-one authoritative implementation line.
+**Canonical engineering branch: `main`**
 
-Authoritative consolidation record:
+Authoritative status:
 - `docs/AURORA_CONSOLIDATION_MATRIX.md`
 - Issue #50
-- Audit branch: `runtime/consolidation-gate`
-- Implementation baseline: `runtime/increment-10-director-contract`
-- Verified baseline commit: `64193c0cbbaccc0920c87f20054c83bc0c482d556`
-- CI 1287, 1288 and 1289: SUCCESS
+- consolidation evidence branch: `runtime/consolidation-gate`
+- canonical consolidation commit: `e4dff9e0e15198d41cb5f3e086903fecd4e9d9f6`
+- CI 1291–1296: SUCCESS
 
-During this gate, only documentation, verification, tests, and fixes required for already-existing
-behavior are allowed.
+The repository is no longer tracking historical increments as future work. The sections below describe what is
+already integrated and what remains genuinely required.
 
 ## Phase 0 — Foundation / Governance — INTEGRATED
 
-Repository architecture, governance, security policy, schemas, CI and core operational records exist.
+Repository architecture, governance, security policy, schemas, CI and operational records are integrated.
 
 ## Phase 1 — Autonomous Capability Acquisition — INTEGRATED
 
-Implemented:
+Integrated:
 - capability registry and broker;
 - governed capability discovery and persistent acquisition;
-- APT/PyPI acquisition paths;
+- APT/PyPI acquisition;
 - artifact verification/provenance;
-- dependency closure resolution;
+- dependency closure;
 - transactional state, staging, recovery and reconciliation;
 - tool artifact injection.
 
-Known limitation:
-- npm/GitHub-release sources remain registered but are not executable acquisition paths.
-- OS-level transparent network enforcement remains separate from application-level gateway policy.
+Remaining production boundary:
+- additional acquisition source families where required;
+- host/OS network enforcement.
 
-## Phase 2 — Runtime Safety / Persistence / Recovery — INTEGRATED WITH HARDENING GAP
+## Phase 2 — Runtime Safety / Persistence / Recovery — INTEGRATED
 
-Implemented:
+Integrated:
 - sandboxed execution;
 - deterministic isolated workspaces;
-- network gateway/proxy/dataplane;
+- application network gateway/proxy/dataplane;
 - durable task/event state;
 - leases, crash recovery and reconciliation;
 - bounded concurrency and shared-resource locking.
 
-Remaining verification/hardening:
-- stronger host/OS-level enforcement and production recovery drills.
+Remaining production verification:
+- production-grade observability;
+- controlled recovery drills;
+- host/OS-level enforcement proof if required.
 
 ## Phase 3 — Director / Organization / Mission Runtime — INTEGRATED
 
-Implemented:
+Integrated:
 - provider-neutral Director planning/review;
 - durable TaskEngine;
 - 24/7 DirectorRuntime and daemon;
 - shared mission memory/inbox;
 - bounded adaptive review/replan;
-- organization and department registry;
+- organization/departments;
 - specialist team formation and adaptation.
 
-Mission loop safety:
-- bounded Director review rounds;
-- bounded `run_until_terminal` cycles;
-- durable state and restart recovery;
-- no evidence leakage from later decisions into earlier decision evaluations.
+Loop safety is established by bounded per-mission review/cycle budgets and durable restart state.
 
 ## Phase 8 — Adaptive Agent Intelligence — CLOSED
 
-Closed at merge commit:
-`d5621d08e0207eaa222620f3d6fc7f7f016b0edf`
-
-Implemented:
+Integrated and verified:
 - specialist skill evaluation;
 - durable skill learning;
-- trusted model performance history;
+- model performance history;
 - dynamic model routing;
 - evidence-backed skill evolution;
-- explicit approval/promotion;
+- approval/promotion;
 - validation, regression and rollback;
 - adaptive specialist-agent selection.
 
-## Phase 9 — Knowledge & Research Intelligence — IMPLEMENTED THROUGH VERIFIED ADAPTIVE ROUTING PROOF
+## Phase 9 — Knowledge & Research Intelligence — INTEGRATED WITH EXPLICIT DISCOVERY WIRING GAP
 
-Implemented:
+Integrated:
 1. research domain and durable evidence;
 2. redirect-safe provenance;
 3. deterministic source parsing and claim extraction;
 4. independent verification and contradiction handling;
 5. trusted knowledge artifacts and citation graph;
-6. Director/task-engine research delegation;
-7. trust-gated research → learning bridge;
-8. verified execution evidence changing a later ModelRouter decision.
+6. Director/TaskEngine research delegation;
+7. trust-gated research → learning;
+8. verified execution evidence affecting later ModelRouter decisions.
 
-Proof references:
-- research-to-learning bridge: CI 1069;
-- adaptive routing proof: CI 1075;
-- provider-bound execution contract: subsequent Increment 9 work;
-- Director decision-learning/policy lifecycle: CIs 1193–1289.
+The existing `HttpSearchProvider` is implemented and tested, but the normal runtime factory does not yet inject
+it into `ResearchService`. This is a **runtime integration gap**, not a missing research architecture.
 
-Important distinction:
-- the adaptive routing proof used controlled/test providers;
-- dedicated live NVIDIA and live Gemini workflows exist but are opt-in/manual and are not, by themselves,
-  proof of continuously verified production operation.
-
-### Research capability status
-
-The current repository contains an `HttpSearchProvider` and governed web-discovery code.
-However, the current runtime factory does not wire that provider into `ResearchService`.
-Therefore autonomous research discovery is classified as **PARTIALLY INTEGRATED**, not closed.
+The adaptive routing proof used controlled/test providers. Live NVIDIA and Gemini verification remain separate gates.
 
 ## Cross-cutting Director Decision Intelligence — INTEGRATED
 
-Implemented and verified in the current line:
+Integrated and verified:
 - decision outcome/evidence sufficiency;
-- durable decision performance;
+- durable performance aggregation;
 - explicit comparative alternatives;
 - independent comparative evidence;
-- repeated and cross-decision replication summaries;
+- cross-decision replication;
 - promoted empirical knowledge;
 - governed policy proposals;
-- policy validation and canary lifecycle;
-- shadow canary evaluation and rollback;
+- validation and canary lifecycle;
+- shadow canary evaluation/rollback;
 - active policy registry;
 - immutable typed active policy contracts.
 
-The policy path remains advisory and explicitly re-evaluates current evidence; it does not become an
-automatic decision rule.
-
 ## Live Provider Verification — NOT YET ESTABLISHED
 
-Dedicated manual/opt-in gates exist for:
+Dedicated opt-in workflows exist for:
 - NVIDIA adaptive learning;
 - Gemini Director.
 
-The consolidation gate must classify any live result with its exact run evidence. No live run is inferred
-from the existence of a workflow.
+A workflow definition does not count as a live verification. The exact successful run must be executed and recorded.
 
-## Genuine Remaining Work After Consolidation
+## Production readiness work remaining
 
-These are not active implementation tickets yet. They become eligible only after Issue #50 closes:
+These are the only current production-oriented gaps identified by the consolidation audit:
 
-1. Reconcile `main` with the canonical implementation branch and select one permanent source of truth.
-2. Close/archive obsolete stacked PRs and historical branches or explicitly classify them as archival.
-3. Finish/verify the governed Research discovery runtime integration.
-4. Decide and verify OS-level network enforcement requirements.
-5. Execute and record live provider gates where production verification is required.
-6. Complete production observability, recovery drills and controlled live authorization.
-7. Only then define the next net-new capability increment from an evidence-backed gap.
+1. **Research discovery runtime wiring:** connect the existing governed `HttpSearchProvider` through runtime configuration
+   and verify the end-to-end Director research-discovery path.
+2. **OS-level network enforcement:** decide the required host boundary and execute the proof where required.
+3. **Live NVIDIA verification:** execute and archive real-provider evidence.
+4. **Live Gemini verification:** execute and archive real-provider evidence.
+5. **Production observability:** complete operational visibility and alerting evidence.
+6. **Recovery drills:** execute controlled crash/restart/reconciliation exercises and archive results.
+7. **Controlled production authorization:** establish the explicit live-operation gate.
 
-No item above should be reimplemented if an existing module already satisfies it; the consolidation matrix
-must be checked first.
+## Increment policy
+
+**Increment 11 is frozen.**
+
+No new capability increment may be opened until Issue #50 is closed and the next increment is derived from the
+remaining evidence-backed production gap list.
