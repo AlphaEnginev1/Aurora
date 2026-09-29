@@ -10,7 +10,28 @@ from aurora.orchestration.director_decision_policy_canary_store import (
 from aurora.orchestration.director_decision_policy_lifecycle import (
     DirectorDecisionPolicyLifecycle,
 )
-from tests.test_director_decision_policy_lifecycle import _proposal
+from aurora.orchestration.director_decision_policy_evolution import DirectorDecisionPolicyEvolution
+from aurora.orchestration.director_decision_knowledge import DirectorDecisionKnowledge
+
+
+def _proposal():
+    knowledge = DirectorDecisionKnowledge(
+        knowledge_id="dkn-canary",
+        alternative="complete",
+        chosen_decision="continue",
+        comparability_basis=("same_objective", "same_environment_class"),
+        observed_direction="better",
+        decision_events=2,
+        observations=2,
+        sources=("independent_execution",),
+        claim="Repeated empirical observation.",
+        created_at="2026-09-29T19:00:00+00:00",
+    )
+    return DirectorDecisionPolicyEvolution.propose(
+        knowledge,
+        proposed_change="Test complete in the recurring comparable context.",
+        created_at="2026-09-29T19:01:00+00:00",
+    )
 
 
 def _canary():
