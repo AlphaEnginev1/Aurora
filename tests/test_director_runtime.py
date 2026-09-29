@@ -255,6 +255,53 @@ def test_runtime_consumes_durable_active_policy_as_advisory_guidance(tmp_path: P
     assert contracts[0].advisory_record()["advisory_only"] is True
 
 
+def test_runtime_reuses_immutable_active_policy_contract_across_reviews(tmp_path: Path):
+    runtime, store, planner, _ = make_runtime(tmp_path, max_continue_reviews=1)
+
+    knowledge = DirectorDecisionKnowledge(
+        knowledge_id="dkn-runtime-repeat",
+        alternative="complete",
+        chosen_decision="continue",
+        comparability_basis=("same_objective",),
+        observed_direction="better",
+        decision_events=2,
+        observations=2,
+        sources=("independent_execution",),
+        claim="Repeated empirical observation.",
+        created_at="2026-09-29T20:40:00+00:00",
+    )
+    proposal = DirectorDecisionPolicyEvolution.propose(
+        knowledge,
+        proposed_change="Use complete when the current mission is materially comparable.",
+        created_at="2026-09-29T20:41:00+00:00",
+    )
+    DirectorDecisionPolicyProposalStore(tmp_path / "tasks.db").record(proposal)
+    DirectorDecisionPolicyActiveStore(tmp_path / "tasks.db").activate(
+        DirectorDecisionPolicyActive(
+            proposal_id=proposal.proposal_id,
+            validation_id="dpv-runtime-repeat",
+            authorized_by="director-governance",
+            activated_at="2026-09-29T20:42:00+00:00",
+        )
+    )
+
+    submission = runtime.submit_mission(objective="adapt this mission")
+    result = runtime.run_until_terminal(submission)
+
+    assert result.status is TaskStatus.SUCCEEDED
+    assert planner.review_calls == 2
+
+    contracts = DirectorDecisionPolicyContractStore(tmp_path / "tasks.db").list_all()
+    assert len(contracts) == 1
+    assert contracts[0].created_at == "2026-09-29T20:42:00+00:00"
+    assert all(
+        "Active Director policy guidance" in item["content"]
+        for context in planner.review_contexts
+        for item in context
+        if "Active Director policy guidance" in item["content"]
+    )
+
+
 def test_full_director_event_bus_worker_cycle(tmp_path: Path):
     runtime, store, planner, engine = make_runtime(tmp_path)
 
