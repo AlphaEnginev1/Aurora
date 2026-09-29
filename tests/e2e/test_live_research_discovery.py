@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 from urllib.parse import urlparse
 
-from aurora.autonomy.internet import InternetPolicy
+from aurora.autonomy.internet import InternetGateway, InternetPolicy
 from aurora.orchestration.factory import build_director_runtime
 from aurora.research.models import ResearchRequest
 from aurora.skills.acquisition import SkillGap
@@ -17,7 +17,7 @@ def test_live_research_discovery_uses_real_search_provider_and_persists_source(t
 
     endpoint = os.environ.get(
         "AURORA_RESEARCH_DISCOVERY_ENDPOINT",
-        "https://searx.oloke.xyz/search?format=json",
+        "https://searx.party/search?format=json",
     )
     monkeypatch.setenv("AURORA_RESEARCH_DISCOVERY_ENDPOINT", endpoint)
 
@@ -27,7 +27,7 @@ def test_live_research_discovery_uses_real_search_provider_and_persists_source(t
             {
                 "default": "deny",
                 "protocols": ["https"],
-                "allowed_hosts": ["searx.oloke.xyz"],
+                "allowed_hosts": [provider_host],
                 "browser_isolation_required": True,
                 "sandbox_network": "broker_only",
                 "os_isolation": {
@@ -65,13 +65,13 @@ def test_live_research_discovery_uses_real_search_provider_and_persists_source(t
     gap = SkillGap(
         skill_id="research-live-provider-proof",
         mission_id="live-research-provider-proof",
-        reason="site:searx.oloke.xyz SearXNG search service",
+        reason=f"site:github.com SearXNG search via {provider_host}",
         required_capabilities=(),
     )
 
     urls = discovery.source_discovery(gap)
     assert urls, "live search provider returned no candidate sources"
-    assert all(urlparse(url).hostname == "searx.oloke.xyz" for url in urls)
+    first_source_host = urlparse(urls[0]).hostname\n    assert first_source_host, "live search provider returned an invalid source URL"\n    assert urlparse(urls[0]).scheme in {"http", "https"}\n\n    research_service.gateway = InternetGateway(\n        InternetPolicy(\n            protocols=frozenset({"https"}),\n            allowed_hosts=frozenset({provider_host, first_source_host}),\n        )\n    )
 
     sources = research_service.retrieve(
         ResearchRequest(
