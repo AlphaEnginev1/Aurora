@@ -246,3 +246,13 @@ def test_adaptive_director_replans_after_terminal_phase(tmp_path: Path):
     assert len(learning_messages) == 1
     assert '"decision": "continue"' in learning_messages[0]
     assert '"score": 1.0' in learning_messages[0]
+
+    performance_messages = [
+        item["content"]
+        for item in second_review_context
+        if "Aggregated Director decision performance:" in item["content"]
+    ]
+    assert len(performance_messages) == 1
+    assert '"decision": "continue"' in performance_messages[0]
+    assert '"evaluations": 1' in performance_messages[0]
+    assert '"success_rate": 1.0' in performance_messages[0]
