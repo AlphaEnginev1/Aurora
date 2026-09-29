@@ -1,12 +1,15 @@
 name: Live Research Discovery Gate
 
 on:
+  push:
+    branches:
+      - runtime/live-research-discovery-provider-fix
   workflow_dispatch:
     inputs:
       endpoint:
         description: "Real SearXNG-compatible JSON search endpoint"
         required: true
-        default: "https://searx.oloke.xyz/search?format=json"
+        default: "https://searx.party/search?format=json"
         type: string
 
 jobs:
@@ -14,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       AURORA_LIVE_RESEARCH_GATE: "1"
-      AURORA_RESEARCH_DISCOVERY_ENDPOINT: ${{ inputs.endpoint }}
+      AURORA_RESEARCH_DISCOVERY_ENDPOINT: ${{ inputs.endpoint || 'https://searx.party/search?format=json' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
