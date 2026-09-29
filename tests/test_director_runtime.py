@@ -398,7 +398,11 @@ def test_cross_decision_replication_is_advisory(tmp_path: Path):
                 comparability_basis=("same_objective", "same_environment_class"),
                 observed_direction="better",
             ),
-            created_at=f"2026-09-29T16:2{suffix == 'b'}:00+00:00",
+            created_at=(
+                "2026-09-29T16:21:00+00:00"
+                if suffix == "a"
+                else "2026-09-29T16:22:00+00:00"
+            ),
         )
 
     runtime.run_until_terminal(submission)
