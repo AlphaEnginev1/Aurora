@@ -5,8 +5,6 @@ from threading import Thread
 from urllib.parse import parse_qs, urlparse
 
 from aurora.orchestration.factory import build_director_runtime
-from aurora.orchestration.task_store import TaskStatus
-
 
 class DiscoveryHandler(BaseHTTPRequestHandler):
     queries: list[str] = []
