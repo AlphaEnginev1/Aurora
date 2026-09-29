@@ -23,7 +23,8 @@ from .director_decision_policy_proposal_store import DirectorDecisionPolicyPropo
 from .director_decision_policy_contract import (
     DirectorDecisionPolicyContract,
     DirectorDecisionPolicyContractError,
-)\nfrom .director_decision_policy_lifecycle import (
+)
+from .director_decision_policy_lifecycle import (
     DirectorDecisionPolicyActivation,
     DirectorDecisionPolicyLifecycle,
     DirectorDecisionPolicyLifecycleError,
