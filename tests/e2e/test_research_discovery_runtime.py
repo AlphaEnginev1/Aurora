@@ -85,7 +85,6 @@ def test_director_runtime_uses_http_research_discovery_end_to_end(tmp_path: Path
             egress_proxy_host="127.0.0.1",
             egress_proxy_port=3128,
             worker_id="research-discovery-e2e",
-            event_consumer_id="research-discovery-e2e-events",
             worker_concurrency=1,
         )
 
