@@ -352,11 +352,21 @@ class TaskWorker:
         limit = 16_384
         if result.model_result is not None:
             content = result.model_result.response.content
+            response = result.model_result.response
             return {
                 "type": "model",
-                "model": result.model_result.response.model,
+                "model": response.model,
                 "content": content[:limit],
                 "truncated": len(content) > limit,
+                "routing": {
+                    "selected_model": response.selected_model or response.model,
+                    "score": response.routing_score,
+                    "factors": dict(response.routing_factors),
+                    "candidates": [
+                        {"model": model, "score": score}
+                        for model, score in response.routing_candidates
+                    ],
+                },
             }
         capability = result.capability_result
         if isinstance(capability, ResearchTaskResult):
