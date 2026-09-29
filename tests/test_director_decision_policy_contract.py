@@ -74,3 +74,22 @@ def test_contract_rejects_non_active_or_invalid_directive():
             evidence_summary="evidence",
             authorized_by="authority",
         )
+
+
+def test_contract_record_is_stable_for_auditing():
+    contract = _contract()
+    record = contract.advisory_record()
+
+    assert record["contract_id"] == contract.contract_id
+    assert record["version"] == 1
+    assert record["proposal_id"] == "dpp-contract"
+    assert record["validation_id"] == "dpv-contract"
+    assert record["knowledge_id"] == "dkn-contract"
+    assert record["comparability_basis"] == [
+        "same_environment_class",
+        "same_objective",
+    ]
+    assert record["directive"] == "consider_candidate"
+    assert record["authorized_by"] == "director-governance"
+    assert record["advisory_only"] is True
+    assert record["must_re_evaluate_current_evidence"] is True

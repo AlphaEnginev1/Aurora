@@ -22,9 +22,9 @@ class DirectorDecisionPolicyProposal:
     observed_direction: str
     proposed_change: str
     evidence_summary: str
-    comparability_basis: tuple[str, ...] = ()
     state: str = "proposed"
     created_at: str = ""
+    comparability_basis: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if self.state != "proposed":
