@@ -37,14 +37,11 @@ class DirectorDecisionPolicyProposal:
             raise DirectorDecisionPolicyEvolutionError("policy proposal requires determinate observed direction")
         if not self.proposed_change.strip() or not self.evidence_summary.strip():
             raise DirectorDecisionPolicyEvolutionError("policy proposal requires change and evidence")
-        if self.comparability_basis:
-            normalized_basis = tuple(
-                sorted({item.strip() for item in self.comparability_basis if item.strip()})
-            )
-            if normalized_basis != self.comparability_basis:
-                raise DirectorDecisionPolicyEvolutionError(
-                    "policy proposal comparability basis must be normalized"
-                )
+        normalized_basis = tuple(
+            sorted({item.strip() for item in self.comparability_basis if item.strip()})
+        )
+        if normalized_basis != self.comparability_basis:
+            object.__setattr__(self, "comparability_basis", normalized_basis)
         if not self.created_at:
             object.__setattr__(self, "created_at", datetime.now(timezone.utc).isoformat())
 
