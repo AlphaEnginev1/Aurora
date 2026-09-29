@@ -14,6 +14,12 @@ from .engine import CapabilityTaskResult, OrchestrationEngine, TaskResult
 from .event_bus import DurableEventBus, EventBusError, EventSubscription
 from .mission_memory import MissionMemory, MissionMemoryError, MissionMessage
 from .director_runtime import DirectorRuntime, DirectorRuntimeError, MissionRuntimeResult, RuntimeCycle
+from .director_decision_policy_evolution import (
+    DirectorDecisionPolicyEvolution,
+    DirectorDecisionPolicyEvolutionError,
+    DirectorDecisionPolicyProposal,
+)
+from .director_decision_policy_proposal_store import DirectorDecisionPolicyProposalStore
 from .director_decision_knowledge import (
     DirectorDecisionKnowledge,
     DirectorDecisionKnowledgeError,
@@ -55,6 +61,10 @@ __all__ = [
     "DirectorRuntimeError",
     "MissionRuntimeResult",
     "RuntimeCycle",
+    "DirectorDecisionPolicyEvolution",
+    "DirectorDecisionPolicyEvolutionError",
+    "DirectorDecisionPolicyProposal",
+    "DirectorDecisionPolicyProposalStore",
     "DirectorDecisionKnowledge",
     "DirectorDecisionKnowledgeError",
     "DirectorDecisionKnowledgePromotion",
