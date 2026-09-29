@@ -193,6 +193,16 @@ def test_policy_shadow_canary_integrates_with_terminal_director_cycle(tmp_path: 
     assert shadow_events[0].payload["candidate_executed"] is False
     assert shadow_events[0].payload["decision_event_id"] == observation.decision_event_id
 
+    evaluation_events = [
+        event for event in store.events(submission.mission_id)
+        if event.event_type == "director_decision_policy_shadow_evaluated"
+    ]
+    assert len(evaluation_events) == 1
+    assert evaluation_events[0].payload["proposal_id"] == proposal.proposal_id
+    assert evaluation_events[0].payload["observations"] == 1
+    assert evaluation_events[0].payload["governance_review_ready"] is False
+    assert evaluation_events[0].payload["reason"] == "insufficient_shadow_observations"
+
 
 def test_runtime_consumes_durable_active_policy_as_advisory_guidance(tmp_path: Path):
     runtime, store, planner, _ = make_runtime(tmp_path)
