@@ -18,6 +18,8 @@ from .director_decision_comparison import (
     DirectorDecisionComparisonEvaluator,
 )
 from .director_decision_comparison_store import DirectorDecisionComparisonStore
+from .director_decision_knowledge import DirectorDecisionKnowledgePromoter
+from .director_decision_knowledge_store import DirectorDecisionKnowledgeStore
 from .director_decision_policy import DirectorDecisionPolicy
 from .durable_director import DurableDirectorService, MissionSubmission
 from .event_bus import DurableEventBus, EventSubscription
@@ -87,6 +89,7 @@ class DirectorRuntime:
         skill_improvement_generator: SkillImprovementGenerator | None = None,
         decision_performance: DirectorDecisionPerformanceStore | None = None,
         decision_comparison_store: DirectorDecisionComparisonStore | None = None,
+        decision_knowledge_store: DirectorDecisionKnowledgeStore | None = None,
         sleep_fn: Callable[[float], None] = sleep,
     ) -> None:
         if not event_consumer_id.strip():
@@ -119,6 +122,13 @@ class DirectorRuntime:
         self.decision_comparison_store = (
             decision_comparison_store
             or DirectorDecisionComparisonStore(store.path)
+        )
+        self.decision_knowledge_store = (
+            decision_knowledge_store
+            or DirectorDecisionKnowledgeStore(store.path)
+        )
+        self.decision_knowledge_promoter = DirectorDecisionKnowledgePromoter(
+            self.decision_comparison_store
         )
         self._sleep = sleep_fn
         self._subscription: EventSubscription = self.event_bus.subscribe(event_consumer_id)
@@ -910,6 +920,53 @@ class DirectorRuntime:
                                     "sources": item.sources,
                                 }
                                 for item in replication_summaries
+                            ],
+                            sort_keys=True,
+                        )
+                    ),
+                }
+            )
+        promoted_knowledge = []
+        seen_knowledge = set()
+        for summary in replication_summaries:
+            knowledge_key = (
+                summary.alternative,
+                summary.chosen_decision,
+                summary.comparability_basis,
+            )
+            if knowledge_key in seen_knowledge:
+                continue
+            seen_knowledge.add(knowledge_key)
+            promotion = self.decision_knowledge_promoter.promote(summary)
+            if not promotion.promoted or promotion.knowledge is None:
+                continue
+            self.decision_knowledge_store.record(promotion.knowledge)
+            promoted_knowledge.append(promotion.knowledge)
+
+        if promoted_knowledge:
+            context.append(
+                {
+                    "role": "user",
+                    "content": (
+                        "Promoted empirical Director knowledge advisory. "
+                        "This knowledge was promoted only from replicated, directionally "
+                        "consistent comparable observations. It is observational evidence "
+                        "and does not establish causality or authorize an automatic policy "
+                        "change: "
+                        + json.dumps(
+                            [
+                                {
+                                    "knowledge_id": item.knowledge_id,
+                                    "alternative": item.alternative,
+                                    "chosen_decision": item.chosen_decision,
+                                    "comparability_basis": item.comparability_basis,
+                                    "observed_direction": item.observed_direction,
+                                    "decision_events": item.decision_events,
+                                    "observations": item.observations,
+                                    "sources": item.sources,
+                                    "state": item.state,
+                                }
+                                for item in promoted_knowledge
                             ],
                             sort_keys=True,
                         )
