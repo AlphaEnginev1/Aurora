@@ -642,6 +642,24 @@ class DirectorRuntime:
                 "state": observation.state,
             },
         )
+        evaluation = self.evaluate_policy_shadow_canary()
+        if evaluation is not None:
+            self.event_bus.publish(
+                mission_id=mission_id,
+                event_type="director_decision_policy_shadow_evaluated",
+                payload={
+                    "evaluation_id": evaluation.evaluation_id,
+                    "proposal_id": evaluation.proposal_id,
+                    "observations": evaluation.observations,
+                    "agreements": evaluation.agreements,
+                    "disagreements": evaluation.disagreements,
+                    "agreement_rate": evaluation.agreement_rate,
+                    "governance_review_ready": evaluation.governance_review_ready,
+                    "rollback_required": evaluation.rollback_required,
+                    "state": evaluation.state,
+                    "reason": evaluation.reason,
+                },
+            )
 
     def submit_mission(self, **kwargs: Any) -> MissionSubmission:
         """Plan and durably submit a mission for the continuous worker loop."""
