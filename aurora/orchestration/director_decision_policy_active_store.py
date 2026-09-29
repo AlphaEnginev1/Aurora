@@ -84,7 +84,11 @@ class DirectorDecisionPolicyActiveStore:
                 LIMIT 1
                 """
             ).fetchone()
-            if current is not None and str(current["proposal_id"]) != active.proposal_id:
+            if current is not None:
+                if str(current["proposal_id"]) == active.proposal_id:
+                    raise DirectorDecisionPolicyActiveStoreError(
+                        "Director policy proposal is already active"
+                    )
                 raise DirectorDecisionPolicyActiveStoreError(
                     "an active Director policy already exists"
                 )
