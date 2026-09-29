@@ -5,6 +5,10 @@ from aurora.inference.models import InferenceResponse
 from aurora.orchestration.director import DirectorPlan, DirectorReview
 from aurora.orchestration.director_decision_comparison import DirectorDecisionComparativeEvidence
 from aurora.orchestration.director_runtime import DirectorRuntime
+from aurora.orchestration.director_decision_policy_active_store import DirectorDecisionPolicyActiveStore, DirectorDecisionPolicyActive
+from aurora.orchestration.director_decision_policy_proposal_store import DirectorDecisionPolicyProposalStore
+from aurora.orchestration.director_decision_policy_evolution import DirectorDecisionPolicyEvolution
+from aurora.orchestration.director_decision_knowledge import DirectorDecisionKnowledge
 from aurora.orchestration.director_decision_knowledge import DirectorDecisionKnowledge
 from aurora.orchestration.director_decision_policy_canary_store import DirectorDecisionPolicyShadowCanaryStore
 from aurora.orchestration.director_decision_policy_evolution import DirectorDecisionPolicyEvolution
@@ -188,6 +192,50 @@ def test_policy_shadow_canary_integrates_with_terminal_director_cycle(tmp_path: 
     assert len(shadow_events) == 1
     assert shadow_events[0].payload["candidate_executed"] is False
     assert shadow_events[0].payload["decision_event_id"] == observation.decision_event_id
+
+
+def test_runtime_consumes_durable_active_policy_as_advisory_guidance(tmp_path: Path):
+    runtime, store, planner, _ = make_runtime(tmp_path)
+
+    knowledge = DirectorDecisionKnowledge(
+        knowledge_id="dkn-runtime-active",
+        alternative="complete",
+        chosen_decision="continue",
+        comparability_basis=("same_objective",),
+        observed_direction="better",
+        decision_events=2,
+        observations=2,
+        sources=("independent_execution",),
+        claim="Repeated empirical observation.",
+        created_at="2026-09-29T20:10:00+00:00",
+    )
+    proposal = DirectorDecisionPolicyEvolution.propose(
+        knowledge,
+        proposed_change="Use complete when the current mission is materially comparable.",
+        created_at="2026-09-29T20:11:00+00:00",
+    )
+    DirectorDecisionPolicyProposalStore(tmp_path / "tasks.db").record(proposal)
+    DirectorDecisionPolicyActiveStore(tmp_path / "tasks.db").activate(
+        DirectorDecisionPolicyActive(
+            proposal_id=proposal.proposal_id,
+            validation_id="dpv-runtime-active",
+            authorized_by="director-governance",
+            activated_at="2026-09-29T20:12:00+00:00",
+        )
+    )
+
+    submission = runtime.submit_mission(objective="research Aurora")
+    runtime.run_until_terminal(submission)
+
+    messages = [
+        item["content"]
+        for item in planner.review_contexts[0]
+        if "Active Director policy guidance" in item["content"]
+    ]
+    assert len(messages) == 1
+    assert "governed and advisory" in messages[0]
+    assert "does not override current evidence" in messages[0]
+    assert "Re-evaluate current evidence before deciding" in messages[0]
 
 
 def test_full_director_event_bus_worker_cycle(tmp_path: Path):
