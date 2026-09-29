@@ -6,10 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
 
-from .director_decision_policy_evolution import (
-    DirectorDecisionPolicyEvolutionError,
-    DirectorDecisionPolicyProposal,
-)
+from .director_decision_policy_evolution import DirectorDecisionPolicyProposal
 
 
 class DirectorDecisionPolicyLifecycleError(ValueError):
@@ -51,9 +48,9 @@ class DirectorDecisionPolicyActivation:
     created_at: str = ""
 
     def __post_init__(self) -> None:
-        if self.state not in {"canary", "active"}:
+        if self.state not in {"canary", "active", "rolled_back"}:
             raise DirectorDecisionPolicyLifecycleError(
-                "activation state must be canary or active"
+                "activation state must be canary, active, or rolled_back"
             )
         if not self.authorized_by.strip():
             raise DirectorDecisionPolicyLifecycleError("activation requires an authority")
@@ -135,6 +132,34 @@ class DirectorDecisionPolicyLifecycle:
             proposal_id=proposal.proposal_id,
             validation_id=validation.validation_id,
             state="canary",
+            authorized_by=authorized_by,
+            created_at=created_at or "",
+        )
+
+    @staticmethod
+    def rollback(
+        activation: DirectorDecisionPolicyActivation,
+        *,
+        reason: str,
+        authorized_by: str,
+        created_at: str | None = None,
+    ) -> DirectorDecisionPolicyActivation:
+        if activation.state not in {"canary", "active"}:
+            raise DirectorDecisionPolicyLifecycleError(
+                "only canary or active policies may be rolled back"
+            )
+        if not reason.strip():
+            raise DirectorDecisionPolicyLifecycleError(
+                "policy rollback requires a reason"
+            )
+        if not authorized_by.strip():
+            raise DirectorDecisionPolicyLifecycleError(
+                "policy rollback requires an authority"
+            )
+        return DirectorDecisionPolicyActivation(
+            proposal_id=activation.proposal_id,
+            validation_id=activation.validation_id,
+            state="rolled_back",
             authorized_by=authorized_by,
             created_at=created_at or "",
         )
