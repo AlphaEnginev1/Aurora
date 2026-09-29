@@ -20,7 +20,10 @@ from .director_decision_policy_evolution import (
     DirectorDecisionPolicyProposal,
 )
 from .director_decision_policy_proposal_store import DirectorDecisionPolicyProposalStore
-from .director_decision_policy_contract import (\n    DirectorDecisionPolicyContract,\n    DirectorDecisionPolicyContractError,\n)\nfrom .director_decision_policy_lifecycle import (
+from .director_decision_policy_contract import (
+    DirectorDecisionPolicyContract,
+    DirectorDecisionPolicyContractError,
+)\nfrom .director_decision_policy_lifecycle import (
     DirectorDecisionPolicyActivation,
     DirectorDecisionPolicyLifecycle,
     DirectorDecisionPolicyLifecycleError,
@@ -94,7 +97,9 @@ __all__ = [
     "DirectorRuntimeError",
     "MissionRuntimeResult",
     "RuntimeCycle",
-    "DirectorDecisionPolicyContract",\n    "DirectorDecisionPolicyContractError",\n    "DirectorDecisionPolicyEvolution",
+    "DirectorDecisionPolicyContract",
+    "DirectorDecisionPolicyContractError",
+    "DirectorDecisionPolicyEvolution",
     "DirectorDecisionPolicyEvolutionError",
     "DirectorDecisionPolicyProposal",
     "DirectorDecisionPolicyProposalStore",
