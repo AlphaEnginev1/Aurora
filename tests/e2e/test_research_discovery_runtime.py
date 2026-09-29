@@ -27,7 +27,8 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
             body = (
                 b"- Configure the governed research procedure before execution.\n"
                 b"- Verify the resulting evidence against the recorded source snapshot.\n"
-                b"Preserve provenance and record the validation result.\n"
+                b"- Record the validation result in the durable research evidence store.\n"
+                b"- Compare the evidence with the recorded source snapshot.\n"
             )
         else:
             self.send_response(404)
