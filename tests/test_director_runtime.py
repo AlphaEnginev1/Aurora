@@ -38,7 +38,7 @@ class FakePlanner:
     def review(self, **kwargs):
         self.review_calls += 1
         self.review_contexts.append(kwargs["context"])
-        if self.review_calls == 1 and "adapt" in kwargs["objective"]:
+        if "adapt" in kwargs["objective"] and self.review_calls <= 2:
             return DirectorReview(
                 decision="continue",
                 rationale="One more validation step is required.",
@@ -371,41 +371,68 @@ def test_cross_decision_replication_is_advisory(tmp_path: Path):
     runtime, store, planner, _ = make_runtime(tmp_path)
     submission = runtime.submit_mission(objective="adapt compare safely")
 
-    for _ in range(100):
-        runtime.run_once()
-        reviews = [
-            event for event in store.events(submission.mission_id)
+    def reviews():
+        return [
+            event
+            for event in store.events(submission.mission_id)
             if event.event_type == "director_review"
         ]
-        if len(reviews) >= 2:
+
+    # Record the first comparison before the second Director cycle.
+    for _ in range(100):
+        runtime.run_once()
+        if len(reviews()) >= 1:
             break
-    assert len(reviews) >= 2
+    assert len(reviews()) >= 1
+    first_id = int(reviews()[0].event_id)
+    runtime.record_decision_comparison(
+        mission_id=submission.mission_id,
+        decision_event_id=first_id,
+        chosen_decision="continue",
+        alternative="complete",
+        comparative_evidence=DirectorDecisionComparativeEvidence(
+            source="independent_execution",
+            alternative_execution_id="alternative-replication-a",
+            chosen_execution_id="chosen-replication-a",
+            chosen_outcome="follow_up_succeeded",
+            alternative_outcome="mission_succeeded",
+            comparability_basis=("same_objective", "same_environment_class"),
+            observed_direction="better",
+        ),
+        created_at="2026-09-29T16:21:00+00:00",
+    )
 
-    first_id = int(reviews[0].event_id)
-    second_id = int(reviews[1].event_id)
-    for decision_event_id, suffix in ((first_id, "a"), (second_id, "b")):
-        runtime.record_decision_comparison(
-            mission_id=submission.mission_id,
-            decision_event_id=decision_event_id,
-            chosen_decision="continue",
-            alternative="complete",
-            comparative_evidence=DirectorDecisionComparativeEvidence(
-                source="independent_execution",
-                alternative_execution_id=f"alternative-replication-{suffix}",
-                chosen_execution_id=f"chosen-replication-{suffix}",
-                chosen_outcome="follow_up_succeeded",
-                alternative_outcome="mission_succeeded",
-                comparability_basis=("same_objective", "same_environment_class"),
-                observed_direction="better",
-            ),
-            created_at=(
-                "2026-09-29T16:21:00+00:00"
-                if suffix == "a"
-                else "2026-09-29T16:22:00+00:00"
-            ),
-        )
+    # Record an independent comparison for the second decision before the
+    # third Director cycle, where cross-decision replication can be observed.
+    for _ in range(100):
+        runtime.run_once()
+        if len(reviews()) >= 2:
+            break
+    assert len(reviews()) >= 2
+    second_id = int(reviews()[1].event_id)
+    runtime.record_decision_comparison(
+        mission_id=submission.mission_id,
+        decision_event_id=second_id,
+        chosen_decision="continue",
+        alternative="complete",
+        comparative_evidence=DirectorDecisionComparativeEvidence(
+            source="independent_execution",
+            alternative_execution_id="alternative-replication-b",
+            chosen_execution_id="chosen-replication-b",
+            chosen_outcome="follow_up_succeeded",
+            alternative_outcome="mission_succeeded",
+            comparability_basis=("same_objective", "same_environment_class"),
+            observed_direction="better",
+        ),
+        created_at="2026-09-29T16:22:00+00:00",
+    )
 
-    runtime.run_until_terminal(submission)
+    # The third review is the actual consumer of the replicated evidence.
+    for _ in range(100):
+        runtime.run_once()
+        if len(reviews()) >= 3:
+            break
+    assert len(reviews()) >= 3
 
     replication_messages = [
         item["content"]
@@ -414,7 +441,8 @@ def test_cross_decision_replication_is_advisory(tmp_path: Path):
         if "Cross-decision comparative replication advisory." in item["content"]
     ]
     assert replication_messages
-    assert '"decision_events": 2' in replication_messages[0]
-    assert '"observations": 2' in replication_messages[0]
-    assert '"consistent_direction": "better"' in replication_messages[0]
-    assert "causality" in replication_messages[0]
+    assert '"decision_events": 2' in replication_messages[-1]
+    assert '"observations": 2' in replication_messages[-1]
+    assert '"consistent_direction": "better"' in replication_messages[-1]
+    assert "causality" in replication_messages[-1]
+
