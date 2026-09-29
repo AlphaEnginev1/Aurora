@@ -12,6 +12,7 @@ from uuid import uuid4
 
 from .director import DirectorPlanError
 from .director_decision_learning import DirectorDecisionLearning
+from .director_decision_performance import DirectorDecisionPerformanceStore
 from .durable_director import DurableDirectorService, MissionSubmission
 from .event_bus import DurableEventBus, EventSubscription
 from .mission_memory import MissionMemory, MissionMemoryError
@@ -78,6 +79,7 @@ class DirectorRuntime:
         autonomous_specialist_acquisition: AutonomousSpecialistAcquisition | None = None,
         skill_evolution_runtime: SkillEvolutionRuntime | None = None,
         skill_improvement_generator: SkillImprovementGenerator | None = None,
+        decision_performance: DirectorDecisionPerformanceStore | None = None,
         sleep_fn: Callable[[float], None] = sleep,
     ) -> None:
         if not event_consumer_id.strip():
@@ -106,6 +108,7 @@ class DirectorRuntime:
         self.autonomous_specialist_acquisition = autonomous_specialist_acquisition
         self.skill_evolution_runtime = skill_evolution_runtime
         self.skill_improvement_generator = skill_improvement_generator
+        self.decision_performance = decision_performance or DirectorDecisionPerformanceStore(store.path)
         self._sleep = sleep_fn
         self._subscription: EventSubscription = self.event_bus.subscribe(event_consumer_id)
         self._workers: dict[str, TaskWorker] = {}
@@ -655,6 +658,7 @@ class DirectorRuntime:
         decision_learning = DirectorDecisionLearning.learned_evidence(
             self.store.events(mission_id)
         )
+        decision_performance = self.decision_performance.summary()
         if routing_evidence:
             context.append(
                 {
@@ -672,6 +676,28 @@ class DirectorRuntime:
                     "content": (
                         "Durable Director decision learning evidence: "
                         + json.dumps(decision_learning, sort_keys=True)
+                    ),
+                }
+            )
+        if decision_performance:
+            context.append(
+                {
+                    "role": "user",
+                    "content": (
+                        "Aggregated Director decision performance: "
+                        + json.dumps(
+                            [
+                                {
+                                    "decision": item.decision,
+                                    "evaluations": item.evaluations,
+                                    "average_score": item.average_score,
+                                    "successful_evaluations": item.successful_evaluations,
+                                    "success_rate": item.success_rate,
+                                }
+                                for item in decision_performance
+                            ],
+                            sort_keys=True,
+                        )
                     ),
                 }
             )
@@ -867,6 +893,15 @@ class DirectorRuntime:
                     "outcome": evaluation.outcome,
                     "evidence": list(evaluation.evidence),
                 },
+            )
+            self.decision_performance.record(
+                decision_event_id=evaluation.decision_event_id,
+                round=evaluation.round,
+                decision=evaluation.decision,
+                score=evaluation.score,
+                outcome=evaluation.outcome,
+                evidence=evaluation.evidence,
+                created_at=decision_event.created_at,
             )
             try:
                 self.memory.append(
