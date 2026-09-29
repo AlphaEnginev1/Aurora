@@ -9,8 +9,7 @@ genuine remaining work.
 ## 0. Canonical source of truth
 
 - **Canonical engineering branch: `main`**
-- Canonical commit after reconciliation: `e4dff9e0e15198d41cb5f3e086903fecd4e9d9f6`
-- Canonical pre-test implementation baseline: `64193c0bbaccc0920c87f20054c83bc0c482d556`
+- Canonical pre-consolidation implementation baseline: `64193c0bbaccc0920c87f20054c83bc0c482d556`
 - Consolidation evidence branch: `runtime/consolidation-gate`
 - Pre-consolidation main preserved as: `archive/main-pre-consolidation-20260929`
 - CI 1287: SUCCESS
