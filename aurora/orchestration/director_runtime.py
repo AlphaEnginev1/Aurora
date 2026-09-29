@@ -895,12 +895,34 @@ class DirectorRuntime:
             # Director review must never satisfy an earlier decision's
             # execution/evidence requirements.
             observed_events = []
+            decision_task_ids: set[str] = set()
+            interval_closed = False
             for event in events:
                 if event.event_id <= decision_event.event_id:
                     continue
                 if event.event_type == "director_review":
+                    interval_closed = True
                     break
                 observed_events.append(event.event_type)
+                if event.event_type == "director_decision_executed":
+                    decision_task_ids.update(
+                        str(task_id)
+                        for task_id in (event.payload.get("task_ids") or [])
+                    )
+
+            # Follow-up tasks belong to the decision that created them even
+            # when the next Director review happens before those tasks finish.
+            # Associate their durable terminal events by task_id instead of
+            # extending the generic evidence window across later decisions.
+            if interval_closed and decision_task_ids:
+                for event in events:
+                    if (
+                        event.event_id > decision_event.event_id
+                        and event.task_id in decision_task_ids
+                        and event.event_type in {"succeeded", "failed", "blocked"}
+                    ):
+                        observed_events.append(event.event_type)
+
             if terminal_event is not None and terminal_event.event_id > decision_event.event_id:
                 observed_events.append(terminal_event.event_type)
             evaluation = DirectorDecisionLearning.evaluate(
