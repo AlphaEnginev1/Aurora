@@ -60,6 +60,7 @@ class DirectorDecisionPolicy:
             proposed_change=proposal.proposed_change,
             evidence_summary=proposal.evidence_summary,
             authorized_by=active.authorized_by,
+            created_at=active.activated_at,
         )
 
     @staticmethod
