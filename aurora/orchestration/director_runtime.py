@@ -802,6 +802,11 @@ class DirectorRuntime:
             if decision_event_id is not None
             else ()
         )
+        comparison_summaries = (
+            self.decision_comparison_store.summarize_for_decision(decision_event_id)
+            if decision_event_id is not None
+            else ()
+        )
         if comparisons:
             context.append(
                 {
@@ -822,6 +827,34 @@ class DirectorRuntime:
                                     "evidence": item.evidence,
                                 }
                                 for item in comparisons
+                            ],
+                            sort_keys=True,
+                        )
+                    ),
+                }
+            )
+        if comparison_summaries:
+            context.append(
+                {
+                    "role": "user",
+                    "content": (
+                        "Aggregated comparative observations for this Director decision. "
+                        "This is repeated observational evidence only; it does not establish "
+                        "causality or an automatic policy rule: "
+                        + json.dumps(
+                            [
+                                {
+                                    "alternative": item.alternative,
+                                    "chosen_decision": item.chosen_decision,
+                                    "observations": item.observations,
+                                    "better_observations": item.better_observations,
+                                    "worse_observations": item.worse_observations,
+                                    "same_observations": item.same_observations,
+                                    "undetermined_observations": item.undetermined_observations,
+                                    "consistent_direction": item.consistent_direction,
+                                    "sources": item.sources,
+                                }
+                                for item in comparison_summaries
                             ],
                             sort_keys=True,
                         )
