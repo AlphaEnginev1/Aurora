@@ -227,11 +227,15 @@ def test_adaptive_director_replans_after_terminal_phase(tmp_path: Path):
         event for event in store.events(submission.mission_id)
         if event.event_type == "director_decision_evaluated"
     ]
-    assert len(evaluations) == 1
+    assert len(evaluations) == 2
     assert evaluations[0].payload["decision"] == "continue"
     assert evaluations[0].payload["score"] == 1.0
     assert evaluations[0].payload["outcome"] == "follow_up_succeeded"
     assert evaluations[0].payload["round"] == 1
+    assert evaluations[1].payload["decision"] == "complete"
+    assert evaluations[1].payload["score"] == 1.0
+    assert evaluations[1].payload["outcome"] == "mission_completed"
+    assert evaluations[1].payload["round"] == 2
 
     second_review_context = planner.review_contexts[1]
     learning_messages = [
