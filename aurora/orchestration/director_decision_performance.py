@@ -85,9 +85,9 @@ class DirectorDecisionPerformanceStore:
         score: float | None,
         outcome: str,
         evidence: Iterable[str],
-        evidence_completeness: str,
-        sufficiency_reasons: Iterable[str],
         created_at: str,
+        evidence_completeness: str = "complete",
+        sufficiency_reasons: Iterable[str] = (),
     ) -> None:
         if evidence_completeness not in {"complete", "partial", "insufficient"}:
             raise ValueError("invalid evidence_completeness")
