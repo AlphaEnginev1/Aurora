@@ -14,6 +14,13 @@ from .engine import CapabilityTaskResult, OrchestrationEngine, TaskResult
 from .event_bus import DurableEventBus, EventBusError, EventSubscription
 from .mission_memory import MissionMemory, MissionMemoryError, MissionMessage
 from .director_runtime import DirectorRuntime, DirectorRuntimeError, MissionRuntimeResult, RuntimeCycle
+from .director_decision_knowledge import (
+    DirectorDecisionKnowledge,
+    DirectorDecisionKnowledgeError,
+    DirectorDecisionKnowledgePromotion,
+    DirectorDecisionKnowledgePromoter,
+)
+from .director_decision_knowledge_store import DirectorDecisionKnowledgeStore
 from .task_engine import DelegatedTask, DelegatedTaskResult, ResearchTaskResult, TaskEngine, TaskEngineError, TaskStatus
 from .task_store import DurableTaskStore, StoredTask, TaskEvent, TaskStoreError
 from .task_worker import TaskWorker, TaskWorkerError, WorkerCycle, WorkerPolicy
@@ -48,6 +55,11 @@ __all__ = [
     "DirectorRuntimeError",
     "MissionRuntimeResult",
     "RuntimeCycle",
+    "DirectorDecisionKnowledge",
+    "DirectorDecisionKnowledgeError",
+    "DirectorDecisionKnowledgePromotion",
+    "DirectorDecisionKnowledgePromoter",
+    "DirectorDecisionKnowledgeStore",
     "MissionMemory",
     "MissionMemoryError",
     "MissionMessage",
