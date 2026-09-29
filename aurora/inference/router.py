@@ -218,19 +218,37 @@ class ModelRouter:
         capability: str | None = None,
         preferred_models: Sequence[str] | None = None,
     ) -> InferenceResponse:
-        spec = self.select(
+        decision = self.route(
             request,
-            capability,
+            capability=capability,
             preferred_models=preferred_models,
         )
+        spec = next(model for model in self.models if model.id == decision.selected_model)
         execution_id = new_execution_id()
         if spec.provider == "nvidia_api":
-            return NVIDIAAPIProvider(
+            response = NVIDIAAPIProvider(
                 spec, api_key=self.nvidia_api_key
             ).generate(
                 request,
                 selected_model=spec.id,
                 execution_id=execution_id,
+            )
+            return InferenceResponse(
+                model=response.model,
+                provider=response.provider,
+                content=response.content,
+                raw=response.raw,
+                request_id=response.request_id,
+                execution_id=response.execution_id,
+                requested_model=response.requested_model,
+                selected_model=response.selected_model,
+                provider_model=response.provider_model,
+                reported_model=response.reported_model,
+                usage=response.usage,
+                telemetry=response.telemetry,
+                routing_score=decision.selected_score,
+                routing_factors=dict(decision.factors),
+                routing_candidates=decision.candidates,
             )
         raise ModelRoutingError(f"Unsupported provider: {spec.provider}")
 
