@@ -317,3 +317,51 @@ def test_comparative_evidence_is_advisory_in_next_director_cycle(tmp_path: Path)
     assert len(advisory_messages) >= 1
     assert '"state": "potentially_better_observed"' in advisory_messages[0]
     assert '"causal_attribution": "unsupported"' in advisory_messages[0]
+
+
+def test_comparative_evidence_aggregate_is_advisory(tmp_path: Path):
+    runtime, store, planner, _ = make_runtime(tmp_path)
+    submission = runtime.submit_mission(objective="adapt compare safely")
+
+    for _ in range(50):
+        runtime.run_once()
+        review_events = [
+            event for event in store.events(submission.mission_id)
+            if event.event_type == "director_review"
+        ]
+        if review_events:
+            break
+    assert review_events
+    decision_event_id = int(review_events[-1].event_id)
+
+    for index in range(1, 3):
+        runtime.record_decision_comparison(
+            mission_id=submission.mission_id,
+            decision_event_id=decision_event_id,
+            chosen_decision="continue",
+            alternative="complete",
+            comparative_evidence=DirectorDecisionComparativeEvidence(
+                source="independent_execution",
+                alternative_execution_id=f"alternative-execution-{index}",
+                chosen_execution_id=f"chosen-execution-{index}",
+                chosen_outcome="follow_up_succeeded",
+                alternative_outcome="mission_succeeded",
+                comparability_basis=("same_objective", "same_environment_class"),
+                observed_direction="better",
+            ),
+            created_at=f"2026-09-29T15:4{index}:00+00:00",
+        )
+
+    runtime.run_until_terminal(submission)
+
+    aggregate_messages = [
+        item["content"]
+        for context in planner.review_contexts
+        for item in context
+        if "Aggregated comparative observations for this Director decision." in item["content"]
+    ]
+    assert aggregate_messages
+    assert '"observations": 2' in aggregate_messages[0]
+    assert '"better_observations": 2' in aggregate_messages[0]
+    assert '"consistent_direction": "better"' in aggregate_messages[0]
+    assert "causality" in aggregate_messages[0]
