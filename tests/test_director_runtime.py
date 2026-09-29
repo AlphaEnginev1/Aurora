@@ -213,6 +213,8 @@ def test_adaptive_director_replans_after_terminal_phase(tmp_path: Path):
 
     events = [event.event_type for event in store.events(submission.mission_id)]
     assert "director_review" in events
+    assert events.count("director_decision_executed") == 2
+    assert "director_decision_evaluated" in events
     assert "mission_reopened" in events
     assert events.count("mission_succeeded") == 1
     assert [call["task_id"] for call in engine.orchestration.calls] == [
@@ -220,3 +222,23 @@ def test_adaptive_director_replans_after_terminal_phase(tmp_path: Path):
         "review",
         "r1_validate",
     ]
+
+    evaluations = [
+        event for event in store.events(submission.mission_id)
+        if event.event_type == "director_decision_evaluated"
+    ]
+    assert len(evaluations) == 1
+    assert evaluations[0].payload["decision"] == "continue"
+    assert evaluations[0].payload["score"] == 1.0
+    assert evaluations[0].payload["outcome"] == "follow_up_succeeded"
+    assert evaluations[0].payload["round"] == 1
+
+    second_review_context = planner.review_contexts[1]
+    learning_messages = [
+        item["content"]
+        for item in second_review_context
+        if "Durable Director decision learning evidence:" in item["content"]
+    ]
+    assert len(learning_messages) == 1
+    assert '"decision": "continue"' in learning_messages[0]
+    assert '"score": 1.0' in learning_messages[0]
