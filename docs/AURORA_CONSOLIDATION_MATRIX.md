@@ -1,171 +1,273 @@
 # Aurora Consolidation Matrix
 
-**Audit status: ACTIVE — FEATURE FREEZE**
+**Audit status: FINAL CONSOLIDATION RECORD — FEATURE FREEZE**
 
-This document is the working inventory for the Aurora consolidation gate. It is intentionally
-evidence-oriented: implementation existence is separated from runtime integration and from live-provider
-verification.
+This document is the authoritative implementation/status inventory produced by the consolidation gate.
+It separates implementation existence, automated testing, runtime wiring, live-provider verification, and
+genuine remaining work.
 
-## Canonical baseline
+## 0. Canonical source of truth
 
-- Audit branch: `runtime/consolidation-gate`
-- Source implementation baseline: `runtime/increment-10-director-contract`
-- Baseline commit: `64193c0cbbaccc0920c87f20054c83bc0c482d556`
+- **Canonical engineering branch: `main`**
+- Canonical commit after reconciliation: `e4dff9e0e15198d41cb5f3e086903fecd4e9d9f6`
+- Canonical pre-test implementation baseline: `64193c0bbaccc0920c87f20054c83bc0c482d556`
+- Consolidation evidence branch: `runtime/consolidation-gate`
+- Pre-consolidation main preserved as: `archive/main-pre-consolidation-20260929`
 - CI 1287: SUCCESS
 - CI 1288: SUCCESS
 - CI 1289: SUCCESS
+- CI 1291: SUCCESS
+- CI 1292: SUCCESS
+- CI 1293: SUCCESS
+- CI 1294: SUCCESS
+- CI 1295: SUCCESS
+- CI 1296: SUCCESS
 - Consolidation issue: #50
 
-## 1. System inventory
+**Decision:** `main` is now the single permanent engineering source of truth. The consolidation branch
+remains as an auditable snapshot of the gate work and is not a second implementation line.
 
-| Area | Current state | Evidence / notes |
-|---|---|---|
-| Repository / governance | IMPLEMENTED | Architecture, governance, security, CI and operational docs exist. |
-| Capability Broker / Registry | IMPLEMENTED | Registered capabilities are policy checked before execution. |
-| Autonomous capability discovery | IMPLEMENTED | PR #45 merged; current runtime has capability resolution/discovery services. |
-| Acquisition | IMPLEMENTED | APT/PyPI acquisition, verification, transactions, staging, recovery and dependency closure are present. |
-| Sandbox / workspace isolation | IMPLEMENTED | Bubblewrap-based isolated execution and deterministic per-attempt workspaces are present. |
-| Network controls | IMPLEMENTED / HARDENING REMAINS | Gateway, proxy and network dataplane exist. OS-level transparent enforcement is still documented as a separate hardening limitation. |
-| Inference Fabric / ModelRouter | IMPLEMENTED | Provider-neutral routing, model health/capability filtering, scoring and learned-performance inputs exist. |
-| NVIDIA provider | IMPLEMENTED | NVIDIA API adapter exists; live gate is opt-in and therefore not equivalent to live production verification. |
-| Director provider abstraction | IMPLEMENTED | Vendor-neutral Director provider contract plus Gemini adapter exist. |
-| Director 24/7 runtime | IMPLEMENTED | Durable Event Bus, worker leases, recovery, adaptive reviews and daemon are integrated. |
-| Loop safety | BOUNDED PER MISSION | `max_review_rounds=3` by default; `run_until_terminal` has `max_cycles=1000`; `run_forever` is intentionally continuous for the 24/7 service. |
-| Organization / departments | IMPLEMENTED | Organization Registry, role/capability authorization and model preferences exist. |
-| Specialist skills foundation | IMPLEMENTED | Versioned SkillRegistry, role defaults, task assignments, capability checks and persistence exist. |
-| Skill evaluation / learning | IMPLEMENTED | Durable evaluations and trusted performance history exist. |
-| Skill evolution | IMPLEMENTED | Evidence-backed proposals, validation, approval, promotion and rollback are implemented. |
-| Specialist acquisition | IMPLEMENTED | Governed discovery, construction and explicit promotion exist. |
-| Computer operator / credentials | IMPLEMENTED | Governed computer operation and credential/identity broker PRs are merged. |
-| Research domain | IMPLEMENTED | Research requests, sources, evidence, provenance and fail-closed states exist. |
-| Research parsing / claims | IMPLEMENTED | Deterministic visible-text parsing, claim extraction and provenance binding exist. |
-| Research verification | IMPLEMENTED | Independent-source verification and contradiction handling exist. |
-| Trusted knowledge / citation graph | IMPLEMENTED | Verified-only knowledge artifacts and durable citation edges exist. |
-| Research delegation | IMPLEMENTED | Durable `research` task path and bounded result summaries exist. |
-| Research → learning / routing | IMPLEMENTED | Verified-artifact trust gate and later adaptive routing proof exist; current proof provider is controlled/test-only. |
-| Research discovery provider | PARTIAL INTEGRATION | `HttpSearchProvider` exists, but the current `factory.py` constructs `ResearchService` without wiring a discovery provider. Do not count this as a complete autonomous research-discovery runtime path yet. |
-| Director decision learning | IMPLEMENTED | Durable evaluation, evidence sufficiency and performance aggregation exist. |
-| Comparative decision evidence | IMPLEMENTED | Explicit alternatives, independent comparisons, aggregation and cross-decision replication are present. |
-| Empirical decision knowledge | IMPLEMENTED | Repeated comparable observations can be promoted as observational knowledge; no causality is asserted. |
-| Director policy evolution | IMPLEMENTED | Governed proposal, validation, canary, rollback and active registry exist. |
-| Shadow canary | IMPLEMENTED | Candidate decision is simulated without candidate execution; evaluation is automatic and rollback is fail-closed on integrity violation. |
-| Active typed policy contract | IMPLEMENTED | Immutable typed contract and durable store exist. |
-| Live provider verification | NOT YET VERIFIED | Dedicated live Gemini and NVIDIA workflows are manual/opt-in. Current audit evidence does not show a successful live-provider run. |
+## 1. Definitive capability status
 
-## 2. Major milestones already completed
+| Area | IMPLEMENTADO | TESTEADO | RUNTIME INTEGRADO | LIVE VERIFICADO | PENDIENTE REAL |
+|---|---|---|---|---|---|
+| Foundation / governance / security / CI | YES | YES | YES | N/A | Production hardening only |
+| Capability Broker / Registry | YES | YES | YES | N/A | None identified |
+| Autonomous capability discovery / acquisition | YES | YES | YES | NO | Production-source expansion (APT/PyPI path limits) |
+| Acquisition transactions / provenance / dependency closure | YES | YES | YES | NO | Production drills |
+| Sandbox / deterministic workspaces | YES | YES | YES | NO | Host-level enforcement verification |
+| Application network gateway / proxy / dataplane | YES | YES | YES | NO | OS-level transparent enforcement decision + proof |
+| Inference Fabric / ModelRouter | YES | YES | YES | NO | Live provider verification |
+| NVIDIA provider | YES | YES | YES (provider contract) | NO | Live NVIDIA gate and production authorization |
+| Director provider abstraction / Gemini adapter | YES | YES | YES (provider contract) | NO | Live Gemini gate and production authorization |
+| Director 24/7 runtime | YES | YES | YES | N/A | Production observability / recovery drills |
+| Loop safety / bounded mission review | YES | YES | YES | N/A | None identified |
+| Organization / departments / agent selection | YES | YES | YES | N/A | None identified |
+| Specialist skills foundation | YES | YES | YES | N/A | None identified |
+| Skill evaluation / learning | YES | YES | YES | NO | Production live-provider evidence |
+| Skill evolution / validation / promotion / rollback | YES | YES | YES | NO | Production live-provider evidence |
+| Specialist acquisition / construction | YES | YES | YES | NO | Production live-provider evidence |
+| Computer operator / credential boundary | YES | YES | YES | NO | Production authorization drills |
+| Research domain / durable evidence | YES | YES | YES | NO | Live research-discovery runtime wiring |
+| Research parsing / claim extraction | YES | YES | YES | NO | None identified |
+| Research independent verification / contradiction handling | YES | YES | YES | NO | Production live-source drill |
+| Trusted knowledge / citation graph | YES | YES | YES | NO | None identified |
+| Research delegation to TaskEngine | YES | YES | YES | NO | None identified |
+| Research → learning / routing trust gate | YES | YES | YES | NO | Live-provider verification |
+| **Research HttpSearchProvider** | **YES** | **YES** | **NO — factory not wired** | NO | Wire governed provider into runtime factory/configuration |
+| Director decision learning / comparative evidence | YES | YES | YES | N/A | None identified |
+| Empirical decision knowledge promotion | YES | YES | YES | N/A | None identified |
+| Director policy evolution / canary / rollback | YES | YES | YES | N/A | Production recovery drill |
+| Active typed policy contract | YES | YES | YES | N/A | None identified |
+| Live provider workflows | YES (workflow code) | YES (workflow definition) | OPT-IN ONLY | **NO** | Execute and record real NVIDIA/Gemini runs |
 
-The following are already represented in the integration line and must NOT be reopened as new feature increments:
+### Meaning of the five columns
 
-- Phase 8 Adaptive Agent Intelligence — merged at `d5621d08e0207eaa222620f3d6fc7f7f016b0edf`.
-- Parallel runtime hardening — PR #26 merged.
-- Mission team runtime and adaptive team behavior — PRs #27 and #28 merged.
-- Skill acquisition / construction / promotion / evolution / rollback — PRs #29–#38 merged.
-- Model performance learning / routing integration — PRs #39–#42 and #49 merged.
-- Governed web discovery provider — PR #43 merged.
-- Tool artifact injection — PR #44 merged.
-- Autonomous capability discovery / persistent acquisition — PR #45 merged.
-- Governed computer operator / credential boundary — PRs #46–#47 merged.
-- Phase 9 research increments through adaptive routing proof are represented in the current line.
-- Director decision learning, comparative evidence, knowledge promotion, policy lifecycle, shadow canary and active contract work are represented by CIs 1193–1289.
+- **IMPLEMENTADO:** code path exists in the canonical source.
+- **TESTEADO:** automated tests provide evidence on the canonical line.
+- **RUNTIME INTEGRADO:** the normal Aurora runtime factory/orchestration path wires and can invoke it.
+- **LIVE VERIFICADO:** a real external provider/environment run has been executed and its evidence recorded.
+- **PENDIENTE REAL:** work that is still genuinely required; this is not a synonym for “nice to have”.
 
-## 3. GitHub process hazards found
+## 2. Research discovery finding
 
-### Historical stacked branches
+The canonical line contains `HttpSearchProvider` and `ResearchService.discover()`.
+The provider boundary now has explicit tests covering:
 
-The repository contains many historical `runtime/*` branches whose implementations were later
-integrated into the current line. They remain visible and should be treated as historical work,
-not as an independent future backlog.
+1. unique URL discovery and request construction;
+2. fail-closed behavior when no discovery provider is configured;
+3. successful `ResearchService` use of an explicitly supplied discovery provider.
 
-### Historical PR cleanup
+However, `build_director_runtime()` currently constructs:
 
-The obsolete stacked PR backlog has now been closed for consolidation: PRs #1–#23, #25 and #48.
-PRs #24 and #26–#47 were already merged. There are currently **no open pull requests** in the repository.
-This removes the primary GitHub-level source of false "pending work" signals.
+`ResearchService(gateway, ResearchStore(...))`
 
-### Main branch divergence
+without supplying a `discovery=HttpSearchProvider(...)` instance.
 
-At audit time, `main` points to `232522026917160e7faa032c72ff92a8e3ae4060`, while the implementation
-baseline is `64193c0cbbaccc0920c87f20054c83bc0c482d556`. The comparison reports the implementation branch
-as 810 commits ahead and 6 commits behind `main`. Until this is reconciled, `main` cannot be treated
-as the authoritative Aurora implementation line.
+Therefore the precise status is:
 
-### Documentation drift
+**IMPLEMENTADO = YES**  
+**TESTEADO = YES**  
+**RUNTIME INTEGRADO = NO**  
+**LIVE VERIFICADO = NO**  
+**PENDIENTE REAL = governed runtime wiring + configuration + live evidence**
 
-The current ROADMAP and several operational documents still describe already-completed work as future
-"Next increments". README still describes the repository as "Foundation bootstrap in progress". These
-statements are not reliable project-state indicators.
+No autonomous research-discovery feature should be reimplemented; only the missing runtime connection remains.
 
-## 4. Duplicate implementation finding
+## 3. Live provider verification
 
-No duplicate primary implementation of the following was found in the current source tree:
+Two dedicated manual/opt-in workflows exist:
 
-- DirectorRuntime
-- ModelRouter
-- SkillLearningStore
-- ResearchService
-- Director decision-learning store
-- Director policy lifecycle / canary / active contract stores
+- `.github/workflows/live-nvidia-learning.yml`
+- `.github/workflows/live-gemini-director.yml`
 
-The `aurora_director` package is an integration wrapper, not a second Director implementation.
+Their existence is not evidence of live operation. The consolidation audit found no successful live-provider run
+that can be promoted to **LIVE VERIFICADO**.
 
-The repeated initial commit message `feat: establish Aurora autonomous architecture v1` appears 19 times,
-but inspection shows these are individual initial-file commits (architecture / ADR material), not 19
-copies of the runtime implementation.
+Therefore:
 
-## 5. Director loop audit
+- NVIDIA: IMPLEMENTADO / TESTEADO / RUNTIME INTEGRADO at provider-contract level / LIVE VERIFICADO = NO.
+- Gemini: IMPLEMENTADO / TESTEADO / RUNTIME INTEGRADO at provider-contract level / LIVE VERIFICADO = NO.
 
-The continuous service loop is intentional:
+The remaining action is execution and recording of the real gates under the appropriate authorization and secrets.
 
-`run_forever() -> run_once() -> worker execution -> terminal review/replan`.
+## 4. Network enforcement
 
-Mission-level safeguards are present:
+Aurora has application-level network governance through the InternetGateway, egress proxy and network dataplane.
+The remaining boundary is whether production requires **transparent OS-level enforcement** that cannot be bypassed by
+a process escaping the application-level control plane.
 
-- default `max_review_rounds=3`;
-- exhausted review budget produces `mission_blocked`;
-- `run_until_terminal` has `max_cycles=1000`;
-- durable event/task state is authoritative across restart;
-- later Director reviews cannot satisfy earlier decision evidence outside their bounded interval.
+This is now classified as a production-security decision and verification item, not an unimplemented duplicate
+network architecture.
 
-Therefore the current code does not show an uncontrolled per-mission review/replan loop.
+## 5. Observability and recovery
 
-## 6. Work classification
+The runtime already contains durable task/event state, leases, reconciliation, bounded execution and restart
+recovery paths. What remains for production is operational evidence:
 
-### CLOSED / DO NOT REOPEN
+- production-grade observability coverage;
+- controlled crash/restart/recovery drills;
+- evidence that the documented recovery guarantees hold under representative failures.
 
-Core autonomy, acquisition, sandbox, network gateway/proxy, 24/7 runtime, organization,
-specialist skills, skill learning/evolution lifecycle, model routing evidence, research evidence
-pipeline, capability discovery, computer/credential governance, Director decision learning,
-comparative evidence, knowledge promotion, policy evolution, canary and active contract.
+This is verification/hardening of existing runtime behavior, not a new orchestration feature.
 
-### PARTIALLY INTEGRATED
+## 6. Historical branch classification
 
-- Research discovery provider exists but is not wired into the ResearchService construction in the
-  current runtime factory.
-- OS-level transparent network enforcement remains a separate hardening boundary.
-- Some "live" provider paths are opt-in/manual and have not been established as continuously verified
-  runtime providers.
+At consolidation time the repository contains **57 branch refs**:
 
-### CONSOLIDATION REQUIRED BEFORE NEW FEATURES
+- 1 canonical branch: `main`;
+- 1 consolidation evidence branch: `runtime/consolidation-gate`;
+- 1 preserved pre-consolidation main snapshot: `archive/main-pre-consolidation-20260929`;
+- 55 other historical branches.
 
-- Choose the canonical implementation branch.
-- Reconcile `main` with the implementation line.
-- Close/archive obsolete stacked PRs or explicitly mark them historical.
-- Replace stale roadmap/documentation statements.
-- Keep this matrix as the authoritative status record until the canonical roadmap is repaired.
-- Produce a finite, evidence-backed remaining-work list.
+All 55 historical branches are classified **ARCHIVE / INTEGRATED**. They are not future implementation lines and
+are not new work queues.
 
-## 7. Freeze rule
+### 6.1 Historical branches that are direct ancestors of the canonical line (35)
 
-No new Aurora functionality is to be implemented while Issue #50 is open.
+`fix/bwrap-status-framing-v1`  
+`fix/network-securebits-test-v1`  
+`foundation/aurora-architecture-v1`  
+`integration/aurora-foundation`  
+`runtime/acquisition-service-v2-e2e`  
+`runtime/acquisition-service-v3-dependency-closure`  
+`runtime/acquisition-transactions-v1`  
+`runtime/adaptive-director-memory-loop`  
+`runtime/adaptive-mission-teams`  
+`runtime/agent-department-registry-routing`  
+`runtime/agent-skills-specialization`  
+`runtime/capability-broker-execution-e2e`  
+`runtime/concurrency-hardening`  
+`runtime/controlled-network-broker-v1`  
+`runtime/director-eventbus-24x7`  
+`runtime/director-task-engine`  
+`runtime/durable-task-queue`  
+`runtime/egress-proxy-enforcement-v1`  
+`runtime/execution-sandbox-v1`  
+`runtime/filesystem-staging-rollback-v1`  
+`runtime/increment-9-provider-contract`  
+`runtime/increment-10-director-contract`  
+`runtime/inference-fabric-v1`  
+`runtime/isolated-network-dataplane-v1`  
+`runtime/knowledge-claims-extraction`  
+`runtime/knowledge-research-intelligence`  
+`runtime/package-provenance-v1`  
+`runtime/research-learning-routing`  
+`runtime/research-task-delegation`  
+`runtime/skill-acquisition-evolution`  
+`runtime/skill-evaluation-learning-dynamic-routing`  
+`runtime/task-worker-24x7`  
+`runtime/team-mission-runtime`  
+`runtime/trusted-knowledge-artifacts`  
+`runtime/verification-contradictions`
 
-Allowed changes are limited to consolidation documentation, verification, tests, and fixes required
-to make already-implemented behavior accurately represented and safely verifiable.
+### 6.2 Historical branches that diverged from the canonical line but are still integrated (20)
 
-## 8. Audit conclusion
+These were inspected as divergent historical work. Their unique commits correspond to functionality already
+represented in the canonical line or to older variants superseded by later hardening.
 
-The principal risk is not a second copy of Aurora's runtime logic. The principal risk is repository
-state drift: historical branches and open stacked PRs plus stale documentation make completed features
-look unfinished and can cause future work to be reimplemented.
+`runtime/adaptive-routing-proof`  
+`runtime/autonomous-capability-engine`  
+`runtime/autonomous-skill-evolution`  
+`runtime/autonomous-specialist-acquisition`  
+`runtime/crash-recovery-reconciliation-v1`  
+`runtime/credential-identity-broker`  
+`runtime/evidence-driven-skill-generation`  
+`runtime/governed-computer-operator`  
+`runtime/governed-web-discovery`  
+`runtime/model-performance-integration-fix`  
+`runtime/model-performance-learning`  
+`runtime/richer-skill-evidence`  
+`runtime/skill-acquisition-pipeline`  
+`runtime/skill-discovery-construction`  
+`runtime/skill-promotion-team-reformation`  
+`runtime/skill-regression-rollback`  
+`runtime/skill-validation-durability`  
+`runtime/skill-validation-lab`  
+`runtime/tool-artifact-injection`  
+`runtime/validation-replay-context`
 
-This gate therefore becomes the control point for future planning. A new implementation increment is
-not valid until it appears in the reconciled remaining-work list after this gate is closed.
+Notably, the old `runtime/governed-web-discovery` branch carries an earlier/simple ResearchService implementation;
+the canonical line contains the later research parsing, provenance, verification and knowledge work. Its branch is
+therefore historical and must not be used to reconstruct current behavior.
+
+## 7. Main reconciliation decision
+
+The old `main` was not used as the implementation source of truth because it was structurally behind the
+integration line while also carrying six historical commits. Those commits were:
+
+- governed runtime skill acquisition + its corrective revert;
+- governed web discovery provider;
+- live Gemini Director workflow exposure.
+
+The actual implementation line already contains the corresponding runtime capabilities and a current Gemini
+workflow. The old `main` state is preserved intact at:
+
+`archive/main-pre-consolidation-20260929`
+
+The canonical implementation is therefore the audited consolidation line, now promoted to:
+
+**`main`**
+
+## 8. CLOSED / DO NOT REOPEN
+
+Do not reopen as new increments:
+
+- foundation/governance/security;
+- capability broker/registry;
+- acquisition/provenance/transactions/dependency closure;
+- sandbox/workspace isolation;
+- application network gateway/proxy/dataplane;
+- Director 24/7 runtime;
+- bounded mission review/replan;
+- organization/departments;
+- specialist skills;
+- skill evaluation/learning/evolution/rollback;
+- specialist acquisition;
+- computer/credential governance;
+- research evidence/parsing/verification/knowledge;
+- research delegation and trust-gated learning;
+- adaptive routing proof;
+- provider execution contract;
+- Director decision learning/comparison/replication;
+- empirical decision knowledge;
+- policy evolution/canary/rollback;
+- active policy registry and immutable active contract.
+
+The consolidation matrix is the first check before proposing any future increment.
+
+## 9. Genuine remaining production work
+
+After consolidation, the finite remaining list is:
+
+1. **Research discovery runtime wiring** — connect the existing `HttpSearchProvider` to the normal Director runtime
+   through governed configuration, then test the complete path.
+2. **OS-level network enforcement** — decide the required host boundary and execute an end-to-end proof if required.
+3. **Live NVIDIA verification** — execute and record a real provider gate.
+4. **Live Gemini verification** — execute and record a real provider gate.
+5. **Production observability** — close remaining operational visibility gaps.
+6. **Recovery drills** — execute controlled crash/restart/reconciliation exercises and archive evidence.
+7. **Controlled production authorization** — define the explicit live-operation gate and evidence requirements.
+
+No Increment 11 is authorized by this document. New functionality remains frozen until the consolidation gate
+is explicitly closed and the next increment is derived from this finite evidence-backed list.
