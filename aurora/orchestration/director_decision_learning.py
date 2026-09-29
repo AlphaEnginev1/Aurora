@@ -72,6 +72,7 @@ class DirectorDecisionLearning:
             return None
 
         reasons.append("result_observed")
+        reasons.append("decision_review_evidence_available")
         if has_execution:
             reasons.append("execution_observed")
         else:
@@ -123,6 +124,7 @@ class DirectorDecisionLearning:
             quality = "evaluation_pending"
 
         if completeness != "complete":
+            reasons.append("critical_information_missing")
             attribution = "insufficient_evidence_for_quality_attribution"
 
         return DirectorDecisionEvaluation(
