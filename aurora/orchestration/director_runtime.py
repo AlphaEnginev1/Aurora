@@ -29,6 +29,7 @@ from .director_decision_policy_canary_evaluation import (
 )
 from .director_decision_policy_canary_evaluation_store import DirectorDecisionPolicyCanaryEvaluationStore
 from .director_decision_policy_lifecycle import DirectorDecisionPolicyLifecycle
+from .director_decision_policy_lifecycle_store import DirectorDecisionPolicyLifecycleStore
 from .director_decision_policy_evolution import DirectorDecisionPolicyProposal
 from .director_decision_policy_lifecycle import DirectorDecisionPolicyActivation
 from .durable_director import DurableDirectorService, MissionSubmission
@@ -104,6 +105,7 @@ class DirectorRuntime:
         policy_shadow_proposal: DirectorDecisionPolicyProposal | None = None,
         policy_shadow_store: DirectorDecisionPolicyShadowCanaryStore | None = None,
         policy_shadow_evaluation_store: DirectorDecisionPolicyCanaryEvaluationStore | None = None,
+        policy_shadow_lifecycle_store: DirectorDecisionPolicyLifecycleStore | None = None,
         policy_shadow_decider: Callable[[str, list[dict[str, Any]], DirectorDecisionPolicyProposal], str] | None = None,
         sleep_fn: Callable[[float], None] = sleep,
     ) -> None:
@@ -168,6 +170,10 @@ class DirectorRuntime:
         self.policy_shadow_evaluation_store = (
             policy_shadow_evaluation_store
             or DirectorDecisionPolicyCanaryEvaluationStore(store.path)
+        )
+        self.policy_shadow_lifecycle_store = (
+            policy_shadow_lifecycle_store
+            or DirectorDecisionPolicyLifecycleStore(store.path)
         )
         self.policy_shadow_decider = policy_shadow_decider
         self._sleep = sleep_fn
@@ -545,19 +551,8 @@ class DirectorRuntime:
                 reason=evaluation.reason,
                 authorized_by=rollback_authority,
             )
+            self.policy_shadow_lifecycle_store.record_activation(rolled_back)
             self.policy_shadow_activation = rolled_back
-            self.event_bus.publish(
-                mission_id="__policy_governance__",
-                event_type="director_decision_policy_shadow_rolled_back",
-                payload={
-                    "proposal_id": rolled_back.proposal_id,
-                    "validation_id": rolled_back.validation_id,
-                    "state": rolled_back.state,
-                    "reason": evaluation.reason,
-                    "evaluation_id": evaluation.evaluation_id,
-                    "authorized_by": rolled_back.authorized_by,
-                },
-            )
         return evaluation
 
     def _observe_policy_shadow_canary(
