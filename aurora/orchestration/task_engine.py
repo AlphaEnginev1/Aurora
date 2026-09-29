@@ -323,6 +323,11 @@ class TaskEngine:
             for evaluation in evaluations:
                 self.skill_learning.record(evaluation)
                 if self.model_performance is not None:
+                    response = (
+                        result.model_result.response
+                        if result.model_result is not None
+                        else None
+                    )
                     self.model_performance.record(
                         model=evaluation.model,
                         skill_id=evaluation.skill_id,
@@ -333,6 +338,9 @@ class TaskEngine:
                         evidence_completeness=evaluation.evidence_completeness,
                         evidence_state=evaluation.evidence_state,
                         created_at=self._learning_timestamp(),
+                        routing_score=response.routing_score if response else None,
+                        routing_factors=response.routing_factors if response else None,
+                        routing_candidates=response.routing_candidates if response else (),
                     )
                 evolution.observe(
                     evaluation,
@@ -518,150 +526,3 @@ class TaskEngine:
                 discovered = ResearchRequest(
                     request_id=request.request_id,
                     objective=request.objective,
-                    required_sources=urls,
-                    constraints=request.constraints,
-                    max_sources=request.max_sources,
-                )
-                sources, claims = self.research_service.retrieve_and_extract(discovered)
-            trust_state = EvidenceState.INSUFFICIENT
-            trusted_artifacts: tuple[str, ...] = ()
-            if artifact_ids:
-                if self.research_learning_gate is None:
-                    raise TaskEngineError("trusted research artifacts require a configured research learning gate")
-                signal = self.research_learning_gate.authorize(tuple(artifact_ids))
-                trust_state = signal.state
-                trusted_artifacts = signal.artifact_ids
-            return ResearchTaskResult(
-                request_id=request.request_id,
-                source_ids=tuple(source.source_id for source in sources),
-                claim_ids=tuple(claim.claim_id for claim in claims),
-                trust_state=trust_state,
-                knowledge_artifact_ids=trusted_artifacts,
-            )
-
-        if task.capability:
-            request = CapabilityRequest(
-                name=task.capability,
-                actor=task.role,
-                reason=task.objective,
-            )
-            execution_workspace = workspace or self.workspace_root
-            return self.orchestration.run_capability_task(
-                task_id=task.task_id,
-                role=task.role,
-                request=request,
-                workspace=execution_workspace,
-                args=task.args,
-            )
-        skill_context = (
-            skill_assignment.render_system_context()
-            if skill_assignment is not None
-            else ""
-        )
-        if trusted_artifact_ids:
-            if self.research_learning_gate is None:
-                raise TaskEngineError("trusted research artifacts require a configured research learning gate")
-            research_context = self.research_learning_gate.context_for(trusted_artifact_ids)
-            research_block = "\n".join(
-                f"- artifact_id={artifact_id}: {claim}"
-                for artifact_id, claim in research_context
-            )
-            skill_context = (
-                skill_context + "\n\n"
-                if skill_context else ""
-            ) + (
-                "Verified research knowledge authorized for this task. Treat these claims "
-                "as governed evidence and do not extend them beyond their stated content:\n"
-                + research_block
-            )
-        required_capabilities = (
-            tuple(sorted({
-                capability
-                for skill in skill_assignment.skills
-                for capability in skill.required_capabilities
-            }))
-            if skill_assignment is not None
-            else ()
-        )
-        prepare_capabilities = getattr(
-            self.orchestration, "prepare_capabilities", None
-        )
-        artifacts = (
-            prepare_capabilities(
-                names=required_capabilities,
-                actor=task.role,
-                reason=task.objective,
-            )
-            if prepare_capabilities is not None
-            else ()
-        )
-        if artifacts:
-            manifest = "\n".join(
-                f"- {item.name}: version={item.version or 'unknown'}, "
-                f"source={item.source or 'unknown'}, path={item.path or 'unknown'}, "
-                f"artifact_id={item.artifact_id or 'unknown'}, verification={item.verification}"
-                for item in artifacts
-            )
-            skill_context = (
-                skill_context + "\n\n"
-                if skill_context else ""
-            ) + (
-                "Governed capability artifacts prepared for this task. "
-                "Use only through Aurora's capability boundary; do not bypass it.\n"
-                + manifest
-            )
-        return self.orchestration.run_task(
-            task_id=task.task_id,
-            role=task.role,
-            objective=task.objective,
-            model_preferences=model_preferences,
-            skill_ids=skill_ids,
-            skill_tags=skill_tags,
-            task_type=task_type,
-            learned_model_scores=learned_model_scores,
-            context=(
-                [{"role": "system", "content": skill_context}]
-                if skill_context
-                else None
-            ),
-        )
-
-    def _workspace_for_task(self, task: DelegatedTask, execution_scope: str | None) -> Path:
-        """Return an isolated deterministic workspace for one execution attempt."""
-        if execution_scope is None:
-            return self.workspace_root
-        if not execution_scope.strip():
-            raise TaskEngineError("execution_scope cannot be empty")
-        digest = hashlib.sha256(execution_scope.encode("utf-8")).hexdigest()
-        workspace = self.workspace_root / "tasks" / digest
-        workspace.mkdir(parents=True, exist_ok=True)
-        return workspace
-
-    @staticmethod
-    def _assert_acyclic(tasks: Sequence[DelegatedTask]) -> None:
-        graph = {task.task_id: set(task.depends_on) for task in tasks}
-        visiting: set[str] = set()
-        visited: set[str] = set()
-
-        def visit(task_id: str) -> None:
-            if task_id in visiting:
-                raise TaskEngineError("task graph contains a dependency cycle")
-            if task_id in visited:
-                return
-            visiting.add(task_id)
-            for dep in graph[task_id]:
-                visit(dep)
-            visiting.remove(task_id)
-            visited.add(task_id)
-
-        for task_id in graph:
-            visit(task_id)
-
-
-__all__ = [
-    "DelegatedTask",
-    "DelegatedTaskResult",
-    "TaskEngine",
-    "TaskEngineError",
-    "TaskStatus",
-]
