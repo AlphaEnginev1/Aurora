@@ -154,10 +154,12 @@ def test_policy_lifecycle_canary_can_be_rolled_back():
     assert rolled_back.proposal_id == canary.proposal_id
     assert rolled_back.validation_id == canary.validation_id
 
-    with pytest.raises(DirectorDecisionPolicyLifecycleError, match="canary state"):
-        from aurora.orchestration.director_decision_policy_canary import (
-            DirectorDecisionPolicyShadowCanary,
-        )
+    from aurora.orchestration.director_decision_policy_canary import (
+        DirectorDecisionPolicyCanaryError,
+        DirectorDecisionPolicyShadowCanary,
+    )
+
+    with pytest.raises(DirectorDecisionPolicyCanaryError, match="canary state"):
 
         DirectorDecisionPolicyShadowCanary.observe(
             rolled_back,
