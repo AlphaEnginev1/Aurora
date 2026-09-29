@@ -127,7 +127,14 @@ class DirectorDecisionLearning:
             # Task-level terminal evidence is retained as supporting evidence
             # when available, but its absence must not erase an otherwise
             # executed and terminally observed Director decision.
-            required = has_execution and "mission_reopened" in observed_set
+            required = (
+                terminal is not None
+                and (
+                    has_execution
+                    or "mission_reopened" in observed_set
+                )
+                and "mission_reopened" in observed_set
+            )
         elif decision == "complete":
             outcome = "mission_completed" if terminal == "mission_succeeded" else f"mission_{terminal.removeprefix('mission_')}"
             score = 1.0 if terminal == "mission_succeeded" else 0.0
