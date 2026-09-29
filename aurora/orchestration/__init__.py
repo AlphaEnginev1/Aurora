@@ -33,6 +33,7 @@ from .director_decision_policy_canary import (
     DirectorDecisionPolicyShadowObservation,
 )
 from .director_decision_policy_canary_store import (
+    DirectorDecisionPolicyCanaryReadiness,
     DirectorDecisionPolicyShadowCanaryStore,
     DirectorDecisionPolicyShadowSummary,
 )
@@ -89,6 +90,7 @@ __all__ = [
     "DirectorDecisionPolicyCanaryError",
     "DirectorDecisionPolicyShadowCanary",
     "DirectorDecisionPolicyShadowObservation",
+    "DirectorDecisionPolicyCanaryReadiness",
     "DirectorDecisionPolicyShadowCanaryStore",
     "DirectorDecisionPolicyShadowSummary",
     "DirectorDecisionKnowledge",
