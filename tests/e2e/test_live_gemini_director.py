@@ -20,6 +20,11 @@ from aurora.orchestration.director_provider import DirectorModelResponse, Direct
 from aurora.orchestration.engine import OrchestrationEngine
 from aurora.orchestration.gemini_provider import GeminiDirectorProvider
 from aurora.orchestration.task_engine import TaskEngine, TaskStatus
+from aurora.organization.registry import AgentSpec, DepartmentSpec, OrganizationRegistry
+from aurora.skills.models import SkillSpec
+from aurora.skills.registry import SkillRegistry
+from aurora.skills.learning import SkillLearningStore
+from aurora.inference.model_performance import ModelPerformanceStore
 
 
 @pytest.fixture(scope="module")
@@ -105,7 +110,11 @@ class ControlledRouter:
         return InferenceResponse(
             model="controlled-task-model",
             provider="controlled",
-            content="controlled execution result",
+            content=(
+                "controlled execution result\n"
+                "VERIFY:result_present=pass\n"
+                "QUALITY:quality_ok=pass"
+            ),
             request_id=request.request_id,
             execution_id="controlled-execution",
         )
@@ -221,6 +230,7 @@ class MissionReplayDirectorProvider(ReplayDirectorProvider):
     def __init__(self, response: DirectorModelResponse):
         super().__init__(response)
         self.calls = 0
+        self.review_contexts = []
 
     def generate(self, messages, model, role, tools=()):
         self.calls += 1
@@ -302,6 +312,7 @@ class ReplanningDirectorProvider(MissionReplayDirectorProvider):
         if role == "director_planner":
             return self.response
         if role == "director_reviewer":
+            self.review_contexts.append(tuple(messages))
             if self.calls == 2:
                 return DirectorModelResponse(
                     content=(
@@ -340,9 +351,50 @@ def test_live_gemini_director_replans_after_review_and_completes(
     provider = ReplanningDirectorProvider(live_gemini_response)
     planner = DirectorPlanner(provider=provider, router=None)
     router = ControlledRouter()
+    skill = SkillSpec(
+        skill_id="research.validation",
+        version="1.0.0",
+        name="Research validation",
+        mission="Validate research execution outputs.",
+        instructions="Return governed verification and quality markers.",
+        required_capabilities=frozenset(),
+        verification_requirements=("result_present",),
+        quality_checks=("quality_ok",),
+        tags=("research", "verification"),
+        model_preferences=("controlled-task-model",),
+    )
+    skill_registry = SkillRegistry({"research.validation": skill})
+    organization = OrganizationRegistry(
+        agents={
+            "agent-researcher": AgentSpec(
+                agent_id="agent-researcher",
+                role="researcher",
+                department="research",
+                mission="Perform controlled research validation.",
+                capabilities=frozenset(),
+                model_preferences=("controlled-task-model",),
+                skill_ids=("research.validation",),
+            )
+        },
+        departments={
+            "research": DepartmentSpec(
+                department_id="research",
+                mission="Research",
+                agent_ids=("agent-researcher",),
+                model_preferences=("controlled-task-model",),
+                allowed_capabilities=frozenset(),
+            )
+        },
+    )
+    skill_learning = SkillLearningStore(tmp_path / "skills.db")
+    model_performance = ModelPerformanceStore(tmp_path / "model-performance.db")
     task_engine = TaskEngine(
         orchestration=OrchestrationEngine(router),
         workspace_root=tmp_path / "workspace",
+        organization=organization,
+        skill_registry=skill_registry,
+        skill_learning=skill_learning,
+        model_performance=model_performance,
     )
     store = DurableTaskStore(tmp_path / "tasks.db")
     event_bus = DurableEventBus(store)
@@ -380,6 +432,23 @@ def test_live_gemini_director_replans_after_review_and_completes(
 
     assert provider.calls == 3
     assert len(router.requests) == 2
+    scores = model_performance.trusted_scores_for(
+        skill_ids=("research.validation",),
+        skill_versions={"research.validation": "1.0.0"},
+        task_type="research",
+        context_bucket="medium",
+        minimum_evaluations=1,
+        minimum_evidence_completeness=1.0,
+    )
+    assert scores == {"controlled-task-model": 1.0}
+    assert provider.review_contexts
+    assert any(
+        "Observed specialist evaluations:" in message.get("content", "")
+        and "score=1.0" in message.get("content", "")
+        and "evidence_state=evidence_complete" in message.get("content", "")
+        for review in provider.review_contexts
+        for message in review
+    )
 
     events = [event.event_type for event in store.events(submission.mission_id)]
     assert events.count("director_review") == 2
