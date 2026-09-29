@@ -69,7 +69,7 @@ class DirectorDecisionPolicy:
     ) -> str:
         contract = DirectorDecisionPolicy.active_contract(active, proposal)
         return (
-            "Active Director policy contract (governed and advisory; never an "
+            "Active Director policy guidance and contract (governed and advisory; never an "
             "automatic decision rule): "
             + json.dumps(contract.advisory_record(), sort_keys=True)
             + f" proposed_change={proposal.proposed_change}. "
