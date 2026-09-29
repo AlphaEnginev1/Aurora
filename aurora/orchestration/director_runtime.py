@@ -789,6 +789,33 @@ class DirectorRuntime:
                     ),
                 }
             )
+        comparisons = self.decision_comparison_store.list_for_decision(decision_event_id)
+        if comparisons:
+            context.append(
+                {
+                    "role": "user",
+                    "content": (
+                        "Comparative evidence advisory for this Director decision. "
+                        "These observations are not causal claims and must not be converted "
+                        "into an automatic rule: "
+                        + json.dumps(
+                            [
+                                {
+                                    "alternative": item.alternative,
+                                    "source": item.source,
+                                    "state": item.state,
+                                    "observed_direction": item.observed_direction,
+                                    "reason": item.reason,
+                                    "causal_attribution": item.causal_attribution,
+                                    "evidence": item.evidence,
+                                }
+                                for item in comparisons
+                            ],
+                            sort_keys=True,
+                        )
+                    ),
+                }
+            )
         policy_prompt = DirectorDecisionPolicy.prompt(decision_guidance)
         if policy_prompt:
             context.append({"role": "user", "content": policy_prompt})
