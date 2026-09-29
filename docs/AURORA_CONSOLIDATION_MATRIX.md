@@ -1,6 +1,6 @@
 # Aurora Consolidation Matrix
 
-**Audit status: FINAL CONSOLIDATION RECORD — FEATURE FREEZE**
+**Consolidation status: COMPLETE — FINAL RECORD**
 
 This document is the authoritative implementation/status inventory produced by the consolidation gate.
 It separates implementation existence, automated testing, runtime wiring, live-provider verification, and
