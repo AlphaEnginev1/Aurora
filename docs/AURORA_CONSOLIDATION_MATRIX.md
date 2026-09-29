@@ -132,11 +132,13 @@ This is verification/hardening of existing runtime behavior, not a new orchestra
 
 ## 6. Historical branch classification
 
-At consolidation time the repository contains **57 branch refs**:
+At consolidation time the repository contains **58 branch refs**:
 
 - 1 canonical branch: `main`;
 - 1 consolidation evidence branch: `runtime/consolidation-gate`;
 - 1 preserved pre-consolidation main snapshot: `archive/main-pre-consolidation-20260929`;
+
+The pre-consolidation `main` state remains untouched in that archive branch for historical evidence.
 - 55 other historical branches.
 
 All 55 historical branches are classified **ARCHIVE / INTEGRATED**. They are not future implementation lines and
