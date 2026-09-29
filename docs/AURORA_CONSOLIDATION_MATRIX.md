@@ -76,10 +76,11 @@ The repository contains many historical `runtime/*` branches whose implementatio
 integrated into the current line. They remain visible and should be treated as historical work,
 not as an independent future backlog.
 
-### Open draft PRs
+### Historical PR cleanup
 
-Multiple old stacked PRs remain open even though their functionality is already integrated. Examples
-include PRs #16–#25 and #48. These PRs are a major source of false "pending work" signals.
+The obsolete stacked PR backlog has now been closed for consolidation: PRs #1–#23, #25 and #48.
+PRs #24 and #26–#47 were already merged. There are currently **no open pull requests** in the repository.
+This removes the primary GitHub-level source of false "pending work" signals.
 
 ### Main branch divergence
 
