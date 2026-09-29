@@ -86,10 +86,17 @@ def test_continue_without_execution_or_task_evidence_is_partial():
     assert evaluation.evidence_state == "evaluation_pending"
 
 
-def test_insufficient_evidence_is_reserved_for_no_observed_result():
+def test_no_observed_result_is_explicitly_insufficient_evidence():
     evaluation = DirectorDecisionLearning.evaluate(
         decision_event=event(14, "complete"),
         observed_event_types=(),
     )
 
-    assert evaluation is None
+    assert evaluation is not None
+    assert evaluation.score is None
+    assert evaluation.outcome == "outcome_not_observed"
+    assert evaluation.quality == "evaluation_pending"
+    assert evaluation.evidence_state == "insufficient_evidence"
+    assert evaluation.evidence_completeness == "insufficient"
+    assert evaluation.attribution == "insufficient_evidence_for_quality_attribution"
+    assert "result_not_observed" in evaluation.sufficiency_reasons
