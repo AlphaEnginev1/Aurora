@@ -3,6 +3,7 @@ from threading import Event
 
 from aurora.inference.models import InferenceResponse
 from aurora.orchestration.director import DirectorPlan, DirectorReview
+from aurora.orchestration.director_decision_comparison import DirectorDecisionComparativeEvidence
 from aurora.orchestration.director_runtime import DirectorRuntime
 from aurora.orchestration.durable_director import DurableDirectorService
 from aurora.orchestration.event_bus import DurableEventBus
@@ -263,3 +264,48 @@ def test_adaptive_director_replans_after_terminal_phase(tmp_path: Path):
     assert '"evaluations": 1' in performance_messages[0]
     assert '"success_rate": 1.0' in performance_messages[0]
 
+
+
+def test_comparative_evidence_is_advisory_in_next_director_cycle(tmp_path: Path):
+    runtime, store, planner, _ = make_runtime(tmp_path)
+    submission = runtime.submit_mission(objective="compare safely")
+
+    for _ in range(50):
+        runtime.run_once()
+        decision_events = [
+            event for event in store.events(submission.mission_id)
+            if event.event_type == "director_decision_executed"
+        ]
+        if decision_events:
+            break
+    assert decision_events
+    decision_event_id = int(decision_events[-1].event_id)
+
+    runtime.record_decision_comparison(
+        mission_id=submission.mission_id,
+        decision_event_id=decision_event_id,
+        chosen_decision="continue",
+        alternative="complete",
+        comparative_evidence=DirectorDecisionComparativeEvidence(
+            source="independent_execution",
+            alternative_execution_id="alternative-execution-1",
+            chosen_execution_id=f"chosen-execution-{decision_event_id}",
+            chosen_outcome="follow_up_succeeded",
+            alternative_outcome="mission_succeeded",
+            comparability_basis=("same_objective", "same_environment_class"),
+            observed_direction="better",
+        ),
+        created_at="2026-09-29T15:45:00+00:00",
+    )
+
+    runtime.run_until_terminal(submission)
+
+    advisory_messages = [
+        item["content"]
+        for context in planner.review_contexts
+        for item in context
+        if "Comparative evidence advisory for this Director decision." in item["content"]
+    ]
+    assert len(advisory_messages) >= 1
+    assert '"state": "potentially_better_observed"' in advisory_messages[0]
+    assert '"causal_attribution": "unsupported"' in advisory_messages[0]
