@@ -156,11 +156,11 @@ def test_comparison_store_deduplicates_and_summarizes_repeated_observations(tmp_
     }
     store.record(**common, alternative_execution_id="alt-1", chosen_execution_id="chosen-1")
     store.record(**common, alternative_execution_id="alt-1", chosen_execution_id="chosen-1")
+    second = {**common, "created_at": "2026-09-29T15:11:00+00:00"}
     store.record(
-        **common,
+        **second,
         alternative_execution_id="alt-2",
         chosen_execution_id="chosen-2",
-        created_at="2026-09-29T15:11:00+00:00",
     )
     rows = store.list_for_decision(16)
     assert len(rows) == 2
