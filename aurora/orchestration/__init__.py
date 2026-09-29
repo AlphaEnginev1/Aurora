@@ -20,6 +20,13 @@ from .director_decision_policy_evolution import (
     DirectorDecisionPolicyProposal,
 )
 from .director_decision_policy_proposal_store import DirectorDecisionPolicyProposalStore
+from .director_decision_policy_lifecycle import (
+    DirectorDecisionPolicyActivation,
+    DirectorDecisionPolicyLifecycle,
+    DirectorDecisionPolicyLifecycleError,
+    DirectorDecisionPolicyValidation,
+)
+from .director_decision_policy_lifecycle_store import DirectorDecisionPolicyLifecycleStore
 from .director_decision_knowledge import (
     DirectorDecisionKnowledge,
     DirectorDecisionKnowledgeError,
@@ -65,6 +72,11 @@ __all__ = [
     "DirectorDecisionPolicyEvolutionError",
     "DirectorDecisionPolicyProposal",
     "DirectorDecisionPolicyProposalStore",
+    "DirectorDecisionPolicyActivation",
+    "DirectorDecisionPolicyLifecycle",
+    "DirectorDecisionPolicyLifecycleError",
+    "DirectorDecisionPolicyValidation",
+    "DirectorDecisionPolicyLifecycleStore",
     "DirectorDecisionKnowledge",
     "DirectorDecisionKnowledgeError",
     "DirectorDecisionKnowledgePromotion",
