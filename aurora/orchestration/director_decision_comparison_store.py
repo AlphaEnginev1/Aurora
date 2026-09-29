@@ -248,6 +248,29 @@ class DirectorDecisionComparisonStore:
             sources=tuple(sorted({item.source for item in items})),
         ),)
 
+    def list_for_cohort(
+        self,
+        *,
+        alternative: str,
+        chosen_decision: str,
+        comparability_basis: Iterable[str],
+    ) -> tuple[StoredDirectorDecisionComparison, ...]:
+        """Return all observations for an exact comparable evidence cohort."""
+        basis = tuple(dict.fromkeys(item for item in comparability_basis if item))
+        if not basis:
+            raise ValueError("comparability basis is required")
+        with self._connect() as db:
+            rows = db.execute(
+                """
+                SELECT * FROM director_decision_comparisons
+                WHERE alternative = ? AND chosen_decision = ?
+                ORDER BY comparison_id
+                """,
+                (alternative, chosen_decision),
+            ).fetchall()
+        items = tuple(self._row(row) for row in rows)
+        return tuple(item for item in items if item.comparability_basis == basis)
+
     def list_for_decision(
         self, decision_event_id: int
     ) -> tuple[StoredDirectorDecisionComparison, ...]:
