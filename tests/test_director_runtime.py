@@ -231,10 +231,16 @@ def test_adaptive_director_replans_after_terminal_phase(tmp_path: Path):
     assert evaluations[0].payload["decision"] == "continue"
     assert evaluations[0].payload["score"] == 1.0
     assert evaluations[0].payload["outcome"] == "follow_up_succeeded"
+    assert evaluations[0].payload["quality"] == "supported_success"
+    assert evaluations[0].payload["evidence_state"] == "outcome_observed"
+    assert evaluations[0].payload["attribution"] == "temporal_outcome_alignment"
     assert evaluations[0].payload["round"] == 1
     assert evaluations[1].payload["decision"] == "complete"
     assert evaluations[1].payload["score"] == 1.0
     assert evaluations[1].payload["outcome"] == "mission_completed"
+    assert evaluations[1].payload["quality"] == "supported_success"
+    assert evaluations[1].payload["evidence_state"] == "outcome_observed"
+    assert evaluations[1].payload["attribution"] == "temporal_outcome_alignment"
     assert evaluations[1].payload["round"] == 2
 
     second_review_context = planner.review_contexts[1]
@@ -256,3 +262,4 @@ def test_adaptive_director_replans_after_terminal_phase(tmp_path: Path):
     assert '"decision": "continue"' in performance_messages[0]
     assert '"evaluations": 1' in performance_messages[0]
     assert '"success_rate": 1.0' in performance_messages[0]
+
