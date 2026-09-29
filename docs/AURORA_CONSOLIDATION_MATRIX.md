@@ -21,7 +21,9 @@ genuine remaining work.
 - CI 1294: SUCCESS
 - CI 1295: SUCCESS
 - CI 1296: SUCCESS
-- Consolidation issue: #50
+- Consolidation issue: #50 (CLOSED)
+- CI 1305: SUCCESS — research discovery E2E on verification branch
+- CI 1306: SUCCESS — merged canonical `main`
 
 **Decision:** `main` is now the single permanent engineering source of truth. The consolidation branch
 remains as an auditable snapshot of the gate work and is not a second implementation line.
@@ -53,7 +55,7 @@ remains as an auditable snapshot of the gate work and is not a second implementa
 | Trusted knowledge / citation graph | YES | YES | YES | NO | None identified |
 | Research delegation to TaskEngine | YES | YES | YES | NO | None identified |
 | Research → learning / routing trust gate | YES | YES | YES | NO | Live-provider verification |
-| **Research HttpSearchProvider** | **YES** | **YES** | **NO — factory not wired** | NO | Wire governed provider into runtime factory/configuration |
+| **Research HttpSearchProvider** | **YES** | **YES** | **YES** | NO | Live external search-provider verification |
 | Director decision learning / comparative evidence | YES | YES | YES | N/A | None identified |
 | Empirical decision knowledge promotion | YES | YES | YES | N/A | None identified |
 | Director policy evolution / canary / rollback | YES | YES | YES | N/A | Production recovery drill |
@@ -70,28 +72,23 @@ remains as an auditable snapshot of the gate work and is not a second implementa
 
 ## 2. Research discovery finding
 
-The canonical line contains `HttpSearchProvider` and `ResearchService.discover()`.
-The provider boundary now has explicit tests covering:
+The canonical line contains `HttpSearchProvider` and `ResearchService.discover()`. `build_director_runtime()` now wires an explicitly configured `AURORA_RESEARCH_DISCOVERY_ENDPOINT` through `InternetGateway` into `HttpSearchProvider` and uses `ResearchService.discover()` as the runtime source-discovery callback for specialist research.
+
+The end-to-end verification covers:
 
 1. unique URL discovery and request construction;
 2. fail-closed behavior when no discovery provider is configured;
 3. successful `ResearchService` use of an explicitly supplied discovery provider.
 
-However, `build_director_runtime()` currently constructs:
-
-`ResearchService(gateway, ResearchStore(...))`
-
-without supplying a `discovery=HttpSearchProvider(...)` instance.
-
 Therefore the precise status is:
 
 **IMPLEMENTADO = YES**  
 **TESTEADO = YES**  
-**RUNTIME INTEGRADO = NO**  
+**RUNTIME INTEGRADO = YES**  
 **LIVE VERIFICADO = NO**  
-**PENDIENTE REAL = governed runtime wiring + configuration + live evidence**
+**PENDIENTE REAL = live external search-provider verification**
 
-No autonomous research-discovery feature should be reimplemented; only the missing runtime connection remains.
+The E2E proof is controlled/local HTTP rather than a public search service; it proves the governed runtime wiring, not external provider availability.
 
 ## 3. Live provider verification
 
@@ -261,8 +258,7 @@ The consolidation matrix is the first check before proposing any future incremen
 
 After consolidation, the finite remaining list is:
 
-1. **Research discovery runtime wiring** — connect the existing `HttpSearchProvider` to the normal Director runtime
-   through governed configuration, then test the complete path.
+1. **Live research discovery verification** — execute the governed search endpoint against the intended real provider and archive the evidence.
 2. **OS-level network enforcement** — decide the required host boundary and execute an end-to-end proof if required.
 3. **Live NVIDIA verification** — execute and record a real provider gate.
 4. **Live Gemini verification** — execute and record a real provider gate.
@@ -270,5 +266,4 @@ After consolidation, the finite remaining list is:
 6. **Recovery drills** — execute controlled crash/restart/reconciliation exercises and archive evidence.
 7. **Controlled production authorization** — define the explicit live-operation gate and evidence requirements.
 
-No Increment 11 is authorized by this document. New functionality remains frozen until the consolidation gate
-is explicitly closed and the next increment is derived from this finite evidence-backed list.
+Increment 11 is not currently authorized by this document. Any next capability must be derived from the remaining evidence-backed production gaps and explicitly authorized.
