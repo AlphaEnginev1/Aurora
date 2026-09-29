@@ -681,6 +681,23 @@ class DirectorRuntime:
                     ),
                 }
             )
+            pending_evidence = [
+                item
+                for item in decision_learning
+                if item.get("evidence_completeness") in {"partial", "insufficient"}
+            ]
+            if pending_evidence:
+                context.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            "Decision outcome observed, but evidence insufficient to establish "
+                            "decision quality. Treat this as advisory evaluation_pending evidence; "
+                            "do not convert it into an automatic decision rule: "
+                            + json.dumps(pending_evidence, sort_keys=True)
+                        ),
+                    }
+                )
         if decision_performance:
             context.append(
                 {
