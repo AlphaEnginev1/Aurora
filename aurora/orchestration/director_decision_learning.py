@@ -112,7 +112,11 @@ class DirectorDecisionLearning:
         if required:
             completeness = "complete"
             evidence_state = "outcome_observed"
-        elif has_execution or has_post_task_outcome:
+        elif terminal is not None:
+            # A terminal result is itself usable evidence, but without the
+            # critical execution/follow-up evidence it cannot support a
+            # quality attribution. Keep it partial rather than pretending
+            # that no evidence exists.
             completeness = "partial"
             evidence_state = "evaluation_pending"
             score = None
