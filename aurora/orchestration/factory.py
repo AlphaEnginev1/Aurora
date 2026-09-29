@@ -13,7 +13,8 @@ from aurora.autonomy.sandbox import SandboxExecutor, SandboxPolicy
 from aurora.inference.config import load_model_specs
 from aurora.inference.router import ModelRouter
 from aurora.inference.model_performance import ModelPerformanceStore
-from aurora.research.discovery import ResearchSourceCatalog
+from aurora.research.discovery import HttpSearchProvider, ResearchSourceCatalog
+from aurora.research.models import ResearchRequest
 from aurora.research.service import ResearchService
 from aurora.research.store import ResearchStore
 from aurora.organization import AgentSelector, OrganizationRegistry
@@ -129,10 +130,37 @@ def build_director_runtime(*, inference_policy_path: str | Path, autonomy_policy
     store_path=Path(task_db_path).resolve() if task_db_path else runtime_root/"tasks.db"
     store=DurableTaskStore(store_path); event_bus=DurableEventBus(store)
     skill_acquisition=SkillAcquisitionRuntime(runtime_root/"skill-acquisition.db")
-    research_service=ResearchService(gateway,ResearchStore(runtime_root/"research.db"))
+    research_store=ResearchStore(runtime_root/"research.db")
+    research_discovery_endpoint=os.getenv("AURORA_RESEARCH_DISCOVERY_ENDPOINT","").strip()
+    research_discovery=(
+        HttpSearchProvider(gateway,research_discovery_endpoint)
+        if research_discovery_endpoint else None
+    )
+    research_service=ResearchService(gateway,research_store,discovery=research_discovery)
     acquisition_pipeline=SkillAcquisitionPipeline(skill_acquisition,runtime_root/"skill-acquisition-artifacts.db")
     source_catalog=ResearchSourceCatalog.from_environment()
-    skill_discovery=SkillDiscoveryService(research=research_service,source_discovery=source_catalog.discover,tool_catalog=registry)
+
+    def discover_research_sources(gap):
+        objective=(
+            f"Discover reliable procedures for specialist skill {gap.skill_id}. "
+            f"Gap: {gap.reason}. Capabilities: {', '.join(gap.required_capabilities)}"
+        )
+        if research_service.discovery is not None:
+            return research_service.discover(
+                ResearchRequest(
+                    request_id=f"skill-discovery-search-{gap.mission_id}-{gap.skill_id}",
+                    objective=objective,
+                    constraints=gap.required_capabilities,
+                    max_sources=10,
+                )
+            )
+        return source_catalog.discover(gap)
+
+    skill_discovery=SkillDiscoveryService(
+        research=research_service,
+        source_discovery=discover_research_sources,
+        tool_catalog=registry,
+    )
     autonomous_specialist_acquisition=AutonomousSpecialistAcquisition(
         research=research_service,acquisition=acquisition,pipeline=acquisition_pipeline,
         sandbox=offline_sandbox,discovery=skill_discovery)
