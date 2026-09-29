@@ -365,3 +365,52 @@ def test_comparative_evidence_aggregate_is_advisory(tmp_path: Path):
     assert '"better_observations": 2' in aggregate_messages[0]
     assert '"consistent_direction": "better"' in aggregate_messages[0]
     assert "causality" in aggregate_messages[0]
+
+
+def test_cross_decision_replication_is_advisory(tmp_path: Path):
+    runtime, store, planner, _ = make_runtime(tmp_path)
+    submission = runtime.submit_mission(objective="adapt compare safely")
+
+    for _ in range(100):
+        runtime.run_once()
+        reviews = [
+            event for event in store.events(submission.mission_id)
+            if event.event_type == "director_review"
+        ]
+        if len(reviews) >= 2:
+            break
+    assert len(reviews) >= 2
+
+    first_id = int(reviews[0].event_id)
+    second_id = int(reviews[1].event_id)
+    for decision_event_id, suffix in ((first_id, "a"), (second_id, "b")):
+        runtime.record_decision_comparison(
+            mission_id=submission.mission_id,
+            decision_event_id=decision_event_id,
+            chosen_decision="continue",
+            alternative="complete",
+            comparative_evidence=DirectorDecisionComparativeEvidence(
+                source="independent_execution",
+                alternative_execution_id=f"alternative-replication-{suffix}",
+                chosen_execution_id=f"chosen-replication-{suffix}",
+                chosen_outcome="follow_up_succeeded",
+                alternative_outcome="mission_succeeded",
+                comparability_basis=("same_objective", "same_environment_class"),
+                observed_direction="better",
+            ),
+            created_at=f"2026-09-29T16:2{suffix == 'b'}:00+00:00",
+        )
+
+    runtime.run_until_terminal(submission)
+
+    replication_messages = [
+        item["content"]
+        for context in planner.review_contexts
+        for item in context
+        if "Cross-decision comparative replication advisory." in item["content"]
+    ]
+    assert replication_messages
+    assert '"decision_events": 2' in replication_messages[0]
+    assert '"observations": 2' in replication_messages[0]
+    assert '"consistent_direction": "better"' in replication_messages[0]
+    assert "causality" in replication_messages[0]
