@@ -41,15 +41,15 @@ class DirectorDecisionPolicy:
         )
 
     @staticmethod
-    def active_prompt(
+    def active_contract(
         active: DirectorDecisionPolicyActive,
         proposal: DirectorDecisionPolicyProposal,
-    ) -> str:
+    ) -> DirectorDecisionPolicyContract:
         if proposal.proposal_id != active.proposal_id:
             raise ValueError("active policy proposal does not match active registry")
         if proposal.state != "proposed":
             raise ValueError("active registry may only reference a governed proposal")
-        contract = DirectorDecisionPolicyContract.from_proposal(
+        return DirectorDecisionPolicyContract.from_proposal(
             proposal_id=proposal.proposal_id,
             validation_id=active.validation_id,
             knowledge_id=proposal.knowledge_id,
@@ -61,6 +61,13 @@ class DirectorDecisionPolicy:
             evidence_summary=proposal.evidence_summary,
             authorized_by=active.authorized_by,
         )
+
+    @staticmethod
+    def active_prompt(
+        active: DirectorDecisionPolicyActive,
+        proposal: DirectorDecisionPolicyProposal,
+    ) -> str:
+        contract = DirectorDecisionPolicy.active_contract(active, proposal)
         return (
             "Active Director policy contract (governed and advisory; never an "
             "automatic decision rule): "

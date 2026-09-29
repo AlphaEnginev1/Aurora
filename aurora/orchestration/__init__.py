@@ -99,6 +99,8 @@ __all__ = [
     "RuntimeCycle",
     "DirectorDecisionPolicyContract",
     "DirectorDecisionPolicyContractError",
+    "DirectorDecisionPolicyContractStore",
+    "DirectorDecisionPolicyContractStoreError",
     "DirectorDecisionPolicyEvolution",
     "DirectorDecisionPolicyEvolutionError",
     "DirectorDecisionPolicyProposal",

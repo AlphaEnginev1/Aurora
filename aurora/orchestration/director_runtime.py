@@ -31,6 +31,7 @@ from .director_decision_policy_canary_evaluation_store import DirectorDecisionPo
 from .director_decision_policy_lifecycle import DirectorDecisionPolicyLifecycle
 from .director_decision_policy_lifecycle_store import DirectorDecisionPolicyLifecycleStore
 from .director_decision_policy_active_store import DirectorDecisionPolicyActiveStore
+from .director_decision_policy_contract_store import DirectorDecisionPolicyContractStore
 from .director_decision_policy_proposal_store import DirectorDecisionPolicyProposalStore
 from .director_decision_policy_evolution import DirectorDecisionPolicyProposal
 from .director_decision_policy_lifecycle import DirectorDecisionPolicyActivation
@@ -111,6 +112,7 @@ class DirectorRuntime:
         policy_shadow_decider: Callable[[str, list[dict[str, Any]], DirectorDecisionPolicyProposal], str] | None = None,
         active_policy_store: DirectorDecisionPolicyActiveStore | None = None,
         policy_proposal_store: DirectorDecisionPolicyProposalStore | None = None,
+        policy_contract_store: DirectorDecisionPolicyContractStore | None = None,
         sleep_fn: Callable[[float], None] = sleep,
     ) -> None:
         if not event_consumer_id.strip():
@@ -182,6 +184,7 @@ class DirectorRuntime:
         self.policy_shadow_decider = policy_shadow_decider
         self.active_policy_store = active_policy_store or DirectorDecisionPolicyActiveStore(store.path)
         self.policy_proposal_store = policy_proposal_store or DirectorDecisionPolicyProposalStore(store.path)
+        self.policy_contract_store = policy_contract_store or DirectorDecisionPolicyContractStore(store.path)
         self._sleep = sleep_fn
         self._subscription: EventSubscription = self.event_bus.subscribe(event_consumer_id)
         self._workers: dict[str, TaskWorker] = {}
@@ -1165,11 +1168,16 @@ class DirectorRuntime:
             active_proposal = self.policy_proposal_store.get(active_policy.proposal_id)
             if active_proposal is not None:
                 try:
+                    active_policy_contract = DirectorDecisionPolicy.active_contract(
+                        active_policy,
+                        active_proposal,
+                    )
+                    self.policy_contract_store.record(active_policy_contract)
                     active_policy_prompt = DirectorDecisionPolicy.active_prompt(
                         active_policy,
                         active_proposal,
                     )
-                except ValueError as exc:
+                except (ValueError, DirectorDecisionPolicyContractError) as exc:
                     self.event_bus.publish(
                         mission_id=mission_id,
                         event_type="director_active_policy_invalid",
