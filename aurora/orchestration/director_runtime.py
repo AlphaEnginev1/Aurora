@@ -807,20 +807,30 @@ class DirectorRuntime:
             if decision_event_id is not None
             else ()
         )
+        # Replication is a cross-decision property. Do not scope its
+        # discovery to the single latest evaluated decision: a mission may
+        # have accumulated comparisons on earlier Director review events
+        # before the terminal evaluation creates a newer decision id.
         replication_summaries = []
         seen_replication = set()
-        for item in comparisons:
-            key = (item.alternative, item.chosen_decision, item.comparability_basis)
-            if key in seen_replication:
-                continue
-            seen_replication.add(key)
-            replication_summaries.extend(
-                self.decision_comparison_store.summarize_across_decisions(
-                    alternative=item.alternative,
-                    chosen_decision=item.chosen_decision,
-                    comparability_basis=item.comparability_basis,
+        review_event_ids = {
+            int(event.event_id)
+            for event in self.store.events(mission_id)
+            if event.event_type == "director_review"
+        }
+        for review_event_id in review_event_ids:
+            for item in self.decision_comparison_store.list_for_decision(review_event_id):
+                key = (item.alternative, item.chosen_decision, item.comparability_basis)
+                if key in seen_replication:
+                    continue
+                seen_replication.add(key)
+                replication_summaries.extend(
+                    self.decision_comparison_store.summarize_across_decisions(
+                        alternative=item.alternative,
+                        chosen_decision=item.chosen_decision,
+                        comparability_basis=item.comparability_basis,
+                    )
                 )
-            )
         if comparisons:
             context.append(
                 {
