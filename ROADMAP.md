@@ -6,9 +6,11 @@
 
 Authoritative status:
 - `docs/AURORA_CONSOLIDATION_MATRIX.md`
-- Issue #50
+- Issue #50 (CLOSED)
 - consolidation evidence branch: `runtime/consolidation-gate`
 - CI 1291–1296: SUCCESS
+- CI 1305: SUCCESS — research discovery E2E
+- CI 1306: SUCCESS — canonical main after merge
 
 The repository is no longer tracking historical increments as future work. The sections below describe what is
 already integrated and what remains genuinely required.
@@ -72,7 +74,7 @@ Integrated and verified:
 - validation, regression and rollback;
 - adaptive specialist-agent selection.
 
-## Phase 9 — Knowledge & Research Intelligence — INTEGRATED WITH EXPLICIT DISCOVERY WIRING GAP
+## Phase 9 — Knowledge & Research Intelligence — INTEGRATED
 
 Integrated:
 1. research domain and durable evidence;
@@ -84,8 +86,7 @@ Integrated:
 7. trust-gated research → learning;
 8. verified execution evidence affecting later ModelRouter decisions.
 
-The existing `HttpSearchProvider` is implemented and tested, but the normal runtime factory does not yet inject
-it into `ResearchService`. This is a **runtime integration gap**, not a missing research architecture.
+The existing `HttpSearchProvider` is now injected by the normal runtime factory when `AURORA_RESEARCH_DISCOVERY_ENDPOINT` is configured. `DirectorRuntime.acquire_specialist()` reaches this path through `SkillDiscoveryService`, which delegates source discovery to `ResearchService.discover()`. CI 1305 provides the controlled HTTP end-to-end proof and CI 1306 verifies the merged canonical `main`.
 
 The adaptive routing proof used controlled/test providers. Live NVIDIA and Gemini verification remain separate gates.
 
@@ -116,8 +117,7 @@ A workflow definition does not count as a live verification. The exact successfu
 
 These are the only current production-oriented gaps identified by the consolidation audit:
 
-1. **Research discovery runtime wiring:** connect the existing governed `HttpSearchProvider` through runtime configuration
-   and verify the end-to-end Director research-discovery path.
+1. **Live research discovery verification:** execute and archive evidence against the intended real search provider.
 2. **OS-level network enforcement:** decide the required host boundary and execute the proof where required.
 3. **Live NVIDIA verification:** execute and archive real-provider evidence.
 4. **Live Gemini verification:** execute and archive real-provider evidence.
@@ -127,7 +127,6 @@ These are the only current production-oriented gaps identified by the consolidat
 
 ## Increment policy
 
-**Increment 11 is frozen.**
+**Increment 11 remains unapproved.**
 
-No new capability increment may be opened until Issue #50 is closed and the next increment is derived from the
-remaining evidence-backed production gap list.
+The next capability must be derived from the remaining evidence-backed production gaps and explicitly authorized.
