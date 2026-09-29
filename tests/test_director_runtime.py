@@ -279,7 +279,15 @@ def test_comparative_evidence_is_advisory_in_next_director_cycle(tmp_path: Path)
         if decision_events:
             break
     assert decision_events
-    decision_event_id = int(decision_events[-1].event_id)
+    review_events = [
+        event for event in store.events(submission.mission_id)
+        if event.event_type == "director_review"
+    ]
+    assert review_events
+    # Comparative evidence is anchored to the Director decision (review) event,
+    # not to its execution event. The runtime uses the same identity when
+    # attaching advisory evidence to the next Director cycle.
+    decision_event_id = int(review_events[-1].event_id)
 
     runtime.record_decision_comparison(
         mission_id=submission.mission_id,
