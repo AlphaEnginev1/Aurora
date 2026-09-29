@@ -52,25 +52,42 @@ class DirectorDecisionKnowledgeStore:
             )
 
     def record(self, knowledge: DirectorDecisionKnowledge) -> None:
+        """Insert or refresh a promoted cohort without changing its identity."""
+        comparability_basis_json = json.dumps(
+            knowledge.comparability_basis,
+            sort_keys=True,
+        )
+        sources_json = json.dumps(knowledge.sources, sort_keys=True)
         with self._connect() as db:
             db.execute(
                 """
-                INSERT OR IGNORE INTO director_decision_knowledge (
+                INSERT INTO director_decision_knowledge (
                     knowledge_id, alternative, chosen_decision,
                     comparability_basis_json, observed_direction,
                     decision_events, observations, sources_json,
                     claim, state, created_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (
+                    alternative,
+                    chosen_decision,
+                    comparability_basis_json,
+                    observed_direction
+                ) DO UPDATE SET
+                    decision_events = excluded.decision_events,
+                    observations = excluded.observations,
+                    sources_json = excluded.sources_json,
+                    claim = excluded.claim,
+                    state = excluded.state
                 """,
                 (
                     knowledge.knowledge_id,
                     knowledge.alternative,
                     knowledge.chosen_decision,
-                    json.dumps(knowledge.comparability_basis, sort_keys=True),
+                    comparability_basis_json,
                     knowledge.observed_direction,
                     knowledge.decision_events,
                     knowledge.observations,
-                    json.dumps(knowledge.sources, sort_keys=True),
+                    sources_json,
                     knowledge.claim,
                     knowledge.state,
                     knowledge.created_at,
