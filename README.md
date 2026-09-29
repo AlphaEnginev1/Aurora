@@ -13,7 +13,9 @@ Aurora has one authoritative engineering line:
 - pre-consolidation main preserved as: `archive/main-pre-consolidation-20260929`
 - CI 1287–1289: SUCCESS
 - CI 1291–1296: SUCCESS
-- consolidation issue: #50
+- CI 1305: SUCCESS — research discovery E2E
+- CI 1306: SUCCESS — canonical `main`
+- consolidation issue: #50 (CLOSED)
 
 No new functionality was authorized during the consolidation gate; Increment 11 remains explicitly unapproved.
 
@@ -34,7 +36,7 @@ The matrix distinguishes **IMPLEMENTADO**, **TESTEADO**, **RUNTIME INTEGRADO**, 
 
 The remaining gaps are finite and evidence-backed:
 
-1. governed runtime wiring for the existing research `HttpSearchProvider`;
+1. live verification against the intended real research search provider;
 2. decision and proof of OS-level transparent network enforcement;
 3. real NVIDIA provider verification;
 4. real Gemini provider verification;
