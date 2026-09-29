@@ -292,3 +292,97 @@ def test_live_gemini_director_closes_mission_after_execution_and_review(
     assert "director_review_started" in events
     assert "director_review" in events
     assert "mission_succeeded" in events
+
+
+class ReplanningDirectorProvider(MissionReplayDirectorProvider):
+    """Replay the live plan, then force one review-driven follow-up phase."""
+
+    def generate(self, messages, model, role, tools=()):
+        self.calls += 1
+        if role == "director_planner":
+            return self.response
+        if role == "director_reviewer":
+            if self.calls == 2:
+                return DirectorModelResponse(
+                    content=(
+                        '{"decision":"continue","rationale":"The first execution completed, '
+                        'but a second controlled validation step is required.","tasks":['
+                        '{"task_id":"validate_result","role":"researcher",'
+                        '"objective":"Validate the controlled execution result.",'
+                        '"capability":null,"args":[],"depends_on":[],"skills":[]}]}'
+                    ),
+                    model=self.response.model,
+                    provider="gemini",
+                    request_id="replay-review-1",
+                    execution_id="replay-review-1",
+                    tool_calls=(),
+                )
+            if self.calls == 3:
+                return DirectorModelResponse(
+                    content=(
+                        '{"decision":"complete","rationale":"The follow-up validation completed '
+                        'and the mission objective is now satisfied.","tasks":[]}'
+                    ),
+                    model=self.response.model,
+                    provider="gemini",
+                    request_id="replay-review-2",
+                    execution_id="replay-review-2",
+                    tool_calls=(),
+                )
+        raise AssertionError(f"unexpected Director role/call: {role}/{self.calls}")
+
+
+@pytest.mark.live
+def test_live_gemini_director_replans_after_review_and_completes(
+    live_gemini_response,
+    tmp_path,
+):
+    provider = ReplanningDirectorProvider(live_gemini_response)
+    planner = DirectorPlanner(provider=provider, router=None)
+    router = ControlledRouter()
+    task_engine = TaskEngine(
+        orchestration=OrchestrationEngine(router),
+        workspace_root=tmp_path / "workspace",
+    )
+    store = DurableTaskStore(tmp_path / "tasks.db")
+    event_bus = DurableEventBus(store)
+    durable_director = DurableDirectorService(
+        planner=planner,
+        task_engine=task_engine,
+        store=store,
+        event_bus=event_bus,
+    )
+    runtime = DirectorRuntime(
+        director=durable_director,
+        store=store,
+        event_bus=event_bus,
+        worker_policy=WorkerPolicy(
+            lease_seconds=30,
+            max_attempts=2,
+            idle_sleep_seconds=0,
+        ),
+        worker_id="live-gemini-replanner",
+        event_consumer_id="live-gemini-replanner-events",
+        worker_concurrency=1,
+        max_review_rounds=2,
+    )
+
+    submission = runtime.submit_mission(
+        objective="Create exactly one research task to investigate Aurora architecture.",
+    )
+    result = runtime.run_until_terminal(submission, max_cycles=30)
+
+    assert result.status is TaskStatus.SUCCEEDED
+    assert len(result.tasks) == 2
+    assert result.tasks[0].status is TaskStatus.SUCCEEDED
+    assert result.tasks[1].status is TaskStatus.SUCCEEDED
+    assert result.tasks[1].task.task_id == "r1_validate_result"
+
+    assert provider.calls == 3
+    assert len(router.requests) == 2
+
+    events = [event.event_type for event in store.events(submission.mission_id)]
+    assert events.count("director_review") == 2
+    assert "mission_reopened" in events
+    assert "worker.task_succeeded" in events
+    assert events[-1] == "mission_succeeded"
