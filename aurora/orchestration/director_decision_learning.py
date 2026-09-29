@@ -58,9 +58,19 @@ class DirectorDecisionLearning:
             (item for item in ("mission_succeeded", "mission_failed", "mission_blocked") if item in observed_set),
             None,
         )
+        # DurableTaskStore records task terminal states using the canonical
+        # event types ``succeeded``, ``failed`` and ``blocked``. Keep the
+        # legacy ``task_*`` aliases accepted for normalized callers.
         has_post_task_outcome = any(
             item in observed_set
-            for item in ("task_completed", "task_failed", "task_blocked")
+            for item in (
+                "succeeded",
+                "failed",
+                "blocked",
+                "task_completed",
+                "task_failed",
+                "task_blocked",
+            )
         )
         reasons: list[str] = []
         outcome: str
