@@ -22,6 +22,24 @@ class DirectorDecisionComparisonSummary:
     sources: tuple[str, ...]
 
 
+
+@dataclass(frozen=True)
+class DirectorDecisionReplicationSummary:
+    """Cross-decision replication summary for one comparable evidence cohort."""
+
+    alternative: str
+    chosen_decision: str
+    comparability_basis: tuple[str, ...]
+    decision_events: int
+    observations: int
+    better_observations: int
+    worse_observations: int
+    same_observations: int
+    undetermined_observations: int
+    consistent_direction: str
+    sources: tuple[str, ...]
+
+
 @dataclass(frozen=True)
 class StoredDirectorDecisionComparison:
     comparison_id: int
@@ -177,6 +195,59 @@ class DirectorDecisionComparisonStore:
             )
         return tuple(summaries)
 
+    def summarize_across_decisions(
+        self,
+        *,
+        alternative: str,
+        chosen_decision: str,
+        comparability_basis: Iterable[str],
+    ) -> tuple[DirectorDecisionReplicationSummary, ...]:
+        """Aggregate repeated comparable observations across distinct decisions.
+
+        The cohort uses the exact normalized comparability basis so materially
+        different contexts are not merged. This reports replication only.
+        """
+        basis = tuple(dict.fromkeys(item for item in comparability_basis if item))
+        if not basis:
+            raise ValueError("comparability basis is required")
+        with self._connect() as db:
+            rows = db.execute(
+                """
+                SELECT * FROM director_decision_comparisons
+                WHERE alternative = ? AND chosen_decision = ?
+                ORDER BY comparison_id
+                """,
+                (alternative, chosen_decision),
+            ).fetchall()
+        items = []
+        for row in rows:
+            item = self._row(row)
+            if item.comparability_basis == basis:
+                items.append(item)
+        if not items:
+            return ()
+        directions = [item.observed_direction for item in items]
+        observed = {d for d in directions if d in {"better", "worse", "same"}}
+        if len(observed) == 1 and "undetermined" not in directions:
+            consistent = next(iter(observed))
+        elif not observed:
+            consistent = "undetermined"
+        else:
+            consistent = "mixed"
+        return (DirectorDecisionReplicationSummary(
+            alternative=alternative,
+            chosen_decision=chosen_decision,
+            comparability_basis=basis,
+            decision_events=len({item.decision_event_id for item in items}),
+            observations=len(items),
+            better_observations=directions.count("better"),
+            worse_observations=directions.count("worse"),
+            same_observations=directions.count("same"),
+            undetermined_observations=directions.count("undetermined"),
+            consistent_direction=consistent,
+            sources=tuple(sorted({item.source for item in items})),
+        ),)
+
     def list_for_decision(
         self, decision_event_id: int
     ) -> tuple[StoredDirectorDecisionComparison, ...]:
@@ -213,4 +284,4 @@ class DirectorDecisionComparisonStore:
         )
 
 
-__all__ = ["DirectorDecisionComparisonStore", "DirectorDecisionComparisonSummary", "StoredDirectorDecisionComparison"]
+__all__ = ["DirectorDecisionComparisonStore", "DirectorDecisionComparisonSummary", "DirectorDecisionReplicationSummary", "StoredDirectorDecisionComparison"]
