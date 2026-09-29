@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .director_decision_performance import DirectorDecisionPerformance
+from .director_decision_policy_active_store import DirectorDecisionPolicyActive
+from .director_decision_policy_evolution import DirectorDecisionPolicyProposal
 
 
 @dataclass(frozen=True)
@@ -34,6 +36,27 @@ class DirectorDecisionPolicy:
                 average_score=item.average_score,
             )
             for item in performance
+        )
+
+    @staticmethod
+    def active_prompt(
+        active: DirectorDecisionPolicyActive,
+        proposal: DirectorDecisionPolicyProposal,
+    ) -> str:
+        if proposal.proposal_id != active.proposal_id:
+            raise ValueError("active policy proposal does not match active registry")
+        if proposal.state != "proposed":
+            raise ValueError("active registry may only reference a governed proposal")
+        return (
+            "Active Director policy guidance (governed and advisory; it does not "
+            "override current evidence or automatically choose a decision): "
+            f"proposal_id={proposal.proposal_id}; "
+            f"observed_direction={proposal.observed_direction}; "
+            f"evidence={proposal.evidence_summary}; "
+            f"proposed_change={proposal.proposed_change}. "
+            "Apply this guidance only when the current mission context is materially "
+            "comparable to the evidence that produced the policy. Re-evaluate current "
+            "evidence before deciding."
         )
 
     @staticmethod
