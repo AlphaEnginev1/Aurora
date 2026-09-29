@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -9,7 +10,15 @@ from aurora.skills.acquisition import SkillGap
 
 
 def test_live_research_discovery_uses_real_search_provider_and_persists_source(tmp_path: Path, monkeypatch):
-    endpoint = "https://searx.oloke.xyz/search?format=json"
+    import pytest
+
+    if os.environ.get("AURORA_LIVE_RESEARCH_GATE") != "1":
+        pytest.skip("live research discovery gate is opt-in")
+
+    endpoint = os.environ.get(
+        "AURORA_RESEARCH_DISCOVERY_ENDPOINT",
+        "https://searx.oloke.xyz/search?format=json",
+    )
     monkeypatch.setenv("AURORA_RESEARCH_DISCOVERY_ENDPOINT", endpoint)
 
     network_policy = tmp_path / "network-policy.json"
