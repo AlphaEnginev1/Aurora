@@ -13,6 +13,7 @@ from uuid import uuid4
 from .director import DirectorPlanError
 from .director_decision_learning import DirectorDecisionLearning
 from .director_decision_performance import DirectorDecisionPerformanceStore
+from .director_decision_policy import DirectorDecisionPolicy
 from .durable_director import DurableDirectorService, MissionSubmission
 from .event_bus import DurableEventBus, EventSubscription
 from .mission_memory import MissionMemory, MissionMemoryError
@@ -659,6 +660,7 @@ class DirectorRuntime:
             self.store.events(mission_id)
         )
         decision_performance = self.decision_performance.summary()
+        decision_guidance = DirectorDecisionPolicy.guidance(decision_performance)
         if routing_evidence:
             context.append(
                 {
@@ -701,6 +703,9 @@ class DirectorRuntime:
                     ),
                 }
             )
+        policy_prompt = DirectorDecisionPolicy.prompt(decision_guidance)
+        if policy_prompt:
+            context.append({"role": "user", "content": policy_prompt})
         self.event_bus.publish(
             mission_id=mission_id,
             event_type="director_review_started",
