@@ -9,7 +9,6 @@ Autonomous multi-agent engineering system.
 Aurora has one authoritative engineering line:
 
 - **canonical branch:** `main`
-- canonical consolidation commit: `e4dff9e0e15198d41cb5f3e086903fecd4e9d9f6`
 - consolidation evidence branch: `runtime/consolidation-gate`
 - pre-consolidation main preserved as: `archive/main-pre-consolidation-20260929`
 - CI 1287–1289: SUCCESS
