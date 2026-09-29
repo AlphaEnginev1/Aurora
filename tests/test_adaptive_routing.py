@@ -214,6 +214,9 @@ def test_provider_bound_execution_evaluates_and_changes_next_route(tmp_path: Pat
     assert response.telemetry.success is True
     assert response.telemetry.request_id == request.request_id
     assert response.telemetry.execution_id == response.execution_id
+    assert response.routing_score is not None
+    assert response.routing_factors["learned_score"] == 0.5
+    assert response.routing_candidates == (("nvidia/model-a", response.routing_score),)
 
     evaluator, task = _skill_and_task()
     performance = ModelPerformanceStore(tmp_path / "model-performance.db")
