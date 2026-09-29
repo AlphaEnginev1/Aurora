@@ -21,6 +21,10 @@ from .director_decision_comparison_store import DirectorDecisionComparisonStore
 from .director_decision_knowledge import DirectorDecisionKnowledgePromoter
 from .director_decision_knowledge_store import DirectorDecisionKnowledgeStore
 from .director_decision_policy import DirectorDecisionPolicy
+from .director_decision_policy_canary import DirectorDecisionPolicyShadowCanary
+from .director_decision_policy_canary_store import DirectorDecisionPolicyShadowCanaryStore
+from .director_decision_policy_evolution import DirectorDecisionPolicyProposal
+from .director_decision_policy_lifecycle import DirectorDecisionPolicyActivation
 from .durable_director import DurableDirectorService, MissionSubmission
 from .event_bus import DurableEventBus, EventSubscription
 from .mission_memory import MissionMemory, MissionMemoryError
@@ -90,6 +94,10 @@ class DirectorRuntime:
         decision_performance: DirectorDecisionPerformanceStore | None = None,
         decision_comparison_store: DirectorDecisionComparisonStore | None = None,
         decision_knowledge_store: DirectorDecisionKnowledgeStore | None = None,
+        policy_shadow_activation: DirectorDecisionPolicyActivation | None = None,
+        policy_shadow_proposal: DirectorDecisionPolicyProposal | None = None,
+        policy_shadow_store: DirectorDecisionPolicyShadowCanaryStore | None = None,
+        policy_shadow_decider: Callable[[str, list[dict[str, Any]], DirectorDecisionPolicyProposal], str] | None = None,
         sleep_fn: Callable[[float], None] = sleep,
     ) -> None:
         if not event_consumer_id.strip():
@@ -130,6 +138,27 @@ class DirectorRuntime:
         self.decision_knowledge_promoter = DirectorDecisionKnowledgePromoter(
             self.decision_comparison_store
         )
+        if (policy_shadow_activation is None) != (policy_shadow_proposal is None):
+            raise DirectorRuntimeError(
+                "policy shadow activation and proposal must be configured together"
+            )
+        if policy_shadow_activation is not None and policy_shadow_proposal is not None:
+            if policy_shadow_activation.proposal_id != policy_shadow_proposal.proposal_id:
+                raise DirectorRuntimeError(
+                    "policy shadow activation does not belong to proposal"
+                )
+            if policy_shadow_activation.state != "canary":
+                raise DirectorRuntimeError(
+                    "policy shadow activation must remain in canary state"
+                )
+        if policy_shadow_activation is not None and policy_shadow_decider is None:
+            raise DirectorRuntimeError(
+                "policy shadow canary requires a candidate decision decider"
+            )
+        self.policy_shadow_activation = policy_shadow_activation
+        self.policy_shadow_proposal = policy_shadow_proposal
+        self.policy_shadow_store = policy_shadow_store or DirectorDecisionPolicyShadowCanaryStore(store.path)
+        self.policy_shadow_decider = policy_shadow_decider
         self._sleep = sleep_fn
         self._subscription: EventSubscription = self.event_bus.subscribe(event_consumer_id)
         self._workers: dict[str, TaskWorker] = {}
@@ -476,6 +505,88 @@ class DirectorRuntime:
             payload={"candidate_id": candidate_id, "restored": True},
         )
         return restored
+
+    def _observe_policy_shadow_canary(
+        self,
+        *,
+        mission_id: str,
+        decision_event_id: int,
+        objective: str,
+        context: list[dict[str, Any]],
+        baseline_decision: str,
+    ) -> None:
+        """Run the candidate in shadow only when a terminal baseline outcome exists."""
+        activation = self.policy_shadow_activation
+        proposal = self.policy_shadow_proposal
+        decider = self.policy_shadow_decider
+        if activation is None or proposal is None or decider is None:
+            return
+        if self.store.mission_status(mission_id) not in self.TERMINAL:
+            return
+        shadow_context = list(context)
+        shadow_context.append(
+            {
+                "role": "user",
+                "content": (
+                    "SHADOW POLICY SIMULATION ONLY. The active baseline decision is already "
+                    "the executed policy. Apply this proposed policy change only to determine "
+                    "what decision a candidate would recommend for the same observed state. "
+                    "Do not execute candidate tasks, do not modify mission state, and return a "
+                    "decision for observation only. Proposed policy change: "
+                    + proposal.proposed_change
+                ),
+            }
+        )
+        try:
+            candidate_decision = decider(objective, shadow_context, proposal).strip()
+        except Exception as exc:
+            self.event_bus.publish(
+                mission_id=mission_id,
+                event_type="director_decision_policy_shadow_failed",
+                payload={
+                    "decision_event_id": decision_event_id,
+                    "proposal_id": proposal.proposal_id,
+                    "error": str(exc),
+                },
+            )
+            return
+        if candidate_decision not in {"complete", "continue", "blocked"}:
+            self.event_bus.publish(
+                mission_id=mission_id,
+                event_type="director_decision_policy_shadow_failed",
+                payload={
+                    "decision_event_id": decision_event_id,
+                    "proposal_id": proposal.proposal_id,
+                    "error": f"invalid candidate decision: {candidate_decision}",
+                },
+            )
+            return
+        status = self.store.mission_status(mission_id)
+        actual_outcome = f"mission_{status}"
+        observation = DirectorDecisionPolicyShadowCanary.observe(
+            activation,
+            decision_event_id=decision_event_id,
+            baseline_decision=baseline_decision,
+            candidate_decision=candidate_decision,
+            actual_outcome=actual_outcome,
+        )
+        self.policy_shadow_store.record(observation)
+        self.event_bus.publish(
+            mission_id=mission_id,
+            event_type="director_decision_policy_shadow_observed",
+            payload={
+                "observation_id": observation.observation_id,
+                "decision_event_id": observation.decision_event_id,
+                "proposal_id": observation.proposal_id,
+                "validation_id": observation.validation_id,
+                "baseline_decision": observation.baseline_decision,
+                "candidate_decision": observation.candidate_decision,
+                "actual_outcome": observation.actual_outcome,
+                "decision_agreement": observation.decision_agreement,
+                "candidate_executed": observation.candidate_executed,
+                "state": observation.state,
+            },
+        )
 
     def submit_mission(self, **kwargs: Any) -> MissionSubmission:
         """Plan and durably submit a mission for the continuous worker loop."""
@@ -1000,7 +1111,7 @@ class DirectorRuntime:
                 )
             return
 
-        self.event_bus.publish(
+        review_event = self.event_bus.publish(
             mission_id=mission_id,
             event_type="director_review",
             payload={
@@ -1011,6 +1122,13 @@ class DirectorRuntime:
                 "routing_evidence": routing_evidence,
                 "considered_alternatives": list(review.considered_alternatives),
             },
+        )
+        self._observe_policy_shadow_canary(
+            mission_id=mission_id,
+            decision_event_id=review_event.event_id,
+            objective=objective,
+            context=context,
+            baseline_decision=review.decision,
         )
         try:
             self.memory.append(
