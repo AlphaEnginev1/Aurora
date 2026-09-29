@@ -23,6 +23,12 @@ from .director_decision_knowledge_store import DirectorDecisionKnowledgeStore
 from .director_decision_policy import DirectorDecisionPolicy
 from .director_decision_policy_canary import DirectorDecisionPolicyShadowCanary
 from .director_decision_policy_canary_store import DirectorDecisionPolicyShadowCanaryStore
+from .director_decision_policy_canary_evaluation import (
+    DirectorDecisionPolicyCanaryEvaluator,
+    DirectorDecisionPolicyCanaryEvaluation,
+)
+from .director_decision_policy_canary_evaluation_store import DirectorDecisionPolicyCanaryEvaluationStore
+from .director_decision_policy_lifecycle import DirectorDecisionPolicyLifecycle
 from .director_decision_policy_evolution import DirectorDecisionPolicyProposal
 from .director_decision_policy_lifecycle import DirectorDecisionPolicyActivation
 from .durable_director import DurableDirectorService, MissionSubmission
@@ -97,6 +103,7 @@ class DirectorRuntime:
         policy_shadow_activation: DirectorDecisionPolicyActivation | None = None,
         policy_shadow_proposal: DirectorDecisionPolicyProposal | None = None,
         policy_shadow_store: DirectorDecisionPolicyShadowCanaryStore | None = None,
+        policy_shadow_evaluation_store: DirectorDecisionPolicyCanaryEvaluationStore | None = None,
         policy_shadow_decider: Callable[[str, list[dict[str, Any]], DirectorDecisionPolicyProposal], str] | None = None,
         sleep_fn: Callable[[float], None] = sleep,
     ) -> None:
@@ -158,6 +165,10 @@ class DirectorRuntime:
         self.policy_shadow_activation = policy_shadow_activation
         self.policy_shadow_proposal = policy_shadow_proposal
         self.policy_shadow_store = policy_shadow_store or DirectorDecisionPolicyShadowCanaryStore(store.path)
+        self.policy_shadow_evaluation_store = (
+            policy_shadow_evaluation_store
+            or DirectorDecisionPolicyCanaryEvaluationStore(store.path)
+        )
         self.policy_shadow_decider = policy_shadow_decider
         self._sleep = sleep_fn
         self._subscription: EventSubscription = self.event_bus.subscribe(event_consumer_id)
@@ -505,6 +516,49 @@ class DirectorRuntime:
             payload={"candidate_id": candidate_id, "restored": True},
         )
         return restored
+
+    def evaluate_policy_shadow_canary(
+        self,
+        *,
+        rollback_on_integrity_violation: bool = True,
+        rollback_authority: str = "shadow-canary-guard",
+        min_observations: int = 5,
+    ) -> DirectorDecisionPolicyCanaryEvaluation | None:
+        """Evaluate the configured shadow canary and optionally roll it back on integrity violation."""
+        activation = self.policy_shadow_activation
+        proposal = self.policy_shadow_proposal
+        if activation is None or proposal is None:
+            return None
+        evaluation = DirectorDecisionPolicyCanaryEvaluator.evaluate(
+            self.policy_shadow_store,
+            proposal.proposal_id,
+            min_observations=min_observations,
+        )
+        self.policy_shadow_evaluation_store.record(evaluation)
+        if (
+            rollback_on_integrity_violation
+            and evaluation.rollback_required
+            and activation.state == "canary"
+        ):
+            rolled_back = DirectorDecisionPolicyLifecycle.rollback(
+                activation,
+                reason=evaluation.reason,
+                authorized_by=rollback_authority,
+            )
+            self.policy_shadow_activation = rolled_back
+            self.event_bus.publish(
+                mission_id="__policy_governance__",
+                event_type="director_decision_policy_shadow_rolled_back",
+                payload={
+                    "proposal_id": rolled_back.proposal_id,
+                    "validation_id": rolled_back.validation_id,
+                    "state": rolled_back.state,
+                    "reason": evaluation.reason,
+                    "evaluation_id": evaluation.evaluation_id,
+                    "authorized_by": rolled_back.authorized_by,
+                },
+            )
+        return evaluation
 
     def _observe_policy_shadow_canary(
         self,
