@@ -8,7 +8,6 @@ Authoritative status:
 - `docs/AURORA_CONSOLIDATION_MATRIX.md`
 - Issue #50
 - consolidation evidence branch: `runtime/consolidation-gate`
-- canonical consolidation commit: `e4dff9e0e15198d41cb5f3e086903fecd4e9d9f6`
 - CI 1291–1296: SUCCESS
 
 The repository is no longer tracking historical increments as future work. The sections below describe what is
