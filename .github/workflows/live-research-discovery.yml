@@ -5,24 +5,102 @@ on:
     branches:
       - runtime/live-research-discovery-provider-fix
   workflow_dispatch:
-    inputs:
-      endpoint:
-        description: "Real SearXNG-compatible JSON search endpoint"
-        required: true
-        default: "https://searx.ononoki.org/search?format=json"
-        type: string
 
 jobs:
   live-research-discovery:
     runs-on: ubuntu-latest
     env:
       AURORA_LIVE_RESEARCH_GATE: "1"
-      AURORA_RESEARCH_DISCOVERY_ENDPOINT: ${{ inputs.endpoint || 'https://searx.ononoki.org/search?format=json' }}
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
       - run: python -m pip install --upgrade pip pytest
+
+      - name: Start controlled SearXNG
+        run: |
+          set -euo pipefail
+          mkdir -p .ci/searxng
+          docker pull docker.io/searxng/searxng:latest
+          docker run -d --name aurora-searxng             -p 127.0.0.1:8888:8080             -v "$PWD/.ci/searxng/settings.yml:/etc/searxng/settings.yml:ro"             docker.io/searxng/searxng:latest
+
+          for i in $(seq 1 60); do
+            if curl -fsS --max-time 3 \
+              'http://127.0.0.1:8888/search?q=SearXNG&format=json' \
+              -o /tmp/searxng.json; then
+              python - <<'PY'
+          import json
+          with open("/tmp/searxng.json", encoding="utf-8") as f:
+              data = json.load(f)
+          assert isinstance(data.get("results"), list)
+          assert data["results"], "controlled SearXNG returned no results"
+          print(f"SearXNG JSON readiness OK: {len(data['results'])} results")
+          PY
+              break
+            fi
+            if [ "$i" -eq 60 ]; then
+              docker logs aurora-searxng
+              exit 1
+            fi
+            sleep 2
+          done
+
+      - name: Install Cloudflare Quick Tunnel
+        run: |
+          set -euo pipefail
+          curl -fsSL \
+            -o /tmp/cloudflared \
+            https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
+          chmod +x /tmp/cloudflared
+
+      - name: Expose controlled SearXNG over HTTPS
+        run: |
+          set -euo pipefail
+          /tmp/cloudflared tunnel --url http://127.0.0.1:8888 --no-autoupdate \
+            > /tmp/cloudflared.log 2>&1 &
+          echo $! > /tmp/cloudflared.pid
+
+          for i in $(seq 1 60); do
+            endpoint="$(grep -Eo 'https://[-a-z0-9]+\.trycloudflare\.com' /tmp/cloudflared.log | head -n 1 || true)"
+            if [ -n "$endpoint" ]; then
+              echo "AURORA_RESEARCH_DISCOVERY_ENDPOINT=$endpoint/search?format=json" >> "$GITHUB_ENV"
+              echo "Controlled live provider: $endpoint"
+              break
+            fi
+            if ! kill -0 "$(cat /tmp/cloudflared.pid)" 2>/dev/null; then
+              cat /tmp/cloudflared.log
+              exit 1
+            fi
+            sleep 2
+          done
+
+          endpoint="$(grep -Eo 'https://[-a-z0-9]+\.trycloudflare\.com' /tmp/cloudflared.log | head -n 1 || true)"
+          test -n "$endpoint"
+
+          curl -fsS --retry 5 --retry-delay 2 \
+            "$endpoint/search?q=SearXNG&format=json" \
+            -o /tmp/public-searxng.json
+
+          python - <<'PY'
+          import json
+          with open("/tmp/public-searxng.json", encoding="utf-8") as f:
+              data = json.load(f)
+          assert isinstance(data.get("results"), list)
+          assert data["results"], "HTTPS SearXNG tunnel returned no results"
+          print(f"HTTPS controlled SearXNG OK: {len(data['results'])} results")
+          PY
+
       - name: Run real research discovery gate
         run: python -m pytest -q tests/e2e/test_live_research_discovery.py
+
+      - name: Cleanup controlled provider
+        if: always()
+        run: |
+          if [ -f /tmp/cloudflared.pid ]; then
+            kill "$(cat /tmp/cloudflared.pid)" 2>/dev/null || true
+          fi
+          docker logs aurora-searxng 2>/dev/null || true
+          docker rm -f aurora-searxng 2>/dev/null || true
