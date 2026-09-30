@@ -35,7 +35,7 @@ def _write_record(path: Path, *, scope=None, expires=None):
         "issued_at": (now - timedelta(minutes=1)).isoformat(),
         "expires_at": (expires or now + timedelta(hours=1)).isoformat(),
         "scope": scope or ["director_live_execution"],
-        "prerequisites": REQUIRED_PREREQUISITES,
+        "prerequisites": dict(REQUIRED_PREREQUISITES),
         "live_enabled": True,
         "revoked": False,
         "kill_switch": False,
