@@ -248,7 +248,6 @@ class ProductionObservability:
                 provider=provider,
                 model=model,
                 timestamp=source.created_at,
-                event_id=f"task-event:{source.event_id}",
                 metadata={"source_event_id": source.event_id},
             )
 
@@ -482,7 +481,7 @@ class ProductionObservability:
                 decision_id = (
                     decisions_by_round.get(round_number)
                     if isinstance(round_number, int)
-                    else None
+                    else latest_decision_id
                 )
                 add(
                     "decision_completed",
