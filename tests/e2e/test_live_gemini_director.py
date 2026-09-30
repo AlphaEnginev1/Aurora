@@ -29,8 +29,16 @@ from aurora.inference.model_performance import ModelPerformanceStore
 
 @pytest.fixture(scope="module")
 def live_gemini_response() -> DirectorModelResponse:
-    if not os.getenv("NVIDIA_GEMINI_LIVE"):
-        pytest.skip("live Gemini gate is disabled")
+    if os.getenv("NVIDIA_GEMINI_LIVE") != "1":
+        pytest.skip("live Gemini gate is opt-in outside the dedicated workflow")
+    if not os.getenv("GEMINI_API_KEY"):
+        raise AssertionError(
+            "LIVE-GEMINI gate requires GEMINI_API_KEY; missing live credential must fail the gate"
+        )
+    if not os.getenv("GEMINI_MODEL_ID"):
+        raise AssertionError(
+            "LIVE-GEMINI gate requires GEMINI_MODEL_ID; missing served model must fail the gate"
+        )
 
     provider = GeminiDirectorProvider()
     return provider.generate(
