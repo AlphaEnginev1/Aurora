@@ -29,19 +29,23 @@ jobs:
 
           for i in $(seq 1 60); do
             if curl -fsS --max-time 3 \
-              'http://127.0.0.1:8888/search?q=SearXNG&format=json' \
+              'http://127.0.0.1:8888/search?q=%21wp%20SearXNG&format=json' \
               -o /tmp/searxng.json; then
-              python - <<'PY'
+              if python - <<'PY'
           import json
           with open("/tmp/searxng.json", encoding="utf-8") as f:
               data = json.load(f)
-          assert isinstance(data.get("results"), list)
-          assert data["results"], "controlled SearXNG returned no results"
-          print(f"SearXNG JSON readiness OK: {len(data['results'])} results")
+          results = data.get("results")
+          if not isinstance(results, list) or not results:
+              raise SystemExit(1)
+          print(f"SearXNG JSON readiness OK: {len(results)} results")
           PY
-              break
+              then
+                break
+              fi
             fi
             if [ "$i" -eq 60 ]; then
+              echo "SearXNG did not produce JSON results within readiness window"
               docker logs aurora-searxng
               exit 1
             fi
@@ -81,7 +85,7 @@ jobs:
           test -n "$endpoint"
 
           curl -fsS --retry 5 --retry-delay 2 \
-            "$endpoint/search?q=SearXNG&format=json" \
+            "$endpoint/search?q=%21wp%20SearXNG&format=json" \
             -o /tmp/public-searxng.json
 
           python - <<'PY'
