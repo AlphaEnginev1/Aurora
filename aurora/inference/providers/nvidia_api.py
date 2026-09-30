@@ -88,6 +88,8 @@ class NVIDIAAPIProvider:
             payload["temperature"] = request.temperature
         if request.max_tokens is not None:
             payload["max_tokens"] = request.max_tokens
+        if request.provider_options:
+            payload.update(request.provider_options)
 
         req = urllib.request.Request(
             self.spec.endpoint.rstrip("/") + "/chat/completions",
