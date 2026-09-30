@@ -356,6 +356,12 @@ class TaskWorker:
             return {
                 "type": "model",
                 "model": response.model,
+                "provider": response.provider,
+                "request_id": response.request_id,
+                "execution_id": response.execution_id,
+                "requested_model": response.requested_model,
+                "selected_model": response.selected_model,
+                "reported_model": response.reported_model,
                 "content": content[:limit],
                 "truncated": len(content) > limit,
                 "routing": {
