@@ -25,24 +25,39 @@ feature increments.
 - No new capability increment is implied by this queue.
 - Historical branches and old PRs are not alternative work queues.
 
-## Current block
+## Canonical completion status
 
-**BLOCK 1 — LIVE-RESEARCH-DISCOVERY**
+**FROZEN PRODUCTION-READINESS QUEUE 1–7 — COMPLETE**
 
-Current verified state:
-- implementation: COMPLETE;
-- automated tests: COMPLETE;
-- runtime wiring: COMPLETE;
-- controlled HTTP E2E: COMPLETE (CI 1305);
-- canonical-main verification after merge: COMPLETE (CI 1310/1312 sequence);
-- real external search-provider verification: **PENDING**.
+All seven blocks are verified on the canonical `main` line:
 
-Close condition:
-- one real external search provider is selected;
-- Aurora reaches it through the governed InternetGateway path;
-- the provider returns usable discovery results through the existing HttpSearchProvider contract;
-- the resulting source is retrieved and persisted by ResearchService;
-- evidence is archived with exact provider/run/configuration details;
-- the final CI/live result is recorded here and in docs/AURORA_CONSOLIDATION_MATRIX.md.
+1. **LIVE-RESEARCH-DISCOVERY** — VERIFIED
+2. **OS-NETWORK-ENFORCEMENT** — VERIFIED
+3. **LIVE-NVIDIA** — VERIFIED
+4. **LIVE-GEMINI** — VERIFIED
+5. **PRODUCTION-OBSERVABILITY** — VERIFIED
+6. **RECOVERY-DRILLS** — VERIFIED
+7. **CONTROLLED-LIVE-AUTHORIZATION** — VERIFIED
 
-Do not start Block 2 until this close condition is satisfied.
+The final canonical production-readiness commit is `f0c60a01600d0f7e508508f29faefc516b763bbe` plus the documentation-only verification update that follows it.
+
+## Block 7 status
+
+The Controlled Live Authorization gate is established and enforced at the daemon entrypoint.
+
+The gate is fail-closed and requires:
+- an explicit human authorization record;
+- verified prerequisites for Blocks 1–6;
+- an operation-specific scope;
+- a non-expired authorization;
+- a matching canonical commit;
+- no revocation or active kill-switch.
+
+**Live operation is not automatically enabled by closing this queue.** No authorization record or provider credential is stored in the repository. Without an explicit valid human authorization record, `--live` is denied before the runtime is constructed.
+
+## Queue closure rule
+
+This frozen queue is now closed. Historical branches and previous PRs are not alternative implementation queues.
+
+No Block 1–7 work should be restarted unless new evidence identifies a regression or a separately authorized production requirement. Increment 11 remains outside this queue and is not authorized by the consolidation record.
+
