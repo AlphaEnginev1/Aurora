@@ -49,4 +49,11 @@ The ordered production-readiness blocks 1–7 are verified on canonical `main`:
 
 Block 7 provides the explicit live-operation authorization boundary. It does not grant live access automatically: Aurora remains fail-closed until a human operator supplies a valid, scoped, non-expired authorization record matching the verified canonical commit and prerequisites.
 
+## Aurora canonical visual identity
+
+Aurora's canonical human-facing avatar is preserved at `assets/aurora-central-avatar.jpg`.
+
+The exact original image is the central visual representation for interaction with the Director. Future dashboard, voice, and motion work may animate this avatar in sync with speech and Aurora's interaction state, while preserving the canonical source image unchanged. The authoritative identity contract is `docs/architecture/AURORA_CANONICAL_AVATAR_IDENTITY.md`.
+
+
 Historical branches and closed PRs are not alternate work queues. Increment 11 remains explicitly unapproved by the consolidation record.
