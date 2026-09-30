@@ -1,4 +1,7 @@
-use_default_settings: true
+use_default_settings:
+  engines:
+    keep_only:
+      - aurora-wikipedia
 
 general:
   debug: false
@@ -16,11 +19,6 @@ server:
   public_instance: false
   image_proxy: false
   secret_key: "aurora-live-research-ci-secret"
-
-use_default_settings:
-  engines:
-    keep_only:
-      - aurora-wikipedia
 
 engines:
   - name: aurora-wikipedia
