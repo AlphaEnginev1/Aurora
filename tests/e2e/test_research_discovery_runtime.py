@@ -96,7 +96,7 @@ def test_director_runtime_uses_http_research_discovery_end_to_end(tmp_path: Path
         )
 
         assert DiscoveryHandler.queries
-        assert "Discover reliable procedures for specialist skill research-http-e2e" in DiscoveryHandler.queries[0]
+        assert DiscoveryHandler.queries[0] == "discover a governed procedure through the configured search provider"
         assert prepared.evidence.state == "awaiting_approval"
         assert prepared.evidence.validation_returncode == 0
         assert len(prepared.evidence.source_ids) == 1
