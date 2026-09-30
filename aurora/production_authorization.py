@@ -37,11 +37,12 @@ class LiveAuthorizationError(RuntimeError):
 
 
 _SENSITIVE_KEY_RE = re.compile(
-    r"(?:^|[_\-])(?:authorization(?:_header|_value)?|password|passwd|secret|"
-    r"credential|api[_\-]?key|access[_\-]?token|refresh[_\-]?token|"
+    r"(?:^|[_\-])(?:authorization(?:_(?:header|value))?(?!_id)|password|passwd|"
+    r"secret|credential|api[_\-]?key|access[_\-]?token|refresh[_\-]?token|"
     r"private[_\-]?key|client[_\-]?secret|token)(?:$|[_\-])",
     re.IGNORECASE,
 )
+
 _CREDENTIAL_VALUE_PATTERNS = (
     re.compile(r"\bBearer\s+\S+", re.IGNORECASE),
     re.compile(r"\bBasic\s+[A-Za-z0-9+/=]+", re.IGNORECASE),
