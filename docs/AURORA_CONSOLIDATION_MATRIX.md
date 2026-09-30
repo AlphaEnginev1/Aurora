@@ -95,15 +95,15 @@ The end-to-end verification covers:
 2. fail-closed behavior when no discovery provider is configured;
 3. successful `ResearchService` use of an explicitly supplied discovery provider.
 
-Therefore the precise status is:
+Therefore the canonical production-readiness status is:
 
 **IMPLEMENTADO = YES**  
 **TESTEADO = YES**  
 **RUNTIME INTEGRADO = YES**  
-**LIVE VERIFICADO = NO**  
-**PENDIENTE REAL = live external search-provider verification**
+**LIVE VERIFICADO = YES**  
+**PENDIENTE REAL = none in the frozen production-readiness queue**
 
-The E2E proof is controlled/local HTTP rather than a public search service; it proves the governed runtime wiring, not external provider availability.
+The dedicated LIVE-RESEARCH-DISCOVERY gate sequence is closed and verified. The historical controlled/local HTTP E2E remains valid as component evidence; the dedicated live gate provides the production-readiness closure.
 
 ## 3. Live provider verification
 
