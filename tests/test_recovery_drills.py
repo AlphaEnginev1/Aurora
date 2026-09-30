@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from aurora.inference.models import InferenceResponse
 from aurora.orchestration.director import DirectorPlan, DirectorReview
 from aurora.orchestration.director_runtime import DirectorRuntime
 from aurora.orchestration.durable_director import DurableDirectorService
@@ -23,22 +24,19 @@ class _RecoveryOrchestration:
         return TaskResult(
             task_id=kwargs["task_id"],
             role=kwargs["role"],
-            response=type(
-                "Response",
-                (),
-                {
-                    "model": "recovery/model",
-                    "provider": "recovery-test",
-                    "content": f"completed {kwargs['task_id']}",
-                    "request_id": f"request-{kwargs['task_id']}",
-                    "execution_id": f"execution-{kwargs['task_id']}",
-                    "selected_model": "recovery/model",
-                    "reported_model": "recovery/model",
-                    "routing_score": 0.8,
-                    "routing_factors": {"quality": 0.8},
-                    "routing_candidates": (("recovery/model", 0.8),),
-                },
-            )(),
+            response=InferenceResponse(
+                model="recovery/model",
+                provider="recovery-test",
+                content=f"completed {kwargs['task_id']}",
+                request_id=f"request-{kwargs['task_id']}",
+                execution_id=f"execution-{kwargs['task_id']}",
+                requested_model=kwargs.get("model"),
+                selected_model="recovery/model",
+                reported_model="recovery/model",
+                routing_score=0.8,
+                routing_factors={"quality": 0.8},
+                routing_candidates=(("recovery/model", 0.8),),
+            ),
         )
 
     def run_capability_task(self, **kwargs):
