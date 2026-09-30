@@ -69,7 +69,7 @@ def test_live_research_discovery_uses_real_search_provider_and_persists_source(
     gap = SkillGap(
         skill_id="research-live-provider-proof",
         mission_id="live-research-provider-proof",
-        reason=f"SearXNG JSON API search integration via {provider_host}",
+        reason="SearXNG",
         required_capabilities=(),
     )
 
