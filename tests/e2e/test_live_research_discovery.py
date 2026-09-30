@@ -14,7 +14,8 @@ def test_live_research_discovery_uses_real_search_provider_and_persists_source(
 ):
     import pytest
 
-    # Live gate remains explicitly opt-in; this branch is used only for provider validation.\n    if os.environ.get("AURORA_LIVE_RESEARCH_GATE") != "1":
+    # Live gate remains explicitly opt-in; this branch is used only for provider validation.
+    if os.environ.get("AURORA_LIVE_RESEARCH_GATE") != "1":
         pytest.skip("live research discovery gate is opt-in")
 
     endpoint = os.environ.get(
