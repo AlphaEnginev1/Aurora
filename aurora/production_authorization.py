@@ -121,7 +121,7 @@ class ControlledLiveAuthorization:
         *,
         expected_prerequisites: Mapping[str, str] | None = None,
         expected_canonical_commit: str | None = None,
-        clock_skew_seconds: int = 60,
+        clock_skew_seconds: int = 0,
     ) -> None:
         if clock_skew_seconds < 0:
             raise ValueError("clock_skew_seconds cannot be negative")
