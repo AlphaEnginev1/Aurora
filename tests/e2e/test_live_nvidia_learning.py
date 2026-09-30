@@ -1,13 +1,12 @@
 """Live NVIDIA adaptive-learning gate.
 
-This test is intentionally opt-in. It runs only when a real NVIDIA API key,
-endpoint, and served model are supplied by the dedicated workflow.
+This test is intentionally live-only. The dedicated workflow must provide
+a real NVIDIA API key and served model; missing live configuration is a
+configuration failure, never a skipped test.
 """
 
 import os
 from pathlib import Path
-
-import pytest
 
 from aurora.inference.models import InferenceRequest, ModelSpec
 from aurora.inference.model_performance import ModelPerformanceStore
@@ -23,8 +22,14 @@ def test_live_nvidia_execution_evaluates_and_persists_learning(tmp_path: Path):
     api_key = os.environ.get("NVIDIA_API_KEY")
     endpoint = os.environ.get("NVIDIA_API_ENDPOINT", "https://integrate.api.nvidia.com/v1")
     model_id = os.environ.get("NVIDIA_MODEL_ID")
-    if not api_key or not model_id:
-        pytest.skip("live NVIDIA gate requires NVIDIA_API_KEY and NVIDIA_MODEL_ID")
+    if not api_key:
+        raise AssertionError(
+            "LIVE-NVIDIA gate requires NVIDIA_API_KEY; missing live credential must fail the gate"
+        )
+    if not model_id:
+        raise AssertionError(
+            "LIVE-NVIDIA gate requires NVIDIA_MODEL_ID; missing served model must fail the gate"
+        )
 
     spec = ModelSpec(
         model_id,
