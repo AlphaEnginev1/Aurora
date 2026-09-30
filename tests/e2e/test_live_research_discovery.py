@@ -68,7 +68,7 @@ def test_live_research_discovery_uses_real_search_provider_and_persists_source(
     assert research_service.discovery.endpoint == endpoint
 
     gap = SkillGap(
-        skill_id="research-live-provider-proof",
+        skill_id="SearXNG",
         mission_id="live-research-provider-proof",
         reason="SearXNG",
         required_capabilities=(),
