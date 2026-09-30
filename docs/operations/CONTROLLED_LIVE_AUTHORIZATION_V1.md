@@ -1,6 +1,6 @@
 # Controlled Live Authorization V1
 
-**Status:** TEST CONTRACT
+**Status:** VERIFIED
 
 Block 7 establishes the explicit human-controlled gate between Aurora's verified engineering/runtime state and live/production execution.
 
@@ -77,13 +77,17 @@ It must never log API keys, bearer tokens, passwords, or provider credentials.
 
 ## Closure
 
-Block 7 is VERIFIED only after:
-1. contract tests are green;
-2. live mode is fail-closed without explicit authorization;
-3. authorized operation/scope succeeds through the existing runtime entry point;
-4. expired/revoked/kill-switched/insufficient-prerequisite records are denied;
-5. no authorization path changes normal Director behavior;
-6. full test and e2e-network CI are green on the canonical main line.
+**Block 7 is VERIFIED on the canonical main line.**
+
+Evidence:
+- PR #55 merged into `main`.
+- Block 7 branch CI 1412: `test` PASS and `e2e-network` PASS.
+- Canonical `main` CI 1414: `test` PASS and `e2e-network` PASS.
+- Canonical `main` commit after the merge: `f0c60a01600d0f7e508508f29faefc516b763bbe`.
+- Authorization tests cover fail-closed startup, explicit enablement, scope, prerequisites, canonical commit binding, expiry, revocation, kill-switch, credential rejection, strict types and timezone validation.
+- Normal non-live mode remains unchanged by the authorization boundary.
+
+**Important:** VERIFIED means the authorization gate is established and enforced. It does not mean Aurora is currently authorized to operate live. No live authorization record is stored in the repository, and live mode remains disabled unless a human operator supplies a valid, explicit authorization record.
 
 
 ## Operational record format
