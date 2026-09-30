@@ -1,9 +1,4 @@
-use_default_settings:
-  engines:
-    keep_only:
-      - wikipedia
-      - wikidata
-      - duckduckgo
+use_default_settings: true
 
 general:
   debug: false
@@ -21,3 +16,24 @@ server:
   public_instance: false
   image_proxy: false
   secret_key: "aurora-live-research-ci-secret"
+
+use_default_settings:
+  engines:
+    keep_only:
+      - aurora-wikipedia
+
+engines:
+  - name: aurora-wikipedia
+    engine: json_engine
+    shortcut: awp
+    categories:
+      - general
+      - web
+    disabled: false
+    search_url: "https://en.wikipedia.org/w/rest.php/v1/search/page?q={query}&limit=10"
+    results_query: pages
+    url_query: key
+    url_prefix: "https://en.wikipedia.org/wiki/"
+    title_query: title
+    content_query: excerpt
+    timeout: 10
