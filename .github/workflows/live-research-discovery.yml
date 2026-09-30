@@ -67,12 +67,28 @@ jobs:
             > /tmp/cloudflared.log 2>&1 &
           echo $! > /tmp/cloudflared.pid
 
+          endpoint=""
           for i in $(seq 1 60); do
             endpoint="$(grep -Eo 'https://[a-z0-9][a-z0-9-]{4,}\.trycloudflare\.com' /tmp/cloudflared.log | head -n 1 || true)"
             if [ -n "$endpoint" ]; then
-              echo "AURORA_RESEARCH_DISCOVERY_ENDPOINT=$endpoint/search?format=json" >> "$GITHUB_ENV"
-              echo "Controlled live provider: $endpoint"
-              break
+              if curl -fsS --max-time 5 --retry 1 \
+                "$endpoint/search?q=SearXNG&format=json" \
+                -o /tmp/public-searxng.json; then
+                if python - <<'PY'
+          import json
+          with open("/tmp/public-searxng.json", encoding="utf-8") as f:
+              data = json.load(f)
+          results = data.get("results")
+          if not isinstance(results, list) or not results:
+              raise SystemExit(1)
+          print(f"HTTPS controlled SearXNG OK: {len(results)} results")
+          PY
+                then
+                  echo "AURORA_RESEARCH_DISCOVERY_ENDPOINT=$endpoint/search?format=json" >> "$GITHUB_ENV"
+                  echo "Controlled live provider ready: $endpoint"
+                  break
+                fi
+              fi
             fi
             if ! kill -0 "$(cat /tmp/cloudflared.pid)" 2>/dev/null; then
               cat /tmp/cloudflared.log
@@ -81,21 +97,8 @@ jobs:
             sleep 2
           done
 
-          endpoint="$(grep -Eo 'https://[a-z0-9][a-z0-9-]{4,}\.trycloudflare\.com' /tmp/cloudflared.log | head -n 1 || true)"
           test -n "$endpoint"
-
-          curl -fsS --retry 5 --retry-delay 2 \
-            "$endpoint/search?q=SearXNG&format=json" \
-            -o /tmp/public-searxng.json
-
-          python - <<'PY'
-          import json
-          with open("/tmp/public-searxng.json", encoding="utf-8") as f:
-              data = json.load(f)
-          assert isinstance(data.get("results"), list)
-          assert data["results"], "HTTPS SearXNG tunnel returned no results"
-          print(f"HTTPS controlled SearXNG OK: {len(data['results'])} results")
-          PY
+          grep -q "AURORA_RESEARCH_DISCOVERY_ENDPOINT=" "$GITHUB_ENV"
 
       - name: Run real research discovery gate
         run: python -m pytest -q tests/e2e/test_live_research_discovery.py
