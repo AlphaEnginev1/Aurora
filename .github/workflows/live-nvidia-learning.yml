@@ -25,6 +25,7 @@ jobs:
       - run: python -m pip install --upgrade pip pytest
       - name: Run live provider adaptive-learning gate
         env:
+          AURORA_LIVE_NVIDIA_GATE: "1"
           NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
           NVIDIA_MODEL_ID: ${{ inputs.model_id }}
           NVIDIA_API_ENDPOINT: ${{ inputs.endpoint }}
