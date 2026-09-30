@@ -199,12 +199,15 @@ class ProductionObservability:
         task_results = task_results or {}
         decisions_by_round: dict[int, str] = {}
         review_by_id: dict[int, Any] = {}
+        latest_decision_id: str | None = None
+        task_started_at: dict[str, str] = {}
         for source in source_events:
             if source.event_type != "director_review":
                 continue
             round_number = source.payload.get("round")
             if isinstance(round_number, int):
                 decisions_by_round[round_number] = f"decision:{source.event_id}"
+            latest_decision_id = f"decision:{source.event_id}"
             review_by_id[int(source.event_id)] = source
 
         observations: list[ObservabilityEvent] = []
@@ -312,7 +315,7 @@ class ProductionObservability:
                 decision_id = (
                     decisions_by_round.get(round_number)
                     if isinstance(round_number, int)
-                    else None
+                    else latest_decision_id
                 )
                 add(
                     "decision_executed",
@@ -391,17 +394,20 @@ class ProductionObservability:
 
             if source.event_type == "claimed":
                 started = source.created_at
+                if task_id:
+                    task_started_at[task_id] = started
                 add("task_started", suffix="task-started", status="running", started_at=started)
                 add("execution_started", suffix="execution-started", status="running", started_at=started)
                 continue
 
             if source.event_type == "succeeded":
                 completed = source.created_at
+                started = task_started_at.get(task_id) if task_id else None
                 add(
                     "execution_completed",
                     suffix="execution-completed",
                     status="succeeded",
-                    started_at=None,
+                    started_at=started,
                     completed_at=completed,
                     result_value=result,
                 )
@@ -409,6 +415,7 @@ class ProductionObservability:
                     "task_completed",
                     suffix="task-completed",
                     status="succeeded",
+                    started_at=started,
                     completed_at=completed,
                     result_value=result,
                 )
