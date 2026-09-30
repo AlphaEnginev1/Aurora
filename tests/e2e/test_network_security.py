@@ -415,3 +415,92 @@ def test_real_brokered_capability_acquisition_verification_and_execution(
     assert execution_events[-1]["verification"] == "verified"
     assert execution_events[-1]["returncode"] == 0
     assert execution_events[-1]["argument_count"] == 2
+
+
+
+def test_direct_dns_udp_is_blocked(controlled_network_enforcement_available, tmp_path: Path):
+    code = "import socket; s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM); s.settimeout(2); s.sendto(b'\\x00'*12,('1.1.1.1',53)); s.recvfrom(64)"
+    result = run_sandbox(tmp_path, "python3", "-c", code)
+    assert result.returncode != 0
+
+
+def test_direct_dns_tcp_is_blocked(controlled_network_enforcement_available, tmp_path: Path):
+    code = "import socket; s=socket.create_connection(('1.1.1.1',53),2)"
+    result = run_sandbox(tmp_path, "python3", "-c", code)
+    assert result.returncode != 0
+
+
+def test_gateway_arbitrary_port_is_blocked(controlled_network_enforcement_available, proxy, tmp_path: Path):
+    result = run_sandbox(
+        tmp_path, "python3", "-c",
+        "import socket; socket.create_connection((__import__('sys').argv[1],22),2)",
+        proxy.host,
+    )
+    assert result.returncode != 0
+
+
+def test_post_handoff_capabilities_are_zero(controlled_network_enforcement_available, tmp_path: Path):
+    code = (
+        "s=open('/proc/self/status').read().splitlines(); "
+        "d={k:int(v,16) for k,v in (x.split(':',1) for x in s) if k in "
+        "('CapEff','CapPrm','CapAmb','CapBnd')}; "
+        "assert all(v==0 for v in d.values()), d"
+    )
+    result = run_sandbox(tmp_path, "python3", "-c", code)
+    assert result.returncode == 0, result.stderr
+
+
+def test_raw_socket_is_blocked(controlled_network_enforcement_available, tmp_path: Path):
+    code = "import socket; socket.socket(socket.AF_INET,socket.SOCK_RAW,socket.IPPROTO_ICMP)"
+    result = run_sandbox(tmp_path, "python3", "-c", code)
+    assert result.returncode != 0
+
+
+def test_setns_is_blocked(controlled_network_enforcement_available, tmp_path: Path):
+    code = (
+        "import ctypes,os; libc=ctypes.CDLL(None,use_errno=True); "
+        "fd=os.open('/proc/self/ns/net',os.O_RDONLY); "
+        "rc=libc.setns(fd,0); assert rc==-1"
+    )
+    result = run_sandbox(tmp_path, "python3", "-c", code)
+    assert result.returncode == 0, result.stderr
+
+
+def test_clone3_is_blocked(controlled_network_enforcement_available, tmp_path: Path):
+    code = (
+        "import ctypes,os; libc=ctypes.CDLL(None,use_errno=True); "
+        "rc=libc.syscall(435,0,0); assert rc==-1"
+    )
+    result = run_sandbox(tmp_path, "python3", "-c", code)
+    assert result.returncode == 0, result.stderr
+
+
+def test_clone_namespace_flags_are_blocked(controlled_network_enforcement_available, tmp_path: Path):
+    code = (
+        "import ctypes,os; libc=ctypes.CDLL(None,use_errno=True); "
+        "rc=libc.syscall(56,0x40000000,0,0,0,0); assert rc==-1"
+    )
+    result = run_sandbox(tmp_path, "python3", "-c", code)
+    assert result.returncode == 0, result.stderr
+
+
+def test_nftables_mutation_is_blocked(controlled_network_enforcement_available, tmp_path: Path):
+    result = run_sandbox(tmp_path, "nft", "add", "table", "inet", "aurora_escape_probe")
+    assert result.returncode != 0
+
+
+def test_invalid_network_bootstrap_fails_closed(tmp_path: Path):
+    marker = tmp_path / "should-not-run"
+    result = SandboxExecutor(
+        SandboxPolicy(
+            network=True,
+            egress_proxy_host="10.0.2.2",
+            egress_proxy_port=3128,
+            timeout_seconds=10,
+        )
+    ).execute(
+        ["sh", "-c", f"printf x > {marker}"],
+        workspace=tmp_path,
+    )
+    assert result.returncode != 0
+    assert not marker.exists()
