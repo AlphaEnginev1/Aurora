@@ -42,7 +42,7 @@ class GeminiDirectorProvider:
         api_key: str | None = None,
         model: str | None = None,
         endpoint: str | None = None,
-        timeout_seconds: float = 30.0,
+        timeout_seconds: float | None = None,
         max_retries: int = 2,
     ) -> None:
         self.config = config or GeminiDirectorConfig(
@@ -52,7 +52,11 @@ class GeminiDirectorProvider:
                 "GEMINI_API_ENDPOINT",
                 "https://generativelanguage.googleapis.com/v1beta",
             ),
-            timeout_seconds=timeout_seconds,
+            timeout_seconds=(
+                timeout_seconds
+                if timeout_seconds is not None
+                else float(os.getenv("GEMINI_API_TIMEOUT", "30"))
+            ),
             max_retries=max_retries,
         )
         if not self.config.api_key.strip():
