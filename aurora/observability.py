@@ -248,7 +248,6 @@ class ProductionObservability:
                 provider=provider,
                 model=model,
                 timestamp=source.created_at,
-                metadata={"source_event_id": source.event_id},
             )
 
             def add(
