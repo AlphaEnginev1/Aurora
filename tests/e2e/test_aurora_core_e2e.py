@@ -1,7 +1,9 @@
 """Canonical Aurora Core end-to-end integration proof.
 
-This test composes the already-verified runtime boundaries into one deterministic
-cycle. It does not replace the dedicated live provider/research/network gates.
+This composes the existing Director, research, skills, routing, execution,
+evaluation, learning, review and observability boundaries into one deterministic
+cycle. Dedicated live gates remain authoritative for real external providers,
+network enforcement and live authorization.
 """
 
 from __future__ import annotations
@@ -20,9 +22,15 @@ from aurora.orchestration.event_bus import DurableEventBus
 from aurora.orchestration.task_engine import TaskEngine, TaskStatus
 from aurora.orchestration.task_store import DurableTaskStore
 from aurora.orchestration.task_worker import WorkerPolicy
+from aurora.research.discovery import HttpSearchProvider
 from aurora.research.knowledge import TrustedKnowledgeBuilder
 from aurora.research.learning import ResearchLearningGate
-from aurora.research.models import EvidenceRecord, EvidenceState, SourceRecord
+from aurora.research.models import (
+    EvidenceRecord,
+    EvidenceState,
+    ResearchFinding,
+    SourceRecord,
+)
 from aurora.research.service import ResearchService
 from aurora.research.store import ResearchStore
 from aurora.skills.learning import SkillLearningStore
@@ -52,7 +60,8 @@ class CoreRouter:
 class CoreDirectorProvider:
     provider_id = "controlled"
 
-    def __init__(self):
+    def __init__(self, artifact_id: str):
+        self.artifact_id = artifact_id
         self.calls = 0
         self.review_contexts = []
 
@@ -65,12 +74,12 @@ class CoreDirectorProvider:
                     '{"task_id":"research_evidence","role":"researcher",'
                     '"objective":"investigate Aurora evidence",'
                     '"capability":"research",'
-                    '"args":["https://example.test/aurora"],'
+                    '"args":["artifact:' + self.artifact_id + '"],'
                     '"depends_on":[],"skills":[]},'
                     '{"task_id":"analyze_evidence","role":"researcher",'
                     '"objective":"analyze verified Aurora evidence",'
                     '"capability":null,'
-                    '"args":["artifact:kart-core"],'
+                    '"args":["artifact:' + self.artifact_id + '"],'
                     '"depends_on":["research_evidence"],'
                     '"skills":["research"]}'
                     ']}'
@@ -106,10 +115,10 @@ class CoreGateway:
                 b'{"results":[{"url":"https://example.test/aurora",'
                 b'"title":"Aurora evidence","snippet":"verified architecture evidence"}]}'
             )
-        return b"Aurora evidence source." 
+        return b"Aurora evidence source."
 
 
-def _seed_trusted_artifact(store: ResearchStore) -> None:
+def _seed_trusted_artifact(store: ResearchStore) -> str:
     source = SourceRecord(
         source_id="src-core",
         url="https://example.test/aurora",
@@ -125,26 +134,25 @@ def _seed_trusted_artifact(store: ResearchStore) -> None:
         claim="Aurora evidence source.",
     ).verify("independent verification")
     store.record_evidence(evidence)
-    finding = TrustedKnowledgeBuilder(store).build(
-        __import__("aurora.research.models", fromlist=["ResearchFinding"]).ResearchFinding(
-            finding_id="finding-core",
-            claim="Aurora evidence source.",
-            evidence_ids=(evidence.evidence_id,),
-            confidence=1.0,
-            state=EvidenceState.VERIFIED,
-        ),
-        (evidence,),
-    )[0]
-    store.record_knowledge_artifact(finding)
+    finding = ResearchFinding(
+        finding_id="finding-core",
+        claim="Aurora evidence source.",
+        evidence_ids=(evidence.evidence_id,),
+        confidence=1.0,
+        state=EvidenceState.VERIFIED,
+    )
+    artifact, _ = TrustedKnowledgeBuilder(store).build(finding, (evidence,))
+    return artifact.artifact_id
 
 
 def test_aurora_core_full_cycle(tmp_path: Path):
-    router = CoreRouter()
     research_store = ResearchStore(tmp_path / "research.db")
-    _seed_trusted_artifact(research_store)
+    artifact_id = _seed_trusted_artifact(research_store)
+    discovery = HttpSearchProvider(CoreGateway(), "https://search.example.test/search")
     research_service = ResearchService(
         CoreGateway(),
         research_store,
+        discovery=discovery,
     )
 
     skills = SkillRegistry(
@@ -189,7 +197,7 @@ def test_aurora_core_full_cycle(tmp_path: Path):
 
     performance = ModelPerformanceStore(tmp_path / "model-performance.db")
     task_engine = TaskEngine(
-        OrchestrationEngine(router),
+        OrchestrationEngine(CoreRouter()),
         tmp_path / "workspace",
         organization=organization,
         skill_registry=skills,
@@ -198,20 +206,14 @@ def test_aurora_core_full_cycle(tmp_path: Path):
         research_service=research_service,
         research_learning_gate=ResearchLearningGate(research_store),
     )
+    provider = CoreDirectorProvider(artifact_id)
     planner = DirectorPlanner(
-        provider=CoreDirectorProvider(),
+        provider=provider,
         router=None,
         organization=organization,
         skill_registry=skills,
     )
-    provider = planner.provider
-    durable = DurableDirectorService(
-        planner=planner,
-        task_engine=task_engine,
-        store=DurableTaskStore(tmp_path / "tasks.db"),
-        event_bus=DurableEventBus(DurableTaskStore(tmp_path / "events.db")),
-    )
-    # Reuse the durable store/event bus from the same database for a real runtime.
+
     store = DurableTaskStore(tmp_path / "runtime.db")
     event_bus = DurableEventBus(store)
     durable = DurableDirectorService(
@@ -224,7 +226,11 @@ def test_aurora_core_full_cycle(tmp_path: Path):
         director=durable,
         store=store,
         event_bus=event_bus,
-        worker_policy=WorkerPolicy(lease_seconds=30, max_attempts=2, idle_sleep_seconds=0),
+        worker_policy=WorkerPolicy(
+            lease_seconds=30,
+            max_attempts=2,
+            idle_sleep_seconds=0,
+        ),
         worker_id="aurora-core-e2e",
         event_consumer_id="aurora-core-e2e-events",
         worker_concurrency=1,
@@ -232,8 +238,10 @@ def test_aurora_core_full_cycle(tmp_path: Path):
     )
 
     submission = runtime.submit_mission(
-        objective="Investigate Aurora evidence, execute the analysis, evaluate the result, "
-        "and complete the mission using learned routing evidence."
+        objective=(
+            "Investigate Aurora evidence, execute the analysis, evaluate the result, "
+            "and complete the mission using learned routing evidence."
+        )
     )
     result = runtime.run_until_terminal(submission, max_cycles=20)
 
