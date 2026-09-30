@@ -1,6 +1,6 @@
 # Recovery Drills V1
 
-**Status:** TEST CONTRACT
+**Status:** VERIFIED
 
 Block 6 verifies the recovery guarantees already implemented in Aurora. It does not introduce a second recovery subsystem.
 
@@ -40,11 +40,13 @@ Existing acquisition recovery/reconciliation must remain covered by its establis
 
 ## Closure evidence
 
-Block 6 can be marked VERIFIED only when:
-- all RD-01..RD-05 automated drills are green on the canonical line;
-- the full `test` suite and `e2e-network` suite are green;
-- no recovery path changes authoritative mission semantics;
-- evidence demonstrates persistence across process/runtime recreation;
-- the recovery behavior remains idempotent and claim-token safe.
+Block 6 is VERIFIED on the canonical `main` line.
+
+- CI 1396: Recovery Drills branch — `test` PASS, `e2e-network` PASS.
+- CI 1398: canonical `main` after merge — `test` PASS, `e2e-network` PASS.
+- RD-01..RD-05 are green.
+- Existing acquisition transaction reconciliation remains covered by its established recovery tests.
+- No new recovery subsystem was introduced; the drills verify the already-integrated durable recovery mechanisms.
+- Recovery remains idempotent and claim-token safe, and restart evidence is preserved in the durable task/event state.
 
 No new recovery architecture is authorized by this contract.
