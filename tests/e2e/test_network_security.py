@@ -18,7 +18,7 @@ from aurora.autonomy.policy import Policy
 from aurora.autonomy.egress_proxy import EgressProxy, EgressProxyPolicy
 from aurora.autonomy.internet import InternetGateway, InternetPolicy
 from aurora.autonomy.registry import ToolSpec
-from aurora.autonomy.sandbox import SandboxExecutor, SandboxPolicy
+from aurora.autonomy.sandbox import SandboxError, SandboxExecutor, SandboxPolicy
 
 REQUIRED = ("bwrap", "slirp4netns", "nft", "ip", "setpriv", "curl")
 
@@ -491,16 +491,16 @@ def test_nftables_mutation_is_blocked(controlled_network_enforcement_available, 
 
 def test_invalid_network_bootstrap_fails_closed(tmp_path: Path):
     marker = tmp_path / "should-not-run"
-    result = SandboxExecutor(
-        SandboxPolicy(
-            network=True,
-            egress_proxy_host="10.0.2.2",
-            egress_proxy_port=3128,
-            timeout_seconds=10,
+    with pytest.raises(SandboxError, match="invalid egress proxy endpoint"):
+        SandboxExecutor(
+            SandboxPolicy(
+                network=True,
+                egress_proxy_host="10.0.2.2",
+                egress_proxy_port=3128,
+                timeout_seconds=10,
+            )
+        ).execute(
+            ["sh", "-c", f"printf x > {marker}"],
+            workspace=tmp_path,
         )
-    ).execute(
-        ["sh", "-c", f"printf x > {marker}"],
-        workspace=tmp_path,
-    )
-    assert result.returncode != 0
     assert not marker.exists()
