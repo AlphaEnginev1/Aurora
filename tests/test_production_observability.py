@@ -11,6 +11,15 @@ from pathlib import Path
 
 import pytest
 
+from aurora.inference.models import InferenceResponse
+from aurora.orchestration.director import DirectorPlan, DirectorReview
+from aurora.orchestration.durable_director import DurableDirectorService
+from aurora.orchestration.engine import TaskResult
+from aurora.orchestration.event_bus import DurableEventBus
+from aurora.orchestration.director_runtime import DirectorRuntime
+from aurora.orchestration.task_engine import DelegatedTask, TaskEngine, TaskStatus
+from aurora.orchestration.task_store import DurableTaskStore
+from aurora.orchestration.task_worker import WorkerPolicy
 from aurora.observability import (
     ObservabilityEvent,
     ObservabilitySecurityError,
@@ -201,3 +210,129 @@ def test_observability_is_not_authoritative_for_decision_result(tmp_path: Path):
 
     assert recorded_result == decision_result
     assert recorded_result is decision_result
+
+
+class _IntegrationPlanner:
+    def plan(self, **kwargs):
+        return DirectorPlan(
+            objective=kwargs["objective"],
+            tasks=(DelegatedTask("collect", "agent", "collect evidence"),),
+            model="director/model",
+        )
+
+    def review(self, **kwargs):
+        return DirectorReview(
+            decision="complete",
+            rationale="Observed execution is sufficient.",
+            tasks=(),
+            model="director/model",
+        )
+
+
+class _IntegrationOrchestration:
+    def run_task(self, **kwargs):
+        return TaskResult(
+            task_id=kwargs["task_id"],
+            role=kwargs["role"],
+            response=InferenceResponse(
+                model="actual/model",
+                provider="nvidia_api",
+                content="observed result",
+                request_id="request-real-1",
+                execution_id="execution-real-1",
+                selected_model="actual/model",
+                reported_model="actual/model",
+                routing_score=0.91,
+                routing_factors={"quality": 0.9},
+                routing_candidates=(("actual/model", 0.91),),
+            ),
+        )
+
+    def run_capability_task(self, **kwargs):
+        raise AssertionError("capability execution is not expected")
+
+
+def test_real_director_cycle_is_reconstructable_after_runtime_restart(tmp_path: Path):
+    db = tmp_path / "tasks.db"
+    observation_path = tmp_path / "observability.jsonl"
+    store = DurableTaskStore(db)
+    bus = DurableEventBus(store)
+    engine = TaskEngine(_IntegrationOrchestration(), tmp_path / "workspace")
+    director = DurableDirectorService(
+        planner=_IntegrationPlanner(),
+        task_engine=engine,
+        store=store,
+        event_bus=bus,
+    )
+    observer = ProductionObservability(observation_path)
+    runtime = DirectorRuntime(
+        director=director,
+        store=store,
+        event_bus=bus,
+        observability=observer,
+        worker_policy=WorkerPolicy(lease_seconds=30, max_attempts=1, idle_sleep_seconds=0),
+        worker_id="integration-worker",
+        event_consumer_id="integration-events",
+        worker_concurrency=1,
+    )
+
+    submission = runtime.submit_mission(objective="prove observability")
+    result = runtime.run_until_terminal(submission)
+
+    assert result.status is TaskStatus.SUCCEEDED
+    events = observer.reconstruct_cycle(submission.mission_id)
+    event_types = [event.event_type for event in events]
+    required = [
+        "mission_started",
+        "task_created",
+        "task_started",
+        "execution_started",
+        "execution_completed",
+        "task_completed",
+        "decision_created",
+        "decision_executed",
+        "evaluation_completed",
+        "learning_recorded",
+        "decision_completed",
+    ]
+    positions = [event_types.index(name) for name in required]
+    assert positions == sorted(positions)
+
+    execution = next(event for event in events if event.event_type == "execution_completed")
+    assert execution.correlation_id == submission.mission_id
+    assert execution.task_id == "collect"
+    assert execution.execution_id == "execution-real-1"
+    assert execution.request_id == "request-real-1"
+    assert execution.provider == "nvidia_api"
+    assert execution.model == "actual/model"
+    assert execution.result["type"] == "model"
+    assert execution.duration_ms is not None
+
+    decisions = {
+        event.event_type: event
+        for event in events
+        if event.event_type in {"decision_created", "decision_executed", "evaluation_completed", "decision_completed"}
+    }
+    assert decisions["decision_created"].decision_id
+    assert decisions["decision_executed"].decision_id == decisions["decision_created"].decision_id
+    assert decisions["evaluation_completed"].decision_id == decisions["decision_created"].decision_id
+    assert decisions["decision_completed"].decision_id == decisions["decision_created"].decision_id
+
+    before = len(observation_path.read_text(encoding="utf-8").splitlines())
+    observer_after_restart = ProductionObservability(observation_path)
+    runtime_after_restart = DirectorRuntime(
+        director=director,
+        store=store,
+        event_bus=bus,
+        observability=observer_after_restart,
+        worker_policy=WorkerPolicy(lease_seconds=30, max_attempts=1, idle_sleep_seconds=0),
+        worker_id="integration-worker-restarted",
+        event_consumer_id="integration-events-restarted",
+        worker_concurrency=1,
+    )
+    runtime_after_restart.run_once()
+    after = len(observation_path.read_text(encoding="utf-8").splitlines())
+    assert after == before
+    assert [event.event_id for event in observer_after_restart.reconstruct_cycle(submission.mission_id)] == [
+        event.event_id for event in events
+    ]
