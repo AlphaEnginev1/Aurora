@@ -29,4 +29,5 @@ jobs:
           NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
           NVIDIA_MODEL_ID: ${{ inputs.model_id }}
           NVIDIA_API_ENDPOINT: ${{ inputs.endpoint }}
+          NVIDIA_API_TIMEOUT: "180"
         run: python -m pytest -q tests/e2e/test_live_nvidia_learning.py
