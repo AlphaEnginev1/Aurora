@@ -1,0 +1,25 @@
+use_default_settings: true
+
+general:
+  debug: false
+  instance_name: "Aurora Live Research SearXNG"
+
+search:
+  safe_search: 0
+  formats:
+    - html
+    - json
+
+server:
+  bind_address: "0.0.0.0"
+  limiter: false
+  public_instance: false
+  image_proxy: false
+  secret_key: "aurora-live-research-ci-secret"
+
+use_default_settings:
+  engines:
+    keep_only:
+      - wikipedia
+      - wikidata
+      - duckduckgo
