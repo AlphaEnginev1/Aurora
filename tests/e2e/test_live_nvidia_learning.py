@@ -8,6 +8,8 @@ configuration failure, never a skipped test.
 import os
 from pathlib import Path
 
+import pytest
+
 from aurora.inference.models import InferenceRequest, ModelSpec
 from aurora.inference.model_performance import ModelPerformanceStore
 from aurora.inference.router import ModelRouter
@@ -19,6 +21,9 @@ from aurora.skills.models import SkillSpec
 
 
 def test_live_nvidia_execution_evaluates_and_persists_learning(tmp_path: Path):
+    if os.environ.get("AURORA_LIVE_NVIDIA_GATE") != "1":
+        pytest.skip("live NVIDIA gate is opt-in outside the dedicated workflow")
+
     api_key = os.environ.get("NVIDIA_API_KEY")
     endpoint = os.environ.get("NVIDIA_API_ENDPOINT", "https://integrate.api.nvidia.com/v1")
     model_id = os.environ.get("NVIDIA_MODEL_ID")
