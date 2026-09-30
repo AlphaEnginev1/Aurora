@@ -167,26 +167,50 @@ class ControlledLiveAuthorization:
             raise LiveAuthorizationError(
                 f"authorization record missing fields: {', '.join(missing)}"
             )
-        try:
-            scope = frozenset(str(item) for item in raw["scope"])
-            prerequisites = dict(raw["prerequisites"])
-            metadata = dict(raw.get("metadata", {}))
-        except (TypeError, ValueError) as exc:
+        text_fields = (
+            "authorization_id",
+            "approved_by",
+            "issued_at",
+            "expires_at",
+            "canonical_commit",
+        )
+        if any(not isinstance(raw[name], str) for name in text_fields):
             raise LiveAuthorizationError(
-                "authorization record contains invalid structured fields"
-            ) from exc
+                "authorization record contains invalid text fields"
+            )
+        bool_fields = ("live_enabled", "revoked", "kill_switch")
+        if any(type(raw[name]) is not bool for name in bool_fields):
+            raise LiveAuthorizationError(
+                "authorization record contains invalid boolean fields"
+            )
+        if not isinstance(raw["scope"], list) or any(
+            not isinstance(item, str) for item in raw["scope"]
+        ):
+            raise LiveAuthorizationError("authorization scope must be a list of strings")
+        if not isinstance(raw["prerequisites"], dict) or any(
+            not isinstance(key, str) or not isinstance(value, str)
+            for key, value in raw["prerequisites"].items()
+        ):
+            raise LiveAuthorizationError(
+                "authorization prerequisites must be a string mapping"
+            )
+        metadata = raw.get("metadata", {})
+        if not isinstance(metadata, dict):
+            raise LiveAuthorizationError(
+                "authorization metadata must be an object"
+            )
         return AuthorizationRecord(
-            authorization_id=str(raw["authorization_id"]),
-            approved_by=str(raw["approved_by"]),
-            issued_at=str(raw["issued_at"]),
-            expires_at=str(raw["expires_at"]),
-            scope=scope,
-            prerequisites=prerequisites,
-            live_enabled=bool(raw["live_enabled"]),
-            revoked=bool(raw["revoked"]),
-            kill_switch=bool(raw["kill_switch"]),
-            canonical_commit=str(raw["canonical_commit"]),
-            metadata=metadata,
+            authorization_id=raw["authorization_id"],
+            approved_by=raw["approved_by"],
+            issued_at=raw["issued_at"],
+            expires_at=raw["expires_at"],
+            scope=frozenset(raw["scope"]),
+            prerequisites=dict(raw["prerequisites"]),
+            live_enabled=raw["live_enabled"],
+            revoked=raw["revoked"],
+            kill_switch=raw["kill_switch"],
+            canonical_commit=raw["canonical_commit"],
+            metadata=dict(metadata),
         )
 
     def require(
@@ -266,9 +290,11 @@ class ControlledLiveAuthorization:
 
         issued = _parse_time(record.issued_at, "issued_at")
         expires = _parse_time(record.expires_at, "expires_at")
-        current = now or datetime.now(timezone.utc)
         if issued.tzinfo is None or expires.tzinfo is None:
             raise LiveAuthorizationError("authorization timestamps must include timezone")
+        current = now or datetime.now(timezone.utc)
+        if current.tzinfo is None:
+            raise LiveAuthorizationError("current authorization time must include timezone")
         if expires <= issued:
             raise LiveAuthorizationError("authorization expiry must be after issue time")
         if issued - current > self.clock_skew:
