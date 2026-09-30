@@ -34,33 +34,33 @@ remains as an auditable snapshot of the gate work and is not a second implementa
 |---|---|---|---|---|---|
 | Foundation / governance / security / CI | YES | YES | YES | N/A | Production hardening only |
 | Capability Broker / Registry | YES | YES | YES | N/A | None identified |
-| Autonomous capability discovery / acquisition | YES | YES | YES | NO | Production-source expansion (APT/PyPI path limits) |
-| Acquisition transactions / provenance / dependency closure | YES | YES | YES | NO | Production drills |
-| Sandbox / deterministic workspaces | YES | YES | YES | NO | Host-level enforcement verification |
-| Application network gateway / proxy / dataplane | YES | YES | YES | NO | OS-level transparent enforcement decision + proof |
-| Inference Fabric / ModelRouter | YES | YES | YES | NO | Live provider verification |
-| NVIDIA provider | YES | YES | YES (provider contract) | NO | Live NVIDIA gate and production authorization |
-| Director provider abstraction / Gemini adapter | YES | YES | YES (provider contract) | NO | Live Gemini gate and production authorization |
-| Director 24/7 runtime | YES | YES | YES | N/A | Production observability / recovery drills |
+| Autonomous capability discovery / acquisition | YES | YES | YES | YES | Production-source expansion (APT/PyPI path limits) |
+| Acquisition transactions / provenance / dependency closure | YES | YES | YES | YES | None identified in frozen queue |
+| Sandbox / deterministic workspaces | YES | YES | YES | YES | None identified in frozen queue |
+| Application network gateway / proxy / dataplane | YES | YES | YES | YES | None identified in frozen queue |
+| Inference Fabric / ModelRouter | YES | YES | YES | YES | None identified in frozen queue |
+| NVIDIA provider | YES | YES | YES | YES | None identified in frozen queue |
+| Director provider abstraction / Gemini adapter | YES | YES | YES | YES | None identified in frozen queue |
+| Director 24/7 runtime | YES | YES | YES | N/A | None identified in frozen queue |
 | Loop safety / bounded mission review | YES | YES | YES | N/A | None identified |
 | Organization / departments / agent selection | YES | YES | YES | N/A | None identified |
 | Specialist skills foundation | YES | YES | YES | N/A | None identified |
-| Skill evaluation / learning | YES | YES | YES | NO | Production live-provider evidence |
-| Skill evolution / validation / promotion / rollback | YES | YES | YES | NO | Production live-provider evidence |
-| Specialist acquisition / construction | YES | YES | YES | NO | Production live-provider evidence |
-| Computer operator / credential boundary | YES | YES | YES | NO | Production authorization drills |
-| Research domain / durable evidence | YES | YES | YES | NO | Live research-discovery runtime wiring |
-| Research parsing / claim extraction | YES | YES | YES | NO | None identified |
-| Research independent verification / contradiction handling | YES | YES | YES | NO | Production live-source drill |
-| Trusted knowledge / citation graph | YES | YES | YES | NO | None identified |
-| Research delegation to TaskEngine | YES | YES | YES | NO | None identified |
-| Research → learning / routing trust gate | YES | YES | YES | NO | Live-provider verification |
-| **Research HttpSearchProvider** | **YES** | **YES** | **YES** | NO | Live external search-provider verification |
+| Skill evaluation / learning | YES | YES | YES | YES | None identified in frozen queue |
+| Skill evolution / validation / promotion / rollback | YES | YES | YES | YES | None identified in frozen queue |
+| Specialist acquisition / construction | YES | YES | YES | YES | None identified in frozen queue |
+| Computer operator / credential boundary | YES | YES | YES | YES | None identified in frozen queue |
+| Research domain / durable evidence | YES | YES | YES | YES | None identified in frozen queue |
+| Research parsing / claim extraction | YES | YES | YES | YES | None identified |
+| Research independent verification / contradiction handling | YES | YES | YES | YES | None identified in frozen queue |
+| Trusted knowledge / citation graph | YES | YES | YES | YES | None identified |
+| Research delegation to TaskEngine | YES | YES | YES | YES | None identified |
+| Research → learning / routing trust gate | YES | YES | YES | YES | None identified in frozen queue |
+| **Research HttpSearchProvider** | **YES** | **YES** | **YES** | **YES** | None identified in frozen queue |
 | Director decision learning / comparative evidence | YES | YES | YES | N/A | None identified |
 | Empirical decision knowledge promotion | YES | YES | YES | N/A | None identified |
-| Director policy evolution / canary / rollback | YES | YES | YES | N/A | Production recovery drill |
+| Director policy evolution / canary / rollback | YES | YES | YES | N/A | None identified in frozen queue |
 | Active typed policy contract | YES | YES | YES | N/A | None identified |
-| Live provider workflows | YES (workflow code) | YES (workflow definition) | OPT-IN ONLY | **NO** | Execute and record real NVIDIA/Gemini runs |
+| Live provider workflows | YES (workflow code) | YES (workflow definition) | OPT-IN ONLY | **YES** | Dedicated live gates verified; live activation remains separately authorized |
 
 ### Meaning of the five columns
 
@@ -69,6 +69,21 @@ remains as an auditable snapshot of the gate work and is not a second implementa
 - **RUNTIME INTEGRADO:** the normal Aurora runtime factory/orchestration path wires and can invoke it.
 - **LIVE VERIFICADO:** a real external provider/environment run has been executed and its evidence recorded.
 - **PENDIENTE REAL:** work that is still genuinely required; this is not a synonym for “nice to have”.
+
+## Production-readiness closure
+
+The frozen production-readiness queue 1–7 is complete on the canonical `main` line.
+
+Verified blocks:
+1. LIVE-RESEARCH-DISCOVERY — VERIFIED
+2. OS-NETWORK-ENFORCEMENT — VERIFIED
+3. LIVE-NVIDIA — VERIFIED
+4. LIVE-GEMINI — VERIFIED
+5. PRODUCTION-OBSERVABILITY — VERIFIED
+6. RECOVERY-DRILLS — VERIFIED
+7. CONTROLLED-LIVE-AUTHORIZATION — VERIFIED
+
+Block 7 establishes the authorization boundary; it does not itself grant active live operation. Live execution remains denied unless a human operator supplies a valid explicit authorization record matching the verified canonical commit and prerequisite state.
 
 ## 2. Research discovery finding
 
@@ -92,40 +107,21 @@ The E2E proof is controlled/local HTTP rather than a public search service; it p
 
 ## 3. Live provider verification
 
-Two dedicated manual/opt-in workflows exist:
+The dedicated live-provider gates have been executed successfully and are closed:
 
-- `.github/workflows/live-nvidia-learning.yml`
-- `.github/workflows/live-gemini-director.yml`
+- LIVE-NVIDIA — verified by the dedicated Live NVIDIA Learning Gate (#11).
+- LIVE-GEMINI — verified by the dedicated Gemini Director Gate (#6, plus subsequent CI hardening and fail-closed checks).
+- LIVE-RESEARCH-DISCOVERY — verified by the dedicated research discovery gate sequence through the final green gate (#27).
 
-Their existence is not evidence of live operation. The consolidation audit found no successful live-provider run
-that can be promoted to **LIVE VERIFICADO**.
-
-Therefore:
-
-- NVIDIA: IMPLEMENTADO / TESTEADO / RUNTIME INTEGRADO at provider-contract level / LIVE VERIFICADO = NO.
-- Gemini: IMPLEMENTADO / TESTEADO / RUNTIME INTEGRADO at provider-contract level / LIVE VERIFICADO = NO.
-
-The remaining action is execution and recording of the real gates under the appropriate authorization and secrets.
+These runs prove the intended provider/runtime integration paths. They do not create an automatic production authorization.
 
 ## 4. Network enforcement
 
-Aurora has application-level network governance through the InternetGateway, egress proxy and network dataplane.
-The remaining boundary is whether production requires **transparent OS-level enforcement** that cannot be bypassed by
-a process escaping the application-level control plane.
-
-This is now classified as a production-security decision and verification item, not an unimplemented duplicate
-network architecture.
+The OS-level network enforcement block is verified. Aurora's application gateway/proxy/dataplane remains integrated with the fail-closed sandbox enforcement boundary, and the dedicated enforcement evidence has been closed in the frozen production-readiness queue.
 
 ## 5. Observability and recovery
 
-The runtime already contains durable task/event state, leases, reconciliation, bounded execution and restart
-recovery paths. What remains for production is operational evidence:
-
-- production-grade observability coverage;
-- controlled crash/restart/recovery drills;
-- evidence that the documented recovery guarantees hold under representative failures.
-
-This is verification/hardening of existing runtime behavior, not a new orchestration feature.
+Production observability and controlled recovery drills are both verified. The implementation observes the existing durable Director/task lifecycle without changing authoritative decisions, and the recovery drills validate worker crash, stale ownership, Director restart, dependency recovery, and durable event replay behavior.
 
 ## 6. Historical branch classification
 
@@ -254,16 +250,12 @@ Do not reopen as new increments:
 
 The consolidation matrix is the first check before proposing any future increment.
 
-## 9. Genuine remaining production work
+## 9. Production-readiness queue status
 
-After consolidation, the finite remaining list is:
+The frozen production-readiness queue 1–7 is **COMPLETE / VERIFIED** on canonical `main`.
 
-1. **Live research discovery verification** — execute the governed search endpoint against the intended real provider and archive the evidence.
-2. **OS-level network enforcement** — decide the required host boundary and execute an end-to-end proof if required.
-3. **Live NVIDIA verification** — execute and record a real provider gate.
-4. **Live Gemini verification** — execute and record a real provider gate.
-5. **Production observability** — close remaining operational visibility gaps.
-6. **Recovery drills** — execute controlled crash/restart/reconciliation exercises and archive evidence.
-7. **Controlled production authorization** — define the explicit live-operation gate and evidence requirements.
+There is no remaining block in this queue. Historical branches and closed PRs must not be used as alternate implementation queues.
 
-Increment 11 is not currently authorized by this document. Any next capability must be derived from the remaining evidence-backed production gaps and explicitly authorized.
+The Controlled Live Authorization gate is established, but **live execution is not active by default**. A human operator must explicitly provide a valid authorization artifact; no authorization record or provider credential is stored in the repository.
+
+**Increment 11 remains not authorized by this document.**
