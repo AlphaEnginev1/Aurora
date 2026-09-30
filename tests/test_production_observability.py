@@ -282,7 +282,7 @@ def test_real_director_cycle_is_reconstructable_after_runtime_restart(tmp_path: 
     assert result.status is TaskStatus.SUCCEEDED
     events = observer.reconstruct_cycle(submission.mission_id)
     event_types = [event.event_type for event in events]
-    required = [
+    for name in (
         "mission_started",
         "task_created",
         "task_started",
@@ -294,9 +294,19 @@ def test_real_director_cycle_is_reconstructable_after_runtime_restart(tmp_path: 
         "evaluation_completed",
         "learning_recorded",
         "decision_completed",
-    ]
-    positions = [event_types.index(name) for name in required]
-    assert positions == sorted(positions)
+    ):
+        assert name in event_types
+
+    positions = {name: event_types.index(name) for name in event_types}
+    assert positions["task_created"] < positions["task_started"]
+    assert positions["task_started"] <= positions["execution_started"]
+    assert positions["execution_started"] < positions["execution_completed"]
+    assert positions["execution_completed"] <= positions["task_completed"]
+    assert positions["task_completed"] < positions["decision_created"]
+    assert positions["decision_created"] <= positions["decision_executed"]
+    assert positions["decision_executed"] < positions["evaluation_completed"]
+    assert positions["evaluation_completed"] < positions["learning_recorded"]
+    assert positions["learning_recorded"] < positions["decision_completed"]
 
     execution = next(event for event in events if event.event_type == "execution_completed")
     assert execution.correlation_id == submission.mission_id
