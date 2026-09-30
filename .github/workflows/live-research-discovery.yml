@@ -68,7 +68,7 @@ jobs:
           echo $! > /tmp/cloudflared.pid
 
           for i in $(seq 1 60); do
-            endpoint="$(grep -Eo 'https://[-a-z0-9]+\.trycloudflare\.com' /tmp/cloudflared.log | head -n 1 || true)"
+            endpoint="$(grep -Eo 'https://[a-z0-9][a-z0-9-]{4,}\.trycloudflare\.com' /tmp/cloudflared.log | head -n 1 || true)"
             if [ -n "$endpoint" ]; then
               echo "AURORA_RESEARCH_DISCOVERY_ENDPOINT=$endpoint/search?format=json" >> "$GITHUB_ENV"
               echo "Controlled live provider: $endpoint"
@@ -81,11 +81,11 @@ jobs:
             sleep 2
           done
 
-          endpoint="$(grep -Eo 'https://[-a-z0-9]+\.trycloudflare\.com' /tmp/cloudflared.log | head -n 1 || true)"
+          endpoint="$(grep -Eo 'https://[a-z0-9][a-z0-9-]{4,}\.trycloudflare\.com' /tmp/cloudflared.log | head -n 1 || true)"
           test -n "$endpoint"
 
           curl -fsS --retry 5 --retry-delay 2 \
-            "$endpoint/search?q=%21wp%20SearXNG&format=json" \
+            "$endpoint/search?q=SearXNG&format=json" \
             -o /tmp/public-searxng.json
 
           python - <<'PY'
