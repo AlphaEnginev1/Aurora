@@ -141,10 +141,9 @@ def build_director_runtime(*, inference_policy_path: str | Path, autonomy_policy
     source_catalog=ResearchSourceCatalog.from_environment()
 
     def discover_research_sources(gap):
-        objective=(
-            f"Discover reliable procedures for specialist skill {gap.skill_id}. "
-            f"Gap: {gap.reason}. Capabilities: {', '.join(gap.required_capabilities)}"
-        )
+        objective = gap.reason.strip() or gap.skill_id.strip()
+        if gap.required_capabilities:
+            objective = f"{objective} {' '.join(gap.required_capabilities)}".strip()
         if research_service.discovery is not None:
             return research_service.discover(
                 ResearchRequest(
