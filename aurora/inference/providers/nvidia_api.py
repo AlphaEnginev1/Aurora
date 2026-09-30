@@ -45,11 +45,18 @@ class NVIDIAAPIProvider:
         self,
         spec: ModelSpec,
         api_key: str | None = None,
-        timeout: float = 60.0,
+        timeout: float | None = None,
     ):
         self.spec = spec
         self.api_key = api_key or os.getenv("NVIDIA_API_KEY")
-        self.timeout = timeout
+        configured_timeout = timeout
+        if configured_timeout is None:
+            configured_timeout = float(os.getenv("NVIDIA_API_TIMEOUT", "180"))
+        if configured_timeout <= 0:
+            raise ProviderConfigurationError(
+                "NVIDIA provider timeout must be greater than zero",
+            )
+        self.timeout = configured_timeout
 
     def health(self) -> bool:
         return bool(self.spec.enabled and self.spec.endpoint and self.api_key)
