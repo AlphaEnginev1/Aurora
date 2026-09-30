@@ -15,6 +15,9 @@ Aurora has one authoritative engineering line:
 - CI 1291–1296: SUCCESS
 - CI 1305: SUCCESS — research discovery E2E
 - CI 1306: SUCCESS — canonical `main`
+- CI 1392: SUCCESS — Production Observability V1
+- CI 1398/1399: SUCCESS — Recovery Drills V1
+- CI 1414: SUCCESS — Controlled Live Authorization V1
 - consolidation issue: #50 (CLOSED)
 
 No new functionality was authorized during the consolidation gate; Increment 11 remains explicitly unapproved.
@@ -32,19 +35,18 @@ The roadmap is reconciled to that record:
 The matrix distinguishes **IMPLEMENTADO**, **TESTEADO**, **RUNTIME INTEGRADO**, **LIVE VERIFICADO** and
 **PENDIENTE REAL** so that a feature cannot be treated as production-ready merely because code or unit tests exist.
 
-## Genuine remaining production work
+## Frozen production-readiness queue — COMPLETE
 
-The remaining gaps are finite and evidence-backed:
+The ordered production-readiness blocks 1–7 are verified on canonical `main`:
 
-1. live verification against the intended real research search provider;
-2. decision and proof of OS-level transparent network enforcement;
-3. real NVIDIA provider verification;
-4. real Gemini provider verification;
-5. production observability;
-6. controlled recovery/crash drills;
-7. explicit controlled production authorization.
+1. LIVE-RESEARCH-DISCOVERY — VERIFIED
+2. OS-NETWORK-ENFORCEMENT — VERIFIED
+3. LIVE-NVIDIA — VERIFIED
+4. LIVE-GEMINI — VERIFIED
+5. PRODUCTION-OBSERVABILITY — VERIFIED
+6. RECOVERY-DRILLS — VERIFIED
+7. CONTROLLED-LIVE-AUTHORIZATION — VERIFIED
 
-**Increment 11 is not authorized by the consolidation record.**
+Block 7 provides the explicit live-operation authorization boundary. It does not grant live access automatically: Aurora remains fail-closed until a human operator supplies a valid, scoped, non-expired authorization record matching the verified canonical commit and prerequisites.
 
-New capability work resumes only after the consolidation gate is explicitly closed and the next increment is
-derived from the remaining evidence.
+Historical branches and closed PRs are not alternate work queues. Increment 11 remains explicitly unapproved by the consolidation record.
