@@ -248,6 +248,7 @@ class ProductionObservability:
                 provider=provider,
                 model=model,
                 timestamp=source.created_at,
+                metadata={"source_event_id": source.event_id},
             )
 
             def add(
@@ -356,6 +357,17 @@ class ProductionObservability:
                     evaluation=payload,
                     evidence=evidence,
                     metadata={"learning_sink": "DirectorDecisionPerformanceStore"},
+                )
+                add(
+                    "decision_completed",
+                    suffix="decision-completed",
+                    decision_id=decision_id,
+                    status="completed",
+                    result_value={
+                        "decision": payload.get("decision"),
+                        "outcome": payload.get("outcome"),
+                        "score": payload.get("score"),
+                    },
                 )
                 continue
 
@@ -476,16 +488,9 @@ class ProductionObservability:
                 continue
 
             if source.event_type in {"mission_succeeded", "mission_failed", "mission_blocked"}:
-                round_number = payload.get("round")
-                decision_id = (
-                    decisions_by_round.get(round_number)
-                    if isinstance(round_number, int)
-                    else latest_decision_id
-                )
                 add(
-                    "decision_completed",
+                    "mission_completed",
                     suffix="mission-terminal",
-                    decision_id=decision_id,
                     status=source.event_type.removeprefix("mission_"),
                     result_value={
                         "status": source.event_type.removeprefix("mission_"),
