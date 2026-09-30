@@ -11,6 +11,9 @@ Authoritative status:
 - CI 1291–1296: SUCCESS
 - CI 1305: SUCCESS — research discovery E2E
 - CI 1306: SUCCESS — canonical main after merge
+- CI 1392: SUCCESS — Production Observability V1
+- CI 1398/1399: SUCCESS — Recovery Drills V1
+- CI 1414: SUCCESS — Controlled Live Authorization V1 on canonical main
 
 The repository is no longer tracking historical increments as future work. The sections below describe what is
 already integrated and what remains genuinely required.
@@ -30,9 +33,8 @@ Integrated:
 - transactional state, staging, recovery and reconciliation;
 - tool artifact injection.
 
-Remaining production boundary:
+Remaining non-queue hardening:
 - additional acquisition source families where required;
-- host/OS network enforcement.
 
 ## Phase 2 — Runtime Safety / Persistence / Recovery — INTEGRATED
 
@@ -44,10 +46,10 @@ Integrated:
 - leases, crash recovery and reconciliation;
 - bounded concurrency and shared-resource locking.
 
-Remaining production verification:
-- production-grade observability;
-- controlled recovery drills;
-- host/OS-level enforcement proof if required.
+Production verification for the frozen queue is complete:
+- production observability — VERIFIED;
+- controlled recovery drills — VERIFIED;
+- OS/network enforcement — VERIFIED.
 
 ## Phase 3 — Director / Organization / Mission Runtime — INTEGRATED
 
@@ -105,25 +107,25 @@ Integrated and verified:
 - active policy registry;
 - immutable typed active policy contracts.
 
-## Live Provider Verification — NOT YET ESTABLISHED
+## Live Provider Verification — VERIFIED
 
-Dedicated opt-in workflows exist for:
-- NVIDIA adaptive learning;
-- Gemini Director.
+The dedicated live-provider evidence gates are closed:
+- LIVE-RESEARCH-DISCOVERY — VERIFIED;
+- LIVE-NVIDIA — VERIFIED;
+- LIVE-GEMINI — VERIFIED.
 
-A workflow definition does not count as a live verification. The exact successful run must be executed and recorded.
+## Frozen Production Readiness — COMPLETE
 
-## Production readiness work remaining
+Blocks 1–7 of the ordered production-readiness queue are VERIFIED on canonical `main`:
+1. LIVE-RESEARCH-DISCOVERY
+2. OS-NETWORK-ENFORCEMENT
+3. LIVE-NVIDIA
+4. LIVE-GEMINI
+5. PRODUCTION-OBSERVABILITY
+6. RECOVERY-DRILLS
+7. CONTROLLED-LIVE-AUTHORIZATION
 
-These are the only current production-oriented gaps identified by the consolidation audit:
-
-1. **Live research discovery verification:** execute and archive evidence against the intended real search provider.
-2. **OS-level network enforcement:** decide the required host boundary and execute the proof where required.
-3. **Live NVIDIA verification:** execute and archive real-provider evidence.
-4. **Live Gemini verification:** execute and archive real-provider evidence.
-5. **Production observability:** complete operational visibility and alerting evidence.
-6. **Recovery drills:** execute controlled crash/restart/reconciliation exercises and archive results.
-7. **Controlled production authorization:** establish the explicit live-operation gate.
+The queue is closed. Block 7 establishes the explicit authorization boundary; it does not activate live execution automatically. Aurora remains fail-closed unless a human operator supplies a valid authorization record matching the verified canonical commit and prerequisites.
 
 ## Increment policy
 
