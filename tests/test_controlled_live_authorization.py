@@ -161,3 +161,50 @@ def test_live_authorization_does_not_mutate_input_record():
     decision = gate.require(record, operation="director_live_execution", canonical_commit=CANONICAL_COMMIT)
     assert record is before
     assert decision.authorization_id == before.authorization_id
+
+
+def test_live_authorization_rejects_non_boolean_json_flags(tmp_path: Path):
+    path = tmp_path / "live-authorization.json"
+    data = {
+        "authorization_id": "auth-type-001",
+        "approved_by": "human-operator",
+        "issued_at": (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat(),
+        "expires_at": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+        "scope": ["director_live_execution"],
+        "prerequisites": PREREQUISITES,
+        "live_enabled": "false",
+        "revoked": False,
+        "kill_switch": False,
+        "canonical_commit": CANONICAL_COMMIT,
+    }
+    path.write_text(json.dumps(data), encoding="utf-8")
+    with pytest.raises(LiveAuthorizationError, match="invalid boolean"):
+        ControlledLiveAuthorization.from_file(path)
+
+
+def test_live_authorization_rejects_naive_timestamps(tmp_path: Path):
+    path = tmp_path / "live-authorization.json"
+    data = {
+        "authorization_id": "auth-time-001",
+        "approved_by": "human-operator",
+        "issued_at": "2026-09-30T18:00:00",
+        "expires_at": "2026-09-30T20:00:00",
+        "scope": ["director_live_execution"],
+        "prerequisites": PREREQUISITES,
+        "live_enabled": True,
+        "revoked": False,
+        "kill_switch": False,
+        "canonical_commit": CANONICAL_COMMIT,
+    }
+    path.write_text(json.dumps(data), encoding="utf-8")
+    record = ControlledLiveAuthorization.from_file(path)
+    gate = ControlledLiveAuthorization(
+        expected_prerequisites=PREREQUISITES,
+        expected_canonical_commit=CANONICAL_COMMIT,
+    )
+    with pytest.raises(LiveAuthorizationError, match="timestamps must include timezone"):
+        gate.require(
+            record,
+            operation="director_live_execution",
+            canonical_commit=CANONICAL_COMMIT,
+        )
