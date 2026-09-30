@@ -42,6 +42,7 @@ from .mission_memory import MissionMemory, MissionMemoryError
 from .task_engine import DelegatedTask, DelegatedTaskResult, TaskStatus
 from .task_store import DurableTaskStore, TaskEvent, TaskStoreError
 from .task_worker import TaskWorker, WorkerCycle, WorkerPolicy
+from aurora.observability import ProductionObservability
 from aurora.skills.evaluation import SkillEvaluator
 from aurora.skills.learning import SkillEvolutionEngine, SkillLearningStore
 from aurora.skills.autonomous_specialist_acquisition import AutonomousSpecialistAcquisition
@@ -111,6 +112,7 @@ class DirectorRuntime:
         policy_shadow_evaluation_store: DirectorDecisionPolicyCanaryEvaluationStore | None = None,
         policy_shadow_lifecycle_store: DirectorDecisionPolicyLifecycleStore | None = None,
         policy_shadow_decider: Callable[[str, list[dict[str, Any]], DirectorDecisionPolicyProposal], str] | None = None,
+        observability: ProductionObservability | None = None,
         active_policy_store: DirectorDecisionPolicyActiveStore | None = None,
         policy_proposal_store: DirectorDecisionPolicyProposalStore | None = None,
         policy_contract_store: DirectorDecisionPolicyContractStore | None = None,
@@ -183,6 +185,7 @@ class DirectorRuntime:
             or DirectorDecisionPolicyLifecycleStore(store.path)
         )
         self.policy_shadow_decider = policy_shadow_decider
+        self.observability = observability
         self.active_policy_store = active_policy_store or DirectorDecisionPolicyActiveStore(store.path)
         self.policy_proposal_store = policy_proposal_store or DirectorDecisionPolicyProposalStore(store.path)
         self.policy_contract_store = policy_contract_store or DirectorDecisionPolicyContractStore(store.path)
@@ -752,6 +755,10 @@ class DirectorRuntime:
         for mission_id in sorted(set(terminal_candidates)):
             self._review_or_finalize(mission_id)
 
+        observed_missions = set(event_missions) | set(active) | set(terminal_candidates)
+        for mission_id in sorted(observed_missions):
+            self._record_observability(mission_id)
+
         for event in events:
             if event.event_type in {"skill.evaluated", "skill.evolution_proposed", "team.adapted_runtime", "team.adaptation_failed"}:
                 try:
@@ -821,6 +828,18 @@ class DirectorRuntime:
             )
             self._workers[key] = worker
         return worker
+
+    def _record_observability(self, mission_id: str) -> None:
+        """Persist canonical V1 observations from the already-durable mission journal."""
+        if self.observability is None:
+            return
+        try:
+            events = self.store.events(mission_id)
+            tasks = {item.task.task_id: item for item in self.store.list_tasks(mission_id)}
+            self.observability.record_mission_events(events, task_results=tasks)
+        except Exception:
+            # Observability is never allowed to alter authoritative mission state.
+            return
 
     def _record_worker_result(self, mission_id: str, cycle: WorkerCycle) -> None:
         if not cycle.task_id or cycle.action not in {"succeeded", "failed", "retried"}:
