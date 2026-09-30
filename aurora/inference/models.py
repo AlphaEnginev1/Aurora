@@ -55,6 +55,7 @@ class InferenceRequest:
     model: str | None = None
     temperature: float | None = None
     max_tokens: int | None = None
+    provider_options: dict[str, Any] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
     request_id: str = field(default_factory=lambda: uuid4().hex)
 
