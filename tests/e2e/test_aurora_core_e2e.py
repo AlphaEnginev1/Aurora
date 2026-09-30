@@ -178,7 +178,7 @@ def test_aurora_core_full_cycle(tmp_path: Path):
                 "researcher",
                 "research",
                 "Investigate and validate evidence.",
-                frozenset(),
+                frozenset({"research"}),
                 ("core/model",),
                 ("research",),
             )
@@ -189,7 +189,7 @@ def test_aurora_core_full_cycle(tmp_path: Path):
                 "Research",
                 ("researcher",),
                 ("core/model",),
-                frozenset(),
+                frozenset({"research"}),
             )
         },
     )
