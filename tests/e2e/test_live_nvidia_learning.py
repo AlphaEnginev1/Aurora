@@ -58,8 +58,12 @@ def test_live_nvidia_execution_evaluates_and_persists_learning(tmp_path: Path):
             },
             {"role": "user", "content": "Confirm the Aurora provider-learning test is running."},
         ],
-        temperature=0,
-        max_tokens=80,
+        temperature=1,
+        max_tokens=512,
+        provider_options={
+            "reasoning_effort": "low",
+            "seed": 42,
+        },
         metadata={"skill_tags": ("research",), "task_type": "research"},
     )
 
