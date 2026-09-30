@@ -18,6 +18,7 @@ from aurora.research.models import ResearchRequest
 from aurora.research.service import ResearchService
 from aurora.research.store import ResearchStore
 from aurora.organization import AgentSelector, OrganizationRegistry
+from aurora.observability import ProductionObservability
 from aurora.skills import SkillAcquisitionRuntime, SkillEvaluator, SkillEvolutionEngine, SkillLearningStore, SkillRegistry
 from aurora.skills.acquisition_pipeline import SkillAcquisitionPipeline
 from aurora.skills.autonomous_specialist_acquisition import AutonomousSpecialistAcquisition
@@ -179,6 +180,7 @@ def build_director_runtime(*, inference_policy_path: str | Path, autonomy_policy
     skill_improvement_generator=SkillImprovementGenerator(service.planner.router, skill_learning)
     return DirectorRuntime(director=durable_director,store=store,event_bus=event_bus,worker_policy=worker_policy,
         worker_id=worker_id,worker_concurrency=worker_concurrency,skill_evaluator=skill_evaluator,
+        observability=ProductionObservability(runtime_root/"observability.jsonl"),
         skill_learning=skill_learning,skill_evolution=skill_evolution,
         skill_evolution_runtime=skill_evolution_runtime, skill_improvement_generator=skill_improvement_generator,
         autonomous_specialist_acquisition=autonomous_specialist_acquisition)
