@@ -9,6 +9,11 @@ from threading import Event
 import signal
 
 from .factory import build_director_runtime
+from aurora.production_authorization import (
+    ControlledLiveAuthorization,
+    LiveAuthorizationError,
+    REQUIRED_PREREQUISITES,
+)
 
 
 def _path_env(name: str, default: str) -> Path:
@@ -26,11 +31,40 @@ def main() -> int:
         action="store_true",
         help="Run one runtime cycle and exit.",
     )
+    parser.add_argument(
+        "--live",
+        action="store_true",
+        help="Enter live mode only after explicit production authorization.",
+    )
+    parser.add_argument(
+        "--live-operation",
+        default="director_live_execution",
+        help="Authorized live operation to activate.",
+    )
     args = parser.parse_args()
 
     proxy_host = os.getenv("AURORA_EGRESS_PROXY_HOST")
     if not proxy_host:
         parser.error("AURORA_EGRESS_PROXY_HOST must be configured; direct egress is forbidden")
+
+    if args.live:
+        authorization_file = _path_env(
+            "AURORA_LIVE_AUTHORIZATION_FILE",
+            ".aurora-runtime/live-authorization.json",
+        )
+        canonical_commit = os.getenv("AURORA_CANONICAL_COMMIT", "").strip()
+        try:
+            record = ControlledLiveAuthorization.from_file(authorization_file)
+            ControlledLiveAuthorization(
+                expected_prerequisites=REQUIRED_PREREQUISITES,
+                expected_canonical_commit=canonical_commit or None,
+            ).require(
+                record,
+                operation=args.live_operation,
+                canonical_commit=canonical_commit,
+            )
+        except LiveAuthorizationError as exc:
+            parser.error(f"live authorization denied: {exc}")
 
     runtime = build_director_runtime(
         inference_policy_path=_path_env(
