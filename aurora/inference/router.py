@@ -1,7 +1,12 @@
 """Capability-aware model router."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass
-from typing import Mapping, Sequence
+from typing import TYPE_CHECKING, Mapping, Sequence
+
+if TYPE_CHECKING:
+    from aurora.context import ContextGate
 
 from .models import InferenceRequest, InferenceResponse, ModelSpec, new_execution_id
 from .providers.nvidia_api import NVIDIAAPIProvider
@@ -25,6 +30,18 @@ class RoutingDecision:
 class ModelRouter:
     models: list[ModelSpec]
     nvidia_api_key: str | None = None
+    context_gate: ContextGate | None = None
+    enforce_context: bool = False
+
+    def configure_context_gate(
+        self,
+        context_gate: ContextGate,
+        *,
+        enforce: bool = True,
+    ) -> None:
+        """Attach Aurora's universal context gate to the inference boundary."""
+        self.context_gate = context_gate
+        self.enforce_context = enforce
 
     def available(self) -> list[ModelSpec]:
         return [m for m in self.models if m.enabled and m.healthy and m.available]
@@ -115,6 +132,61 @@ class ModelRouter:
             preferred_models=preferred_models,
         )
         return next(model for model in self.models if model.id == decision.selected_model)
+
+    def _enforce_authoritative_context(self, request: InferenceRequest) -> InferenceRequest:
+        if not self.enforce_context:
+            return request
+        if self.context_gate is None:
+            raise ModelRoutingError(
+                "universal Aurora ContextGate is required but not configured"
+            )
+
+        from aurora.context import AuroraContextError, ContextScope
+
+        metadata = dict(request.metadata or {})
+        role = str(metadata.get("role", "")).strip()
+        project_id = str(metadata.get("project_id", "")).strip() or None
+        task_id = str(metadata.get("task_id", "")).strip() or None
+
+        if role.startswith("director"):
+            scope = ContextScope.DIRECTOR
+            agent_role = None
+        elif project_id is not None:
+            scope = ContextScope.PROJECT
+            agent_role = role or None
+        else:
+            scope = ContextScope.GLOBAL
+            agent_role = role or None
+
+        try:
+            manifest = self.context_gate.prepare(
+                scope=scope,
+                project_id=project_id,
+                agent_role=agent_role,
+                task_id=task_id,
+                require_mailbox=True,
+                require_knowledge=True,
+            )
+        except AuroraContextError as exc:
+            raise ModelRoutingError(f"Aurora ContextGate rejected inference: {exc}") from exc
+
+        if "runtime_state" in manifest.unknown_fields:
+            raise ModelRoutingError(
+                "Aurora ContextGate rejected inference: runtime_state is unknown"
+            )
+
+        metadata["aurora_context_verified"] = True
+        metadata["aurora_context_manifest_id"] = manifest.manifest_id
+        metadata["aurora_context_scope"] = manifest.scope.value
+        metadata["aurora_context_unknown_fields"] = list(manifest.unknown_fields)
+        return InferenceRequest(
+            messages=[*manifest.messages, *request.messages],
+            model=request.model,
+            temperature=request.temperature,
+            max_tokens=request.max_tokens,
+            metadata=metadata,
+            request_id=request.request_id,
+        )
 
     @staticmethod
     def _meets_constraints(model: ModelSpec, request: InferenceRequest) -> bool:
@@ -218,6 +290,7 @@ class ModelRouter:
         capability: str | None = None,
         preferred_models: Sequence[str] | None = None,
     ) -> InferenceResponse:
+        request = self._enforce_authoritative_context(request)
         decision = self.route(
             request,
             capability=capability,

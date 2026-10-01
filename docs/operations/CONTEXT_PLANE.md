@@ -38,4 +38,10 @@ A project-scoped request must resolve a registered project. Global/Director cont
 
 ## Integration boundary
 
-The current Block 2 implementation establishes the contract and composition layer. It intentionally does not yet make the gate mandatory for every inference call. That is Block 4, after Director Bootstrap (Block 3).
+Block 2 established the contract and composition layer.
+
+Block 3 loads a fail-closed startup snapshot through the gate before the runtime is returned.
+
+Block 4 makes the gate the common inference prerequisite at `ModelRouter.generate()`. Production Director and specialist executions use that router, so provider selection cannot occur until authoritative context has been prepared.
+
+Project-specific inference uses `project_id` metadata; executions without a project identity receive the global Aurora scope. The verified context manifest id is attached to inference metadata for auditability.

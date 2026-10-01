@@ -220,8 +220,10 @@ def build_director_runtime(*, inference_policy_path: str | Path, autonomy_policy
         mailbox_context=build_context_mailbox_adapter(store),
         knowledge_context=build_context_knowledge_adapter(research_store),
     )
+    context_gate=ContextGate(context_plane)
+    service.planner.router.configure_context_gate(context_gate, enforce=True)
     bootstrap=DirectorBootstrap(
-        context_gate=ContextGate(context_plane),
+        context_gate=context_gate,
         model_policy_path=inference_policy_path,
         decision_performance_store=decision_performance,
         active_policy_store=active_policy_store,

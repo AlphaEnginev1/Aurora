@@ -66,6 +66,7 @@ class OrchestrationEngine:
         capability: str = "reasoning",
         model: str | None = None,
         model_preferences: Sequence[str] | None = None,
+        project_id: str | None = None,
         context: list[dict[str, Any]] | None = None,
         skill_ids: Sequence[str] | None = None,
         skill_tags: Sequence[str] | None = None,
@@ -78,6 +79,8 @@ class OrchestrationEngine:
             "task_id": task_id,
             "role": role,
         }
+        if project_id:
+            request_metadata["project_id"] = project_id
         if skill_ids:
             request_metadata["skill_ids"] = list(skill_ids)
         if skill_tags:
