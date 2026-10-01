@@ -823,6 +823,10 @@ class DurableTaskStore:
         event_id: int,
         *,
         allow_gaps: bool = False,
+        mission_id: str | None = None,
+        project_id: str | None = None,
+        agent_role: str | None = None,
+        correlation_id: str | None = None,
     ) -> None:
         if not consumer_id.strip():
             raise TaskStoreError("consumer_id is empty")
@@ -849,6 +853,40 @@ class DurableTaskStore:
                 raise TaskStoreError(
                     f"event cursor cannot skip events: {event_id} > {current + 1}"
                 )
+            if allow_gaps:
+                filters = ["event_id > ?"]
+                params: list[object] = [current]
+                for column, value in (
+                    ("mission_id", mission_id),
+                    ("project_id", project_id),
+                    ("agent_role", agent_role),
+                    ("correlation_id", correlation_id),
+                ):
+                    if value is not None:
+                        filters.append(f"{column} = ?")
+                        params.append(value)
+                next_matching = db.execute(
+                    f"""
+                    SELECT event_id
+                    FROM task_events
+                    WHERE {" AND ".join(filters)}
+                    ORDER BY event_id
+                    LIMIT 1
+                    """,
+                    tuple(params),
+                ).fetchone()
+                if next_matching is None:
+                    db.rollback()
+                    raise TaskStoreError(
+                        f"no matching event available after cursor {current}"
+                    )
+                if int(next_matching["event_id"]) != event_id:
+                    db.rollback()
+                    raise TaskStoreError(
+                        f"filtered event cursor cannot skip matching events: "
+                        f"{event_id} != {int(next_matching['event_id'])}"
+                    )
+
             exists = db.execute(
                 "SELECT 1 FROM task_events WHERE event_id = ?",
                 (event_id,),
