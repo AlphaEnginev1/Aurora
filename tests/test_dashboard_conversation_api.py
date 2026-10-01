@@ -151,15 +151,37 @@ def test_http_conversation_round_trip(tmp_path):
         assert history["turns"][1]["content"] == "Respuesta HTTP de Aurora."
         assert history["turns"][1]["execution_id"] == turn["execution_id"]
 
-        # Recreate the service over the same SQLite file to prove durable recovery.
-        recovered = DashboardConversationAPI(_conversation(tmp_path))
-        recovered_history = recovered.get_turns(session_id=session["session_id"])
-        assert [item["role"] for item in recovered_history["turns"]] == ["user", "assistant"]
-        assert recovered_history["turns"][1]["content"] == "Respuesta HTTP de Aurora."
-        assert recovered_history["turns"][1]["correlation_id"] == turn["correlation_id"]
-    finally:
+        # Stop the original HTTP server, reconstruct the service from the same
+        # SQLite path, and read history through a fresh HTTP server instance.
         server.shutdown()
         server.server_close()
+        recovered = DashboardConversationAPI(_conversation(tmp_path))
+        restarted = create_dashboard_server(
+            dashboard_gateway=Gateway(),
+            conversation_api=recovered,
+            host="127.0.0.1",
+            port=0,
+        )
+        restarted_thread = Thread(target=restarted.serve_forever, daemon=True)
+        restarted_thread.start()
+        restarted_base = "http://127.0.0.1:" + str(restarted.server_address[1])
+        try:
+            with urlopen(
+                restarted_base + "/api/conversation/" + session["session_id"] + "/turns",
+                timeout=5,
+            ) as response:
+                recovered_history = json.loads(response.read().decode("utf-8"))
+            assert response.status == 200
+            assert [item["role"] for item in recovered_history["turns"]] == ["user", "assistant"]
+            assert recovered_history["turns"][1]["content"] == "Respuesta HTTP de Aurora."
+            assert recovered_history["turns"][1]["correlation_id"] == turn["correlation_id"]
+            assert recovered_history["turns"][1]["execution_id"] == turn["execution_id"]
+        finally:
+            restarted.shutdown()
+            restarted.server_close()
+    finally:
+        if server is not None:
+            server.server_close()
 
 
 def test_dashboard_server_rejects_non_loopback_without_token():
