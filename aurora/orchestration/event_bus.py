@@ -35,6 +35,10 @@ class DurableEventBus:
         event_type: str,
         payload: Mapping[str, object] | None = None,
         task_id: str | None = None,
+        project_id: str | None = None,
+        agent_role: str | None = None,
+        correlation_id: str | None = None,
+        causation_id: str | None = None,
     ) -> TaskEvent:
         try:
             return self.store.append_event(
@@ -42,6 +46,37 @@ class DurableEventBus:
                 task_id=task_id,
                 event_type=event_type,
                 payload=dict(payload or {}),
+                project_id=project_id,
+                agent_role=agent_role,
+                correlation_id=correlation_id,
+                causation_id=causation_id,
+            )
+        except TaskStoreError as exc:
+            raise EventBusError(str(exc)) from exc
+
+    def view(
+        self,
+        *,
+        mission_id: str | None = None,
+        project_id: str | None = None,
+        agent_role: str | None = None,
+        task_id: str | None = None,
+        event_type: str | None = None,
+        correlation_id: str | None = None,
+        after_event_id: int = 0,
+        limit: int = 100,
+    ) -> tuple[TaskEvent, ...]:
+        """Read an authoritative global/project/agent view from the journal."""
+        try:
+            return self.store.events_view(
+                mission_id=mission_id,
+                project_id=project_id,
+                agent_role=agent_role,
+                task_id=task_id,
+                event_type=event_type,
+                correlation_id=correlation_id,
+                after_event_id=after_event_id,
+                limit=limit,
             )
         except TaskStoreError as exc:
             raise EventBusError(str(exc)) from exc
