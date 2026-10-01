@@ -7,7 +7,10 @@
     refreshTimer: null,
     retryDelay: 10000,
     inFlight: false,
-    apiBase: window.AURORA_DASHBOARD_API_BASE || "/api/dashboard"
+    apiBase: window.AURORA_DASHBOARD_API_BASE || "/api/dashboard",
+    conversationApiBase: window.AURORA_CONVERSATION_API_BASE || "/api/conversation",
+    conversationSessionId: null,
+    conversationInFlight: false
   };
 
   const $ = (id) => document.getElementById(id);
@@ -336,6 +339,93 @@
     }
   });
 
+  async function ensureConversationSession() {
+    if (state.conversationSessionId) return state.conversationSessionId;
+    const response = await fetch(state.conversationApiBase + "/session", {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({})
+    });
+    if (!response.ok) throw new Error("conversation session " + response.status);
+    const data = await response.json();
+    if (!data || typeof data.session_id !== "string" || !data.session_id) {
+      throw new Error("invalid conversation session contract");
+    }
+    state.conversationSessionId = data.session_id;
+    return data.session_id;
+  }
+
+  async function sendConversationMessage(rawText) {
+    const content = String(rawText == null ? "" : rawText).trim();
+    if (!content || state.conversationInFlight) return;
+    state.conversationInFlight = true;
+    const send = $("director-send");
+    send.disabled = true;
+
+    if (state.avatarVoice) state.avatarVoice.setThinking();
+    $("avatar-transcript").textContent = "Aurora is thinking…";
+
+    try {
+      const sessionId = await ensureConversationSession();
+      const response = await fetch(
+        state.conversationApiBase + "/" + encodeURIComponent(sessionId) + "/turn",
+        {
+          method: "POST",
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ user_input: content })
+        }
+      );
+      if (!response.ok) {
+        let message = "conversation " + response.status;
+        try {
+          const errorBody = await response.json();
+          if (errorBody && errorBody.error) message = errorBody.error;
+        } catch (_) {}
+        throw new Error(message);
+      }
+      const data = await response.json();
+      if (!data || typeof data.response_text !== "string") {
+        throw new Error("invalid Director response contract");
+      }
+      $("director-message").value = "";
+      $("avatar-transcript").textContent = data.response_text;
+
+      if (
+        state.avatarVoice &&
+        state.avatarVoice.capabilities.speech_output
+      ) {
+        state.avatarVoice.speak(data.response_text);
+      } else if (state.avatarVoice) {
+        state.avatarVoice.setIdle();
+      }
+    } catch (error) {
+      $("avatar-transcript").textContent =
+        "Director conversation unavailable: " + error.message;
+      if (state.avatarVoice) state.avatarVoice.setDisconnected();
+    } finally {
+      state.conversationInFlight = false;
+      send.disabled = false;
+    }
+  }
+
+  function setupConversation() {
+    $("director-send").addEventListener("click", function () {
+      sendConversationMessage($("director-message").value);
+    });
+    $("director-message").addEventListener("keydown", function (event) {
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        sendConversationMessage(event.currentTarget.value);
+      }
+    });
+  }
+
   function setupAvatarVoice() {
     const adapterApi = window.AuroraAvatarVoiceAdapter;
     const root = $("director-portrait");
@@ -350,7 +440,8 @@
         if (payload.final) {
           $("avatar-transcript").textContent =
             "Transcribed: " + payload.text +
-            " · ready for Director submission in Block 12E";
+            " · sending to Director";
+          sendConversationMessage(payload.text);
         }
       }
     });
@@ -387,6 +478,12 @@
     if (event.key === "Escape") closeInspector();
   });
 
+  setupConversation();
   setupAvatarVoice();
+  ensureConversationSession().catch(function (error) {
+    $("avatar-transcript").textContent =
+      "Conversation service unavailable: " + error.message;
+    if (state.avatarVoice) state.avatarVoice.setDisconnected();
+  });
   loadSnapshot();
 })();
