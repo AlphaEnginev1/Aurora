@@ -8,7 +8,7 @@ without treating model output as system truth.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import StrEnum
 from typing import Callable, Iterable, Mapping
@@ -62,8 +62,7 @@ class ContextManifest:
                 "content": (
                     f"[aurora-context source={fragment.source} "
                     f"scope={fragment.scope.value} "
-                    f"provenance={fragment.provenance}]
-"
+                    f"provenance={fragment.provenance}]\n"
                     f"{fragment.content}"
                 ),
             }
