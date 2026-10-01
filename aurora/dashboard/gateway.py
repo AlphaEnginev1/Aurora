@@ -696,3 +696,7 @@ class DashboardGateway:
     def _validate_limit(limit: int, name: str) -> None:
         if limit < 1 or limit > 1000:
             raise DashboardGatewayError(f"{name} must be between 1 and 1000")
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
