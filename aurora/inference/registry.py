@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
@@ -14,7 +13,6 @@ class ModelRegistryError(RuntimeError):
     """Raised when an inference model cannot be registered or resolved safely."""
 
 
-@dataclass
 class ModelRegistry:
     """Authoritative in-memory catalog of configured inference models."""
 
