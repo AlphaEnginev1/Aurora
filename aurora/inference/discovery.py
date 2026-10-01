@@ -1,0 +1,329 @@
+"""Governed model discovery and staging for Aurora inference."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, asdict
+from datetime import datetime, timezone
+import hashlib
+import json
+from pathlib import Path
+import sqlite3
+from typing import Any, Mapping, Protocol, Sequence
+
+from .models import ModelSpec
+from .registry import ModelRegistry, ModelRegistryError
+from .providers.registry import ProviderRegistry, ProviderRegistryError
+
+
+class ModelDiscoveryError(RuntimeError):
+    """Raised when model discovery or governed staging fails."""
+
+
+class ModelDiscoveryProvider(Protocol):
+    """Provider-specific model catalog discovery contract."""
+
+    def discover(self) -> Sequence["DiscoveredModelCandidate"]:
+        ...
+
+
+@dataclass(frozen=True)
+class DiscoveredModelCandidate:
+    """A discovered model that is not active in Aurora until promoted."""
+
+    candidate_id: str
+    provider_id: str
+    model: ModelSpec
+    metadata: Mapping[str, Any]
+    discovered_at: str
+    state: str = "discovered"
+
+
+@dataclass(frozen=True)
+class ModelPromotionValidation:
+    """Explicit validation gates required before activating a candidate."""
+
+    policy_verified: bool
+    security_verified: bool
+    health_verified: bool
+    reason: str = ""
+
+
+class ModelCandidateStore:
+    """SQLite-backed durable staging store for discovered model candidates."""
+
+    def __init__(self, path: str | Path) -> None:
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._initialize()
+
+    def _connect(self) -> sqlite3.Connection:
+        db = sqlite3.connect(self.path, timeout=30, isolation_level=None)
+        db.row_factory = sqlite3.Row
+        db.execute("PRAGMA journal_mode=WAL")
+        db.execute("PRAGMA busy_timeout=30000")
+        return db
+
+    def _initialize(self) -> None:
+        with self._connect() as db:
+            db.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS model_candidates (
+                    candidate_id TEXT PRIMARY KEY,
+                    provider_id TEXT NOT NULL,
+                    model_json TEXT NOT NULL,
+                    metadata_json TEXT NOT NULL,
+                    discovered_at TEXT NOT NULL,
+                    state TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_model_candidates_provider
+                    ON model_candidates(provider_id, discovered_at);
+
+                CREATE INDEX IF NOT EXISTS idx_model_candidates_state
+                    ON model_candidates(state, updated_at);
+                """
+            )
+
+    def upsert(self, candidate: DiscoveredModelCandidate) -> None:
+        if not candidate.candidate_id.strip():
+            raise ModelDiscoveryError("candidate_id is empty")
+        if not candidate.provider_id.strip():
+            raise ModelDiscoveryError("candidate provider_id is empty")
+        if candidate.state not in {"discovered", "synced", "rejected"}:
+            raise ModelDiscoveryError(
+                f"invalid model candidate state: {candidate.state}"
+            )
+        with self._connect() as db:
+            db.execute(
+                """
+                INSERT INTO model_candidates (
+                    candidate_id, provider_id, model_json, metadata_json,
+                    discovered_at, state, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(candidate_id) DO UPDATE SET
+                    provider_id=excluded.provider_id,
+                    model_json=excluded.model_json,
+                    metadata_json=excluded.metadata_json,
+                    discovered_at=excluded.discovered_at,
+                    state=CASE
+                        WHEN model_candidates.state = 'synced'
+                             AND excluded.state = 'discovered'
+                        THEN 'synced'
+                        ELSE excluded.state
+                    END,
+                    updated_at=excluded.updated_at
+                """,
+                (
+                    candidate.candidate_id,
+                    candidate.provider_id,
+                    json.dumps(asdict(candidate.model), sort_keys=True),
+                    json.dumps(dict(candidate.metadata), sort_keys=True, default=str),
+                    candidate.discovered_at,
+                    candidate.state,
+                    _now(),
+                ),
+            )
+
+    def get(self, candidate_id: str) -> DiscoveredModelCandidate | None:
+        with self._connect() as db:
+            row = db.execute(
+                "SELECT * FROM model_candidates WHERE candidate_id = ?",
+                (candidate_id,),
+            ).fetchone()
+        return _row_to_candidate(row) if row is not None else None
+
+    def list(
+        self,
+        *,
+        provider_id: str | None = None,
+        state: str | None = None,
+        limit: int = 100,
+    ) -> tuple[DiscoveredModelCandidate, ...]:
+        if limit < 1:
+            raise ValueError("limit must be at least 1")
+        query = "SELECT * FROM model_candidates WHERE 1=1"
+        params: list[object] = []
+        if provider_id is not None:
+            query += " AND provider_id = ?"
+            params.append(provider_id)
+        if state is not None:
+            query += " AND state = ?"
+            params.append(state)
+        query += " ORDER BY discovered_at DESC, candidate_id LIMIT ?"
+        params.append(limit)
+        with self._connect() as db:
+            rows = db.execute(query, tuple(params)).fetchall()
+        return tuple(_row_to_candidate(row) for row in rows)
+
+    def set_state(self, candidate_id: str, state: str) -> None:
+        if state not in {"discovered", "synced", "rejected"}:
+            raise ModelDiscoveryError(f"invalid model candidate state: {state}")
+        with self._connect() as db:
+            cursor = db.execute(
+                "UPDATE model_candidates SET state = ?, updated_at = ? "
+                "WHERE candidate_id = ?",
+                (state, _now(), candidate_id),
+            )
+        if cursor.rowcount != 1:
+            raise ModelDiscoveryError(
+                f"unknown model candidate: {candidate_id}"
+            )
+
+
+class ModelDiscoveryService:
+    """Discover provider catalogs and stage candidates without bypassing governance."""
+
+    def __init__(
+        self,
+        provider_registry: ProviderRegistry,
+        model_registry: ModelRegistry,
+        candidate_store: ModelCandidateStore,
+    ) -> None:
+        self.provider_registry = provider_registry
+        self.model_registry = model_registry
+        self.candidate_store = candidate_store
+
+    def discover_and_stage(
+        self,
+        provider_id: str,
+    ) -> tuple[DiscoveredModelCandidate, ...]:
+        try:
+            provider = self.provider_registry.create_discovery(provider_id)
+        except ProviderRegistryError as exc:
+            raise ModelDiscoveryError(str(exc)) from exc
+
+        try:
+            discovered = tuple(provider.discover())
+        except Exception as exc:
+            raise ModelDiscoveryError(
+                f"model discovery failed for provider {provider_id!r}"
+            ) from exc
+
+        staged: list[DiscoveredModelCandidate] = []
+        for candidate in discovered:
+            if candidate.provider_id != provider_id:
+                raise ModelDiscoveryError(
+                    "discovered candidate provider identity does not match "
+                    f"requested provider {provider_id!r}"
+                )
+            if candidate.model.provider != provider_id:
+                raise ModelDiscoveryError(
+                    f"candidate {candidate.model.id!r} references provider "
+                    f"{candidate.model.provider!r}, expected {provider_id!r}"
+                )
+            inactive_model = _inactive_model(candidate.model)
+            staged_candidate = DiscoveredModelCandidate(
+                candidate_id=candidate.candidate_id,
+                provider_id=candidate.provider_id,
+                model=inactive_model,
+                metadata=dict(candidate.metadata),
+                discovered_at=candidate.discovered_at or _now(),
+                state="discovered",
+            )
+            self.candidate_store.upsert(staged_candidate)
+            staged.append(staged_candidate)
+        return tuple(staged)
+
+    def promote(
+        self,
+        candidate_id: str,
+        approved_model: ModelSpec,
+        validation: ModelPromotionValidation,
+    ) -> ModelSpec:
+        candidate = self.candidate_store.get(candidate_id)
+        if candidate is None:
+            raise ModelDiscoveryError(f"unknown model candidate: {candidate_id}")
+        if candidate.state != "discovered":
+            raise ModelDiscoveryError(
+                f"model candidate is not promotable from state={candidate.state!r}"
+            )
+        if not (
+            validation.policy_verified
+            and validation.security_verified
+            and validation.health_verified
+        ):
+            raise ModelDiscoveryError(
+                "model candidate failed promotion gates: "
+                "policy, security and health must all be verified"
+            )
+        if approved_model.id != candidate.model.id:
+            raise ModelDiscoveryError(
+                "approved model id does not match discovered candidate"
+            )
+        if approved_model.provider != candidate.provider_id:
+            raise ModelDiscoveryError(
+                "approved model provider does not match discovered candidate"
+            )
+        if not approved_model.enabled or not approved_model.healthy or not approved_model.available:
+            raise ModelDiscoveryError(
+                "approved model must be enabled, healthy and available"
+            )
+        try:
+            self.model_registry.register(approved_model)
+        except ModelRegistryError as exc:
+            raise ModelDiscoveryError(str(exc)) from exc
+        self.candidate_store.set_state(candidate_id, "synced")
+        return approved_model
+
+
+def candidate_id(provider_id: str, model_id: str) -> str:
+    payload = f"{provider_id.strip()}:{model_id.strip()}"
+    return "model-candidate-" + hashlib.sha256(payload.encode("utf-8")).hexdigest()[:32]
+
+
+def _inactive_model(model: ModelSpec) -> ModelSpec:
+    return ModelSpec(
+        id=model.id,
+        provider=model.provider,
+        endpoint=model.endpoint,
+        capabilities=model.capabilities,
+        context_window=model.context_window,
+        enabled=False,
+        specialties=model.specialties,
+        quality_score=model.quality_score,
+        latency_score=model.latency_score,
+        cost_score=model.cost_score,
+        healthy=False,
+        available=False,
+    )
+
+
+def _row_to_candidate(row: sqlite3.Row) -> DiscoveredModelCandidate:
+    raw_model = json.loads(row["model_json"])
+    return DiscoveredModelCandidate(
+        candidate_id=str(row["candidate_id"]),
+        provider_id=str(row["provider_id"]),
+        model=ModelSpec(
+            id=raw_model["id"],
+            provider=raw_model["provider"],
+            endpoint=raw_model["endpoint"],
+            capabilities=tuple(raw_model.get("capabilities", ())),
+            context_window=raw_model.get("context_window"),
+            enabled=bool(raw_model.get("enabled", False)),
+            specialties=tuple(raw_model.get("specialties", ())),
+            quality_score=float(raw_model.get("quality_score", 0.5)),
+            latency_score=float(raw_model.get("latency_score", 0.5)),
+            cost_score=float(raw_model.get("cost_score", 0.5)),
+            healthy=bool(raw_model.get("healthy", False)),
+            available=bool(raw_model.get("available", False)),
+        ),
+        metadata=json.loads(row["metadata_json"]),
+        discovered_at=str(row["discovered_at"]),
+        state=str(row["state"]),
+    )
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+__all__ = [
+    "DiscoveredModelCandidate",
+    "ModelCandidateStore",
+    "ModelDiscoveryError",
+    "ModelDiscoveryProvider",
+    "ModelDiscoveryService",
+    "ModelPromotionValidation",
+    "candidate_id",
+]

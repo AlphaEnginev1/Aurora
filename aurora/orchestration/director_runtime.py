@@ -49,6 +49,7 @@ from aurora.skills.autonomous_specialist_acquisition import AutonomousSpecialist
 from aurora.skills.acquisition_pipeline import PreparedSkillCandidate
 from aurora.skills.evolution_runtime import PreparedSkillEvolution, SkillEvolutionRuntime
 from aurora.skills.improvement import SkillImprovementGenerator
+from aurora.inference.discovery import ModelDiscoveryService
 
 
 
@@ -116,6 +117,7 @@ class DirectorRuntime:
         active_policy_store: DirectorDecisionPolicyActiveStore | None = None,
         policy_proposal_store: DirectorDecisionPolicyProposalStore | None = None,
         policy_contract_store: DirectorDecisionPolicyContractStore | None = None,
+        model_discovery: ModelDiscoveryService | None = None,
         sleep_fn: Callable[[float], None] = sleep,
     ) -> None:
         if not event_consumer_id.strip():
@@ -137,6 +139,7 @@ class DirectorRuntime:
         self.event_batch_size = event_batch_size
         self.idle_sleep_seconds = idle_sleep_seconds
         self.max_review_rounds = max_review_rounds
+        self.model_discovery = model_discovery
         self.worker_concurrency = worker_concurrency
         self.skill_evaluator = skill_evaluator
         self.skill_learning = skill_learning

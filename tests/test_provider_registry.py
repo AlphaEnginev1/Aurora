@@ -67,6 +67,7 @@ def test_registry_catalog_exposes_provider_metadata_without_factory():
             "name": "Fake Provider",
             "enabled": True,
             "capabilities": ("chat", "reasoning"),
+            "discovery_supported": False,
         },
     )
 
@@ -145,3 +146,9 @@ def test_default_registry_contains_current_nvidia_provider():
         and item["name"] == "NVIDIA NIM API"
         for item in registry.catalog
     )
+
+
+def test_default_registry_constructs_nvidia_discovery_adapter():
+    registry = default_provider_registry(nvidia_api_key="test-key")
+    discovery = registry.create_discovery("nvidia_api")
+    assert discovery.provider_id == "nvidia_api"
