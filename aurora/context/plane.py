@@ -16,6 +16,7 @@ from typing import Callable, Iterable, Mapping
 from aurora.inference.models import ModelSpec
 from aurora.organization import OrganizationRegistry
 from aurora.projects import ProjectRegistry, ProjectSpec
+from aurora.inference.registry import ModelRegistry
 from aurora.skills import SkillRegistry
 
 
@@ -79,6 +80,7 @@ class AuroraContextPlane:
     organization: OrganizationRegistry
     skill_registry: SkillRegistry
     models: tuple[ModelSpec, ...] = ()
+    model_registry: ModelRegistry | None = None
     runtime_context: Callable[[str | None], Mapping[str, object]] | None = None
     mailbox_context: Callable[[str | None], Iterable[Mapping[str, object]]] | None = None
     knowledge_context: Callable[[str | None], Iterable[Mapping[str, object]]] | None = None
@@ -126,7 +128,7 @@ class AuroraContextPlane:
             self._fragment(
                 source="models.catalog",
                 scope=scope,
-                content=_model_catalog(self.models),
+                content=_model_catalog(self.models, self.model_registry),
             ),
         ]
         unknown: set[str] = set()
@@ -328,11 +330,15 @@ def _organization_catalog(organization: OrganizationRegistry) -> str:
     return "\n".join(lines) if lines else "No Aurora agents are registered."
 
 
-def _model_catalog(models: tuple[ModelSpec, ...]) -> str:
-    if not models:
+def _model_catalog(
+    models: tuple[ModelSpec, ...],
+    model_registry: ModelRegistry | None = None,
+) -> str:
+    registered = model_registry.models if model_registry is not None else models
+    if not registered:
         return "No inference models are registered."
     lines = []
-    for model in sorted(models, key=lambda item: item.id):
+    for model in sorted(registered, key=lambda item: item.id):
         lines.append(
             f"- {model.id}: provider={model.provider}; "
             f"enabled={model.enabled}; healthy={model.healthy}; available={model.available}; "
