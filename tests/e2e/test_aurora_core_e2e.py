@@ -317,7 +317,7 @@ def test_aurora_core_full_cycle(tmp_path: Path):
     assert {item.task.task_id for item in result.tasks} == {
         "research_evidence",
         "analyze_evidence",
-        "r2_adaptive_followup",
+        "r1_adaptive_followup",
     }
     assert all(item.status is TaskStatus.SUCCEEDED for item in result.tasks)
 
