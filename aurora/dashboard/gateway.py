@@ -489,6 +489,26 @@ class DashboardGateway:
             correlation_id=correlation_id,
         )
 
+    def _task(self, stored: StoredTask) -> dict[str, Any]:
+        task = stored.task
+        return {
+            "mission_id": stored.mission_id,
+            "task_id": task.task_id,
+            "role": task.role,
+            "objective": task.objective,
+            "capability": task.capability,
+            "args": list(task.args),
+            "depends_on": list(task.depends_on),
+            "skills": list(task.skills),
+            "status": stored.status,
+            "attempts": stored.attempts,
+            "last_error": stored.last_error,
+            "claimed_by": stored.claimed_by,
+            "lease_until": stored.lease_until,
+            "result": stored.result,
+            "phase": stored.phase,
+        }
+
     def _event(self, event: TaskEvent) -> dict[str, Any]:
         return {
             "event_id": event.event_id,
