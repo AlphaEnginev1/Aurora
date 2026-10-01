@@ -91,6 +91,8 @@ def test_router_injects_verified_manifest_before_provider(tmp_path):
     seen = {}
 
     class FakeProvider:
+        provider_id = "nvidia_api"
+
         def __init__(self, spec):
             self.spec = spec
 
