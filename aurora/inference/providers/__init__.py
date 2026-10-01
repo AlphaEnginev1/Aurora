@@ -21,3 +21,21 @@ class InferenceProvider(Protocol):
     ) -> InferenceResponse:
         """Execute one request and preserve request/execution/model identity."""
         ...
+
+
+from .registry import (
+    ProviderFactory,
+    ProviderRegistry,
+    ProviderRegistryError,
+    ProviderSpec,
+    default_provider_registry,
+)
+
+__all__ = [
+    "InferenceProvider",
+    "ProviderFactory",
+    "ProviderRegistry",
+    "ProviderRegistryError",
+    "ProviderSpec",
+    "default_provider_registry",
+]
