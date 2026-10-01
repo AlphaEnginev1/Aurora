@@ -118,6 +118,12 @@ class CoreDirectorProvider:
                     '"capability":null,'
                     '"args":["artifact:' + self.artifact_id + '"],'
                     '"depends_on":["research_evidence"],'
+                    '"skills":["research"]},'
+                    '{"task_id":"validate_evidence","role":"researcher",'
+                    '"objective":"validate the verified Aurora analysis",'
+                    '"capability":null,'
+                    '"args":["artifact:' + self.artifact_id + '"],'
+                    '"depends_on":["analyze_evidence"],'
                     '"skills":["research"]}'
                     ']}'
                 ),
@@ -317,6 +323,7 @@ def test_aurora_core_full_cycle(tmp_path: Path):
     assert {item.task.task_id for item in result.tasks} == {
         "research_evidence",
         "analyze_evidence",
+        "validate_evidence",
         "r1_adaptive_followup",
     }
     assert all(item.status is TaskStatus.SUCCEEDED for item in result.tasks)
@@ -330,12 +337,13 @@ def test_aurora_core_full_cycle(tmp_path: Path):
         minimum_evidence_completeness=1.0,
     )
     assert learned["core/model-b"] == 1.0
-    assert len(router.requests) == 2
+    assert len(router.requests) == 3
     assert router.decisions[0].selected_model == "core/model-b"
     assert router.decisions[1].selected_model == "core/model-b"
-    assert router.requests[1].metadata["learned_model_scores"]["core/model-b"] == 1.0
-    assert router.decisions[1].factors["learned_score"] == 1.0
-    assert router.decisions[1].factors["preference"] == 0.0
+    assert router.decisions[2].selected_model == "core/model-b"
+    assert router.requests[2].metadata["learned_model_scores"]["core/model-b"] == 1.0
+    assert router.decisions[2].factors["learned_score"] == 1.0
+    assert router.decisions[2].factors["preference"] == 0.0
 
     events = [event.event_type for event in store.events(submission.mission_id)]
     required = {
