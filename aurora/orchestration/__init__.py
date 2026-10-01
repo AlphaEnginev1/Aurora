@@ -20,7 +20,7 @@ from .gemini_provider import GeminiDirectorConfig, GeminiDirectorError, GeminiDi
 from .durable_director import DurableDirectorError, DurableDirectorService, MissionSubmission
 from .engine import CapabilityTaskResult, OrchestrationEngine, TaskResult
 from .event_bus import DurableEventBus, EventBusError, EventSubscription
-from .mission_memory import MissionMemory, MissionMemoryError, MissionMessage
+from .mission_memory import MAILBOX_EVENT_TYPE, MissionMemory, MissionMemoryError, MissionMessage
 from .director_runtime import DirectorRuntime, DirectorRuntimeError, MissionRuntimeResult, RuntimeCycle
 from .director_decision_policy_evolution import (
     DirectorDecisionPolicyEvolution,
@@ -144,6 +144,7 @@ __all__ = [
     "DirectorDecisionKnowledgePromotion",
     "DirectorDecisionKnowledgePromoter",
     "DirectorDecisionKnowledgeStore",
+    "MAILBOX_EVENT_TYPE",
     "MissionMemory",
     "MissionMemoryError",
     "MissionMessage",
