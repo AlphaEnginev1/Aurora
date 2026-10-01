@@ -58,7 +58,8 @@ def test_dashboard_wires_explicit_voice_controls_to_adapter():
     assert "setupAvatarVoice" in app
     assert "startListening" in app
     assert "stopSpeaking" in app
-    assert "Block 12E" in app
+    assert "sendConversationMessage" in app
+    assert "conversationApiBase" in app
 
 
 def test_voice_adapter_uses_secure_permission_capable_microphone_api():
