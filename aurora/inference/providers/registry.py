@@ -17,7 +17,7 @@ class ProviderRegistryError(RuntimeError):
 
 
 ProviderFactory = Callable[[ModelSpec], InferenceProvider]
-DiscoveryFactory = Callable[[], ModelDiscoveryProvider]
+DiscoveryFactory = Callable[[], "ModelDiscoveryProvider"]
 
 
 @dataclass(frozen=True)
