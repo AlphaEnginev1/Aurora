@@ -234,7 +234,7 @@ def test_aurora_core_full_cycle(tmp_path: Path):
                 ("source_check",),
                 ("citation_check",),
                 ("research",),
-                model_preferences=("core/model-b",),
+                model_preferences=(),
             )
         }
     )
