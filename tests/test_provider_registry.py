@@ -7,7 +7,7 @@ from aurora.inference.providers.registry import (
     ProviderSpec,
     default_provider_registry,
 )
-from aurora.inference.router import ModelRouter
+from aurora.inference.router import ModelRouter, ModelRoutingError
 
 
 class FakeProvider:
@@ -128,7 +128,7 @@ def test_router_rejects_model_with_unregistered_provider():
         provider_registry=ProviderRegistry(),
     )
 
-    with pytest.raises(Exception, match="unknown inference provider"):
+    with pytest.raises(ModelRoutingError, match="unknown inference provider"):
         router.generate(
             InferenceRequest(
                 messages=[{"role": "user", "content": "test"}],
