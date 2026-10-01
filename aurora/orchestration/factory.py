@@ -12,6 +12,7 @@ from aurora.autonomy.registry import CapabilityRegistryStore, load_registry, mer
 from aurora.autonomy.sandbox import SandboxExecutor, SandboxPolicy
 from aurora.inference.registry import ModelRegistry
 from aurora.inference.router import ModelRouter
+from aurora.inference.discovery import ModelCandidateStore, ModelDiscoveryService
 from aurora.inference.providers.registry import default_provider_registry
 from aurora.inference.model_performance import ModelPerformanceStore
 from aurora.research.discovery import HttpSearchProvider, ResearchSourceCatalog
@@ -188,6 +189,14 @@ def build_director_runtime(*, inference_policy_path: str | Path, autonomy_policy
         if research_discovery_endpoint else None
     )
     research_service=ResearchService(gateway,research_store,discovery=research_discovery)
+    model_candidate_store=ModelCandidateStore(runtime_root/"model-candidates.db")
+    if service.planner.router.provider_registry is None or service.planner.router.model_registry is None:
+        raise RuntimeError("model registries are not configured")
+    model_discovery=ModelDiscoveryService(
+        service.planner.router.provider_registry,
+        service.planner.router.model_registry,
+        model_candidate_store,
+    )
     acquisition_pipeline=SkillAcquisitionPipeline(skill_acquisition,runtime_root/"skill-acquisition-artifacts.db")
     source_catalog=ResearchSourceCatalog.from_environment()
 
@@ -268,7 +277,8 @@ def build_director_runtime(*, inference_policy_path: str | Path, autonomy_policy
         decision_knowledge_store=decision_knowledge_store,
         active_policy_store=active_policy_store,
         policy_proposal_store=policy_proposal_store,
-        policy_contract_store=policy_contract_store)
+        policy_contract_store=policy_contract_store,
+        model_discovery=model_discovery)
     runtime.bootstrap=bootstrap
     runtime.bootstrap_state=bootstrap_state
     return runtime
