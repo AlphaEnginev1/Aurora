@@ -11,7 +11,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from aurora.inference.model_performance import ModelPerformanceStore
-from aurora.inference.models import InferenceResponse
+from aurora.inference.models import InferenceRequest, InferenceResponse, ModelSpec
+from aurora.inference.router import ModelRouter
 from aurora.organization.registry import AgentSpec, DepartmentSpec, OrganizationRegistry
 from aurora.orchestration.director import DirectorPlanner
 from aurora.orchestration.director_provider import DirectorModelResponse
@@ -38,14 +39,45 @@ from aurora.skills.models import SkillSpec
 from aurora.skills.registry import SkillRegistry
 
 
-class CoreRouter:
+class CoreRouter(ModelRouter):
     def __init__(self):
+        super().__init__(
+            [
+                ModelSpec(
+                    "core/model-a",
+                    "controlled",
+                    "https://example.invalid/a",
+                    capabilities=("reasoning",),
+                    quality_score=0.75,
+                    latency_score=0.75,
+                    cost_score=0.75,
+                    specialties=("research",),
+                ),
+                ModelSpec(
+                    "core/model-b",
+                    "controlled",
+                    "https://example.invalid/b",
+                    capabilities=("reasoning",),
+                    quality_score=0.60,
+                    latency_score=0.60,
+                    cost_score=0.60,
+                    specialties=("research",),
+                ),
+            ]
+        )
         self.requests = []
+        self.decisions = []
 
     def generate(self, request, *, capability="reasoning", preferred_models=None):
         self.requests.append(request)
+        decision = self.route(
+            request,
+            capability=capability,
+            preferred_models=preferred_models,
+        )
+        self.decisions.append(decision)
         return InferenceResponse(
-            model="core/model",
+            model=decision.selected_model,
             provider="controlled",
             content=(
                 "verified execution result\n"
@@ -54,14 +86,19 @@ class CoreRouter:
             ),
             request_id=request.request_id,
             execution_id=f"execution-{len(self.requests)}",
+            selected_model=decision.selected_model,
+            routing_score=decision.selected_score,
+            routing_factors=decision.factors,
+            routing_candidates=decision.candidates,
         )
 
 
 class CoreDirectorProvider:
     provider_id = "controlled"
 
-    def __init__(self, artifact_id: str):
+    def __init__(self, artifact_id: str, organization: OrganizationRegistry):
         self.artifact_id = artifact_id
+        self.organization = organization
         self.calls = 0
         self.review_contexts = []
 
@@ -92,11 +129,41 @@ class CoreDirectorProvider:
             )
         if role == "director_reviewer":
             self.review_contexts.append(tuple(messages))
+            if self.calls == 2:
+                # The first execution used the exploratory organization preference.
+                # Remove that preference before the follow-up so the next selection
+                # can only demonstrate learned routing evidence.
+                agent = self.organization.agents["researcher"]
+                self.organization.agents["researcher"] = AgentSpec(
+                    agent.agent_id,
+                    agent.role,
+                    agent.department,
+                    agent.mission,
+                    agent.capabilities,
+                    (),
+                    agent.skill_ids,
+                )
+                return DirectorModelResponse(
+                    content=(
+                        '{"decision":"continue",'
+                        '"rationale":"The first execution is evaluated; perform a '
+                        'follow-up execution using the learned routing evidence.",'
+                        '"tasks":[{"task_id":"adaptive_followup","role":"researcher",'
+                        '"objective":"repeat the verified Aurora analysis",'
+                        '"capability":null,"args":["artifact:' + self.artifact_id + '"],'
+                        '"depends_on":[],"skills":["research"]}]}'
+                    ),
+                    model="controlled/director",
+                    provider="controlled",
+                    request_id=f"review-{self.calls}",
+                    execution_id=f"review-execution-{self.calls}",
+                    tool_calls=(),
+                )
             return DirectorModelResponse(
                 content=(
                     '{"decision":"complete",'
-                    '"rationale":"Execution, evidence, evaluation and learned routing '
-                    'are all present and the mission objective is satisfied.",'
+                    '"rationale":"The follow-up execution consumed learned routing evidence '
+                    'and the mission objective is satisfied.",'
                     '"tasks":[]}'
                 ),
                 model="controlled/director",
@@ -197,7 +264,7 @@ def test_aurora_core_full_cycle(tmp_path: Path):
 
     performance = ModelPerformanceStore(tmp_path / "model-performance.db")
     task_engine = TaskEngine(
-        OrchestrationEngine(CoreRouter()),
+        OrchestrationEngine(router),
         tmp_path / "workspace",
         organization=organization,
         skill_registry=skills,
@@ -206,7 +273,8 @@ def test_aurora_core_full_cycle(tmp_path: Path):
         research_service=research_service,
         research_learning_gate=ResearchLearningGate(research_store),
     )
-    provider = CoreDirectorProvider(artifact_id)
+    router = CoreRouter()
+    provider = CoreDirectorProvider(artifact_id, organization)
     planner = DirectorPlanner(
         provider=provider,
         router=None,
@@ -234,7 +302,7 @@ def test_aurora_core_full_cycle(tmp_path: Path):
         worker_id="aurora-core-e2e",
         event_consumer_id="aurora-core-e2e-events",
         worker_concurrency=1,
-        max_review_rounds=1,
+        max_review_rounds=2,
     )
 
     submission = runtime.submit_mission(
@@ -249,6 +317,7 @@ def test_aurora_core_full_cycle(tmp_path: Path):
     assert {item.task.task_id for item in result.tasks} == {
         "research_evidence",
         "analyze_evidence",
+        "r2_adaptive_followup",
     }
     assert all(item.status is TaskStatus.SUCCEEDED for item in result.tasks)
 
@@ -260,7 +329,12 @@ def test_aurora_core_full_cycle(tmp_path: Path):
         minimum_evaluations=1,
         minimum_evidence_completeness=1.0,
     )
-    assert learned == {"core/model": 1.0}
+    assert learned == {"core/model-b": 1.0}
+    assert len(router.requests) == 2
+    assert router.decisions[0].selected_model == "core/model-b"
+    assert router.decisions[1].selected_model == "core/model-b"
+    assert router.requests[1].metadata["learned_model_scores"] == {"core/model-b": 1.0}
+    assert router.decisions[1].factors["learned_score"] == 1.0
 
     events = [event.event_type for event in store.events(submission.mission_id)]
     required = {
