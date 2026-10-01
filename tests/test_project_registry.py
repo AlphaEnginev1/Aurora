@@ -90,19 +90,41 @@ def test_project_registry_rejects_unknown_references(tmp_path: Path):
         )
 
 
-def test_project_registry_deduplicates_configured_references():
-    registry = ProjectRegistry(
+def test_project_registry_rejects_duplicate_references_in_spec():
+    with pytest.raises(ProjectConfigError, match="duplicate agent roles"):
+        ProjectRegistry(
+            {
+                "project-a": ProjectSpec(
+                    "project-a",
+                    "Project A",
+                    "Objective",
+                    ProjectStatus.PLANNED,
+                    agent_roles=("researcher", "researcher"),
+                )
+            }
+        )
+
+def test_project_registry_deduplicates_references_when_loading_json(tmp_path: Path):
+    path = tmp_path / "projects.json"
+    path.write_text(
+        """
         {
-            "project-a": ProjectSpec(
-                "project-a",
-                "Project A",
-                "Objective",
-                ProjectStatus.PLANNED,
-                agent_roles=("researcher", "researcher"),
-                skill_ids=("research", "research"),
-                model_ids=("model/a", "model/a"),
-            )
+          "projects": [{
+            "project_id": "project-a",
+            "name": "Project A",
+            "objective": "Objective",
+            "status": "planned",
+            "agent_roles": ["researcher", "researcher"],
+            "skill_ids": ["research", "research"],
+            "model_ids": ["model/a", "model/a"]
+          }]
         }
+        """,
+        encoding="utf-8",
     )
 
-    assert registry.resolve("project-a").agent_roles == ("researcher",)
+    registry = ProjectRegistry.from_file(path)
+    project = registry.resolve("project-a")
+    assert project.agent_roles == ("researcher",)
+    assert project.skill_ids == ("research",)
+    assert project.model_ids == ("model/a",)
