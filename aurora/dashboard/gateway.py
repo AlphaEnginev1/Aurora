@@ -5,8 +5,6 @@ from __future__ import annotations
 from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
 import json
-from pathlib import Path
-import sqlite3
 from typing import Any, Mapping
 from uuid import uuid4
 
@@ -25,7 +23,9 @@ from aurora.orchestration.director_decision_knowledge_store import (
 from aurora.orchestration.director_decision_performance import (
     DirectorDecisionPerformanceStore,
 )
-from aurora.orchestration.event_bus import EventSubscription
+from aurora.orchestration.director_decision_policy_active_store import (
+    DirectorDecisionPolicyActiveStore,
+)
 from aurora.orchestration.mission_memory import MailboxScope, MissionMemory
 from aurora.orchestration.task_store import DurableTaskStore, StoredTask, TaskEvent
 
@@ -52,6 +52,7 @@ class DashboardGateway:
         research_store: ResearchStore | None = None,
         decision_performance: DirectorDecisionPerformanceStore | None = None,
         decision_knowledge: DirectorDecisionKnowledgeStore | None = None,
+        active_policy_store: DirectorDecisionPolicyActiveStore | None = None,
         observability: ProductionObservability | None = None,
         director_context: ContextManifest | None = None,
         director_model_policy: Mapping[str, Any] | None = None,
@@ -68,6 +69,7 @@ class DashboardGateway:
         self.research_store = research_store
         self.decision_performance = decision_performance
         self.decision_knowledge = decision_knowledge
+        self.active_policy_store = active_policy_store
         self.observability = observability
         self.director_context = director_context
         self.director_model_policy = (
@@ -89,8 +91,6 @@ class DashboardGateway:
             tasks_by_status[task.status] = tasks_by_status.get(task.status, 0) + 1
 
         projects = tuple(self.project_registry.projects.values())
-        active_projects = sum(project.status is ProjectStatus.ACTIVE for project in projects)
-
         latest_events = self._latest_events(event_limit)
         mailbox = self.mission_memory.list_global(limit=mailbox_limit)
 
@@ -162,6 +162,7 @@ class DashboardGateway:
             "freshness": {
                 "captured_at": _now(),
                 "event_history_is_filtered_by_project_id": True,
+                "research_scope": "global",
             },
         }
 
@@ -323,7 +324,11 @@ class DashboardGateway:
                 if self.director_context is not None
                 else ["director_bootstrap"]
             ),
-            "current_model": self._director_model(),
+            "current_model": None,
+        "configured_models": [
+            item for item in (self.director_model_policy or {}).get("models", [])
+            if isinstance(item, Mapping)
+        ],
         }
         return result
 
@@ -355,7 +360,7 @@ class DashboardGateway:
         return None
 
     def _active_policy_view(self) -> dict[str, Any] | None:
-        store = getattr(self, "_active_policy_store", None)
+        store = self.active_policy_store
         if store is None:
             return None
         current = store.current()
@@ -476,15 +481,13 @@ class DashboardGateway:
         agent_role: str | None = None,
         correlation_id: str | None = None,
     ) -> tuple[TaskEvent, ...]:
-        events = self.task_store.events_since(
-            after_event_id=0,
-            limit=max(limit * 4, limit),
+        return self.task_store.latest_events(
+            limit=limit,
             mission_id=mission_id,
             project_id=project_id,
             agent_role=agent_role,
             correlation_id=correlation_id,
         )
-        return tuple(reversed(events[-limit:]))
 
     def _event(self, event: TaskEvent) -> dict[str, Any]:
         return {
@@ -535,13 +538,14 @@ class DashboardGateway:
     def _agent_performance(self, role: str) -> dict[str, Any]:
         if self.skill_learning is None:
             return {"state": "unknown"}
+        scores = self.skill_learning.agent_scores_for(
+            tuple(self.skill_registry.ids()),
+            minimum_evaluations=1,
+            minimum_evidence_completeness=0.0,
+        )
         return {
             "agent_role": role,
-            "scores": self.skill_learning.agent_scores_for(
-                tuple(self.skill_registry.ids()),
-                minimum_evaluations=1,
-                minimum_evidence_completeness=0.0,
-            ),
+            "scores": scores.get(role, {}),
         }
 
     def _recent_model_performance(self, limit: int) -> list[dict[str, Any]]:
@@ -628,6 +632,7 @@ class DashboardGateway:
             "project_id": project_id,
             "state": "available",
             "recent_knowledge": self.research(limit=limit),
+            "scope": "global",
         }
 
     def _active_policy_store_bind(self, store: Any) -> None:
