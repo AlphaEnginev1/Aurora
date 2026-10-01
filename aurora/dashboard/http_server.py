@@ -38,8 +38,8 @@ def create_dashboard_server(
     api_token: str | None = None,
 ) -> ThreadingHTTPServer:
     _validate_bind(host, api_token)
-    if port < 1 or port > 65535:
-        raise DashboardHTTPError("dashboard port must be between 1 and 65535")
+    if port < 0 or port > 65535:
+        raise DashboardHTTPError("dashboard port must be between 0 and 65535")
     root = Path(ui_root).resolve() if ui_root is not None else Path(__file__).resolve().parent / "ui"
     if not root.is_dir():
         raise DashboardHTTPError(f"dashboard UI root does not exist: {root}")
