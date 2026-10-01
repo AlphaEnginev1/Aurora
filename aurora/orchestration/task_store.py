@@ -39,6 +39,10 @@ class TaskEvent:
     event_type: str
     payload: dict
     created_at: str
+    project_id: str | None = None
+    agent_role: str | None = None
+    correlation_id: str | None = None
+    causation_id: str | None = None
 
 
 class DurableTaskStore:
@@ -91,7 +95,11 @@ class DurableTaskStore:
                     task_id TEXT,
                     event_type TEXT NOT NULL,
                     payload_json TEXT NOT NULL,
-                    created_at TEXT NOT NULL
+                    created_at TEXT NOT NULL,
+                    project_id TEXT,
+                    agent_role TEXT,
+                    correlation_id TEXT,
+                    causation_id TEXT
                 );
 
                 CREATE TABLE IF NOT EXISTS event_consumers (
@@ -123,6 +131,15 @@ class DurableTaskStore:
                 db.execute("ALTER TABLE tasks ADD COLUMN phase INTEGER NOT NULL DEFAULT 0")
             if "skills_json" not in columns:
                 db.execute("ALTER TABLE tasks ADD COLUMN skills_json TEXT NOT NULL DEFAULT '[]'")
+
+            event_columns = {
+                row["name"]
+                for row in db.execute("PRAGMA table_info(task_events)").fetchall()
+            }
+            for column in ("project_id", "agent_role", "correlation_id", "causation_id"):
+                if column not in event_columns:
+                    db.execute(f"ALTER TABLE task_events ADD COLUMN {column} TEXT")
+
             db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_tasks_lease ON tasks (status, lease_until)"
             )
@@ -663,6 +680,10 @@ class DurableTaskStore:
         task_id: str | None,
         event_type: str,
         payload: dict,
+        project_id: str | None = None,
+        agent_role: str | None = None,
+        correlation_id: str | None = None,
+        causation_id: str | None = None,
     ) -> TaskEvent:
         if not mission_id.strip():
             raise TaskStoreError("mission_id is empty")
@@ -678,6 +699,10 @@ class DurableTaskStore:
                 task_id,
                 event_type,
                 payload,
+                project_id=project_id,
+                agent_role=agent_role,
+                correlation_id=correlation_id,
+                causation_id=causation_id,
             )
             created_at = db.execute(
                 "SELECT created_at FROM task_events WHERE event_id = ?",
@@ -691,13 +716,18 @@ class DurableTaskStore:
             event_type=event_type,
             payload=dict(payload),
             created_at=created_at,
+            project_id=project_id,
+            agent_role=agent_role,
+            correlation_id=correlation_id,
+            causation_id=causation_id,
         )
 
     def events(self, mission_id: str) -> tuple[TaskEvent, ...]:
         with self._connect() as db:
             rows = db.execute(
                 """
-                SELECT event_id, mission_id, task_id, event_type, payload_json, created_at
+                SELECT event_id, mission_id, task_id, event_type, payload_json, created_at,
+                       project_id, agent_role, correlation_id, causation_id
                 FROM task_events
                 WHERE mission_id = ?
                 ORDER BY event_id
@@ -730,6 +760,52 @@ class DurableTaskStore:
                 """,
                 (after_event_id, limit),
             ).fetchall()
+        return tuple(self._row_to_event(row) for row in rows)
+
+    def events_view(
+        self,
+        *,
+        mission_id: str | None = None,
+        project_id: str | None = None,
+        agent_role: str | None = None,
+        task_id: str | None = None,
+        event_type: str | None = None,
+        correlation_id: str | None = None,
+        after_event_id: int = 0,
+        limit: int = 100,
+    ) -> tuple[TaskEvent, ...]:
+        """Query the single event journal through global/project/agent views."""
+        if after_event_id < 0:
+            raise TaskStoreError("after_event_id cannot be negative")
+        if limit < 1:
+            raise TaskStoreError("limit must be at least 1")
+        filters: list[str] = []
+        params: list[object] = []
+        for column, value in (
+            ("mission_id", mission_id),
+            ("project_id", project_id),
+            ("agent_role", agent_role),
+            ("task_id", task_id),
+            ("event_type", event_type),
+            ("correlation_id", correlation_id),
+        ):
+            if value is not None:
+                if not isinstance(value, str) or not value.strip():
+                    raise TaskStoreError(f"{column} cannot be empty")
+                filters.append(f"{column} = ?")
+                params.append(value.strip())
+        filters.append("event_id > ?")
+        params.append(after_event_id)
+        query = (
+            "SELECT event_id, mission_id, task_id, event_type, payload_json, "
+            "created_at, project_id, agent_role, correlation_id, causation_id "
+            "FROM task_events WHERE "
+            + " AND ".join(filters)
+            + " ORDER BY event_id LIMIT ?"
+        )
+        params.append(limit)
+        with self._connect() as db:
+            rows = db.execute(query, tuple(params)).fetchall()
         return tuple(self._row_to_event(row) for row in rows)
 
     def ensure_event_consumer(
@@ -875,6 +951,10 @@ class DurableTaskStore:
             event_type=row["event_type"],
             payload=json.loads(row["payload_json"]),
             created_at=row["created_at"],
+            project_id=row["project_id"],
+            agent_role=row["agent_role"],
+            correlation_id=row["correlation_id"],
+            causation_id=row["causation_id"],
         )
 
     @classmethod
@@ -885,12 +965,18 @@ class DurableTaskStore:
         task_id: str | None,
         event_type: str,
         payload: dict,
+        *,
+        project_id: str | None = None,
+        agent_role: str | None = None,
+        correlation_id: str | None = None,
+        causation_id: str | None = None,
     ) -> int:
         cursor = db.execute(
             """
             INSERT INTO task_events (
-                mission_id, task_id, event_type, payload_json, created_at
-            ) VALUES (?, ?, ?, ?, ?)
+                mission_id, task_id, event_type, payload_json, created_at,
+                project_id, agent_role, correlation_id, causation_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 mission_id,
@@ -898,6 +984,10 @@ class DurableTaskStore:
                 event_type,
                 json.dumps(payload, sort_keys=True),
                 cls._now(),
+                project_id,
+                agent_role,
+                correlation_id,
+                causation_id,
             ),
         )
         return int(cursor.lastrowid)
