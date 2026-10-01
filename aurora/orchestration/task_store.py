@@ -784,6 +784,44 @@ class DurableTaskStore:
             ).fetchall()
         return tuple(self._row_to_event(row) for row in rows)
 
+    def latest_events(
+        self,
+        *,
+        limit: int = 100,
+        mission_id: str | None = None,
+        project_id: str | None = None,
+        agent_role: str | None = None,
+        correlation_id: str | None = None,
+    ) -> tuple[TaskEvent, ...]:
+        """Return the newest matching events in chronological order."""
+        if limit < 1:
+            raise TaskStoreError("event limit must be at least 1")
+        filters = ["1=1"]
+        params: list[object] = []
+        for column, value in (
+            ("mission_id", mission_id),
+            ("project_id", project_id),
+            ("agent_role", agent_role),
+            ("correlation_id", correlation_id),
+        ):
+            if value is not None:
+                filters.append(f"{column} = ?")
+                params.append(value)
+        params.append(limit)
+        with self._connect() as db:
+            rows = db.execute(
+                f"""
+                SELECT event_id, mission_id, task_id, event_type, payload_json,
+                       created_at, project_id, agent_role, correlation_id
+                FROM task_events
+                WHERE {" AND ".join(filters)}
+                ORDER BY event_id DESC
+                LIMIT ?
+                """,
+                tuple(params),
+            ).fetchall()
+        return tuple(reversed(tuple(self._row_to_event(row) for row in rows)))
+
     def ensure_event_consumer(
         self,
         consumer_id: str,

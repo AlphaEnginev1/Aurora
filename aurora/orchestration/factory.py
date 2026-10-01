@@ -15,6 +15,7 @@ from aurora.inference.router import ModelRouter
 from aurora.inference.discovery import ModelCandidateStore, ModelDiscoveryService
 from aurora.inference.providers.registry import default_provider_registry
 from aurora.inference.model_performance import ModelPerformanceStore
+from aurora.dashboard.gateway import DashboardGateway
 from aurora.research.discovery import HttpSearchProvider, ResearchSourceCatalog
 from aurora.research.models import ResearchRequest
 from aurora.research.service import ResearchService
@@ -45,6 +46,7 @@ from .director_decision_policy_proposal_store import DirectorDecisionPolicyPropo
 from .durable_director import DurableDirectorService
 from .engine import OrchestrationEngine
 from .event_bus import DurableEventBus
+from .mission_memory import MissionMemory
 from .director_runtime import DirectorRuntime
 from .task_engine import TaskEngine
 from .task_store import DurableTaskStore
@@ -267,9 +269,31 @@ def build_director_runtime(*, inference_policy_path: str | Path, autonomy_policy
     )
     bootstrap_state=bootstrap.initialize()
 
+    observability=ProductionObservability(runtime_root/"observability.jsonl")
+    memory=MissionMemory(store)
+    dashboard_gateway=DashboardGateway(
+        project_registry=service.planner.project_registry,
+        organization=service.planner.organization,
+        skill_registry=service.planner.skill_registry,
+        model_registry=service.planner.router.model_registry,
+        provider_registry=service.planner.router.provider_registry,
+        task_store=store,
+        mission_memory=memory,
+        model_performance=ModelPerformanceStore(runtime_root/"model-performance.db"),
+        skill_learning=skill_learning,
+        research_store=research_store,
+        decision_performance=decision_performance,
+        decision_knowledge=decision_knowledge_store,
+        active_policy_store=active_policy_store,
+        observability=observability,
+        director_context=bootstrap_state.context,
+        director_model_policy=bootstrap_state.director_model_policy,
+    )
+
     runtime=DirectorRuntime(director=durable_director,store=store,event_bus=event_bus,worker_policy=worker_policy,
         worker_id=worker_id,worker_concurrency=worker_concurrency,skill_evaluator=skill_evaluator,
-        observability=ProductionObservability(runtime_root/"observability.jsonl"),
+        observability=observability,
+        memory=memory,
         skill_learning=skill_learning,skill_evolution=skill_evolution,
         skill_evolution_runtime=skill_evolution_runtime, skill_improvement_generator=skill_improvement_generator,
         autonomous_specialist_acquisition=autonomous_specialist_acquisition,

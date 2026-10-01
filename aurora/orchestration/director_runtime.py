@@ -50,6 +50,7 @@ from aurora.skills.acquisition_pipeline import PreparedSkillCandidate
 from aurora.skills.evolution_runtime import PreparedSkillEvolution, SkillEvolutionRuntime
 from aurora.skills.improvement import SkillImprovementGenerator
 from aurora.inference.discovery import ModelDiscoveryService
+from aurora.dashboard.gateway import DashboardGateway
 
 
 
@@ -118,6 +119,7 @@ class DirectorRuntime:
         policy_proposal_store: DirectorDecisionPolicyProposalStore | None = None,
         policy_contract_store: DirectorDecisionPolicyContractStore | None = None,
         model_discovery: ModelDiscoveryService | None = None,
+        dashboard_gateway: DashboardGateway | None = None,
         sleep_fn: Callable[[float], None] = sleep,
     ) -> None:
         if not event_consumer_id.strip():
@@ -140,6 +142,7 @@ class DirectorRuntime:
         self.idle_sleep_seconds = idle_sleep_seconds
         self.max_review_rounds = max_review_rounds
         self.model_discovery = model_discovery
+        self.dashboard_gateway = dashboard_gateway
         self.worker_concurrency = worker_concurrency
         self.skill_evaluator = skill_evaluator
         self.skill_learning = skill_learning
