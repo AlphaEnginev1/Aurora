@@ -76,6 +76,11 @@ class ModelRouter:
     ) -> RoutingDecision:
         preferred = preferred_models or ()
         if request.model:
+            allowed_models = _allowed_models(request)
+            if allowed_models is not None and request.model not in allowed_models:
+                raise ModelRoutingError(
+                    f"Requested model {request.model} is outside the request allowlist"
+                )
             for model in self.available():
                 if model.id != request.model:
                     continue
@@ -101,6 +106,9 @@ class ModelRouter:
             )
 
         candidates = self.available()
+        allowed_models = _allowed_models(request)
+        if allowed_models is not None:
+            candidates = [m for m in candidates if m.id in allowed_models]
         if capability:
             candidates = [m for m in candidates if capability in m.capabilities]
         candidates = [m for m in candidates if self._meets_constraints(m, request)]
@@ -359,6 +367,22 @@ class ModelRouter:
                 routing_factors=dict(decision.factors),
                 routing_candidates=decision.candidates,
             )
+
+
+def _allowed_models(request: InferenceRequest) -> set[str] | None:
+    raw = (request.metadata or {}).get("allowed_models")
+    if raw is None:
+        return None
+    if isinstance(raw, str):
+        values = {raw.strip()} if raw.strip() else set()
+    else:
+        try:
+            values = {str(value).strip() for value in raw if str(value).strip()}
+        except TypeError as exc:
+            raise ModelRoutingError("allowed_models must be an iterable of model ids") from exc
+    if not values:
+        raise ModelRoutingError("allowed_models cannot be empty")
+    return values
 
 
 __all__ = ["ModelRouter", "ModelRoutingError", "RoutingDecision"]
