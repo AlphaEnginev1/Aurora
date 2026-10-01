@@ -14,7 +14,7 @@ from aurora.inference.providers.registry import ProviderRegistry
 from aurora.inference.registry import ModelRegistry
 from aurora.observability import ProductionObservability
 from aurora.organization import OrganizationRegistry
-from aurora.projects import ProjectRegistry, ProjectStatus
+from aurora.projects import ProjectRegistry
 from aurora.research.store import ResearchStore
 from aurora.skills import SkillLearningStore, SkillRegistry
 from aurora.orchestration.director_decision_knowledge_store import (
@@ -545,7 +545,8 @@ class DashboardGateway:
         )
         return {
             "agent_role": role,
-            "scores": scores.get(role, {}),
+            "score": scores.get(role),
+            "known": role in scores,
         }
 
     def _recent_model_performance(self, limit: int) -> list[dict[str, Any]]:
