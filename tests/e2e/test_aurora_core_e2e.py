@@ -48,9 +48,9 @@ class CoreRouter(ModelRouter):
                     "controlled",
                     "https://example.invalid/a",
                     capabilities=("reasoning",),
-                    quality_score=0.75,
-                    latency_score=0.75,
-                    cost_score=0.75,
+                    quality_score=0.65,
+                    latency_score=0.65,
+                    cost_score=0.65,
                     specialties=("research",),
                 ),
                 ModelSpec(
