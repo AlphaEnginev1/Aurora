@@ -3,7 +3,6 @@ import json
 import pytest
 
 from aurora.context import AuroraContextPlane, ContextGate
-from aurora.inference import models as model_contracts
 from aurora.inference.models import InferenceRequest, InferenceResponse, ModelSpec
 from aurora.inference.router import ModelRouter, ModelRoutingError
 from aurora.organization import AgentSpec, DepartmentSpec, OrganizationRegistry
