@@ -1,6 +1,7 @@
 """Aurora orchestration contracts."""
 
 from .director import DirectorPlan, DirectorPlanError, DirectorPlanner, DirectorReview, DirectorService, MissionResult
+from .director_conversation import ConversationSession, ConversationTurn, DirectorConversationError, DirectorConversationResponse, DirectorConversationService
 from .director_bootstrap import (
     DirectorBootstrap,
     DirectorBootstrapError,
@@ -88,6 +89,11 @@ __all__ = [
     "DirectorReview",
     "DirectorService",
     "MissionResult",
+    "ConversationSession",
+    "ConversationTurn",
+    "DirectorConversationError",
+    "DirectorConversationResponse",
+    "DirectorConversationService",
     "DirectorBootstrap",
     "DirectorBootstrapError",
     "DirectorBootstrapState",
