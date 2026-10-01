@@ -240,6 +240,7 @@ def build_director_runtime(*, inference_policy_path: str | Path, autonomy_policy
         organization=service.planner.organization,
         skill_registry=service.planner.skill_registry,
         models=tuple(service.planner.router.models),
+        model_registry=service.planner.router.model_registry,
         runtime_context=build_context_runtime_adapter(store),
         mailbox_context=build_context_mailbox_adapter(store),
         knowledge_context=build_context_knowledge_adapter(research_store),
