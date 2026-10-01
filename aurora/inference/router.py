@@ -9,7 +9,7 @@ if TYPE_CHECKING:
     from aurora.context import ContextGate
 
 from .models import InferenceRequest, InferenceResponse, ModelSpec, new_execution_id
-from .providers.nvidia_api import NVIDIAAPIProvider
+from .providers.registry import ProviderRegistry, ProviderRegistryError, default_provider_registry
 
 
 class ModelRoutingError(RuntimeError):
@@ -30,8 +30,15 @@ class RoutingDecision:
 class ModelRouter:
     models: list[ModelSpec]
     nvidia_api_key: str | None = None
+    provider_registry: ProviderRegistry | None = None
     context_gate: ContextGate | None = None
     enforce_context: bool = False
+
+    def __post_init__(self) -> None:
+        if self.provider_registry is None:
+            self.provider_registry = default_provider_registry(
+                nvidia_api_key=self.nvidia_api_key
+            )
 
     def configure_context_gate(
         self,
@@ -298,15 +305,18 @@ class ModelRouter:
         )
         spec = next(model for model in self.models if model.id == decision.selected_model)
         execution_id = new_execution_id()
-        if spec.provider == "nvidia_api":
-            response = NVIDIAAPIProvider(
-                spec, api_key=self.nvidia_api_key
-            ).generate(
-                request,
-                selected_model=spec.id,
-                execution_id=execution_id,
-            )
-            return InferenceResponse(
+        if self.provider_registry is None:
+            raise ModelRoutingError("inference provider registry is not configured")
+        try:
+            provider = self.provider_registry.create(spec)
+        except ProviderRegistryError as exc:
+            raise ModelRoutingError(str(exc)) from exc
+        response = provider.generate(
+            request,
+            selected_model=spec.id,
+            execution_id=execution_id,
+        )
+        return InferenceResponse(
                 model=response.model,
                 provider=response.provider,
                 content=response.content,
@@ -323,7 +333,6 @@ class ModelRouter:
                 routing_factors=dict(decision.factors),
                 routing_candidates=decision.candidates,
             )
-        raise ModelRoutingError(f"Unsupported provider: {spec.provider}")
 
 
 __all__ = ["ModelRouter", "ModelRoutingError", "RoutingDecision"]
