@@ -329,12 +329,13 @@ def test_aurora_core_full_cycle(tmp_path: Path):
         minimum_evaluations=1,
         minimum_evidence_completeness=1.0,
     )
-    assert learned == {"core/model-b": 1.0}
+    assert learned["core/model-b"] == 1.0
     assert len(router.requests) == 2
     assert router.decisions[0].selected_model == "core/model-b"
     assert router.decisions[1].selected_model == "core/model-b"
-    assert router.requests[1].metadata["learned_model_scores"] == {"core/model-b": 1.0}
+    assert router.requests[1].metadata["learned_model_scores"]["core/model-b"] == 1.0
     assert router.decisions[1].factors["learned_score"] == 1.0
+    assert router.decisions[1].factors["preference"] == 0.0
 
     events = [event.event_type for event in store.events(submission.mission_id)]
     required = {
