@@ -4,6 +4,7 @@ import pytest
 
 from aurora.context import AuroraContextPlane, ContextGate
 from aurora.inference.models import InferenceRequest, InferenceResponse, ModelSpec
+from aurora.inference.providers.registry import ProviderRegistry, ProviderSpec
 from aurora.inference.router import ModelRouter, ModelRoutingError
 from aurora.organization import AgentSpec, DepartmentSpec, OrganizationRegistry
 from aurora.orchestration.director_bootstrap import (
@@ -87,7 +88,7 @@ def test_router_requires_context_gate_when_enforcement_is_enabled():
         router.generate(request, capability="reasoning")
 
 
-def test_router_injects_verified_manifest_before_provider(monkeypatch, tmp_path):
+def test_router_injects_verified_manifest_before_provider(tmp_path):
     router = _router_fixture(tmp_path)
     seen = {}
 
@@ -109,9 +110,16 @@ def test_router_injects_verified_manifest_before_provider(monkeypatch, tmp_path)
                 reported_model=selected_model,
             )
 
-    monkeypatch.setattr(
-        "aurora.inference.router.NVIDIAAPIProvider",
-        FakeProvider,
+    router.provider_registry = ProviderRegistry(
+        (
+            ProviderSpec(
+                "nvidia_api",
+                "NVIDIA test provider",
+                ("chat", "reasoning"),
+                True,
+                lambda model: FakeProvider(model),
+            ),
+        )
     )
 
     response = router.generate(
@@ -186,28 +194,8 @@ def test_router_fails_closed_when_runtime_state_is_unknown(monkeypatch, tmp_path
         router.generate(request, capability="reasoning")
 
 
-def test_router_uses_project_scope_when_project_identity_is_present(monkeypatch, tmp_path):
+def test_router_uses_project_scope_when_project_identity_is_present(tmp_path):
     router = _router_fixture(tmp_path)
-    seen = {}
-
-    class FakeProvider:
-        def __init__(self, spec, *, api_key):
-            pass
-
-        def generate(self, request, *, selected_model, execution_id):
-            seen["request"] = request
-            return InferenceResponse(
-                model=selected_model,
-                provider="nvidia_api",
-                content=json.dumps({"ok": True}),
-                request_id=request.request_id,
-                execution_id=execution_id,
-                selected_model=selected_model,
-                provider_model=selected_model,
-                reported_model=selected_model,
-            )
-
-    monkeypatch.setattr("aurora.inference.router.NVIDIAAPIProvider", FakeProvider)
 
     request = InferenceRequest(
         messages=[{"role": "user", "content": "project task"}],
