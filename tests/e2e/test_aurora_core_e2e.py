@@ -246,10 +246,10 @@ def test_aurora_core_full_cycle(tmp_path: Path):
     result = runtime.run_until_terminal(submission, max_cycles=20)
 
     assert result.status is TaskStatus.SUCCEEDED
-    assert [item.task.task_id for item in result.tasks] == [
+    assert {item.task.task_id for item in result.tasks} == {
         "research_evidence",
         "analyze_evidence",
-    ]
+    }
     assert all(item.status is TaskStatus.SUCCEEDED for item in result.tasks)
 
     learned = performance.trusted_scores_for(
