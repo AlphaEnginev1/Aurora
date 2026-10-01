@@ -91,9 +91,8 @@ def test_router_injects_verified_manifest_before_provider(tmp_path):
     seen = {}
 
     class FakeProvider:
-        def __init__(self, spec, *, api_key):
+        def __init__(self, spec):
             self.spec = spec
-            self.api_key = api_key
 
         def generate(self, request, *, selected_model, execution_id):
             seen["request"] = request
