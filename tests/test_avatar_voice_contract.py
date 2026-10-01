@@ -81,3 +81,19 @@ def test_portrait_failure_keeps_static_fallback():
     app = _read("app.js")
     assert 'image.addEventListener("error"' in app
     assert 'placeholder.hidden = false' in app
+
+
+def test_final_voice_transcript_uses_same_director_message_path_as_text():
+    app = _read("app.js")
+    assert "if (payload.final)" in app
+    assert "sendConversationMessage(payload.text)" in app
+    assert 'addEventListener("click"' in app
+    assert 'sendConversationMessage($("director-message").value)' in app
+
+
+def test_speech_output_failure_preserves_director_text_response():
+    app = _read("app.js")
+    response_assignment = '$("avatar-transcript").textContent = data.response_text;'
+    assert response_assignment in app
+    assert "Voice output is optional; preserve the authoritative text response." in app
+    assert "state.avatarVoice.setIdle();" in app
