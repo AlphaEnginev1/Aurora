@@ -1,5 +1,3 @@
-import json
-
 import pytest
 
 from aurora.context import AuroraContextPlane, ContextGate
@@ -140,7 +138,7 @@ def test_router_injects_verified_manifest_before_provider(tmp_path):
     assert response.execution_id
 
 
-def test_router_fails_closed_when_runtime_state_is_unknown(monkeypatch, tmp_path):
+def test_router_fails_closed_when_runtime_state_is_unknown(tmp_path):
     organization = OrganizationRegistry(
         agents={
             "researcher": AgentSpec(
