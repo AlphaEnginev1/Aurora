@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Mapping, Sequence, Any
+from typing import TYPE_CHECKING, Mapping, Sequence
 
 if TYPE_CHECKING:
     from aurora.context import ContextGate
