@@ -1,9 +1,12 @@
 """Capability-aware model router."""
 
-from dataclasses import dataclass
-from typing import Mapping, Sequence
+from __future__ import annotations
 
-from aurora.context import AuroraContextError, ContextGate, ContextScope
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Mapping, Sequence, Any
+
+if TYPE_CHECKING:
+    from aurora.context import ContextGate
 
 from .models import InferenceRequest, InferenceResponse, ModelSpec, new_execution_id
 from .providers.nvidia_api import NVIDIAAPIProvider
@@ -137,6 +140,8 @@ class ModelRouter:
             raise ModelRoutingError(
                 "universal Aurora ContextGate is required but not configured"
             )
+
+        from aurora.context import AuroraContextError, ContextScope
 
         metadata = dict(request.metadata or {})
         role = str(metadata.get("role", "")).strip()
