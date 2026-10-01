@@ -263,6 +263,7 @@ def test_aurora_core_full_cycle(tmp_path: Path):
     skills.validate_organization(organization)
 
     performance = ModelPerformanceStore(tmp_path / "model-performance.db")
+    router = CoreRouter()
     task_engine = TaskEngine(
         OrchestrationEngine(router),
         tmp_path / "workspace",
@@ -273,7 +274,6 @@ def test_aurora_core_full_cycle(tmp_path: Path):
         research_service=research_service,
         research_learning_gate=ResearchLearningGate(research_store),
     )
-    router = CoreRouter()
     provider = CoreDirectorProvider(artifact_id, organization)
     planner = DirectorPlanner(
         provider=provider,
