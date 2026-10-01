@@ -135,10 +135,28 @@ def test_http_conversation_round_trip(tmp_path):
         assert turn["response_text"] == "Respuesta HTTP de Aurora."
         assert turn["session"]["session_id"] == session["session_id"]
         assert turn["turn"]["correlation_id"].startswith("corr-")
+        assert turn["state"] == "completed"
+        assert turn["model"] == "fake/director"
+        assert turn["provider"] == "fake"
+        assert turn["execution_id"]
+        assert turn["context_manifest_id"]
+        assert turn["presentation_hints"]["avatar_state"] == "SPEAKING"
+        assert turn["turn"]["model"] == turn["model"]
+        assert turn["turn"]["provider"] == turn["provider"]
+        assert turn["turn"]["execution_id"] == turn["execution_id"]
 
         with urlopen(base + "/api/conversation/" + session["session_id"] + "/turns", timeout=5) as response:
             history = json.loads(response.read().decode("utf-8"))
         assert [item["role"] for item in history["turns"]] == ["user", "assistant"]
+        assert history["turns"][1]["content"] == "Respuesta HTTP de Aurora."
+        assert history["turns"][1]["execution_id"] == turn["execution_id"]
+
+        # Recreate the service over the same SQLite file to prove durable recovery.
+        recovered = DashboardConversationAPI(_conversation(tmp_path))
+        recovered_history = recovered.get_turns(session_id=session["session_id"])
+        assert [item["role"] for item in recovered_history["turns"]] == ["user", "assistant"]
+        assert recovered_history["turns"][1]["content"] == "Respuesta HTTP de Aurora."
+        assert recovered_history["turns"][1]["correlation_id"] == turn["correlation_id"]
     finally:
         server.shutdown()
         server.server_close()
