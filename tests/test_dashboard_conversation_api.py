@@ -90,10 +90,69 @@ def _conversation(tmp_path: Path):
 def test_http_conversation_round_trip(tmp_path):
     conversation = _conversation(tmp_path)
     api = DashboardConversationAPI(conversation)
-    dashboard = create_dashboard_server(
-        dashboard_gateway=__import__("aurora.dashboard.gateway", fromlist=["DashboardGateway"]).DashboardGateway.__new__(
-            __import__("aurora.dashboard.gateway", fromlist=["DashboardGateway"]).DashboardGateway
-        ),
+
+    class Gateway:
+        def snapshot(self):
+            return {"read_only": True}
+        def project(self, project_id):
+            return {"project": {"project_id": project_id}}
+        def agent(self, role):
+            return {"identity": {"role": role}}
+
+    server = create_dashboard_server(
+        dashboard_gateway=Gateway(),
         conversation_api=api,
+        host="127.0.0.1",
+        port=0,
     )
-    dashboard.server_close()
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = "http://127.0.0.1:" + str(server.server_address[1])
+
+    try:
+        session_request = Request(
+            base + "/api/conversation/session",
+            data=b"{}",
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urlopen(session_request, timeout=5) as response:
+            session = json.loads(response.read().decode("utf-8"))
+        assert response.status == 201
+        assert session["state"] == "active"
+
+        body = json.dumps({"user_input": "Hola por HTTP"}).encode("utf-8")
+        turn_request = Request(
+            base + "/api/conversation/" + session["session_id"] + "/turn",
+            data=body,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urlopen(turn_request, timeout=5) as response:
+            turn = json.loads(response.read().decode("utf-8"))
+
+        assert response.status == 200
+        assert turn["response_text"] == "Respuesta HTTP de Aurora."
+        assert turn["session"]["session_id"] == session["session_id"]
+        assert turn["turn"]["correlation_id"].startswith("corr-")
+
+        with urlopen(base + "/api/conversation/" + session["session_id"] + "/turns", timeout=5) as response:
+            history = json.loads(response.read().decode("utf-8"))
+        assert [item["role"] for item in history["turns"]] == ["user", "assistant"]
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_dashboard_server_rejects_non_loopback_without_token():
+    import pytest
+    from aurora.dashboard.http_server import DashboardHTTPError
+
+    with pytest.raises(DashboardHTTPError, match="non-loopback"):
+        create_dashboard_server(
+            dashboard_gateway=object(),
+            conversation_api=object(),
+            host="0.0.0.0",
+            port=8787,
+            ui_root=Path(__file__).parents[1] / "aurora" / "dashboard" / "ui",
+        )
