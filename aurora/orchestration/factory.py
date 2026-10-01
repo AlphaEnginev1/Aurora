@@ -10,7 +10,7 @@ from aurora.autonomy.internet import InternetGateway, InternetPolicy
 from aurora.autonomy.policy import Policy
 from aurora.autonomy.registry import CapabilityRegistryStore, load_registry, merge_registries
 from aurora.autonomy.sandbox import SandboxExecutor, SandboxPolicy
-from aurora.inference.config import load_model_specs
+from aurora.inference.registry import ModelRegistry
 from aurora.inference.router import ModelRouter
 from aurora.inference.providers.registry import default_provider_registry
 from aurora.inference.model_performance import ModelPerformanceStore
@@ -51,23 +51,38 @@ from .team_runtime import TeamCoordinator
 from .task_worker import WorkerPolicy
 
 def build_orchestration_engine(policy_path: str | Path) -> OrchestrationEngine:
-    models=load_model_specs(policy_path)
-    return OrchestrationEngine(ModelRouter(
-        models=models,
-        nvidia_api_key=os.getenv("NVIDIA_API_KEY"),
-        provider_registry=default_provider_registry(nvidia_api_key=os.getenv("NVIDIA_API_KEY")),
-    ))
+    nvidia_key = os.getenv("NVIDIA_API_KEY")
+    provider_registry = default_provider_registry(nvidia_api_key=nvidia_key)
+    model_registry = ModelRegistry.from_file(
+        policy_path,
+        provider_registry=provider_registry,
+    )
+    return OrchestrationEngine(
+        ModelRouter(
+            models=list(model_registry.models),
+            nvidia_api_key=nvidia_key,
+            provider_registry=provider_registry,
+            model_registry=model_registry,
+        )
+    )
 
 def build_director_service(*, inference_policy_path: str | Path, autonomy_policy_path: str | Path,
     registry_path: str | Path, network_policy_path: str | Path, workspace_root: str | Path,
     egress_proxy_host: str, egress_proxy_port: int=3128, organization_path: str | Path="config/organization.json",
     skills_path: str | Path="config/skills.json", skill_learning_path: str | Path | None=None,
     projects_path: str | Path="config/projects.json") -> DirectorService:
-    inference_specs=load_model_specs(inference_policy_path)
+    nvidia_key = os.getenv("NVIDIA_API_KEY")
+    provider_registry = default_provider_registry(nvidia_api_key=nvidia_key)
+    model_registry = ModelRegistry.from_file(
+        inference_policy_path,
+        provider_registry=provider_registry,
+    )
+    inference_specs = list(model_registry.models)
     router=ModelRouter(
         models=inference_specs,
-        nvidia_api_key=os.getenv("NVIDIA_API_KEY"),
-        provider_registry=default_provider_registry(nvidia_api_key=os.getenv("NVIDIA_API_KEY")),
+        nvidia_api_key=nvidia_key,
+        provider_registry=provider_registry,
+        model_registry=model_registry,
     )
     skill_registry=SkillRegistry.from_file(skills_path,configured_models={model.id for model in inference_specs})
     organization=OrganizationRegistry.from_file(organization_path,configured_models={model.id for model in inference_specs})
@@ -225,6 +240,7 @@ def build_director_runtime(*, inference_policy_path: str | Path, autonomy_policy
         organization=service.planner.organization,
         skill_registry=service.planner.skill_registry,
         models=tuple(service.planner.router.models),
+        model_registry=service.planner.router.model_registry,
         runtime_context=build_context_runtime_adapter(store),
         mailbox_context=build_context_mailbox_adapter(store),
         knowledge_context=build_context_knowledge_adapter(research_store),
