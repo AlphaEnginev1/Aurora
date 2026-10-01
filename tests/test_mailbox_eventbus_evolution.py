@@ -316,3 +316,43 @@ def test_mission_memory_first_of_kind_preserves_evolved_metadata(tmp_path: Path)
     )
 
     assert memory.first_of_kind("m1", "objective") == saved
+
+
+
+def test_mission_memory_migrates_legacy_message_table(tmp_path: Path):
+    path = tmp_path / "tasks.db"
+    with store_connection(path) as db:
+        db.executescript(
+            """
+            CREATE TABLE mission_messages (
+                message_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                mission_id TEXT NOT NULL,
+                source TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                content TEXT NOT NULL,
+                metadata_json TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            """
+        )
+        db.execute(
+            """
+            INSERT INTO mission_messages (
+                mission_id, source, kind, content, metadata_json, created_at
+            ) VALUES ('m1', 'director', 'legacy', 'old message', '{}',
+                      '2026-10-01T10:00:00+00:00')
+            """
+        )
+
+    memory = MissionMemory(DurableTaskStore(path))
+    messages = memory.list("m1")
+    assert len(messages) == 1
+    assert messages[0].scope is MailboxScope.MISSION
+    assert messages[0].project_id is None
+    assert messages[0].correlation_id is None
+
+
+def store_connection(path: Path):
+    import sqlite3
+
+    return sqlite3.connect(path)
