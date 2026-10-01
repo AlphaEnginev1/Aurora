@@ -4,13 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-import json
 from pathlib import Path
 import sqlite3
 from typing import Any, Mapping
 from uuid import uuid4
 
-from aurora.context import ContextScope
 from aurora.inference.models import InferenceRequest, InferenceResponse
 from aurora.inference.router import ModelRouter, ModelRoutingError
 
@@ -214,6 +212,7 @@ Keep responses useful and concise unless the human asks for depth."""
                 "conversation_turn_id": turn_id,
                 "correlation_id": correlation_id,
                 "task_type": "conversation",
+                "allowed_models": self._preferred_models(policy),
             },
         )
 
@@ -483,9 +482,6 @@ Keep responses useful and concise unless the human asks for depth."""
         response: InferenceResponse,
         fallback: str,
     ) -> str:
-        metadata = response.telemetry
-        if metadata is None:
-            return fallback
         return fallback
 
     @staticmethod
