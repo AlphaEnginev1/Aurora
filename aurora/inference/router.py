@@ -9,6 +9,7 @@ if TYPE_CHECKING:
     from aurora.context import ContextGate
 
 from .models import InferenceRequest, InferenceResponse, ModelSpec, new_execution_id
+from .registry import ModelRegistry, ModelRegistryError
 from .providers.registry import ProviderRegistry, ProviderRegistryError, default_provider_registry
 
 
@@ -31,6 +32,7 @@ class ModelRouter:
     models: list[ModelSpec]
     nvidia_api_key: str | None = None
     provider_registry: ProviderRegistry | None = None
+    model_registry: ModelRegistry | None = None
     context_gate: ContextGate | None = None
     enforce_context: bool = False
 
@@ -39,6 +41,15 @@ class ModelRouter:
             self.provider_registry = default_provider_registry(
                 nvidia_api_key=self.nvidia_api_key
             )
+        if self.model_registry is None:
+            self.model_registry = ModelRegistry.from_specs(self.models)
+        else:
+            self.models = list(self.model_registry.models)
+
+    def _registered_models(self) -> list[ModelSpec]:
+        if self.model_registry is not None:
+            return list(self.model_registry.models)
+        return list(self.models)
 
     def configure_context_gate(
         self,
@@ -51,7 +62,11 @@ class ModelRouter:
         self.enforce_context = enforce
 
     def available(self) -> list[ModelSpec]:
-        return [m for m in self.models if m.enabled and m.healthy and m.available]
+        return [
+            model
+            for model in self._registered_models()
+            if model.enabled and model.healthy and model.available
+        ]
 
     def route(
         self,
@@ -138,7 +153,18 @@ class ModelRouter:
             capability=capability,
             preferred_models=preferred_models,
         )
-        return next(model for model in self.models if model.id == decision.selected_model)
+        return self._model_by_id(decision.selected_model)
+
+    def _model_by_id(self, model_id: str) -> ModelSpec:
+        try:
+            if self.model_registry is not None:
+                return self.model_registry.resolve(model_id)
+        except ModelRegistryError as exc:
+            raise ModelRoutingError(str(exc)) from exc
+        for model in self.models:
+            if model.id == model_id:
+                return model
+        raise ModelRoutingError(f"unknown inference model: {model_id}")
 
     def _enforce_authoritative_context(self, request: InferenceRequest) -> InferenceRequest:
         if not self.enforce_context:
@@ -303,7 +329,7 @@ class ModelRouter:
             capability=capability,
             preferred_models=preferred_models,
         )
-        spec = next(model for model in self.models if model.id == decision.selected_model)
+        spec = self._model_by_id(decision.selected_model)
         execution_id = new_execution_id()
         if self.provider_registry is None:
             raise ModelRoutingError("inference provider registry is not configured")
