@@ -77,6 +77,31 @@ def test_filtered_event_cursor_can_ack_over_unrelated_global_ids(tmp_path: Path)
     assert unrelated.event_id > first.event_id
 
 
+def test_filtered_event_cursor_cannot_skip_its_own_matching_event(tmp_path: Path):
+    store = DurableTaskStore(tmp_path / "tasks.db")
+    bus = DurableEventBus(store)
+
+    first = bus.publish(
+        mission_id="m1",
+        event_type="project_event",
+        project_id="project-a",
+    )
+    second = bus.publish(
+        mission_id="m2",
+        event_type="project_event",
+        project_id="project-a",
+    )
+
+    view = bus.subscribe("dashboard", project_id="project-a")
+    with pytest.raises(EventBusError, match="cannot skip matching events"):
+        bus.ack(view, second.event_id)
+
+    assert [event.event_id for event in bus.poll(view)] == [
+        first.event_id,
+        second.event_id,
+    ]
+
+
 def test_unfiltered_event_cursor_keeps_strict_no_skip_semantics(tmp_path: Path):
     store = DurableTaskStore(tmp_path / "tasks.db")
     bus = DurableEventBus(store)
@@ -272,3 +297,22 @@ def test_scope_metadata_survives_restart(tmp_path: Path):
     reopened = MissionMemory(DurableTaskStore(path))
     assert reopened.list_project("project-a") == (saved,)
     assert reopened.list_task("task-1")[0].correlation_id == "corr-9"
+
+
+
+def test_mission_memory_first_of_kind_preserves_evolved_metadata(tmp_path: Path):
+    memory = MissionMemory(DurableTaskStore(tmp_path / "tasks.db"))
+    saved = memory.append(
+        mission_id="m1",
+        source="director",
+        kind="objective",
+        content="objective",
+        scope=MailboxScope.PROJECT,
+        project_id="project-a",
+        agent_role="director",
+        task_id="task-1",
+        event_id=7,
+        correlation_id="corr-8",
+    )
+
+    assert memory.first_of_kind("m1", "objective") == saved
