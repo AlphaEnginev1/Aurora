@@ -1,6 +1,14 @@
 """Aurora orchestration contracts."""
 
 from .director import DirectorPlan, DirectorPlanError, DirectorPlanner, DirectorReview, DirectorService, MissionResult
+from .director_bootstrap import (
+    DirectorBootstrap,
+    DirectorBootstrapError,
+    DirectorBootstrapState,
+    build_context_knowledge_adapter,
+    build_context_mailbox_adapter,
+    build_context_runtime_adapter,
+)
 from .director_provider import (
     DirectorModelResponse,
     DirectorProvider,
@@ -80,6 +88,12 @@ __all__ = [
     "DirectorReview",
     "DirectorService",
     "MissionResult",
+    "DirectorBootstrap",
+    "DirectorBootstrapError",
+    "DirectorBootstrapState",
+    "build_context_knowledge_adapter",
+    "build_context_mailbox_adapter",
+    "build_context_runtime_adapter",
     "DirectorModelResponse",
     "DirectorProvider",
     "InferenceDirectorProvider",
