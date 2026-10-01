@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Mapping
+from enum import Enum
 import json
 import sqlite3
 
@@ -13,6 +14,14 @@ from .task_store import DurableTaskStore, TaskStoreError
 
 class MissionMemoryError(RuntimeError):
     """Raised when durable mission memory cannot be accessed safely."""
+
+
+class MailboxScope(str, Enum):
+    GLOBAL = "global"
+    PROJECT = "project"
+    AGENT = "agent"
+    TASK = "task"
+    MISSION = "mission"
 
 
 @dataclass(frozen=True)
@@ -24,6 +33,12 @@ class MissionMessage:
     content: str
     metadata: dict
     created_at: str
+    scope: MailboxScope = MailboxScope.MISSION
+    project_id: str | None = None
+    agent_role: str | None = None
+    task_id: str | None = None
+    event_id: int | None = None
+    correlation_id: str | None = None
 
 
 class MissionMemory:
@@ -49,6 +64,52 @@ class MissionMemory:
                 "CREATE INDEX IF NOT EXISTS idx_mission_messages "
                 "ON mission_messages (mission_id, message_id)"
             )
+            columns = {
+                row["name"]
+                for row in db.execute(
+                    "PRAGMA table_info(mission_messages)"
+                ).fetchall()
+            }
+            if "scope" not in columns:
+                db.execute(
+                    "ALTER TABLE mission_messages ADD COLUMN scope TEXT NOT NULL DEFAULT 'mission'"
+                )
+            if "project_id" not in columns:
+                db.execute(
+                    "ALTER TABLE mission_messages ADD COLUMN project_id TEXT"
+                )
+            if "agent_role" not in columns:
+                db.execute(
+                    "ALTER TABLE mission_messages ADD COLUMN agent_role TEXT"
+                )
+            if "task_id" not in columns:
+                db.execute(
+                    "ALTER TABLE mission_messages ADD COLUMN task_id TEXT"
+                )
+            if "event_id" not in columns:
+                db.execute(
+                    "ALTER TABLE mission_messages ADD COLUMN event_id INTEGER"
+                )
+            if "correlation_id" not in columns:
+                db.execute(
+                    "ALTER TABLE mission_messages ADD COLUMN correlation_id TEXT"
+                )
+            db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_mission_messages_project "
+                "ON mission_messages (project_id, message_id)"
+            )
+            db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_mission_messages_agent "
+                "ON mission_messages (agent_role, message_id)"
+            )
+            db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_mission_messages_task "
+                "ON mission_messages (task_id, message_id)"
+            )
+            db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_mission_messages_correlation "
+                "ON mission_messages (correlation_id, message_id)"
+            )
 
     def append(
         self,
@@ -58,6 +119,12 @@ class MissionMemory:
         kind: str,
         content: str,
         metadata: Mapping[str, object] | None = None,
+        scope: MailboxScope = MailboxScope.MISSION,
+        project_id: str | None = None,
+        agent_role: str | None = None,
+        task_id: str | None = None,
+        event_id: int | None = None,
+        correlation_id: str | None = None,
     ) -> MissionMessage:
         if not mission_id.strip():
             raise MissionMemoryError("mission_id is empty")
@@ -78,10 +145,24 @@ class MissionMemory:
                 cursor = db.execute(
                     """
                     INSERT INTO mission_messages (
-                        mission_id, source, kind, content, metadata_json, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?)
+                        mission_id, source, kind, content, metadata_json, created_at,
+                        scope, project_id, agent_role, task_id, event_id, correlation_id
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
-                    (mission_id, source, kind, content, payload, now),
+                    (
+                        mission_id,
+                        source,
+                        kind,
+                        content,
+                        payload,
+                        now,
+                        scope.value,
+                        project_id,
+                        agent_role,
+                        task_id,
+                        event_id,
+                        correlation_id,
+                    ),
                 )
                 message_id = int(cursor.lastrowid)
                 db.commit()
@@ -96,6 +177,12 @@ class MissionMemory:
             content=content,
             metadata=dict(metadata or {}),
             created_at=now,
+            scope=scope,
+            project_id=project_id,
+            agent_role=agent_role,
+            task_id=task_id,
+            event_id=event_id,
+            correlation_id=correlation_id,
         )
 
     def list(
@@ -111,7 +198,8 @@ class MissionMemory:
                 rows = db.execute(
                     """
                     SELECT message_id, mission_id, source, kind, content,
-                           metadata_json, created_at
+                           metadata_json, created_at, scope, project_id,
+                           agent_role, task_id, event_id, correlation_id
                     FROM mission_messages
                     WHERE mission_id = ?
                     ORDER BY message_id DESC
@@ -131,10 +219,104 @@ class MissionMemory:
                 content=row["content"],
                 metadata=json.loads(row["metadata_json"]),
                 created_at=row["created_at"],
+                scope=MailboxScope(row["scope"]),
+                project_id=row["project_id"],
+                agent_role=row["agent_role"],
+                task_id=row["task_id"],
+                event_id=row["event_id"],
+                correlation_id=row["correlation_id"],
             )
             for row in rows
         ]
         return tuple(reversed(messages))
+
+    def list_global(self, *, limit: int = 100) -> tuple[MissionMessage, ...]:
+        """Return the global cross-scope mailbox projection."""
+        return self._list_view(limit=limit)
+
+    def list_project(self, project_id: str, *, limit: int = 100) -> tuple[MissionMessage, ...]:
+        if not project_id.strip():
+            raise MissionMemoryError("project_id is empty")
+        return self._list_view(project_id=project_id, limit=limit)
+
+    def list_agent(self, agent_role: str, *, limit: int = 100) -> tuple[MissionMessage, ...]:
+        if not agent_role.strip():
+            raise MissionMemoryError("agent_role is empty")
+        return self._list_view(agent_role=agent_role, limit=limit)
+
+    def list_task(self, task_id: str, *, limit: int = 100) -> tuple[MissionMessage, ...]:
+        if not task_id.strip():
+            raise MissionMemoryError("task_id is empty")
+        return self._list_view(task_id=task_id, limit=limit)
+
+    def list_correlation(
+        self, correlation_id: str, *, limit: int = 100
+    ) -> tuple[MissionMessage, ...]:
+        if not correlation_id.strip():
+            raise MissionMemoryError("correlation_id is empty")
+        return self._list_view(correlation_id=correlation_id, limit=limit)
+
+    def _list_view(
+        self,
+        *,
+        project_id: str | None = None,
+        agent_role: str | None = None,
+        task_id: str | None = None,
+        correlation_id: str | None = None,
+        limit: int = 100,
+    ) -> tuple[MissionMessage, ...]:
+        if limit < 1:
+            raise MissionMemoryError("limit must be at least 1")
+        filters = ["1=1"]
+        params: list[object] = []
+        for column, value in (
+            ("project_id", project_id),
+            ("agent_role", agent_role),
+            ("task_id", task_id),
+            ("correlation_id", correlation_id),
+        ):
+            if value is not None:
+                filters.append(f"{column} = ?")
+                params.append(value)
+        params.append(limit)
+        try:
+            with self.store._connect() as db:
+                rows = db.execute(
+                    f"""
+                    SELECT message_id, mission_id, source, kind, content,
+                           metadata_json, created_at, scope, project_id,
+                           agent_role, task_id, event_id, correlation_id
+                    FROM mission_messages
+                    WHERE {" AND ".join(filters)}
+                    ORDER BY message_id DESC
+                    LIMIT ?
+                    """,
+                    tuple(params),
+                ).fetchall()
+        except sqlite3.Error as exc:
+            raise MissionMemoryError(f"could not read mailbox view: {exc}") from exc
+        return tuple(
+            reversed(
+                tuple(
+                    MissionMessage(
+                        message_id=row["message_id"],
+                        mission_id=row["mission_id"],
+                        source=row["source"],
+                        kind=row["kind"],
+                        content=row["content"],
+                        metadata=json.loads(row["metadata_json"]),
+                        created_at=row["created_at"],
+                        scope=MailboxScope(row["scope"]),
+                        project_id=row["project_id"],
+                        agent_role=row["agent_role"],
+                        task_id=row["task_id"],
+                        event_id=row["event_id"],
+                        correlation_id=row["correlation_id"],
+                    )
+                    for row in rows
+                )
+            )
+        )
 
     def first_of_kind(self, mission_id: str, kind: str) -> MissionMessage | None:
         if not kind.strip():
@@ -164,6 +346,12 @@ class MissionMemory:
             content=row["content"],
             metadata=json.loads(row["metadata_json"]),
             created_at=row["created_at"],
+            scope=MailboxScope(row["scope"]),
+            project_id=row["project_id"],
+            agent_role=row["agent_role"],
+            task_id=row["task_id"],
+            event_id=row["event_id"],
+            correlation_id=row["correlation_id"],
         )
 
     def context(
@@ -185,4 +373,4 @@ class MissionMemory:
         ]
 
 
-__all__ = ["MissionMemory", "MissionMemoryError", "MissionMessage"]
+__all__ = ["MailboxScope", "MissionMemory", "MissionMemoryError", "MissionMessage"]
