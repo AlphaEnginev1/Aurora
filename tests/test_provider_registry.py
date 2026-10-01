@@ -1,0 +1,147 @@
+import pytest
+
+from aurora.inference.models import InferenceRequest, InferenceResponse, ModelSpec
+from aurora.inference.providers.registry import (
+    ProviderRegistry,
+    ProviderRegistryError,
+    ProviderSpec,
+    default_provider_registry,
+)
+from aurora.inference.router import ModelRouter
+
+
+class FakeProvider:
+    provider_id = "fake"
+
+    def __init__(self, model: ModelSpec):
+        self.model = model
+        self.calls = []
+
+    def generate(self, request, *, selected_model: str, execution_id: str):
+        self.calls.append((request, selected_model, execution_id))
+        return InferenceResponse(
+            model=selected_model,
+            provider=self.provider_id,
+            content="ok",
+            request_id=request.request_id,
+            execution_id=execution_id,
+            selected_model=selected_model,
+            provider_model=selected_model,
+            reported_model=selected_model,
+        )
+
+
+def test_registry_rejects_duplicate_provider_ids():
+    registry = ProviderRegistry()
+    spec = ProviderSpec("fake", "Fake", ("chat",), True, lambda model: FakeProvider(model))
+    registry.register(spec)
+
+    with pytest.raises(ProviderRegistryError, match="duplicate provider registration"):
+        registry.register(spec)
+
+
+def test_registry_rejects_unknown_provider():
+    registry = ProviderRegistry()
+
+    with pytest.raises(ProviderRegistryError, match="unknown inference provider"):
+        registry.resolve("missing")
+
+
+def test_registry_catalog_exposes_provider_metadata_without_factory():
+    registry = ProviderRegistry(
+        (
+            ProviderSpec(
+                "fake",
+                "Fake Provider",
+                ("reasoning", "chat"),
+                True,
+                lambda model: FakeProvider(model),
+            ),
+        )
+    )
+
+    assert registry.ids == ("fake",)
+    assert registry.catalog == (
+        {
+            "provider_id": "fake",
+            "name": "Fake Provider",
+            "enabled": True,
+            "capabilities": ("chat", "reasoning"),
+        },
+    )
+
+
+def test_router_uses_registered_provider_instead_of_vendor_branch():
+    created = []
+
+    def factory(model):
+        provider = FakeProvider(model)
+        created.append(provider)
+        return provider
+
+    registry = ProviderRegistry(
+        (
+            ProviderSpec(
+                "fake",
+                "Fake Provider",
+                ("reasoning",),
+                True,
+                factory,
+            ),
+        )
+    )
+    router = ModelRouter(
+        models=[
+            ModelSpec(
+                "fake/model",
+                "fake",
+                "https://example.invalid",
+                capabilities=("reasoning",),
+            )
+        ],
+        provider_registry=registry,
+    )
+
+    response = router.generate(
+        InferenceRequest(
+            messages=[{"role": "user", "content": "test"}],
+        ),
+        capability="reasoning",
+    )
+
+    assert response.provider == "fake"
+    assert response.model == "fake/model"
+    assert len(created) == 1
+    assert created[0].calls[0][1] == "fake/model"
+
+
+def test_router_rejects_model_with_unregistered_provider():
+    router = ModelRouter(
+        models=[
+            ModelSpec(
+                "unknown/model",
+                "missing",
+                "https://example.invalid",
+                capabilities=("reasoning",),
+            )
+        ],
+        provider_registry=ProviderRegistry(),
+    )
+
+    with pytest.raises(Exception, match="unknown inference provider"):
+        router.generate(
+            InferenceRequest(
+                messages=[{"role": "user", "content": "test"}],
+            ),
+            capability="reasoning",
+        )
+
+
+def test_default_registry_contains_current_nvidia_provider():
+    registry = default_provider_registry(nvidia_api_key="test-key")
+    assert "nvidia_api" in registry.ids
+    assert any(
+        item["provider_id"] == "nvidia_api"
+        and item["name"] == "NVIDIA NIM API"
+        for item in registry.catalog
+    )
