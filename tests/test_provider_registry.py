@@ -67,6 +67,7 @@ def test_registry_catalog_exposes_provider_metadata_without_factory():
             "name": "Fake Provider",
             "enabled": True,
             "capabilities": ("chat", "reasoning"),
+            "discovery_supported": False,
         },
     )
 
