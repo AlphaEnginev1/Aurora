@@ -51,3 +51,16 @@ def test_avatar_voice_adapter_documents_text_fallback():
     content = _read("avatar_voice.js")
     assert "text_available" not in content
     assert 'this.setState(STATES.ERROR)' in content
+
+def test_dashboard_wires_explicit_voice_controls_to_adapter():
+    app = _read("app.js")
+    assert "setupAvatarVoice" in app
+    assert "startListening" in app
+    assert "stopSpeaking" in app
+    assert "Block 12E" in app
+
+
+def test_voice_adapter_uses_secure_permission_capable_microphone_api():
+    content = _read("avatar_voice.js")
+    assert "getUserMedia({ audio: true })" in content
+    assert "this._releaseStream()" in content
