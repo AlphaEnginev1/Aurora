@@ -6,7 +6,7 @@ Block 7 adds governed discovery of provider model catalogs.
 
 Provider-specific discovery adapters implement `ModelDiscoveryProvider`.
 
-The current built-in adapter is NVIDIA NIM. NVIDIA documents an OpenAI-compatible `GET /v1/models` endpoint that lists models currently available for inference. citeturn295717search3turn146211view0
+The current built-in adapter is NVIDIA NIM. NVIDIA documents an OpenAI-compatible `GET /v1/models` endpoint that lists models currently available for inference.
 
 Discovery is not inference. It only reads a provider catalog and produces `DiscoveredModelCandidate` records.
 
