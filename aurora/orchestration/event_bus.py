@@ -140,6 +140,10 @@ class DurableEventBus:
                 subscription.cursor_id or subscription.consumer_id,
                 event_id,
                 allow_gaps=filtered,
+                mission_id=subscription.mission_id,
+                project_id=subscription.project_id,
+                agent_role=subscription.agent_role,
+                correlation_id=subscription.correlation_id,
             )
         except TaskStoreError as exc:
             raise EventBusError(str(exc)) from exc
