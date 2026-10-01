@@ -134,8 +134,26 @@ def test_router_injects_verified_manifest_before_provider(monkeypatch, tmp_path)
 
 def test_router_fails_closed_when_runtime_state_is_unknown(monkeypatch, tmp_path):
     organization = OrganizationRegistry(
-        agents={},
-        departments={},
+        agents={
+            "researcher": AgentSpec(
+                "researcher",
+                "researcher",
+                "research",
+                "Research",
+                frozenset({"reasoning"}),
+                ("model/research",),
+                (),
+            )
+        },
+        departments={
+            "research": DepartmentSpec(
+                "research",
+                "Research",
+                ("researcher",),
+                ("model/research",),
+                frozenset({"reasoning"}),
+            )
+        },
     )
     task_store = DurableTaskStore(tmp_path / "tasks.db")
     research_store = ResearchStore(tmp_path / "research.db")
