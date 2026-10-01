@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#07111f">
+  <title>Aurora Operations Center</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark">A</span>
+      <div><strong>AURORA</strong><span>Operations Center</span></div>
+    </div>
+    <div class="topbar-meta">
+      <span id="system-status" class="status-pill unknown">SYSTEM UNKNOWN</span>
+      <span id="freshness">No snapshot</span>
+      <button id="refresh" class="ghost-button" type="button">Refresh</button>
+    </div>
+  </header>
+  <main class="app-shell">
+    <section class="director-card panel">
+      <div class="director-copy">
+        <div class="eyebrow">DIRECTOR CORE</div>
+        <h1 id="director-name">Aurora Director</h1>
+        <p id="director-readiness">Awaiting authoritative dashboard state.</p>
+        <div class="director-metrics">
+          <div><span>Model</span><strong id="director-model">—</strong></div>
+          <div><span>Context</span><strong id="director-context">—</strong></div>
+          <div><span>Projects</span><strong id="project-count">0</strong></div>
+        </div>
+      </div>
+      <div class="portrait-stage" aria-label="Aurora Director portrait">
+        <div class="portrait-ring"></div>
+        <div class="portrait-placeholder"><span>👤</span><small>Director portrait</small></div>
+      </div>
+    </section>
+    <section class="topology-grid">
+      <div class="panel topology-panel">
+        <div class="section-head">
+          <div><div class="eyebrow">AGENT OPERATIONS</div><h2>Organization</h2></div>
+          <span class="muted" id="agent-count">0 agents</span>
+        </div>
+        <div id="agent-orbit" class="agent-orbit" aria-live="polite"></div>
+      </div>
+      <div class="panel projects-panel">
+        <div class="section-head">
+          <div><div class="eyebrow">PROJECT COCKPIT</div><h2>Projects</h2></div>
+          <span class="muted" id="active-project-count">0 active</span>
+        </div>
+        <div id="projects-list" class="stack-list" aria-live="polite"></div>
+      </div>
+    </section>
+    <section class="dashboard-grid">
+      <article class="panel"><div class="section-head"><div><div class="eyebrow">SHARED MAILBOX</div><h2>Recent activity</h2></div><span class="muted" id="mailbox-count">0</span></div><div id="mailbox-list" class="timeline"></div></article>
+      <article class="panel"><div class="section-head"><div><div class="eyebrow">MODEL INTELLIGENCE</div><h2>Providers &amp; models</h2></div><span class="muted" id="model-count">0 models</span></div><div id="model-list" class="stack-list"></div></article>
+      <article class="panel"><div class="section-head"><div><div class="eyebrow">SKILLS &amp; LEARNING</div><h2>Specialization</h2></div></div><div id="skills-list" class="stack-list"></div></article>
+      <article class="panel"><div class="section-head"><div><div class="eyebrow">RUNTIME &amp; RECOVERY</div><h2>Execution state</h2></div></div><div id="runtime-summary" class="runtime-summary"></div></article>
+    </section>
+  </main>
+  <aside id="inspector" class="inspector" aria-hidden="true">
+    <div class="inspector-backdrop" id="inspector-backdrop"></div>
+    <div class="inspector-panel">
+      <div class="inspector-head">
+        <div><div id="inspector-eyebrow" class="eyebrow">INSPECTOR</div><h2 id="inspector-title">Details</h2></div>
+        <button id="inspector-close" class="icon-button" type="button" aria-label="Close inspector">×</button>
+      </div>
+      <div id="inspector-body" class="inspector-body"></div>
+    </div>
+  </aside>
+  <script src="./app.js" defer></script>
+</body>
+</html>
