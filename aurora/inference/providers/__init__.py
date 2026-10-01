@@ -24,6 +24,7 @@ class InferenceProvider(Protocol):
 
 
 from .registry import (
+    DiscoveryFactory,
     ProviderFactory,
     ProviderRegistry,
     ProviderRegistryError,
@@ -33,6 +34,7 @@ from .registry import (
 
 __all__ = [
     "InferenceProvider",
+    "DiscoveryFactory",
     "ProviderFactory",
     "ProviderRegistry",
     "ProviderRegistryError",
