@@ -3,6 +3,9 @@ import json
 
 import pytest
 
+
+seen = []
+
 from aurora.context import AuroraContextPlane, ContextGate
 from aurora.inference.models import InferenceResponse, ModelSpec
 from aurora.inference.providers.registry import ProviderRegistry, ProviderSpec
@@ -84,18 +87,27 @@ def _service(tmp_path: Path):
         healthy=True,
         available=True,
     )
+    rogue_model = ModelSpec(
+        "fake/rogue",
+        "fake",
+        "https://example.invalid",
+        capabilities=("reasoning",),
+        quality_score=1.0,
+        healthy=True,
+        available=True,
+    )
     plane = AuroraContextPlane(
         project_registry=ProjectRegistry({}),
         organization=organization,
         skill_registry=SkillRegistry({}),
-        models=(model,),
+        models=(model, rogue_model),
         runtime_context=build_context_runtime_adapter(task_store),
         mailbox_context=build_context_mailbox_adapter(task_store),
         knowledge_context=build_context_knowledge_adapter(research_store),
     )
     gate = ContextGate(plane)
     router = ModelRouter(
-        models=[model],
+        models=[model, rogue_model],
         context_gate=gate,
         enforce_context=True,
         provider_registry=ProviderRegistry(
