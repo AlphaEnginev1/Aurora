@@ -48,6 +48,7 @@ from .engine import OrchestrationEngine
 from .event_bus import DurableEventBus
 from .mission_memory import MissionMemory
 from .director_runtime import DirectorRuntime
+from .director_conversation import DirectorConversationService
 from .task_engine import TaskEngine
 from .task_store import DurableTaskStore
 from .team_runtime import TeamCoordinator
@@ -268,6 +269,11 @@ def build_director_runtime(*, inference_policy_path: str | Path, autonomy_policy
         decision_knowledge_store=decision_knowledge_store,
     )
     bootstrap_state=bootstrap.initialize()
+    conversation_service=DirectorConversationService(
+        router=service.planner.router,
+        bootstrap=bootstrap,
+        db_path=runtime_root/"conversations.db",
+    )
 
     observability=ProductionObservability(runtime_root/"observability.jsonl")
     memory=MissionMemory(store)
@@ -302,7 +308,8 @@ def build_director_runtime(*, inference_policy_path: str | Path, autonomy_policy
         active_policy_store=active_policy_store,
         policy_proposal_store=policy_proposal_store,
         policy_contract_store=policy_contract_store,
-        model_discovery=model_discovery)
+        model_discovery=model_discovery,
+        conversation_service=conversation_service)
     runtime.bootstrap=bootstrap
     runtime.bootstrap_state=bootstrap_state
     return runtime
