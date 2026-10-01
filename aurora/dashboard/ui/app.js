@@ -3,6 +3,7 @@
 
   const state = {
     snapshot: null,
+    avatarVoice: null,
     refreshTimer: null,
     retryDelay: 10000,
     inFlight: false,
@@ -335,6 +336,47 @@
     }
   });
 
+  function setupAvatarVoice() {
+    const adapterApi = window.AuroraAvatarVoiceAdapter;
+    const root = $("director-portrait");
+    if (!adapterApi || !root) return;
+
+    state.avatarVoice = new adapterApi.AvatarVoiceAdapter({
+      root,
+      transcriptTarget: $("avatar-transcript"),
+      statusTarget: $("avatar-voice-status"),
+      language: "es-ES",
+      onTranscript: function (payload) {
+        if (payload.final) {
+          $("avatar-transcript").textContent =
+            "Transcribed: " + payload.text +
+            " · ready for Director submission in Block 12E";
+        }
+      }
+    });
+
+    const listen = $("avatar-listen");
+    const stop = $("avatar-stop");
+    listen.addEventListener("click", async function () {
+      if (!state.avatarVoice.capabilities.speech_input) {
+        state.avatarVoice.setState(adapterApi.STATES.ERROR);
+        $("avatar-transcript").textContent =
+          "Speech input is unavailable; use text conversation.";
+        return;
+      }
+      try {
+        await state.avatarVoice.startListening();
+      } catch (_) {
+        $("avatar-transcript").textContent =
+          "Microphone unavailable; use text conversation.";
+      }
+    });
+    stop.addEventListener("click", function () {
+      state.avatarVoice.stopListening();
+      state.avatarVoice.stopSpeaking();
+    });
+  }
+
   $("refresh").addEventListener("click", function () {
     state.retryDelay = 10000;
     loadSnapshot();
@@ -345,5 +387,6 @@
     if (event.key === "Escape") closeInspector();
   });
 
+  setupAvatarVoice();
   loadSnapshot();
 })();
