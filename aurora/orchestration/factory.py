@@ -17,6 +17,7 @@ from aurora.research.discovery import HttpSearchProvider, ResearchSourceCatalog
 from aurora.research.models import ResearchRequest
 from aurora.research.service import ResearchService
 from aurora.research.store import ResearchStore
+from aurora.context import AuroraContextPlane, ContextGate
 from aurora.organization import AgentSelector, OrganizationRegistry
 from aurora.projects import ProjectRegistry
 from aurora.observability import ProductionObservability
@@ -28,6 +29,17 @@ from aurora.skills.validation_lab import SkillValidationLab
 from aurora.skills.improvement import SkillImprovementGenerator
 from aurora.skills.discovery import SkillDiscoveryService
 from .director import DirectorPlanner, DirectorService
+from .director_bootstrap import (
+    DirectorBootstrap,
+    build_context_knowledge_adapter,
+    build_context_mailbox_adapter,
+    build_context_runtime_adapter,
+)
+from .director_decision_knowledge_store import DirectorDecisionKnowledgeStore
+from .director_decision_performance import DirectorDecisionPerformanceStore
+from .director_decision_policy_active_store import DirectorDecisionPolicyActiveStore
+from .director_decision_policy_contract_store import DirectorDecisionPolicyContractStore
+from .director_decision_policy_proposal_store import DirectorDecisionPolicyProposalStore
 from .durable_director import DurableDirectorService
 from .engine import OrchestrationEngine
 from .event_bus import DurableEventBus
@@ -192,10 +204,45 @@ def build_director_runtime(*, inference_policy_path: str | Path, autonomy_policy
     skill_validation_lab=SkillValidationLab(service.planner.router)
     skill_evolution_runtime=SkillEvolutionRuntime(skill_learning, runtime_root/"skill-evolution.db", validation_lab=skill_validation_lab)
     skill_improvement_generator=SkillImprovementGenerator(service.planner.router, skill_learning)
-    return DirectorRuntime(director=durable_director,store=store,event_bus=event_bus,worker_policy=worker_policy,
+
+    decision_performance=DirectorDecisionPerformanceStore(store.path)
+    decision_knowledge_store=DirectorDecisionKnowledgeStore(store.path)
+    active_policy_store=DirectorDecisionPolicyActiveStore(store.path)
+    policy_proposal_store=DirectorDecisionPolicyProposalStore(store.path)
+    policy_contract_store=DirectorDecisionPolicyContractStore(store.path)
+
+    context_plane=AuroraContextPlane(
+        project_registry=service.planner.project_registry,
+        organization=service.planner.organization,
+        skill_registry=service.planner.skill_registry,
+        models=tuple(service.planner.router.models),
+        runtime_context=build_context_runtime_adapter(store),
+        mailbox_context=build_context_mailbox_adapter(store),
+        knowledge_context=build_context_knowledge_adapter(research_store),
+    )
+    bootstrap=DirectorBootstrap(
+        context_gate=ContextGate(context_plane),
+        model_policy_path=inference_policy_path,
+        decision_performance_store=decision_performance,
+        active_policy_store=active_policy_store,
+        policy_proposal_store=policy_proposal_store,
+        policy_contract_store=policy_contract_store,
+        decision_knowledge_store=decision_knowledge_store,
+    )
+    bootstrap_state=bootstrap.initialize()
+
+    runtime=DirectorRuntime(director=durable_director,store=store,event_bus=event_bus,worker_policy=worker_policy,
         worker_id=worker_id,worker_concurrency=worker_concurrency,skill_evaluator=skill_evaluator,
         observability=ProductionObservability(runtime_root/"observability.jsonl"),
         skill_learning=skill_learning,skill_evolution=skill_evolution,
         skill_evolution_runtime=skill_evolution_runtime, skill_improvement_generator=skill_improvement_generator,
-        autonomous_specialist_acquisition=autonomous_specialist_acquisition)
+        autonomous_specialist_acquisition=autonomous_specialist_acquisition,
+        decision_performance=decision_performance,
+        decision_knowledge_store=decision_knowledge_store,
+        active_policy_store=active_policy_store,
+        policy_proposal_store=policy_proposal_store,
+        policy_contract_store=policy_contract_store)
+    runtime.bootstrap=bootstrap
+    runtime.bootstrap_state=bootstrap_state
+    return runtime
 
