@@ -127,9 +127,19 @@ class DurableEventBus:
         if event_id < 1:
             raise EventBusError("event_id must be positive")
         try:
+            filtered = any(
+                value is not None
+                for value in (
+                    subscription.mission_id,
+                    subscription.project_id,
+                    subscription.agent_role,
+                    subscription.correlation_id,
+                )
+            )
             self.store.ack_event(
                 subscription.cursor_id or subscription.consumer_id,
                 event_id,
+                allow_gaps=filtered,
             )
         except TaskStoreError as exc:
             raise EventBusError(str(exc)) from exc
