@@ -18,6 +18,7 @@ from aurora.research.models import ResearchRequest
 from aurora.research.service import ResearchService
 from aurora.research.store import ResearchStore
 from aurora.organization import AgentSelector, OrganizationRegistry
+from aurora.projects import ProjectRegistry
 from aurora.observability import ProductionObservability
 from aurora.skills import SkillAcquisitionRuntime, SkillEvaluator, SkillEvolutionEngine, SkillLearningStore, SkillRegistry
 from aurora.skills.acquisition_pipeline import SkillAcquisitionPipeline
@@ -43,12 +44,19 @@ def build_orchestration_engine(policy_path: str | Path) -> OrchestrationEngine:
 def build_director_service(*, inference_policy_path: str | Path, autonomy_policy_path: str | Path,
     registry_path: str | Path, network_policy_path: str | Path, workspace_root: str | Path,
     egress_proxy_host: str, egress_proxy_port: int=3128, organization_path: str | Path="config/organization.json",
-    skills_path: str | Path="config/skills.json", skill_learning_path: str | Path | None=None) -> DirectorService:
+    skills_path: str | Path="config/skills.json", skill_learning_path: str | Path | None=None,
+    projects_path: str | Path="config/projects.json") -> DirectorService:
     inference_specs=load_model_specs(inference_policy_path)
     router=ModelRouter(models=inference_specs,nvidia_api_key=os.getenv("NVIDIA_API_KEY"))
     skill_registry=SkillRegistry.from_file(skills_path,configured_models={model.id for model in inference_specs})
     organization=OrganizationRegistry.from_file(organization_path,configured_models={model.id for model in inference_specs})
     skill_registry.validate_organization(organization)
+    project_registry=ProjectRegistry.from_file(
+        projects_path,
+        configured_agents=organization.agents_by_role().keys(),
+        configured_skills=skill_registry.ids(),
+        configured_models={model.id for model in inference_specs},
+    )
     autonomy_data=json.loads(Path(autonomy_policy_path).read_text(encoding="utf-8"))
     policy=Policy(allowed_capabilities=frozenset(autonomy_data.get("allowed_capabilities",[])),
                   allowed_sources=frozenset(autonomy_data.get("allowed_sources",[])),
@@ -92,7 +100,12 @@ def build_director_service(*, inference_policy_path: str | Path, autonomy_policy
     learning_store=SkillLearningStore(learning_path)
     model_performance=ModelPerformanceStore(root/"model-performance.db")
     task_engine=TaskEngine(orchestration,root,organization=organization,skill_registry=skill_registry,skill_learning=learning_store,model_performance=model_performance)
-    planner=DirectorPlanner(router,organization=organization,skill_registry=skill_registry)
+    planner=DirectorPlanner(
+        router,
+        organization=organization,
+        skill_registry=skill_registry,
+        project_registry=project_registry,
+    )
     return DirectorService(planner,task_engine)
 
 def build_director_runtime(*, inference_policy_path: str | Path, autonomy_policy_path: str | Path,
@@ -100,11 +113,12 @@ def build_director_runtime(*, inference_policy_path: str | Path, autonomy_policy
     egress_proxy_host: str, egress_proxy_port: int=3128, task_db_path: str | Path | None=None,
     worker_policy: WorkerPolicy | None=None, worker_id: str | None=None, worker_concurrency: int=4,
     organization_path: str | Path="config/organization.json", skills_path: str | Path="config/skills.json",
-    skill_learning_path: str | Path | None=None) -> DirectorRuntime:
+    skill_learning_path: str | Path | None=None,
+    projects_path: str | Path="config/projects.json") -> DirectorRuntime:
     service=build_director_service(inference_policy_path=inference_policy_path,autonomy_policy_path=autonomy_policy_path,
         registry_path=registry_path,network_policy_path=network_policy_path,workspace_root=workspace_root,
         egress_proxy_host=egress_proxy_host,egress_proxy_port=egress_proxy_port,organization_path=organization_path,
-        skills_path=skills_path,skill_learning_path=skill_learning_path)
+        skills_path=skills_path,skill_learning_path=skill_learning_path,projects_path=projects_path)
     runtime_root=Path(workspace_root).resolve()
     autonomy_data=json.loads(Path(autonomy_policy_path).read_text(encoding="utf-8"))
     policy=Policy(allowed_capabilities=frozenset(autonomy_data.get("allowed_capabilities",[])),

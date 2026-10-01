@@ -14,6 +14,7 @@ from .director_provider import (
     InferenceDirectorProvider,
 )
 from aurora.organization import OrganizationConfigError, OrganizationRegistry
+from aurora.projects import ProjectRegistry
 from aurora.skills import SkillRegistry, SkillRegistryError
 from .task_engine import DelegatedTask, DelegatedTaskResult, TaskEngine
 
@@ -88,12 +89,14 @@ Rules:
         router: ModelRouter,
         organization: OrganizationRegistry | None = None,
         skill_registry: SkillRegistry | None = None,
+        project_registry: ProjectRegistry | None = None,
         provider: DirectorProvider | None = None,
     ) -> None:
         self.router = router
         self.provider = provider or InferenceDirectorProvider(router)
         self.organization = organization
         self.skill_registry = skill_registry
+        self.project_registry = project_registry
 
     def plan(
         self,
@@ -110,9 +113,12 @@ Rules:
         if self.organization is not None:
             roles = ", ".join(sorted(self.organization.agents_by_role()))
             system += f"\nRegistered roles: {roles}\n"
-            if self.skill_registry is not None:
-                system += "\nRegistered specialist skill catalog:\n"
-                system += self.skill_registry.catalog() + "\n"
+        if self.skill_registry is not None:
+            system += "\nRegistered specialist skill catalog:\n"
+            system += self.skill_registry.catalog() + "\n"
+        if self.project_registry is not None:
+            system += "\nRegistered Aurora project catalog:\n"
+            system += self.project_registry.catalog() + "\n"
         messages = [
             {"role": "system", "content": system},
             *(context or []),
@@ -161,9 +167,12 @@ Rules:
         if self.organization is not None:
             roles = ", ".join(sorted(self.organization.agents_by_role()))
             system += f"\nRegistered roles: {roles}\n"
-            if self.skill_registry is not None:
-                system += "\nRegistered specialist skill catalog:\n"
-                system += self.skill_registry.catalog() + "\n"
+        if self.skill_registry is not None:
+            system += "\nRegistered specialist skill catalog:\n"
+            system += self.skill_registry.catalog() + "\n"
+        if self.project_registry is not None:
+            system += "\nRegistered Aurora project catalog:\n"
+            system += self.project_registry.catalog() + "\n"
         messages = [
             {"role": "system", "content": system},
             *(context or []),
