@@ -752,7 +752,8 @@ class DurableTaskStore:
         with self._connect() as db:
             rows = db.execute(
                 """
-                SELECT event_id, mission_id, task_id, event_type, payload_json, created_at
+                SELECT event_id, mission_id, task_id, event_type, payload_json, created_at,
+                       project_id, agent_role, correlation_id, causation_id
                 FROM task_events
                 WHERE event_id > ?
                 ORDER BY event_id
