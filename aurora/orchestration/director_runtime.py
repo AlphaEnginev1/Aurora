@@ -764,11 +764,13 @@ class DirectorRuntime:
                 try:
                     self.memory.append(
                         mission_id=event.mission_id,
-                        task_id=event.task_id,
                         source="skill-learning",
                         kind=event.event_type,
                         content=json.dumps(event.payload, sort_keys=True),
-                        metadata={"event_id": event.event_id},
+                        metadata={
+                            "event_id": event.event_id,
+                            "task_id": event.task_id,
+                        },
                     )
                 except MissionMemoryError:
                     pass
