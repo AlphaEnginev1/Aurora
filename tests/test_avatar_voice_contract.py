@@ -66,3 +66,18 @@ def test_voice_adapter_uses_secure_permission_capable_microphone_api():
     content = _read("avatar_voice.js")
     assert "getUserMedia({ audio: true })" in content
     assert "this._releaseStream()" in content
+
+def test_dashboard_has_canonical_portrait_asset_slot_and_runtime_config():
+    index = _read("index.html")
+    app = _read("app.js")
+    css = _read("styles.css")
+    assert 'id="director-portrait-image"' in index
+    assert "AURORA_AVATAR_PORTRAIT_URL" in app
+    assert "portrait-stage[data-avatar-state=\"SPEAKING\"] .portrait-image" in css
+    assert "portrait-speak" in css
+
+
+def test_portrait_failure_keeps_static_fallback():
+    app = _read("app.js")
+    assert 'image.addEventListener("error"' in app
+    assert 'placeholder.hidden = false' in app
