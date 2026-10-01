@@ -5,6 +5,7 @@ from aurora.context import (
     ContextScope,
 )
 from aurora.inference.models import ModelSpec
+from aurora.inference.registry import ModelRegistry
 from aurora.organization import AgentSpec, DepartmentSpec, OrganizationRegistry
 from aurora.projects import ProjectRegistry, ProjectSpec, ProjectStatus
 from aurora.skills import SkillRegistry
@@ -140,3 +141,32 @@ def test_project_scope_requires_registered_project():
         assert "unknown Aurora project" in str(exc)
     else:
         raise AssertionError("expected missing project to fail")
+
+
+def test_context_plane_reads_current_model_registry_catalog():
+    projects, organization, skills, models = _fixtures()
+    model_registry = ModelRegistry(models)
+    plane = AuroraContextPlane(
+        projects,
+        organization,
+        skills,
+        models,
+        model_registry=model_registry,
+    )
+
+    model_registry.register(
+        ModelSpec(
+            "model/second",
+            "test-provider",
+            "https://example.invalid/second",
+            capabilities=("reasoning",),
+        )
+    )
+
+    manifest = plane.build(scope=ContextScope.GLOBAL)
+    model_catalog = next(
+        fragment.content
+        for fragment in manifest.fragments
+        if fragment.source == "models.catalog"
+    )
+    assert "model/second" in model_catalog
