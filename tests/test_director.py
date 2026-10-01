@@ -4,6 +4,7 @@ from aurora.inference.models import InferenceResponse, ModelSpec
 from aurora.inference.router import ModelRouter
 from aurora.orchestration.director import DirectorPlanError, DirectorPlanner
 from aurora.organization import AgentSpec, DepartmentSpec, OrganizationRegistry
+from aurora.projects import ProjectRegistry, ProjectSpec, ProjectStatus
 
 
 class FakeRouter(ModelRouter):
@@ -125,3 +126,30 @@ def test_director_rejects_role_outside_organization():
     )
     with pytest.raises(DirectorPlanError, match="unknown Aurora agent role"):
         DirectorPlanner(router, organization=registry).plan(objective="Do work.")
+
+def test_director_planner_receives_registered_project_catalog():
+    projects = ProjectRegistry(
+        {
+            "project-a": ProjectSpec(
+                project_id="project-a",
+                name="Project A",
+                objective="Build a governed research workflow.",
+                status=ProjectStatus.ACTIVE,
+                current_state="research phase",
+            )
+        }
+    )
+    router = FakeRouter(
+        '{"tasks":[{"task_id":"collect","role":"researcher","objective":"Collect sources",'
+        '"capability":null,"args":[],"depends_on":[]}]}'
+    )
+
+    DirectorPlanner(router, project_registry=projects).plan(
+        objective="Continue Project A."
+    )
+
+    system = router.requests[0][0].messages[0]["content"]
+    assert "Registered Aurora project catalog:" in system
+    assert "project-a: Project A" in system
+    assert "status=active" in system
+    assert "state=research phase" in system
