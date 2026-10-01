@@ -8,6 +8,7 @@
     retryDelay: 10000,
     inFlight: false,
     apiBase: window.AURORA_DASHBOARD_API_BASE || "/api/dashboard",
+    portraitUrl: window.AURORA_AVATAR_PORTRAIT_URL || "",
     conversationApiBase: window.AURORA_CONVERSATION_API_BASE || "/api/conversation",
     conversationSessionId: null,
     conversationInFlight: false
@@ -426,6 +427,26 @@
     });
   }
 
+  function setupAvatarPortrait() {
+    const image = $("director-portrait-image");
+    const placeholder = $("portrait-placeholder");
+    if (!image || !placeholder) return;
+
+    const source = String(state.portraitUrl || "").trim();
+    if (!source) return;
+
+    image.addEventListener("load", function () {
+      image.hidden = false;
+      placeholder.hidden = true;
+    });
+    image.addEventListener("error", function () {
+      image.hidden = true;
+      placeholder.hidden = false;
+      image.removeAttribute("src");
+    });
+    image.src = source;
+  }
+
   function setupAvatarVoice() {
     const adapterApi = window.AuroraAvatarVoiceAdapter;
     const root = $("director-portrait");
@@ -436,6 +457,12 @@
       transcriptTarget: $("avatar-transcript"),
       statusTarget: $("avatar-voice-status"),
       language: "es-ES",
+      onState: function (nextState) {
+        if (nextState === adapterApi.STATES.ERROR) {
+          $("avatar-transcript").textContent =
+            "Avatar presentation unavailable; text output remains active.";
+        }
+      },
       onTranscript: function (payload) {
         if (payload.final) {
           $("avatar-transcript").textContent =
@@ -479,6 +506,7 @@
   });
 
   setupConversation();
+  setupAvatarPortrait();
   setupAvatarVoice();
   ensureConversationSession().catch(function (error) {
     $("avatar-transcript").textContent =
