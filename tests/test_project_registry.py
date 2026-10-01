@@ -48,18 +48,22 @@ def test_project_registry_allows_empty_initial_catalog(tmp_path: Path):
     assert registry.catalog() == "No Aurora projects are registered."
 
 
-def test_project_registry_rejects_duplicate_ids():
+def test_project_registry_rejects_duplicate_ids(tmp_path: Path):
+    path = tmp_path / "projects.json"
+    path.write_text(
+        """
+        {
+          "projects": [
+            {"project_id": "project-a", "name": "Project A", "objective": "Objective", "status": "active"},
+            {"project_id": "project-a", "name": "Project A2", "objective": "Objective 2", "status": "active"}
+          ]
+        }
+        """,
+        encoding="utf-8",
+    )
+
     with pytest.raises(ProjectConfigError, match="duplicate project_id"):
-        ProjectRegistry(
-            {
-                "project-a": ProjectSpec(
-                    "project-a", "Project A", "Objective", ProjectStatus.ACTIVE
-                ),
-                "project-b": ProjectSpec(
-                    "project-a", "Project A2", "Objective 2", ProjectStatus.ACTIVE
-                ),
-            }
-        )
+        ProjectRegistry.from_file(path)
 
 
 def test_project_registry_rejects_unknown_references(tmp_path: Path):
