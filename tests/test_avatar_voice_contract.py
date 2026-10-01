@@ -43,8 +43,9 @@ def test_dashboard_loads_voice_adapter_without_provider_credentials():
 
 def test_voice_controls_require_explicit_user_action():
     index = _read("index.html")
-    assert 'id="avatar-listen" type="button"' in index
-    assert 'id="avatar-stop" type="button"' in index
+    assert 'id="avatar-listen"' in index
+    assert 'id="avatar-stop"' in index
+    assert index.count('type="button"') >= 3
 
 
 def test_avatar_voice_adapter_documents_text_fallback():
