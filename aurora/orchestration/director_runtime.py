@@ -51,6 +51,7 @@ from aurora.skills.evolution_runtime import PreparedSkillEvolution, SkillEvoluti
 from aurora.skills.improvement import SkillImprovementGenerator
 from aurora.inference.discovery import ModelDiscoveryService
 from aurora.dashboard.gateway import DashboardGateway
+from .director_conversation import DirectorConversationService
 
 
 
@@ -120,6 +121,7 @@ class DirectorRuntime:
         policy_contract_store: DirectorDecisionPolicyContractStore | None = None,
         model_discovery: ModelDiscoveryService | None = None,
         dashboard_gateway: DashboardGateway | None = None,
+        conversation_service: DirectorConversationService | None = None,
         sleep_fn: Callable[[float], None] = sleep,
     ) -> None:
         if not event_consumer_id.strip():
@@ -143,6 +145,7 @@ class DirectorRuntime:
         self.max_review_rounds = max_review_rounds
         self.model_discovery = model_discovery
         self.dashboard_gateway = dashboard_gateway
+        self.conversation_service = conversation_service
         self.worker_concurrency = worker_concurrency
         self.skill_evaluator = skill_evaluator
         self.skill_learning = skill_learning

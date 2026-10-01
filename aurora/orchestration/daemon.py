@@ -5,10 +5,12 @@ from __future__ import annotations
 import argparse
 import os
 from pathlib import Path
-from threading import Event
+from threading import Event, Thread
 import signal
 
 from .factory import build_director_runtime
+from aurora.dashboard.conversation_api import DashboardConversationAPI
+from aurora.dashboard.http_server import DashboardHTTPError, create_dashboard_server
 from aurora.production_authorization import (
     ControlledLiveAuthorization,
     LiveAuthorizationError,
@@ -40,6 +42,22 @@ def main() -> int:
         "--live-operation",
         default="director_live_execution",
         help="Authorized live operation to activate.",
+    )
+    parser.add_argument(
+        "--dashboard",
+        action="store_true",
+        help="Serve the Aurora dashboard and conversation API alongside the Director runtime.",
+    )
+    parser.add_argument(
+        "--dashboard-host",
+        default=os.getenv("AURORA_DASHBOARD_HOST", "127.0.0.1"),
+        help="Dashboard bind host; non-loopback binds require AURORA_DASHBOARD_API_TOKEN.",
+    )
+    parser.add_argument(
+        "--dashboard-port",
+        type=int,
+        default=int(os.getenv("AURORA_DASHBOARD_PORT", "8787")),
+        help="Dashboard HTTP port.",
     )
     args = parser.parse_args()
 
@@ -95,17 +113,46 @@ def main() -> int:
         ),
     )
 
+    dashboard_server = None
+    if args.dashboard:
+        try:
+            if runtime.conversation_service is None:
+                parser.error("Director conversation service is not configured")
+            dashboard_api = DashboardConversationAPI(runtime.conversation_service)
+            dashboard_server = create_dashboard_server(
+                dashboard_gateway=runtime.dashboard_gateway,
+                conversation_api=dashboard_api,
+                host=args.dashboard_host,
+                port=args.dashboard_port,
+                api_token=os.getenv("AURORA_DASHBOARD_API_TOKEN"),
+            )
+        except DashboardHTTPError as exc:
+            parser.error(str(exc))
+        Thread(
+            target=dashboard_server.serve_forever,
+            name="aurora-dashboard",
+            daemon=True,
+        ).start()
+
     if args.objective:
         runtime.submit_mission(objective=args.objective)
 
     if args.once:
         runtime.run_once()
+        if dashboard_server is not None:
+            dashboard_server.shutdown()
+            dashboard_server.server_close()
         return 0
 
     stop = Event()
     signal.signal(signal.SIGINT, lambda *_: stop.set())
     signal.signal(signal.SIGTERM, lambda *_: stop.set())
-    runtime.run_forever(stop)
+    try:
+        runtime.run_forever(stop)
+    finally:
+        if dashboard_server is not None:
+            dashboard_server.shutdown()
+            dashboard_server.server_close()
     return 0
 
 

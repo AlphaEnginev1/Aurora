@@ -33,7 +33,24 @@
       </div>
       <div id="director-portrait" class="portrait-stage" aria-label="Aurora Director portrait">
         <div class="portrait-ring"></div>
-        <div class="portrait-placeholder"><span>👤</span><small>Director portrait</small></div>
+        <div class="portrait-placeholder">
+          <span>👤</span>
+          <small>Director portrait</small>
+        </div>
+        <div class="avatar-voice-panel" aria-live="polite">
+          <span id="avatar-voice-status" class="avatar-voice-status">IDLE</span>
+          <p id="avatar-transcript">Text conversation remains available when voice is unavailable.</p>
+          <div class="director-chat">
+            <label for="director-message">Conversation</label>
+            <textarea id="director-message" rows="2" maxlength="8000"
+              placeholder="Write to Aurora Director…"></textarea>
+            <div class="avatar-voice-actions">
+              <button id="director-send" class="ghost-button" type="button">Send</button>
+              <button id="avatar-listen" class="ghost-button" type="button">Speak to Aurora</button>
+              <button id="avatar-stop" class="ghost-button" type="button">Stop</button>
+            </div>
+          </div>
+        </div>
       </div>
     </section>
     <section class="topology-grid">
@@ -69,6 +86,7 @@
       <div id="inspector-body" class="inspector-body"></div>
     </div>
   </aside>
+  <script src="./avatar_voice.js" defer></script>
   <script src="./app.js" defer></script>
 </body>
 </html>

@@ -1,0 +1,158 @@
+from pathlib import Path
+import json
+from threading import Thread
+from urllib.request import Request, urlopen
+
+from aurora.dashboard.conversation_api import DashboardConversationAPI
+from aurora.dashboard.http_server import create_dashboard_server
+from aurora.inference.models import InferenceResponse, ModelSpec
+from aurora.inference.providers.registry import ProviderRegistry, ProviderSpec
+from aurora.inference.router import ModelRouter
+from aurora.context import AuroraContextPlane, ContextGate
+from aurora.organization import AgentSpec, DepartmentSpec, OrganizationRegistry
+from aurora.orchestration.director_bootstrap import (
+    DirectorBootstrap,
+    build_context_knowledge_adapter,
+    build_context_mailbox_adapter,
+    build_context_runtime_adapter,
+)
+from aurora.orchestration.director_conversation import DirectorConversationService
+from aurora.orchestration.director_decision_knowledge_store import DirectorDecisionKnowledgeStore
+from aurora.orchestration.director_decision_performance import DirectorDecisionPerformanceStore
+from aurora.orchestration.director_decision_policy_active_store import DirectorDecisionPolicyActiveStore
+from aurora.orchestration.director_decision_policy_contract_store import DirectorDecisionPolicyContractStore
+from aurora.orchestration.director_decision_policy_proposal_store import DirectorDecisionPolicyProposalStore
+from aurora.projects import ProjectRegistry
+from aurora.research.store import ResearchStore
+from aurora.skills import SkillRegistry
+from aurora.orchestration.task_store import DurableTaskStore
+
+
+class FakeProvider:
+    provider_id = "fake"
+
+    def generate(self, request, *, selected_model, execution_id):
+        return InferenceResponse(
+            model=selected_model,
+            provider="fake",
+            content="Respuesta HTTP de Aurora.",
+            request_id=request.request_id,
+            execution_id=execution_id,
+            selected_model=selected_model,
+            provider_model=selected_model,
+            reported_model=selected_model,
+        )
+
+
+def _conversation(tmp_path: Path):
+    task_db = tmp_path / "tasks.db"
+    tasks = DurableTaskStore(task_db)
+    research = ResearchStore(tmp_path / "research.db")
+    organization = OrganizationRegistry(
+        agents={"support": AgentSpec("support", "support", "operations", "Support", frozenset({"reasoning"}), ("fake/director",), ())},
+        departments={"operations": DepartmentSpec("operations", "Support", ("support",), ("fake/director",), frozenset({"reasoning"}))},
+    )
+    model = ModelSpec("fake/director", "fake", "https://example.invalid", capabilities=("reasoning",))
+    plane = AuroraContextPlane(
+        ProjectRegistry({}), organization, SkillRegistry({}), (model,),
+        runtime_context=build_context_runtime_adapter(tasks),
+        mailbox_context=build_context_mailbox_adapter(tasks),
+        knowledge_context=build_context_knowledge_adapter(research),
+    )
+    gate = ContextGate(plane)
+    router = ModelRouter(
+        models=[model],
+        context_gate=gate,
+        enforce_context=True,
+        provider_registry=ProviderRegistry((
+            ProviderSpec("fake", "Fake", ("chat", "reasoning"), True, lambda spec: FakeProvider()),
+        )),
+    )
+    policy = tmp_path / "policy.json"
+    policy.write_text(json.dumps({
+        "version": 1, "default_capability": "reasoning",
+        "providers": {"fake": {"enabled": True}},
+        "models": [{"id": "fake/director", "provider": "fake", "enabled": True, "capabilities": ["reasoning"]}],
+        "routing": {}
+    }), encoding="utf-8")
+    bootstrap = DirectorBootstrap(
+        context_gate=gate, model_policy_path=policy,
+        decision_performance_store=DirectorDecisionPerformanceStore(task_db),
+        active_policy_store=DirectorDecisionPolicyActiveStore(task_db),
+        policy_proposal_store=DirectorDecisionPolicyProposalStore(task_db),
+        policy_contract_store=DirectorDecisionPolicyContractStore(task_db),
+        decision_knowledge_store=DirectorDecisionKnowledgeStore(task_db),
+    )
+    service = DirectorConversationService(router=router, bootstrap=bootstrap, db_path=tmp_path / "conversation.db")
+    return service
+
+
+def test_http_conversation_round_trip(tmp_path):
+    conversation = _conversation(tmp_path)
+    api = DashboardConversationAPI(conversation)
+
+    class Gateway:
+        def snapshot(self):
+            return {"read_only": True}
+        def project(self, project_id):
+            return {"project": {"project_id": project_id}}
+        def agent(self, role):
+            return {"identity": {"role": role}}
+
+    server = create_dashboard_server(
+        dashboard_gateway=Gateway(),
+        conversation_api=api,
+        host="127.0.0.1",
+        port=0,
+    )
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = "http://127.0.0.1:" + str(server.server_address[1])
+
+    try:
+        session_request = Request(
+            base + "/api/conversation/session",
+            data=b"{}",
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urlopen(session_request, timeout=5) as response:
+            session = json.loads(response.read().decode("utf-8"))
+        assert response.status == 201
+        assert session["state"] == "active"
+
+        body = json.dumps({"user_input": "Hola por HTTP"}).encode("utf-8")
+        turn_request = Request(
+            base + "/api/conversation/" + session["session_id"] + "/turn",
+            data=body,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urlopen(turn_request, timeout=5) as response:
+            turn = json.loads(response.read().decode("utf-8"))
+
+        assert response.status == 200
+        assert turn["response_text"] == "Respuesta HTTP de Aurora."
+        assert turn["session"]["session_id"] == session["session_id"]
+        assert turn["turn"]["correlation_id"].startswith("corr-")
+
+        with urlopen(base + "/api/conversation/" + session["session_id"] + "/turns", timeout=5) as response:
+            history = json.loads(response.read().decode("utf-8"))
+        assert [item["role"] for item in history["turns"]] == ["user", "assistant"]
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_dashboard_server_rejects_non_loopback_without_token():
+    import pytest
+    from aurora.dashboard.http_server import DashboardHTTPError
+
+    with pytest.raises(DashboardHTTPError, match="non-loopback"):
+        create_dashboard_server(
+            dashboard_gateway=object(),
+            conversation_api=object(),
+            host="0.0.0.0",
+            port=8787,
+            ui_root=Path(__file__).parents[1] / "aurora" / "dashboard" / "ui",
+        )
