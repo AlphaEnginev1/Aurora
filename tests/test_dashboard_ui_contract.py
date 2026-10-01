@@ -35,10 +35,12 @@ def test_dashboard_ui_uses_gateway_endpoints_only():
     assert "provider.generate" not in js
 
 
-def test_dashboard_ui_defers_live_sync_and_avatar_to_later_blocks():
+def test_dashboard_ui_uses_resilient_live_sync_and_defers_avatar():
     js = (UI_DIR / "app.js").read_text(encoding="utf-8")
     html = (UI_DIR / "index.html").read_text(encoding="utf-8")
 
-    assert "WebSocket" not in js
-    assert "EventSource" not in js
+    assert "scheduleRefresh" in js
+    assert "visibilitychange" in js
+    assert "retryDelay" in js
+    assert "invalid snapshot contract" in js
     assert "portrait-stage" in html

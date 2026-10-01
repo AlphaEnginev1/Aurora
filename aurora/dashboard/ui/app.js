@@ -3,6 +3,9 @@
 
   const state = {
     snapshot: null,
+    refreshTimer: null,
+    retryDelay: 10000,
+    inFlight: false,
     apiBase: window.AURORA_DASHBOARD_API_BASE || "/api/dashboard"
   };
 
@@ -29,20 +32,28 @@
     $("freshness").textContent = reason;
   }
 
-  async function loadSnapshot() {
+  async function loadSnapshot({ quiet = false } = {}) {
+    if (state.inFlight) return;
+    state.inFlight = true;
     const button = $("refresh");
-    button.disabled = true;
+    if (!quiet) button.disabled = true;
     try {
       const response = await fetch(state.apiBase + "/snapshot", {
         headers: { Accept: "application/json" }
       });
       if (!response.ok) throw new Error("dashboard API " + response.status);
-      state.snapshot = await response.json();
+      const next = await response.json();
+      if (!next || typeof next !== "object" || !next.director) throw new Error("invalid snapshot contract");
+      state.snapshot = next;
+      state.retryDelay = 10000;
       render();
     } catch (error) {
-      setUnknown("Snapshot unavailable: " + error.message);
+      setUnknown("Live sync disconnected; retrying: " + error.message);
+      state.retryDelay = Math.min(Math.max(state.retryDelay * 2, 10000), 120000);
     } finally {
-      button.disabled = false;
+      state.inFlight = false;
+      if (!quiet) button.disabled = false;
+      scheduleRefresh();
     }
   }
 
@@ -85,6 +96,9 @@
     renderModels(data.models || [], data.providers || []);
     renderSkills(data.skills || []);
     renderRuntime(data.runtime || {});
+    const eventRows = data.runtime && Array.isArray(data.runtime.latest_events) ? data.runtime.latest_events : [];
+    const newest = eventRows.reduce(function (max, event) { return Math.max(max, Number(event.event_id) || 0); }, 0);
+    $("freshness").textContent = "Live · snapshot " + dateText(data.generated_at) + (newest ? " · event #" + newest : "");
   }
 
   function renderAgents(agents) {
@@ -303,7 +317,28 @@
     $("inspector").setAttribute("aria-hidden", "true");
   }
 
-  $("refresh").addEventListener("click", loadSnapshot);
+  function scheduleRefresh() {
+    if (state.refreshTimer) window.clearTimeout(state.refreshTimer);
+    if (document.hidden) return;
+    state.refreshTimer = window.setTimeout(function () {
+      loadSnapshot({ quiet: true });
+    }, state.retryDelay);
+  }
+
+  document.addEventListener("visibilitychange", function () {
+    if (document.hidden) {
+      if (state.refreshTimer) window.clearTimeout(state.refreshTimer);
+      state.refreshTimer = null;
+    } else {
+      state.retryDelay = 10000;
+      loadSnapshot({ quiet: true });
+    }
+  });
+
+  $("refresh").addEventListener("click", function () {
+    state.retryDelay = 10000;
+    loadSnapshot();
+  });
   $("inspector-close").addEventListener("click", closeInspector);
   $("inspector-backdrop").addEventListener("click", closeInspector);
   window.addEventListener("keydown", function (event) {
