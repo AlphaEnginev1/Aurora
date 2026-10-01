@@ -10,7 +10,6 @@ from typing import Any, Mapping
 from uuid import uuid4
 
 from aurora.context import ContextGate, ContextManifest, ContextScope
-from aurora.inference.models import ModelSpec
 from aurora.orchestration.director_decision_knowledge_store import (
     DirectorDecisionKnowledgeStore,
 )
@@ -249,17 +248,32 @@ def build_context_mailbox_adapter(task_store, *, limit: int = 40) -> Any:
         raise DirectorBootstrapError("mailbox limit must be at least 1")
 
     def mailbox_context(_project_id: str | None) -> tuple[dict[str, object], ...]:
-        events = task_store.latest_events(limit=limit)
+        try:
+            with task_store._connect() as db:
+                rows = db.execute(
+                    """
+                    SELECT event_id, mission_id, task_id, event_type,
+                           payload_json, created_at
+                    FROM task_events
+                    ORDER BY event_id DESC
+                    LIMIT ?
+                    """,
+                    (limit,),
+                ).fetchall()
+        except Exception as exc:
+            raise DirectorBootstrapError(
+                f"unable to load shared mailbox index: {exc}"
+            ) from exc
         return tuple(
             {
-                "event_id": event.event_id,
-                "mission_id": event.mission_id,
-                "task_id": event.task_id,
-                "event_type": event.event_type,
-                "payload": event.payload,
-                "created_at": event.created_at,
+                "event_id": int(row["event_id"]),
+                "mission_id": str(row["mission_id"]),
+                "task_id": row["task_id"],
+                "event_type": str(row["event_type"]),
+                "payload": json.loads(row["payload_json"]),
+                "created_at": str(row["created_at"]),
             }
-            for event in events
+            for row in reversed(rows)
         ) or ({"state": "empty", "event_count": 0},)
 
     return mailbox_context
@@ -272,8 +286,34 @@ def build_context_knowledge_adapter(research_store, *, limit: int = 50) -> Any:
         raise DirectorBootstrapError("knowledge limit must be at least 1")
 
     def knowledge_context(_project_id: str | None) -> tuple[dict[str, object], ...]:
-        rows = tuple(research_store.knowledge_index(limit=limit))
-        return rows or ({"state": "empty", "artifact_count": 0},)
+        try:
+            with research_store._connect() as db:
+                rows = db.execute(
+                    """
+                    SELECT artifact_id, finding_id, claim, evidence_ids,
+                           source_ids, state, created_at
+                    FROM knowledge_artifacts
+                    ORDER BY created_at DESC, artifact_id
+                    LIMIT ?
+                    """,
+                    (limit,),
+                ).fetchall()
+        except Exception as exc:
+            raise DirectorBootstrapError(
+                f"unable to load knowledge/evidence index: {exc}"
+            ) from exc
+        return tuple(
+            {
+                "artifact_id": str(row["artifact_id"]),
+                "finding_id": str(row["finding_id"]),
+                "claim": str(row["claim"]),
+                "evidence_count": len(json.loads(row["evidence_ids"] or "[]")),
+                "source_count": len(json.loads(row["source_ids"] or "[]")),
+                "state": str(row["state"]),
+                "created_at": str(row["created_at"]),
+            }
+            for row in rows
+        ) or ({"state": "empty", "artifact_count": 0},)
 
     return knowledge_context
 
