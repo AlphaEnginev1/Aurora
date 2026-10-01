@@ -9,6 +9,7 @@ from aurora.inference.registry import ModelRegistry
 from aurora.organization import AgentSpec, DepartmentSpec, OrganizationRegistry
 from aurora.orchestration.mission_memory import MailboxScope, MissionMemory
 from aurora.orchestration.task_store import DurableTaskStore
+from aurora.orchestration.task_engine import DelegatedTask
 from aurora.projects import ProjectRegistry, ProjectSpec, ProjectStatus
 from aurora.research.store import ResearchStore
 from aurora.skills import SkillLearningStore, SkillRegistry
@@ -98,16 +99,15 @@ def _gateway(tmp_path: Path, *, include_project: bool = True) -> DashboardGatewa
         else ProjectRegistry({})
     )
     task_store = DurableTaskStore(tmp_path / "tasks.db")
-    task_store.create_mission(
+    task_store.enqueue(
         "mission-1",
-        objective="Research objective",
-        tasks=(
-            {
-                "task_id": "task-1",
-                "role": "researcher",
-                "objective": "Collect evidence",
-                "skill_id": "research",
-            },
+        (
+            DelegatedTask(
+                task_id="task-1",
+                role="researcher",
+                objective="Collect evidence",
+                skills=("research",),
+            ),
         ),
     )
     task_store.append_event(
