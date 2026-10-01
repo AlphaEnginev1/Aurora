@@ -817,7 +817,13 @@ class DurableTaskStore:
             raise TaskStoreError(f"unknown event consumer: {consumer_id}")
         return int(row["last_event_id"])
 
-    def ack_event(self, consumer_id: str, event_id: int) -> None:
+    def ack_event(
+        self,
+        consumer_id: str,
+        event_id: int,
+        *,
+        allow_gaps: bool = False,
+    ) -> None:
         if not consumer_id.strip():
             raise TaskStoreError("consumer_id is empty")
         if event_id < 1:
@@ -838,7 +844,7 @@ class DurableTaskStore:
                 raise TaskStoreError(
                     f"event cursor cannot move backwards: {event_id} < {current}"
                 )
-            if event_id > current + 1:
+            if not allow_gaps and event_id > current + 1:
                 db.rollback()
                 raise TaskStoreError(
                     f"event cursor cannot skip events: {event_id} > {current + 1}"
