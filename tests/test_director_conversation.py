@@ -194,8 +194,9 @@ def test_second_turn_receives_prior_conversation_without_bypassing_context(tmp_p
     service.send_message(session_id=session.session_id, user_input="Segundo")
 
     request = seen[-1][0]
-    assert [item["content"] for item in request.messages[-2:]] == [
+    assert [item["content"] for item in request.messages[-3:]] == [
         "Primero",
+        "Respuesta de Aurora.",
         "Segundo",
     ]
     assert request.metadata["aurora_context_verified"] is True
