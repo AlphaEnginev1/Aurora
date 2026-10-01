@@ -134,8 +134,30 @@ class MissionMemory:
             raise MissionMemoryError("kind is empty")
         if not content.strip():
             raise MissionMemoryError("content is empty")
-        if "\x00" in mission_id or "\x00" in source or "\x00" in kind or "\x00" in content:
+        try:
+            scope = MailboxScope(scope)
+        except ValueError as exc:
+            raise MissionMemoryError(f"invalid mailbox scope: {scope}") from exc
+        if scope is MailboxScope.PROJECT and not (project_id and project_id.strip()):
+            raise MissionMemoryError("project scope requires project_id")
+        if scope is MailboxScope.AGENT and not (agent_role and agent_role.strip()):
+            raise MissionMemoryError("agent scope requires agent_role")
+        if scope is MailboxScope.TASK and not (task_id and task_id.strip()):
+            raise MissionMemoryError("task scope requires task_id")
+        identifiers = (
+            mission_id,
+            source,
+            kind,
+            content,
+            project_id,
+            agent_role,
+            task_id,
+            correlation_id,
+        )
+        if any(value is not None and "\x00" in value for value in identifiers):
             raise MissionMemoryError("mission message contains a null byte")
+        if event_id is not None and event_id < 1:
+            raise MissionMemoryError("event_id must be positive")
 
         now = datetime.now(timezone.utc).isoformat()
         payload = json.dumps(dict(metadata or {}), sort_keys=True)
@@ -326,7 +348,8 @@ class MissionMemory:
                 row = db.execute(
                     """
                     SELECT message_id, mission_id, source, kind, content,
-                           metadata_json, created_at
+                           metadata_json, created_at, scope, project_id,
+                           agent_role, task_id, event_id, correlation_id
                     FROM mission_messages
                     WHERE mission_id = ? AND kind = ?
                     ORDER BY message_id
