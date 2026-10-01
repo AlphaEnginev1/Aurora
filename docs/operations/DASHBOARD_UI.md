@@ -35,11 +35,13 @@ The portrait is a visual slot only in this block. Voice, speech and animation re
 
 The current UI intentionally falls back to a static portrait placeholder until the canonical Aurora portrait asset and avatar adapter are connected.
 
-## Live boundary
+## Live synchronization
 
-Block 10 uses authoritative snapshot reads and manual refresh. It does not own an event stream or reconciliation loop.
+The browser performs an immediate authoritative snapshot read, then refreshes the snapshot every 10 seconds while the page is visible. A successful response replaces the displayed read model as a full reconciliation; the snapshot carries the gateway event journal projection (`runtime.latest_events`) and its event IDs for ordering/inspection. This avoids treating browser memory as durable state or applying speculative mutations.
 
-Snapshot + incremental ordered updates + reconnect/reconciliation remain Block 11.
+On request failure or invalid snapshot shape, the UI marks system status unknown and retries with bounded exponential backoff (up to 120 seconds). Returning to a visible tab triggers an immediate refresh. Manual refresh remains available. Requests are single-flight to prevent overlapping snapshots. The UI does not claim READY from transport connectivity; readiness comes from the authoritative Director snapshot.
+
+The gateway transport must expose `GET /api/dashboard/snapshot` and return the existing DashboardGateway snapshot contract. This block uses polling/reconciliation, not WebSocket or SSE; those transports are not required for correctness. Avatar voice/animation remains Block 12.
 
 ## Deployment
 
