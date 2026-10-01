@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
+
+if TYPE_CHECKING:
+    from ..discovery import ModelDiscoveryProvider
 
 from ..models import ModelSpec
 from . import InferenceProvider
@@ -14,6 +17,7 @@ class ProviderRegistryError(RuntimeError):
 
 
 ProviderFactory = Callable[[ModelSpec], InferenceProvider]
+DiscoveryFactory = Callable[[], ModelDiscoveryProvider]
 
 
 @dataclass(frozen=True)
@@ -25,6 +29,7 @@ class ProviderSpec:
     capabilities: tuple[str, ...]
     enabled: bool
     factory: ProviderFactory
+    discovery_factory: DiscoveryFactory | None = None
 
 
 class ProviderRegistry:
@@ -51,6 +56,10 @@ class ProviderRegistry:
             raise ProviderRegistryError(
                 f"provider {provider_id!r} factory is not callable"
             )
+        if provider.discovery_factory is not None and not callable(provider.discovery_factory):
+            raise ProviderRegistryError(
+                f"provider {provider_id!r} discovery factory is not callable"
+            )
         capabilities = tuple(
             sorted(
                 {
@@ -66,6 +75,7 @@ class ProviderRegistry:
             capabilities=capabilities,
             enabled=bool(provider.enabled),
             factory=provider.factory,
+            discovery_factory=provider.discovery_factory,
         )
 
     def resolve(self, provider_id: str) -> ProviderSpec:
@@ -100,6 +110,23 @@ class ProviderRegistry:
             )
         return instance
 
+    def create_discovery(self, provider_id: str) -> "ModelDiscoveryProvider":
+        provider = self.resolve(provider_id)
+        if not provider.enabled:
+            raise ProviderRegistryError(
+                f"inference provider is disabled: {provider.provider_id}"
+            )
+        if provider.discovery_factory is None:
+            raise ProviderRegistryError(
+                f"provider does not support model discovery: {provider.provider_id}"
+            )
+        try:
+            return provider.discovery_factory()
+        except Exception as exc:
+            raise ProviderRegistryError(
+                f"failed to construct discovery adapter for {provider.provider_id}: {exc}"
+            ) from exc
+
     @property
     def ids(self) -> tuple[str, ...]:
         return tuple(sorted(self._providers))
@@ -112,6 +139,7 @@ class ProviderRegistry:
                 "name": provider.name,
                 "enabled": provider.enabled,
                 "capabilities": provider.capabilities,
+                "discovery_supported": provider.discovery_factory is not None,
             }
             for provider in sorted(
                 self._providers.values(),
@@ -140,12 +168,25 @@ def default_provider_registry(*, nvidia_api_key: str | None = None) -> ProviderR
                 capabilities=("chat", "reasoning"),
                 enabled=True,
                 factory=nvidia_factory,
+                discovery_factory=lambda: _nvidia_discovery_factory(
+                    api_key=nvidia_api_key
+                ),
             ),
         )
     )
 
 
+def _nvidia_discovery_factory(*, api_key: str | None) -> "ModelDiscoveryProvider":
+    from .nvidia_discovery import NVIDIAModelDiscoveryProvider
+
+    return NVIDIAModelDiscoveryProvider(
+        base_url="https://integrate.api.nvidia.com/v1",
+        api_key=api_key,
+    )
+
+
 __all__ = [
+    "DiscoveryFactory",
     "ProviderFactory",
     "ProviderRegistry",
     "ProviderRegistryError",
