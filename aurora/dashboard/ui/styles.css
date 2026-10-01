@@ -35,3 +35,14 @@ font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Sego
 @keyframes avatar-speak{0%,100%{transform:scale(1);opacity:.7}50%{transform:scale(1.035);opacity:1}}
 @keyframes avatar-error{0%,100%{transform:translateX(0)}33%{transform:translateX(-3px)}66%{transform:translateX(3px)}}
 @media(prefers-reduced-motion:reduce){.portrait-stage[data-avatar-state] .portrait-ring{animation:none}}
+
+.portrait-visual{position:relative;z-index:1;width:230px;height:230px;display:grid;place-items:center;border-radius:50%;overflow:hidden}
+.portrait-image{width:100%;height:100%;object-fit:cover;border-radius:50%;box-shadow:0 18px 50px rgba(0,0,0,.3);border:1px solid rgba(125,211,252,.22);transition:transform .25s ease,filter .25s ease}
+.portrait-stage[data-avatar-state="LISTENING"] .portrait-image{transform:scale(1.025);filter:brightness(1.06)}
+.portrait-stage[data-avatar-state="THINKING"] .portrait-image{filter:brightness(.96)}
+.portrait-stage[data-avatar-state="SPEAKING"] .portrait-image{animation:portrait-speak .8s ease-in-out infinite}
+.portrait-stage[data-avatar-state="ERROR"] .portrait-image{animation:portrait-error .55s ease-in-out 2}
+.portrait-stage[data-avatar-state="DISCONNECTED"] .portrait-image{filter:grayscale(.8);opacity:.7}
+@keyframes portrait-speak{0%,100%{transform:scale(1)}50%{transform:scale(1.018)}}
+@keyframes portrait-error{0%,100%{transform:translateX(0)}33%{transform:translateX(-2px)}66%{transform:translateX(2px)}}
+@media(prefers-reduced-motion:reduce){.portrait-image{animation:none!important;transition:none}}
