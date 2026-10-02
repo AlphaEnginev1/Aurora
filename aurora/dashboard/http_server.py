@@ -103,7 +103,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 self._static("index.html")
                 return
             self._static(path.lstrip("/"))
-        except (DashboardGatewayError, DashboardConversationAPIError, DashboardHTTPError) as exc:
+        except (DashboardGatewayError, DashboardConversationAPIError, DashboardHTTPError, DashboardProviderSettingsError) as exc:
             self._json(400, {"error": str(exc)})
         except Exception as exc:
             self._json(500, {"error": "internal dashboard error", "type": type(exc).__name__})
