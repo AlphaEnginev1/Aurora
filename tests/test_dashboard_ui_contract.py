@@ -18,6 +18,10 @@ def test_dashboard_ui_assets_are_present():
     assert 'data-nav-target="knowledge"' in html
     assert 'data-nav-target="models"' in html
     assert 'data-nav-target="system"' in html
+    assert 'data-nav-target="settings"' in html
+    assert 'id="director-provider"' in html
+    assert 'id="gemini-key"' in html
+    assert 'id="nvidia-key"' in html
     assert 'id="chat-expand"' in html
     assert 'id="chat-history"' in html
     assert 'id="projects-board"' in html
@@ -41,6 +45,9 @@ def test_dashboard_ui_uses_gateway_endpoints_only():
     assert '"/projects/"' in js
     assert '"/agents/"' in js
     assert '"/turns"' in js
+    assert '"/settings"' in js
+    assert '"/settings/test"' in js
+    assert "api_key_present" in js
     assert "AURORA_DASHBOARD_API_BASE" in js
     assert "sqlite" not in js.lower()
     assert "task_events" not in js
