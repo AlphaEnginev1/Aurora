@@ -90,10 +90,12 @@
       ? data.organization.agents
       : [];
 
-    $("project-count").textContent = projects.length;
-    $("agent-count").textContent = agents.length + " agents";
-    $("active-project-count").textContent =
-      projects.filter(function (p) { return p.status === "active"; }).length + " active";
+    const activeProjects = projects.filter(function (p) { return p.status === "active"; }).length;
+    $("project-count").textContent = String(projects.length);
+    $("agent-count").textContent = String(agents.length);
+    $("active-project-count").textContent = String(activeProjects);
+    $("agent-count-label").textContent = agents.length + " agents";
+    $("active-project-count-label").textContent = activeProjects + " active";
 
     renderAgents(agents);
     renderProjects(projects);
@@ -199,7 +201,9 @@
   }
 
   function renderModels(models, providers) {
-    $("model-count").textContent = models.length + " models";
+    $("model-count").textContent = String(models.length);
+    const modelCountLabel = $("model-count-label");
+    if (modelCountLabel) modelCountLabel.textContent = models.length + " models";
     const target = $("model-list");
     target.innerHTML = "";
     if (!models.length) {
