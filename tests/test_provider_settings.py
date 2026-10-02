@@ -75,3 +75,21 @@ def test_nvidia_selected_model_is_activated_without_editing_repo_policy(tmp_path
     assert model.enabled is True
     assert model.provider == "nvidia_api"
     assert runtime.planner.provider.provider_id == "inference_router"
+
+
+def test_local_nvidia_model_setting_can_be_restored_on_startup(tmp_path: Path):
+    from aurora.orchestration.factory import _apply_local_model_settings
+    store = OperatorSettingsStore(tmp_path / "operator-settings.json")
+    store.save({
+        "director": {
+            "provider": "nvidia_api",
+            "model": "nvidia/persisted-model",
+            "endpoint": "https://integrate.api.nvidia.com/v1",
+        },
+        "providers": {"nvidia_api": {"api_key": "secret"}},
+    })
+    r = router(tmp_path)
+    _apply_local_model_settings(r, store)
+    restored = r.model_registry.resolve("nvidia/persisted-model")
+    assert restored.enabled is True
+    assert restored.provider == "nvidia_api"
