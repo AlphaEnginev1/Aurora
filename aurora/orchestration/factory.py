@@ -81,9 +81,8 @@ def _build_director_provider(settings_store: OperatorSettingsStore | None = None
     ).strip().lower()
     if director_provider_id == "gemini":
         key = (
-            settings_store.credential("gemini")
-            if settings_store is not None
-            else os.getenv("GEMINI_API_KEY", "")
+            (settings_store.credential("gemini") if settings_store is not None else "")
+            or os.getenv("GEMINI_API_KEY", "")
         )
         if not key:
             return None
