@@ -9,7 +9,11 @@ def test_default_director_provider_is_router(monkeypatch):
 
 
 def test_gemini_can_be_selected_as_director_provider(monkeypatch):
+    class FakeGeminiProvider:
+        provider_id = "gemini"
+
     monkeypatch.setenv("AURORA_DIRECTOR_PROVIDER", "gemini")
+    monkeypatch.setattr(factory, "GeminiDirectorProvider", FakeGeminiProvider)
     provider = factory._build_director_provider()
     assert provider.provider_id == "gemini"
 
