@@ -9,7 +9,8 @@
     "registry.npmjs.org",
     "archive.ubuntu.com",
     "security.ubuntu.com",
-    "integrate.api.nvidia.com"
+    "integrate.api.nvidia.com",
+    "generativelanguage.googleapis.com"
   ],
   "browser_isolation_required": true,
   "sandbox_network": "broker_only",
