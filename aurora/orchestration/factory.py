@@ -12,6 +12,7 @@ from aurora.autonomy.registry import CapabilityRegistryStore, load_registry, mer
 from aurora.autonomy.sandbox import SandboxExecutor, SandboxPolicy
 from aurora.inference.registry import ModelRegistry
 from aurora.inference.router import ModelRouter
+from aurora.inference.models import ModelSpec
 from aurora.inference.discovery import ModelCandidateStore, ModelDiscoveryService
 from aurora.inference.providers.registry import default_provider_registry
 from aurora.inference.model_performance import ModelPerformanceStore
@@ -73,6 +74,56 @@ def build_orchestration_engine(policy_path: str | Path) -> OrchestrationEngine:
         )
     )
 
+def _apply_local_model_settings(router: ModelRouter, settings_store: OperatorSettingsStore) -> None:
+    settings = settings_store.load()
+    director = settings.get("director", {}) if isinstance(settings, dict) else {}
+    provider_id = str(director.get("provider", "")).strip().lower()
+    model_id = str(director.get("model", "")).strip()
+    if provider_id != "nvidia_api" or not model_id:
+        return
+    base_url = str(
+        settings.get("providers", {}).get("nvidia_api", {}).get(
+            "base_url", "https://integrate.api.nvidia.com/v1"
+        )
+    ).rstrip("/")
+    try:
+        existing = router.model_registry.resolve(model_id)
+    except Exception:
+        existing = None
+    if existing is None:
+        model = ModelSpec(
+            id=model_id,
+            provider="nvidia_api",
+            endpoint=base_url,
+            capabilities=("chat", "reasoning", "tool_use"),
+            context_window=131072,
+            enabled=True,
+        )
+        router.model_registry = type(router.model_registry).from_specs(
+            [*router.model_registry.models, model],
+            provider_registry=router.provider_registry,
+        )
+        router.models = list(router.model_registry.models)
+        return
+    if not existing.enabled or existing.endpoint != base_url:
+        updated = ModelSpec(
+            id=existing.id,
+            provider=existing.provider,
+            endpoint=base_url,
+            capabilities=existing.capabilities or ("chat", "reasoning", "tool_use"),
+            context_window=existing.context_window or 131072,
+            enabled=True,
+            specialties=existing.specialties,
+            quality_score=existing.quality_score,
+            latency_score=existing.latency_score,
+            cost_score=existing.cost_score,
+            healthy=existing.healthy,
+            available=existing.available,
+        )
+        router.model_registry.replace(updated)
+        router.models = list(router.model_registry.models)
+
+
 def _build_director_provider(settings_store: OperatorSettingsStore | None = None):
     settings = settings_store.load() if settings_store is not None else {}
     configured = settings.get("director", {}) if isinstance(settings, dict) else {}
@@ -122,6 +173,7 @@ def build_director_service(*, inference_policy_path: str | Path, autonomy_policy
         provider_registry=provider_registry,
         model_registry=model_registry,
     )
+    _apply_local_model_settings(router, settings_store)
     skill_registry=SkillRegistry.from_file(skills_path,configured_models={model.id for model in inference_specs})
     organization=OrganizationRegistry.from_file(organization_path,configured_models={model.id for model in inference_specs})
     skill_registry.validate_organization(organization)
