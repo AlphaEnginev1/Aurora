@@ -24,6 +24,29 @@ if ! alive "$PROXY_PID"; then
   echo $! > "$PROXY_PID"
 fi
 
+for _ in $(seq 1 30); do
+  if python3 - "$HOST_IP" <<'PY' >/dev/null 2>&1
+import socket, sys
+with socket.create_connection((sys.argv[1], 3128), timeout=1):
+    pass
+PY
+  then
+    break
+  fi
+  sleep 1
+done
+
+if ! python3 - "$HOST_IP" <<'PY' >/dev/null 2>&1
+import socket, sys
+with socket.create_connection((sys.argv[1], 3128), timeout=2):
+    pass
+PY
+then
+  echo "Aurora egress proxy did not become ready." >&2
+  tail -n 80 "$PROXY_LOG" >&2 || true
+  exit 1
+fi
+
 if alive "$AURORA_PID"; then
   exit 0
 fi
