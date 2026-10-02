@@ -32,7 +32,6 @@ from aurora.skills.validation_lab import SkillValidationLab
 from aurora.skills.improvement import SkillImprovementGenerator
 from aurora.skills.discovery import SkillDiscoveryService
 from aurora.operator_settings import OperatorSettingsStore, settings_path
-from aurora.orchestration.gemini_provider import GeminiDirectorProvider
 from .director import DirectorPlanner, DirectorService
 from .gemini_provider import GeminiDirectorProvider
 from .director_bootstrap import (
@@ -58,8 +57,7 @@ from .team_runtime import TeamCoordinator
 from .task_worker import WorkerPolicy
 
 def build_orchestration_engine(policy_path: str | Path) -> OrchestrationEngine:
-    settings_store = OperatorSettingsStore(settings_path(workspace_root))
-    nvidia_key = settings_store.credential("nvidia_api") or os.getenv("NVIDIA_API_KEY")
+    nvidia_key = os.getenv("NVIDIA_API_KEY")
     provider_registry = default_provider_registry(nvidia_api_key=nvidia_key)
     model_registry = ModelRegistry.from_file(
         policy_path,
@@ -96,7 +94,7 @@ def _build_director_provider(settings_store: OperatorSettingsStore | None = None
                 configured.get("endpoint", "https://generativelanguage.googleapis.com/v1beta")
             ),
         )
-    if director_provider_id in {"router", "inference_fabric", ""}:
+    if director_provider_id in {"router", "inference_fabric", "nvidia_api", ""}:
         return None
     raise RuntimeError(
         "unsupported AURORA_DIRECTOR_PROVIDER: "
@@ -110,7 +108,8 @@ def build_director_service(*, inference_policy_path: str | Path, autonomy_policy
     egress_proxy_host: str, egress_proxy_port: int=3128, organization_path: str | Path="config/organization.json",
     skills_path: str | Path="config/skills.json", skill_learning_path: str | Path | None=None,
     projects_path: str | Path="config/projects.json") -> DirectorService:
-    nvidia_key = os.getenv("NVIDIA_API_KEY")
+    settings_store = OperatorSettingsStore(settings_path(workspace_root))
+    nvidia_key = settings_store.credential("nvidia_api") or os.getenv("NVIDIA_API_KEY")
     provider_registry = default_provider_registry(nvidia_api_key=nvidia_key)
     model_registry = ModelRegistry.from_file(
         inference_policy_path,
