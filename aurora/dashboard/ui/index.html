@@ -3,87 +3,261 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="theme-color" content="#07111f">
-  <title>Aurora Operations Center</title>
+  <meta name="theme-color" content="#050b10">
+  <meta name="color-scheme" content="dark">
+  <title>Aurora Control Center</title>
   <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
-  <header class="topbar">
-    <div class="brand">
-      <span class="brand-mark">A</span>
-      <div><strong>AURORA</strong><span>Operations Center</span></div>
-    </div>
-    <div class="topbar-meta">
-      <span id="system-status" class="status-pill unknown">SYSTEM UNKNOWN</span>
-      <span id="freshness">No snapshot</span>
-      <button id="refresh" class="ghost-button" type="button">Refresh</button>
-    </div>
-  </header>
-  <main class="app-shell">
-    <section class="director-card panel">
-      <div class="director-copy">
-        <div class="eyebrow">DIRECTOR CORE</div>
-        <h1 id="director-name">Aurora Director</h1>
-        <p id="director-readiness">Awaiting authoritative dashboard state.</p>
-        <div class="director-metrics">
-          <div><span>Model</span><strong id="director-model">—</strong></div>
-          <div><span>Context</span><strong id="director-context">—</strong></div>
-          <div><span>Projects</span><strong id="project-count">0</strong></div>
+  <div class="app-frame">
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark">A</span>
+        <div>
+          <strong>AURORA</strong>
+          <span>Autonomous Intelligence Control Center</span>
         </div>
       </div>
-      <div id="director-portrait" class="portrait-stage" aria-label="Aurora Director portrait">
-        <div class="portrait-ring"></div>
-        <div class="portrait-visual">
-          <img
-            id="director-portrait-image"
-            class="portrait-image"
-            alt="Aurora Director portrait"
-            hidden
-          >
-          <div class="portrait-placeholder" id="portrait-placeholder">
-            <span>👤</span>
-            <small>Director portrait</small>
-          </div>
-        </div>
-        <div class="avatar-voice-panel" aria-live="polite">
-          <span id="avatar-voice-status" class="avatar-voice-status">IDLE</span>
-          <p id="avatar-transcript">Text conversation remains available when voice is unavailable.</p>
-          <div class="director-chat">
-            <label for="director-message">Conversation</label>
-            <textarea id="director-message" rows="2" maxlength="8000"
-              placeholder="Write to Aurora Director…"></textarea>
-            <div class="avatar-voice-actions">
-              <button id="director-send" class="ghost-button" type="button">Send</button>
-              <button id="avatar-listen" class="ghost-button" type="button">Speak to Aurora</button>
-              <button id="avatar-stop" class="ghost-button" type="button">Stop</button>
+      <div class="topbar-meta">
+        <span id="system-status" class="status-pill unknown">SYSTEM UNKNOWN</span>
+        <span id="freshness">No snapshot</span>
+        <button id="refresh" class="ghost-button" type="button">Refresh</button>
+      </div>
+    </header>
+
+    <div class="workspace-shell">
+      <main class="workspace">
+        <section id="view-home" class="view active" data-view-panel="home" aria-label="Dashboard">
+          <div class="view-header">
+            <div>
+              <div class="eyebrow">AURORA // HOME</div>
+              <h1>Control Center</h1>
+              <p>Director workspace · orchestration · decisions · projects</p>
             </div>
+            <div class="header-state"><span class="signal-dot"></span> DIRECTOR ONLINE</div>
           </div>
-        </div>
-      </div>
-    </section>
-    <section class="topology-grid">
-      <div class="panel topology-panel">
-        <div class="section-head">
-          <div><div class="eyebrow">AGENT OPERATIONS</div><h2>Organization</h2></div>
-          <span class="muted" id="agent-count">0 agents</span>
-        </div>
-        <div id="agent-orbit" class="agent-orbit" aria-live="polite"></div>
-      </div>
-      <div class="panel projects-panel">
-        <div class="section-head">
-          <div><div class="eyebrow">PROJECT COCKPIT</div><h2>Projects</h2></div>
-          <span class="muted" id="active-project-count">0 active</span>
-        </div>
-        <div id="projects-list" class="stack-list" aria-live="polite"></div>
-      </div>
-    </section>
-    <section class="dashboard-grid">
-      <article class="panel"><div class="section-head"><div><div class="eyebrow">SHARED MAILBOX</div><h2>Recent activity</h2></div><span class="muted" id="mailbox-count">0</span></div><div id="mailbox-list" class="timeline"></div></article>
-      <article class="panel"><div class="section-head"><div><div class="eyebrow">MODEL INTELLIGENCE</div><h2>Providers &amp; models</h2></div><span class="muted" id="model-count">0 models</span></div><div id="model-list" class="stack-list"></div></article>
-      <article class="panel"><div class="section-head"><div><div class="eyebrow">SKILLS &amp; LEARNING</div><h2>Specialization</h2></div></div><div id="skills-list" class="stack-list"></div></article>
-      <article class="panel"><div class="section-head"><div><div class="eyebrow">RUNTIME &amp; RECOVERY</div><h2>Execution state</h2></div></div><div id="runtime-summary" class="runtime-summary"></div></article>
-    </section>
-  </main>
+
+          <div class="home-grid">
+            <section class="panel hero-panel">
+              <div class="hero-copy">
+                <div class="eyebrow">DIRECTOR CORE</div>
+                <h2 id="director-name">Aurora Director</h2>
+                <p id="director-readiness">Awaiting authoritative dashboard state.</p>
+                <div class="hero-metrics">
+                  <div><span>Model</span><strong id="director-model">—</strong></div>
+                  <div><span>Context</span><strong id="director-context">—</strong></div>
+                  <div><span>Projects</span><strong id="project-count">0</strong></div>
+                </div>
+              </div>
+
+              <div id="director-portrait" class="portrait-stage" aria-label="Aurora Director profile" data-avatar-state="IDLE">
+                <div class="portrait-aura"></div>
+                <div class="portrait-ring ring-a"></div>
+                <div class="portrait-ring ring-b"></div>
+                <div class="portrait-visual">
+                  <img id="director-portrait-image" class="portrait-image" alt="Aurora Director portrait" hidden>
+                  <div class="portrait-placeholder" id="portrait-placeholder">
+                    <span>A</span>
+                    <small>DIRECTOR PROFILE</small>
+                  </div>
+                </div>
+                <div class="portrait-caption">
+                  <span class="portrait-name">AURORA</span>
+                  <span id="avatar-voice-status" class="avatar-voice-status">IDLE</span>
+                </div>
+              </div>
+
+              <div class="chat-surface">
+                <div class="chat-head">
+                  <div>
+                    <div class="eyebrow">DIRECTOR CONVERSATION</div>
+                    <strong>Talk to Aurora</strong>
+                  </div>
+                  <button id="chat-expand" class="text-button" type="button">Expand history ↗</button>
+                </div>
+                <div class="chat-stream">
+                  <p id="avatar-transcript" class="chat-transcript">Text conversation remains available when voice is unavailable.</p>
+                </div>
+                <div class="director-chat">
+                  <label for="director-message">Message</label>
+                  <textarea id="director-message" rows="2" maxlength="8000" placeholder="Escribe una orden, pregunta o decisión para Aurora…"></textarea>
+                  <div class="chat-actions">
+                    <div class="chat-actions-left">
+                      <button id="avatar-listen" class="ghost-button" type="button">Speak</button>
+                      <button id="avatar-stop" class="ghost-button" type="button">Stop</button>
+                    </div>
+                    <button id="director-send" class="primary-button" type="button">Send</button>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <aside class="info-column">
+              <div class="panel info-panel">
+                <div class="panel-head">
+                  <div>
+                    <div class="eyebrow">SYSTEM PULSE</div>
+                    <h2>Right now</h2>
+                  </div>
+                </div>
+                <div class="pulse-grid">
+                  <div class="pulse-card"><span>PROJECTS</span><strong id="pulse-projects">0</strong><em>active</em></div>
+                  <div class="pulse-card"><span>TASKS</span><strong id="pulse-tasks">0</strong><em>total</em></div>
+                  <div class="pulse-card"><span>RESEARCH</span><strong id="pulse-research">—</strong><em>state</em></div>
+                  <div class="pulse-card"><span>MODELS</span><strong id="pulse-models">0</strong><em>registered</em></div>
+                </div>
+              </div>
+
+              <div class="panel priority-panel">
+                <div class="panel-head">
+                  <div>
+                    <div class="eyebrow">PRIORITY STREAM</div>
+                    <h2>Projects</h2>
+                  </div>
+                  <button class="text-button" data-nav-target="projects" type="button">Open all</button>
+                </div>
+                <div id="projects-list" class="stack-list compact-list" aria-live="polite"></div>
+              </div>
+
+              <div class="panel decision-panel">
+                <div class="panel-head">
+                  <div>
+                    <div class="eyebrow">GOVERNANCE</div>
+                    <h2>Decision state</h2>
+                  </div>
+                </div>
+                <div id="decision-summary" class="decision-summary"></div>
+              </div>
+            </aside>
+          </div>
+        </section>
+
+        <section id="view-projects" class="view" data-view-panel="projects" aria-label="Projects">
+          <div class="view-header">
+            <div><div class="eyebrow">AURORA // PROJECTS</div><h1>Projects</h1><p>Portfolio · types · hierarchy · execution state</p></div>
+            <div class="header-state"><span id="active-project-count">0 active</span></div>
+          </div>
+          <div class="content-grid">
+            <section class="panel content-panel span-main">
+              <div class="panel-head">
+                <div><div class="eyebrow">PROJECT COCKPIT</div><h2>Active workspace</h2></div>
+                <div class="filter-row"><button class="filter-chip active" type="button">All</button><button class="filter-chip" type="button">Active</button><button class="filter-chip" type="button">Research</button></div>
+              </div>
+              <div id="projects-board" class="project-board"></div>
+            </section>
+            <aside class="panel content-panel">
+              <div class="panel-head"><div><div class="eyebrow">PROJECT TAXONOMY</div><h2>Types</h2></div></div>
+              <div class="type-list">
+                <div class="type-row"><span>RESEARCH</span><strong>Discovery / Evidence</strong></div>
+                <div class="type-row"><span>TRADING</span><strong>Market / Execution</strong></div>
+                <div class="type-row"><span>AI SYSTEM</span><strong>Agents / Runtime</strong></div>
+                <div class="type-row"><span>INFRA</span><strong>Platform / Services</strong></div>
+                <div class="type-row"><span>FORENSICS</span><strong>Analysis / Recovery</strong></div>
+              </div>
+            </aside>
+          </div>
+        </section>
+
+        <section id="view-tasks" class="view" data-view-panel="tasks" aria-label="Tasks">
+          <div class="view-header">
+            <div><div class="eyebrow">AURORA // TASKS</div><h1>Task Queue</h1><p>Mission execution · status · latest runtime events</p></div>
+            <div class="header-state"><span id="tasks-view-count">0 tasks</span></div>
+          </div>
+          <div class="content-grid">
+            <section class="panel content-panel">
+              <div class="panel-head"><div><div class="eyebrow">TASK STATUS</div><h2>Execution matrix</h2></div></div>
+              <div id="task-matrix" class="task-matrix"></div>
+            </section>
+            <section class="panel content-panel">
+              <div class="panel-head"><div><div class="eyebrow">RUNTIME EVENTS</div><h2>Latest events</h2></div></div>
+              <div id="events-list" class="timeline"></div>
+            </section>
+          </div>
+        </section>
+
+        <section id="view-research" class="view" data-view-panel="research" aria-label="Research">
+          <div class="view-header">
+            <div><div class="eyebrow">AURORA // RESEARCH</div><h1>Research</h1><p>Discovery · sources · trusted artifacts · evidence flow</p></div>
+            <div class="header-state"><span id="research-view-state">UNKNOWN</span></div>
+          </div>
+          <div class="content-grid">
+            <section class="panel content-panel span-main">
+              <div class="panel-head"><div><div class="eyebrow">DISCOVERY PIPELINE</div><h2>Research state</h2></div></div>
+              <div id="research-overview" class="research-overview"></div>
+            </section>
+            <section class="panel content-panel">
+              <div class="panel-head"><div><div class="eyebrow">EVIDENCE</div><h2>Knowledge surface</h2></div></div>
+              <div id="knowledge-surface" class="stack-list"></div>
+            </section>
+          </div>
+        </section>
+
+        <section id="view-knowledge" class="view" data-view-panel="knowledge" aria-label="Knowledge">
+          <div class="view-header">
+            <div><div class="eyebrow">AURORA // KNOWLEDGE</div><h1>Knowledge</h1><p>Trusted knowledge · provenance · decisions · learning</p></div>
+            <div class="header-state">READ-ONLY SURFACE</div>
+          </div>
+          <div class="content-grid">
+            <section class="panel content-panel">
+              <div class="panel-head"><div><div class="eyebrow">TRUST GRAPH</div><h2>Knowledge index</h2></div></div>
+              <div id="knowledge-index" class="knowledge-index"></div>
+            </section>
+            <section class="panel content-panel">
+              <div class="panel-head"><div><div class="eyebrow">GOVERNANCE</div><h2>Decision learning</h2></div></div>
+              <div id="governance-list" class="stack-list"></div>
+            </section>
+          </div>
+        </section>
+
+        <section id="view-models" class="view" data-view-panel="models" aria-label="Models">
+          <div class="view-header">
+            <div><div class="eyebrow">AURORA // MODELS</div><h1>Models</h1><p>Providers · routing · capabilities · model intelligence</p></div>
+            <div class="header-state"><span id="model-count">0 models</span></div>
+          </div>
+          <div class="content-grid">
+            <section class="panel content-panel span-main">
+              <div class="panel-head"><div><div class="eyebrow">MODEL INVENTORY</div><h2>Available intelligence</h2></div></div>
+              <div id="model-list" class="stack-list model-list"></div>
+            </section>
+            <section class="panel content-panel">
+              <div class="panel-head"><div><div class="eyebrow">PROVIDERS</div><h2>Provider layer</h2></div></div>
+              <div id="provider-list" class="stack-list"></div>
+            </section>
+          </div>
+        </section>
+
+        <section id="view-system" class="view" data-view-panel="system" aria-label="System">
+          <div class="view-header">
+            <div><div class="eyebrow">AURORA // SYSTEM</div><h1>System</h1><p>Runtime · observability · recovery · learning loop</p></div>
+            <div class="header-state"><span class="signal-dot"></span> MONITORED</div>
+          </div>
+          <div class="content-grid">
+            <section class="panel content-panel">
+              <div class="panel-head"><div><div class="eyebrow">RUNTIME</div><h2>Execution state</h2></div></div>
+              <div id="runtime-summary" class="runtime-grid"></div>
+            </section>
+            <section class="panel content-panel">
+              <div class="panel-head"><div><div class="eyebrow">SKILLS & LEARNING</div><h2>Specialization</h2></div></div>
+              <div id="skills-list" class="stack-list"></div>
+            </section>
+          </div>
+        </section>
+      </main>
+
+      <nav class="right-rail" aria-label="Aurora navigation">
+        <div class="rail-brand">A</div>
+        <button class="rail-button active" data-nav-target="home" type="button" aria-label="Home"><span class="rail-glyph">⌂</span><small>HOME</small></button>
+        <button class="rail-button" data-nav-target="projects" type="button" aria-label="Projects"><span class="rail-glyph">◇</span><small>PROJECTS</small></button>
+        <button class="rail-button" data-nav-target="tasks" type="button" aria-label="Tasks"><span class="rail-glyph">≡</span><small>TASKS</small></button>
+        <button class="rail-button" data-nav-target="research" type="button" aria-label="Research"><span class="rail-glyph">⌁</span><small>RESEARCH</small></button>
+        <button class="rail-button" data-nav-target="knowledge" type="button" aria-label="Knowledge"><span class="rail-glyph">◌</span><small>KNOW</small></button>
+        <button class="rail-button" data-nav-target="models" type="button" aria-label="Models"><span class="rail-glyph">✦</span><small>MODELS</small></button>
+        <button class="rail-button" data-nav-target="system" type="button" aria-label="System"><span class="rail-glyph">⚙</span><small>SYSTEM</small></button>
+        <div class="rail-footer"><span class="rail-online"></span><small>LIVE</small></div>
+      </nav>
+    </div>
+  </div>
+
   <aside id="inspector" class="inspector" aria-hidden="true">
     <div class="inspector-backdrop" id="inspector-backdrop"></div>
     <div class="inspector-panel">
@@ -94,6 +268,18 @@
       <div id="inspector-body" class="inspector-body"></div>
     </div>
   </aside>
+
+  <aside id="chat-history" class="history-drawer" aria-hidden="true">
+    <div class="history-backdrop" id="history-backdrop"></div>
+    <div class="history-panel">
+      <div class="history-head">
+        <div><div class="eyebrow">DIRECTOR CONVERSATION</div><h2>Conversation history</h2></div>
+        <button id="chat-history-close" class="icon-button" type="button" aria-label="Close conversation history">×</button>
+      </div>
+      <div id="chat-history-body" class="history-body"><div class="empty-state">Expand history to load the durable conversation.</div></div>
+    </div>
+  </aside>
+
   <script src="./avatar_voice.js" defer></script>
   <script src="./app.js" defer></script>
 </body>
