@@ -71,6 +71,19 @@ def build_orchestration_engine(policy_path: str | Path) -> OrchestrationEngine:
         )
     )
 
+def _build_director_provider():
+    director_provider_id = os.getenv("AURORA_DIRECTOR_PROVIDER", "router").strip().lower()
+    if director_provider_id == "gemini":
+        return GeminiDirectorProvider()
+    if director_provider_id in {"router", "inference_fabric", ""}:
+        return None
+    raise RuntimeError(
+        "unsupported AURORA_DIRECTOR_PROVIDER: "
+        + director_provider_id
+        + "; expected gemini or router"
+    )
+
+
 def build_director_service(*, inference_policy_path: str | Path, autonomy_policy_path: str | Path,
     registry_path: str | Path, network_policy_path: str | Path, workspace_root: str | Path,
     egress_proxy_host: str, egress_proxy_port: int=3128, organization_path: str | Path="config/organization.json",
@@ -141,17 +154,7 @@ def build_director_service(*, inference_policy_path: str | Path, autonomy_policy
     learning_store=SkillLearningStore(learning_path)
     model_performance=ModelPerformanceStore(root/"model-performance.db")
     task_engine=TaskEngine(orchestration,root,organization=organization,skill_registry=skill_registry,skill_learning=learning_store,model_performance=model_performance)
-    director_provider_id = os.getenv("AURORA_DIRECTOR_PROVIDER", "router").strip().lower()
-    if director_provider_id == "gemini":
-        director_provider = GeminiDirectorProvider()
-    elif director_provider_id in {"router", "inference_fabric", ""}:
-        director_provider = None
-    else:
-        raise RuntimeError(
-            "unsupported AURORA_DIRECTOR_PROVIDER: "
-            + director_provider_id
-            + "; expected gemini or router"
-        )
+    director_provider = _build_director_provider()
 
     planner=DirectorPlanner(
         router,
