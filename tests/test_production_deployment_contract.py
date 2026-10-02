@@ -12,7 +12,7 @@ def test_production_service_is_persistent_but_not_live_by_default():
     assert "Restart=always" in service
     assert "NoNewPrivileges=true" in service
     assert "EnvironmentFile=/etc/aurora/aurora.env" in service
-    assert "ExecStartPre=/opt/aurora/deploy/aurora-preflight.sh" in service
+    assert "ExecStartPre=/bin/bash /opt/aurora/deploy/aurora-preflight.sh" in service
 
 
 def test_environment_template_has_no_real_credentials_and_selects_gemini_director():
