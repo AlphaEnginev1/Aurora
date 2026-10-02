@@ -12,6 +12,9 @@ def test_gemini_can_be_selected_as_director_provider(monkeypatch):
     class FakeGeminiProvider:
         provider_id = "gemini"
 
+        def __init__(self, **kwargs):
+            self.config = kwargs
+
     monkeypatch.setenv("AURORA_DIRECTOR_PROVIDER", "gemini")
     monkeypatch.setattr(factory, "GeminiDirectorProvider", FakeGeminiProvider)
     provider = factory._build_director_provider()
