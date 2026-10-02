@@ -24,6 +24,9 @@ htmlcov/
 # Logs
 *.log
 
+# Aurora local runtime and operator secrets
+.aurora-runtime/
+
 # Local secrets/config
 .env
 .env.*
