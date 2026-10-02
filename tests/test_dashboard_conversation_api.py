@@ -196,3 +196,50 @@ def test_dashboard_server_rejects_non_loopback_without_token():
             port=8787,
             ui_root=Path(__file__).parents[1] / "aurora" / "dashboard" / "ui",
         )
+
+
+def test_http_serves_canonical_portrait_asset(tmp_path):
+    """Prove the real dashboard HTTP server serves the canonical JPEG asset."""
+    conversation = _conversation(tmp_path)
+    api = DashboardConversationAPI(conversation)
+
+    class Gateway:
+        def snapshot(self):
+            return {"read_only": True}
+
+        def project(self, project_id):
+            return {"project": {"project_id": project_id}}
+
+        def agent(self, role):
+            return {"identity": {"role": role}}
+
+    ui_root = Path(__file__).parents[1] / "aurora" / "dashboard" / "ui"
+    asset_path = ui_root / "aurora-central-avatar.jpg"
+    asset = asset_path.read_bytes()
+
+    assert asset_path.is_file()
+    assert asset.startswith(b"\xff\xd8\xff")
+    assert len(asset) > 3
+
+    server = create_dashboard_server(
+        dashboard_gateway=Gateway(),
+        conversation_api=api,
+        host="127.0.0.1",
+        port=0,
+        ui_root=ui_root,
+    )
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = "http://127.0.0.1:" + str(server.server_address[1])
+
+    try:
+        with urlopen(base + "/aurora-central-avatar.jpg", timeout=5) as response:
+            served = response.read()
+            content_type = response.headers.get("Content-Type")
+
+        assert response.status == 200
+        assert content_type == "image/jpeg"
+        assert served == asset
+    finally:
+        server.shutdown()
+        server.server_close()
