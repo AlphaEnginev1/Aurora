@@ -31,6 +31,8 @@ from aurora.skills.evolution_runtime import SkillEvolutionRuntime
 from aurora.skills.validation_lab import SkillValidationLab
 from aurora.skills.improvement import SkillImprovementGenerator
 from aurora.skills.discovery import SkillDiscoveryService
+from aurora.operator_settings import OperatorSettingsStore, settings_path
+from aurora.orchestration.gemini_provider import GeminiDirectorProvider
 from .director import DirectorPlanner, DirectorService
 from .gemini_provider import GeminiDirectorProvider
 from .director_bootstrap import (
@@ -56,7 +58,8 @@ from .team_runtime import TeamCoordinator
 from .task_worker import WorkerPolicy
 
 def build_orchestration_engine(policy_path: str | Path) -> OrchestrationEngine:
-    nvidia_key = os.getenv("NVIDIA_API_KEY")
+    settings_store = OperatorSettingsStore(settings_path(workspace_root))
+    nvidia_key = settings_store.credential("nvidia_api") or os.getenv("NVIDIA_API_KEY")
     provider_registry = default_provider_registry(nvidia_api_key=nvidia_key)
     model_registry = ModelRegistry.from_file(
         policy_path,
@@ -71,10 +74,28 @@ def build_orchestration_engine(policy_path: str | Path) -> OrchestrationEngine:
         )
     )
 
-def _build_director_provider():
-    director_provider_id = os.getenv("AURORA_DIRECTOR_PROVIDER", "router").strip().lower()
+def _build_director_provider(settings_store: OperatorSettingsStore | None = None):
+    settings = settings_store.load() if settings_store is not None else {}
+    configured = settings.get("director", {}) if isinstance(settings, dict) else {}
+    director_provider_id = os.getenv(
+        "AURORA_DIRECTOR_PROVIDER",
+        str(configured.get("provider", "router")),
+    ).strip().lower()
     if director_provider_id == "gemini":
-        return GeminiDirectorProvider()
+        key = (
+            settings_store.credential("gemini")
+            if settings_store is not None
+            else os.getenv("GEMINI_API_KEY", "")
+        )
+        if not key:
+            return None
+        return GeminiDirectorProvider(
+            api_key=key,
+            model=os.getenv("GEMINI_MODEL_ID") or str(configured.get("model", "gemini-3.7-flash")),
+            endpoint=os.getenv("GEMINI_API_ENDPOINT") or str(
+                configured.get("endpoint", "https://generativelanguage.googleapis.com/v1beta")
+            ),
+        )
     if director_provider_id in {"router", "inference_fabric", ""}:
         return None
     raise RuntimeError(
@@ -154,14 +175,14 @@ def build_director_service(*, inference_policy_path: str | Path, autonomy_policy
     learning_store=SkillLearningStore(learning_path)
     model_performance=ModelPerformanceStore(root/"model-performance.db")
     task_engine=TaskEngine(orchestration,root,organization=organization,skill_registry=skill_registry,skill_learning=learning_store,model_performance=model_performance)
-    director_provider = _build_director_provider()
+    director_provider = _build_director_provider(settings_store)
 
     planner=DirectorPlanner(
         router,
         organization=organization,
         skill_registry=skill_registry,
         project_registry=project_registry,
-        provider=director_provider,
+        provider=director_provider or InferenceDirectorProvider(router),
     )
     return DirectorService(planner,task_engine)
 
@@ -290,6 +311,7 @@ def build_director_runtime(*, inference_policy_path: str | Path, autonomy_policy
         router=service.planner.router,
         bootstrap=bootstrap,
         db_path=runtime_root/"conversations.db",
+        provider=service.planner.provider,
     )
 
     observability=ProductionObservability(runtime_root/"observability.jsonl")
