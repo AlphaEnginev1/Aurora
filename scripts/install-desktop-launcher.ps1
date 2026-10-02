@@ -9,7 +9,6 @@ $shell = New-Object -ComObject WScript.Shell
 $shortcut = $shell.CreateShortcut($shortcutPath)
 $shortcut.TargetPath = $wsl
 $shortcut.Arguments = '-d Ubuntu -- bash -lc "' + $action + '"'
-$shortcut.WorkingDirectory = $repo
 $shortcut.Description = "Launch Aurora Control Center"
 $shortcut.IconLocation = "$env:SystemRoot\System32\shell32.dll,167"
 $shortcut.Save()
