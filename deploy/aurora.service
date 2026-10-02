@@ -1,0 +1,23 @@
+[Unit]
+Description=Aurora 24/7 Director runtime
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=aurora
+Group=aurora
+WorkingDirectory=/opt/aurora
+EnvironmentFile=/etc/aurora/aurora.env
+Environment=PYTHONUNBUFFERED=1
+ExecStartPre=/bin/bash /opt/aurora/deploy/aurora-preflight.sh
+ExecStart=/opt/aurora/.venv/bin/python -m aurora.orchestration.daemon --dashboard
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+KillSignal=SIGTERM
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
