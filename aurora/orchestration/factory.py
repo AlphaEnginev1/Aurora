@@ -32,6 +32,7 @@ from aurora.skills.validation_lab import SkillValidationLab
 from aurora.skills.improvement import SkillImprovementGenerator
 from aurora.skills.discovery import SkillDiscoveryService
 from .director import DirectorPlanner, DirectorService
+from .gemini_provider import GeminiDirectorProvider
 from .director_bootstrap import (
     DirectorBootstrap,
     build_context_knowledge_adapter,
@@ -140,11 +141,24 @@ def build_director_service(*, inference_policy_path: str | Path, autonomy_policy
     learning_store=SkillLearningStore(learning_path)
     model_performance=ModelPerformanceStore(root/"model-performance.db")
     task_engine=TaskEngine(orchestration,root,organization=organization,skill_registry=skill_registry,skill_learning=learning_store,model_performance=model_performance)
+    director_provider_id = os.getenv("AURORA_DIRECTOR_PROVIDER", "router").strip().lower()
+    if director_provider_id == "gemini":
+        director_provider = GeminiDirectorProvider()
+    elif director_provider_id in {"router", "inference_fabric", ""}:
+        director_provider = None
+    else:
+        raise RuntimeError(
+            "unsupported AURORA_DIRECTOR_PROVIDER: "
+            + director_provider_id
+            + "; expected gemini or router"
+        )
+
     planner=DirectorPlanner(
         router,
         organization=organization,
         skill_registry=skill_registry,
         project_registry=project_registry,
+        provider=director_provider,
     )
     return DirectorService(planner,task_engine)
 
