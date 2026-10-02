@@ -2,6 +2,7 @@
 from __future__ import annotations
 import json, urllib.error, urllib.request
 from typing import Any, Mapping
+from aurora.inference.models import ModelSpec
 from aurora.inference.providers.registry import default_provider_registry
 from aurora.operator_settings import OperatorSettingsError, OperatorSettingsStore
 from aurora.orchestration.director_provider import InferenceDirectorProvider
@@ -28,6 +29,42 @@ class ProviderSettingsService:
             nvidia_key = self.store.credential("nvidia_api")
             router.nvidia_api_key = nvidia_key or None
             router.provider_registry = default_provider_registry(nvidia_api_key=nvidia_key or None)
+
+            selected_model = str(settings["director"].get("model", "")).strip()
+            if nvidia_key and str(settings["director"].get("provider", "")).strip().lower() == "nvidia_api" and selected_model:
+                existing = next((item for item in router.model_registry.models if item.id == selected_model), None)
+                if existing is None:
+                    existing = ModelSpec(
+                        id=selected_model,
+                        provider="nvidia_api",
+                        endpoint=str(settings["providers"]["nvidia_api"]["base_url"]).rstrip("/"),
+                        capabilities=("chat", "reasoning", "tool_use"),
+                        context_window=131072,
+                        enabled=True,
+                    )
+                    router.model_registry = type(router.model_registry).from_specs(
+                        [*router.model_registry.models, existing],
+                        provider_registry=router.provider_registry,
+                    )
+                    router.models = list(router.model_registry.models)
+                elif not existing.enabled or existing.endpoint != str(settings["providers"]["nvidia_api"]["base_url"]).rstrip("/"):
+                    updated = ModelSpec(
+                        id=existing.id,
+                        provider=existing.provider,
+                        endpoint=str(settings["providers"]["nvidia_api"]["base_url"]).rstrip("/"),
+                        capabilities=existing.capabilities or ("chat", "reasoning", "tool_use"),
+                        context_window=existing.context_window or 131072,
+                        enabled=True,
+                        specialties=existing.specialties,
+                        quality_score=existing.quality_score,
+                        latency_score=existing.latency_score,
+                        cost_score=existing.cost_score,
+                        healthy=existing.healthy,
+                        available=existing.available,
+                    )
+                    router.model_registry.replace(updated)
+                    router.models = list(router.model_registry.models)
+
             director = settings["director"]
             provider_id = str(director.get("provider", "")).strip().lower()
             if provider_id in {"router", "nvidia_api"}:
