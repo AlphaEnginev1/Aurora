@@ -36,4 +36,16 @@ export AURORA_CANONICAL_COMMIT="$($VENV/bin/python -c 'import subprocess; print(
 
 nohup env AURORA_EGRESS_PROXY_HOST="$AURORA_EGRESS_PROXY_HOST" AURORA_EGRESS_PROXY_PORT=3128 AURORA_DASHBOARD_HOST=127.0.0.1 AURORA_DASHBOARD_PORT=8787 AURORA_CANONICAL_COMMIT="$AURORA_CANONICAL_COMMIT" "$VENV/bin/python" -m aurora.orchestration.daemon --dashboard >>"$AURORA_LOG" 2>&1 &
 echo $! > "$AURORA_PID"
+
+for _ in $(seq 1 30); do
+  if curl -fsS --max-time 1 http://127.0.0.1:8787/ >/dev/null 2>&1; then
+    break
+  fi
+  sleep 1
+done
+
+if command -v cmd.exe >/dev/null 2>&1; then
+  cmd.exe /C start "" "http://127.0.0.1:8787" >/dev/null 2>&1 || true
+fi
+
 echo "Aurora dashboard: http://127.0.0.1:8787"
