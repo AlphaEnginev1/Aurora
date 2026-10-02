@@ -8,7 +8,7 @@
     retryDelay: 10000,
     inFlight: false,
     apiBase: window.AURORA_DASHBOARD_API_BASE || "/api/dashboard",
-    portraitUrl: window.AURORA_AVATAR_PORTRAIT_URL || "",
+    portraitUrl: window.AURORA_AVATAR_PORTRAIT_URL || "./aurora-central-avatar.jpg",
     conversationApiBase: window.AURORA_CONVERSATION_API_BASE || "/api/conversation",
     conversationSessionId: null,
     conversationInFlight: false
