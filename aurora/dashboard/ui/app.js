@@ -477,6 +477,7 @@
         try {
           state.avatarVoice.speak(data.response_text);
         } catch (_) {
+          // Voice output is optional; preserve the authoritative text response.
           state.avatarVoice.setIdle();
         }
       } else if (state.avatarVoice) {
