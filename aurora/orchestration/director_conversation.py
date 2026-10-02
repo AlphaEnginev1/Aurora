@@ -11,6 +11,7 @@ from uuid import uuid4
 
 from aurora.inference.models import InferenceRequest, InferenceResponse
 from aurora.inference.router import ModelRouter, ModelRoutingError
+from .director_provider import DirectorProvider, InferenceDirectorProvider
 
 from .director_bootstrap import DirectorBootstrap, DirectorBootstrapError
 
@@ -79,6 +80,7 @@ Keep responses useful and concise unless the human asks for depth."""
         bootstrap: DirectorBootstrap,
         db_path: str | Path,
         max_history_turns: int = 20,
+        provider: DirectorProvider | None = None,
     ) -> None:
         if max_history_turns < 1:
             raise DirectorConversationError("max_history_turns must be at least 1")
@@ -86,6 +88,7 @@ Keep responses useful and concise unless the human asks for depth."""
         self.bootstrap = bootstrap
         self.db_path = Path(db_path)
         self.max_history_turns = max_history_turns
+        self.provider: DirectorProvider = provider or InferenceDirectorProvider(router)
         self.router.configure_context_gate(bootstrap.context_gate, enforce=True)
         self._initialize_schema()
 
@@ -217,11 +220,27 @@ Keep responses useful and concise unless the human asks for depth."""
         )
 
         try:
-            response = self.router.generate(
-                request,
-                capability=str(policy["default_capability"]),
-                preferred_models=self._preferred_models(policy),
-            )
+            if isinstance(self.provider, InferenceDirectorProvider):
+                response = self.router.generate(
+                    request,
+                    capability=str(policy["default_capability"]),
+                    preferred_models=self._preferred_models(policy),
+                )
+            else:
+                provider_messages = [
+                    {"role": "system", "content": self.SYSTEM_PROMPT},
+                    *bootstrap_state.messages,
+                    *[
+                        {"role": item.role, "content": item.content}
+                        for item in history
+                        if item.state == "completed" and item.role in {"user", "assistant"}
+                    ],
+                ]
+                response = self.provider.generate(
+                    messages=provider_messages,
+                    model=model,
+                    role="director_conversation",
+                )
         except Exception as exc:
             self._insert_turn(
                 turn_id=f"{turn_id}-error",
@@ -300,6 +319,11 @@ Keep responses useful and concise unless the human asks for depth."""
                 "voice_requested": False,
             },
         )
+
+    def set_provider(self, provider: DirectorProvider) -> None:
+        if not getattr(provider, "provider_id", ""):
+            raise DirectorConversationError("Director provider must expose provider_id")
+        self.provider = provider
 
     def close_session(self, session_id: str) -> ConversationSession:
         session = self.get_session(session_id)
@@ -450,21 +474,25 @@ Keep responses useful and concise unless the human asks for depth."""
                 (_now(), bootstrap_id, context_manifest_id, session_id),
             )
 
-    @staticmethod
-    def _preferred_models(policy: Mapping[str, Any]) -> tuple[str, ...]:
+    def _preferred_models(self, policy: Mapping[str, Any]) -> tuple[str, ...]:
         models = policy.get("models", ())
-        return tuple(
+        configured = tuple(
             item["id"]
             for item in models
             if isinstance(item, Mapping)
             and isinstance(item.get("id"), str)
             and bool(item.get("enabled", True))
         )
+        if configured:
+            return configured
+        return tuple(model.id for model in self.router.available())
 
-    @staticmethod
-    def _validate_requested_model(model: str | None, policy: Mapping[str, Any]) -> None:
+    def _validate_requested_model(self, model: str | None, policy: Mapping[str, Any]) -> None:
         if model is None:
             return
+        if getattr(self.provider, "provider_id", "") == "gemini":
+            if str(model).strip():
+                return
         configured = {
             item["id"]
             for item in policy.get("models", ())

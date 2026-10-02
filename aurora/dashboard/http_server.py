@@ -10,6 +10,7 @@ from urllib.parse import unquote, urlparse
 
 from .conversation_api import DashboardConversationAPI, DashboardConversationAPIError
 from .gateway import DashboardGateway, DashboardGatewayError
+from .provider_settings import DashboardProviderSettingsError, ProviderSettingsService
 
 
 class DashboardHTTPError(RuntimeError):
@@ -36,6 +37,7 @@ def create_dashboard_server(
     port: int = 8787,
     ui_root: str | Path | None = None,
     api_token: str | None = None,
+    provider_settings: ProviderSettingsService | None = None,
 ) -> ThreadingHTTPServer:
     _validate_bind(host, api_token)
     if port < 0 or port > 65535:
@@ -51,6 +53,7 @@ def create_dashboard_server(
     Handler.conversation_api = conversation_api
     Handler.ui_root = root
     Handler.api_token = (api_token or "").strip() or None
+    Handler.provider_settings = provider_settings
 
     return ThreadingHTTPServer((host, port), Handler)
 
@@ -60,6 +63,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
     conversation_api: DashboardConversationAPI
     ui_root: Path
     api_token: str | None
+    provider_settings: ProviderSettingsService | None
 
     server_version = "AuroraDashboard/1"
 
@@ -69,6 +73,12 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             path = parsed.path
             if path == "/api/dashboard/snapshot":
                 self._json(200, self.dashboard_gateway.snapshot())
+                return
+            if path == "/api/dashboard/settings":
+                self._require_token()
+                if self.provider_settings is None:
+                    raise DashboardHTTPError("provider settings are not configured")
+                self._json(200, self.provider_settings.public())
                 return
             if path.startswith("/api/dashboard/projects/"):
                 project_id = unquote(path.rsplit("/", 1)[-1])
@@ -93,7 +103,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 self._static("index.html")
                 return
             self._static(path.lstrip("/"))
-        except (DashboardGatewayError, DashboardConversationAPIError, DashboardHTTPError) as exc:
+        except (DashboardGatewayError, DashboardConversationAPIError, DashboardHTTPError, DashboardProviderSettingsError) as exc:
             self._json(400, {"error": str(exc)})
         except Exception as exc:
             self._json(500, {"error": "internal dashboard error", "type": type(exc).__name__})
@@ -103,6 +113,19 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             self._require_token()
             parsed = urlparse(self.path)
             payload = self._json_body()
+            if parsed.path == "/api/dashboard/settings":
+                if self.provider_settings is None:
+                    raise DashboardHTTPError("provider settings are not configured")
+                self._json(200, self.provider_settings.save_and_apply(payload))
+                return
+            if parsed.path == "/api/dashboard/settings/test":
+                if self.provider_settings is None:
+                    raise DashboardHTTPError("provider settings are not configured")
+                provider = payload.get("provider")
+                if not isinstance(provider, str):
+                    raise DashboardConversationAPIError("provider must be a string")
+                self._json(200, self.provider_settings.test_provider(provider))
+                return
             if parsed.path == "/api/conversation/session":
                 session_id = payload.get("session_id")
                 if session_id is not None and not isinstance(session_id, str):
@@ -135,7 +158,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 )
                 return
             self._json(404, {"error": "dashboard route not found"})
-        except (DashboardConversationAPIError, DashboardHTTPError) as exc:
+        except (DashboardConversationAPIError, DashboardHTTPError, DashboardProviderSettingsError) as exc:
             self._json(400, {"error": str(exc)})
         except Exception as exc:
             self._json(500, {"error": "internal dashboard error", "type": type(exc).__name__})

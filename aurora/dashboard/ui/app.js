@@ -12,7 +12,8 @@
     conversationApiBase: window.AURORA_CONVERSATION_API_BASE || "/api/conversation",
     conversationSessionId: null,
     conversationInFlight: false,
-    activeView: "home"
+    activeView: "home",
+    settings: null
   };
 
   const $ = (id) => document.getElementById(id);
@@ -47,6 +48,9 @@
     state.activeView = view;
     document.querySelectorAll("[data-view-panel]").forEach(function (panel) {
       panel.classList.toggle("active", panel.getAttribute("data-view-panel") === view);
+    });
+    if (view === "settings") loadSettings().catch(function (error) {
+      showSettingsMessage("Settings unavailable: " + error.message, true);
     });
     document.querySelectorAll("[data-nav-target]").forEach(function (button) {
       if (button.classList.contains("rail-button")) {
@@ -342,6 +346,123 @@
       '<div class="decision-card"><span>ACTIVE POLICY</span><strong>' + esc(governance.active_policy ? "AVAILABLE" : "NOT CONFIGURED") + '</strong><em>governance boundary</em></div>';
   }
 
+  function showSettingsMessage(message, error) {
+    const target = $("settings-message");
+    if (!target) return;
+    target.textContent = message;
+    target.className = "settings-message " + (error ? "error" : "success");
+  }
+
+  function renderSettings(data) {
+    state.settings = data;
+    const director = safeObject(data.director);
+    const providers = safeObject(data.providers);
+    $("director-provider").value = String(director.provider || "gemini");
+    $("director-model").value = String(director.model || "");
+    $("director-endpoint").value = String(director.endpoint || "");
+    $("nvidia-endpoint").value = String(
+      safeObject(providers.nvidia_api).base_url || "https://integrate.api.nvidia.com/v1"
+    );
+
+    const geminiPresent = !!safeObject(providers.gemini).api_key_present;
+    const nvidiaPresent = !!safeObject(providers.nvidia_api).api_key_present;
+    $("gemini-status").textContent = geminiPresent ? "CONNECTED" : "NOT CONNECTED";
+    $("nvidia-status").textContent = nvidiaPresent ? "CONNECTED" : "NOT CONNECTED";
+    $("settings-state").innerHTML =
+      '<span class="signal-dot"></span> ' +
+      esc(String(data.runtime && data.runtime.director_provider || director.provider || "unknown").toUpperCase());
+    $("nvidia-models").innerHTML = "";
+    showSettingsMessage(geminiPresent || nvidiaPresent ? "Provider configuration loaded." : "Enter your provider keys here; no terminal is needed.", false);
+  }
+
+  async function loadSettings() {
+    const response = await fetch(state.apiBase + "/settings", { headers: { Accept: "application/json" } });
+    if (!response.ok) throw new Error("settings " + response.status);
+    renderSettings(await response.json());
+  }
+
+  async function saveSettings() {
+    const payload = {
+      director: {
+        provider: $("director-provider").value,
+        model: $("director-model").value.trim(),
+        endpoint: $("director-endpoint").value.trim()
+      },
+      providers: {
+        nvidia_api: {
+          base_url: $("nvidia-endpoint").value.trim()
+        }
+      }
+    };
+    const geminiKey = $("gemini-key").value.trim();
+    const nvidiaKey = $("nvidia-key").value.trim();
+    if (geminiKey) payload.providers.gemini = { api_key: geminiKey };
+    if (nvidiaKey) payload.providers.nvidia_api.api_key = nvidiaKey;
+
+    const button = $("settings-save");
+    button.disabled = true;
+    showSettingsMessage("Saving and applying provider configuration…", false);
+    try {
+      const response = await fetch(state.apiBase + "/settings", {
+        method: "POST",
+        headers: { Accept: "application/json", "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data && data.error ? data.error : "settings " + response.status);
+      $("gemini-key").value = "";
+      $("nvidia-key").value = "";
+      renderSettings(data);
+      showSettingsMessage("Configuration saved and applied. Aurora is ready to use the selected Director.", false);
+    } catch (error) {
+      showSettingsMessage(error.message, true);
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  async function testProvider(provider) {
+    showSettingsMessage("Testing " + provider.toUpperCase() + "…", false);
+    const response = await fetch(state.apiBase + "/settings/test", {
+      method: "POST",
+      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      body: JSON.stringify({ provider: provider })
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data && data.error ? data.error : "provider test failed");
+    if (provider === "nvidia_api") {
+      const models = safeArray(data.models);
+      $("nvidia-models").innerHTML = models.length
+        ? '<div class="settings-model-title">DISCOVERED MODELS</div>' +
+          models.slice(0, 40).map(function (model) {
+            return '<button type="button" class="settings-model" data-model="' + esc(model) + '">' + esc(model) + '</button>';
+          }).join("")
+        : '<div class="empty-state">No model IDs returned by NVIDIA.</div>';
+      document.querySelectorAll(".settings-model").forEach(function (button) {
+        button.addEventListener("click", function () {
+          $("director-model").value = button.getAttribute("data-model") || "";
+          $("director-provider").value = "nvidia_api";
+        });
+      });
+    }
+    showSettingsMessage(provider.toUpperCase() + " connection verified.", false);
+  }
+
+  function setupSettings() {
+    $("settings-save").addEventListener("click", function () {
+      saveSettings();
+    });
+    $("settings-reload").addEventListener("click", function () {
+      loadSettings().catch(function (error) { showSettingsMessage(error.message, true); });
+    });
+    $("gemini-test").addEventListener("click", function () {
+      testProvider("gemini").catch(function (error) { showSettingsMessage(error.message, true); });
+    });
+    $("nvidia-test").addEventListener("click", function () {
+      testProvider("nvidia_api").catch(function (error) { showSettingsMessage(error.message, true); });
+    });
+  }
+
   async function openInspector(eyebrow, title, promise) {
     $("inspector-eyebrow").textContent = String(eyebrow).toUpperCase();
     $("inspector-title").textContent = title;
@@ -592,6 +713,7 @@
   setupConversation();
   setupAvatarPortrait();
   setupAvatarVoice();
+  setupSettings();
 
   ensureConversationSession().catch(function (error) {
     $("avatar-transcript").textContent = "Conversation service unavailable: " + error.message;

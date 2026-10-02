@@ -16,6 +16,8 @@ from aurora.production_authorization import (
     LiveAuthorizationError,
     REQUIRED_PREREQUISITES,
 )
+from aurora.operator_settings import OperatorSettingsStore, settings_path
+from aurora.dashboard.provider_settings import ProviderSettingsService
 
 
 def _path_env(name: str, default: str) -> Path:
@@ -114,6 +116,10 @@ def main() -> int:
     )
 
     dashboard_server = None
+    provider_settings = ProviderSettingsService(
+        OperatorSettingsStore(settings_path(os.getenv("AURORA_WORKSPACE_ROOT", ".aurora-runtime"))),
+        runtime,
+    )
     if args.dashboard:
         try:
             if runtime.conversation_service is None:
@@ -125,6 +131,7 @@ def main() -> int:
                 host=args.dashboard_host,
                 port=args.dashboard_port,
                 api_token=os.getenv("AURORA_DASHBOARD_API_TOKEN"),
+                provider_settings=provider_settings,
             )
         except DashboardHTTPError as exc:
             parser.error(str(exc))

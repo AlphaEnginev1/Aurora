@@ -1,0 +1,24 @@
+from pathlib import Path
+
+ROOT = Path(__file__).parents[1]
+
+
+def test_local_launcher_starts_proxy_and_dashboard():
+    script = (ROOT / "scripts" / "launch-local.sh").read_text(encoding="utf-8")
+    for marker in (
+        "aurora.autonomy.egress_proxy_daemon",
+        "aurora.orchestration.daemon",
+        "AURORA_EGRESS_PROXY_HOST",
+        "AURORA_DASHBOARD_PORT=8787",
+        ".aurora-runtime",
+        "aurora.pid",
+    ):
+        assert marker in script
+
+
+def test_windows_shortcut_targets_wsl_ubuntu():
+    script = (ROOT / "scripts" / "install-desktop-launcher.ps1").read_text(encoding="utf-8")
+    assert "CreateShortcut" in script
+    assert "Aurora.lnk" in script
+    assert "-d Ubuntu" in script
+    assert "launch-local.sh" in script

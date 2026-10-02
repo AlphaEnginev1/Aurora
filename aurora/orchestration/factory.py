@@ -12,6 +12,7 @@ from aurora.autonomy.registry import CapabilityRegistryStore, load_registry, mer
 from aurora.autonomy.sandbox import SandboxExecutor, SandboxPolicy
 from aurora.inference.registry import ModelRegistry
 from aurora.inference.router import ModelRouter
+from aurora.inference.models import ModelSpec
 from aurora.inference.discovery import ModelCandidateStore, ModelDiscoveryService
 from aurora.inference.providers.registry import default_provider_registry
 from aurora.inference.model_performance import ModelPerformanceStore
@@ -31,7 +32,9 @@ from aurora.skills.evolution_runtime import SkillEvolutionRuntime
 from aurora.skills.validation_lab import SkillValidationLab
 from aurora.skills.improvement import SkillImprovementGenerator
 from aurora.skills.discovery import SkillDiscoveryService
+from aurora.operator_settings import OperatorSettingsStore, settings_path
 from .director import DirectorPlanner, DirectorService
+from .director_provider import InferenceDirectorProvider
 from .gemini_provider import GeminiDirectorProvider
 from .director_bootstrap import (
     DirectorBootstrap,
@@ -71,11 +74,78 @@ def build_orchestration_engine(policy_path: str | Path) -> OrchestrationEngine:
         )
     )
 
-def _build_director_provider():
-    director_provider_id = os.getenv("AURORA_DIRECTOR_PROVIDER", "router").strip().lower()
+def _apply_local_model_settings(router: ModelRouter, settings_store: OperatorSettingsStore) -> None:
+    settings = settings_store.load()
+    director = settings.get("director", {}) if isinstance(settings, dict) else {}
+    provider_id = str(director.get("provider", "")).strip().lower()
+    model_id = str(director.get("model", "")).strip()
+    if provider_id != "nvidia_api" or not model_id:
+        return
+    base_url = str(
+        settings.get("providers", {}).get("nvidia_api", {}).get(
+            "base_url", "https://integrate.api.nvidia.com/v1"
+        )
+    ).rstrip("/")
+    try:
+        existing = router.model_registry.resolve(model_id)
+    except Exception:
+        existing = None
+    if existing is None:
+        model = ModelSpec(
+            id=model_id,
+            provider="nvidia_api",
+            endpoint=base_url,
+            capabilities=("chat", "reasoning", "tool_use"),
+            context_window=131072,
+            enabled=True,
+        )
+        router.model_registry = type(router.model_registry).from_specs(
+            [*router.model_registry.models, model],
+            provider_registry=router.provider_registry,
+        )
+        router.models = list(router.model_registry.models)
+        return
+    if not existing.enabled or existing.endpoint != base_url:
+        updated = ModelSpec(
+            id=existing.id,
+            provider=existing.provider,
+            endpoint=base_url,
+            capabilities=existing.capabilities or ("chat", "reasoning", "tool_use"),
+            context_window=existing.context_window or 131072,
+            enabled=True,
+            specialties=existing.specialties,
+            quality_score=existing.quality_score,
+            latency_score=existing.latency_score,
+            cost_score=existing.cost_score,
+            healthy=existing.healthy,
+            available=existing.available,
+        )
+        router.model_registry.replace(updated)
+        router.models = list(router.model_registry.models)
+
+
+def _build_director_provider(settings_store: OperatorSettingsStore | None = None):
+    settings = settings_store.load() if settings_store is not None else {}
+    configured = settings.get("director", {}) if isinstance(settings, dict) else {}
+    director_provider_id = os.getenv(
+        "AURORA_DIRECTOR_PROVIDER",
+        str(configured.get("provider", "router")),
+    ).strip().lower()
     if director_provider_id == "gemini":
-        return GeminiDirectorProvider()
-    if director_provider_id in {"router", "inference_fabric", ""}:
+        key = (
+            (settings_store.credential("gemini") if settings_store is not None else "")
+            or os.getenv("GEMINI_API_KEY", "")
+        )
+        if not key and settings_store is not None:
+            return None
+        return GeminiDirectorProvider(
+            api_key=key,
+            model=os.getenv("GEMINI_MODEL_ID") or str(configured.get("model", "gemini-3.7-flash")),
+            endpoint=os.getenv("GEMINI_API_ENDPOINT") or str(
+                configured.get("endpoint", "https://generativelanguage.googleapis.com/v1beta")
+            ),
+        )
+    if director_provider_id in {"router", "inference_fabric", "nvidia_api", ""}:
         return None
     raise RuntimeError(
         "unsupported AURORA_DIRECTOR_PROVIDER: "
@@ -89,7 +159,8 @@ def build_director_service(*, inference_policy_path: str | Path, autonomy_policy
     egress_proxy_host: str, egress_proxy_port: int=3128, organization_path: str | Path="config/organization.json",
     skills_path: str | Path="config/skills.json", skill_learning_path: str | Path | None=None,
     projects_path: str | Path="config/projects.json") -> DirectorService:
-    nvidia_key = os.getenv("NVIDIA_API_KEY")
+    settings_store = OperatorSettingsStore(settings_path(workspace_root))
+    nvidia_key = settings_store.credential("nvidia_api") or os.getenv("NVIDIA_API_KEY")
     provider_registry = default_provider_registry(nvidia_api_key=nvidia_key)
     model_registry = ModelRegistry.from_file(
         inference_policy_path,
@@ -102,6 +173,7 @@ def build_director_service(*, inference_policy_path: str | Path, autonomy_policy
         provider_registry=provider_registry,
         model_registry=model_registry,
     )
+    _apply_local_model_settings(router, settings_store)
     skill_registry=SkillRegistry.from_file(skills_path,configured_models={model.id for model in inference_specs})
     organization=OrganizationRegistry.from_file(organization_path,configured_models={model.id for model in inference_specs})
     skill_registry.validate_organization(organization)
@@ -154,14 +226,14 @@ def build_director_service(*, inference_policy_path: str | Path, autonomy_policy
     learning_store=SkillLearningStore(learning_path)
     model_performance=ModelPerformanceStore(root/"model-performance.db")
     task_engine=TaskEngine(orchestration,root,organization=organization,skill_registry=skill_registry,skill_learning=learning_store,model_performance=model_performance)
-    director_provider = _build_director_provider()
+    director_provider = _build_director_provider(settings_store)
 
     planner=DirectorPlanner(
         router,
         organization=organization,
         skill_registry=skill_registry,
         project_registry=project_registry,
-        provider=director_provider,
+        provider=director_provider or InferenceDirectorProvider(router),
     )
     return DirectorService(planner,task_engine)
 
@@ -290,6 +362,7 @@ def build_director_runtime(*, inference_policy_path: str | Path, autonomy_policy
         router=service.planner.router,
         bootstrap=bootstrap,
         db_path=runtime_root/"conversations.db",
+        provider=service.planner.provider,
     )
 
     observability=ProductionObservability(runtime_root/"observability.jsonl")

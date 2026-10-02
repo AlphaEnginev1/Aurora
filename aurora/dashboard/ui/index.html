@@ -226,6 +226,70 @@
           </div>
         </section>
 
+        <section id="view-settings" class="view" data-view-panel="settings" aria-label="Settings">
+          <div class="view-header">
+            <div><div class="eyebrow">AURORA // SETTINGS</div><h1>AI Engines</h1><p>Director · providers · credentials · model connection</p></div>
+            <div id="settings-state" class="header-state"><span class="signal-dot"></span> LOCAL OPERATOR</div>
+          </div>
+          <div class="settings-layout">
+            <section class="panel content-panel settings-main">
+              <div class="panel-head">
+                <div><div class="eyebrow">DIRECTOR ENGINE</div><h2>Active Director</h2></div>
+              </div>
+              <div class="settings-form">
+                <label for="director-provider">Provider</label>
+                <select id="director-provider">
+                  <option value="gemini">Gemini</option>
+                  <option value="router">Aurora Model Router</option>
+                  <option value="nvidia_api">NVIDIA API</option>
+                </select>
+                <label for="director-model">Model</label>
+                <input id="director-model" type="text" autocomplete="off" placeholder="gemini-3.7-flash">
+                <label for="director-endpoint">Endpoint</label>
+                <input id="director-endpoint" type="url" autocomplete="off" placeholder="https://generativelanguage.googleapis.com/v1beta">
+                <div class="settings-actions">
+                  <button id="settings-save" class="primary-button" type="button">Save & apply</button>
+                  <button id="settings-reload" class="ghost-button" type="button">Reload</button>
+                </div>
+              </div>
+            </section>
+
+            <section class="panel content-panel settings-side">
+              <div class="panel-head">
+                <div><div class="eyebrow">GEMINI</div><h2>Director credential</h2></div>
+                <span id="gemini-status" class="badge">NOT CONNECTED</span>
+              </div>
+              <div class="settings-form">
+                <label for="gemini-key">API key</label>
+                <input id="gemini-key" type="password" autocomplete="new-password" placeholder="Enter Gemini API key">
+                <p class="settings-note">Stored locally in Aurora runtime storage. The dashboard never displays the saved secret.</p>
+                <div class="settings-actions">
+                  <button id="gemini-test" class="ghost-button" type="button">Test Gemini</button>
+                </div>
+              </div>
+            </section>
+
+            <section class="panel content-panel settings-side">
+              <div class="panel-head">
+                <div><div class="eyebrow">NVIDIA NIM</div><h2>Inference fabric</h2></div>
+                <span id="nvidia-status" class="badge">NOT CONNECTED</span>
+              </div>
+              <div class="settings-form">
+                <label for="nvidia-key">API key</label>
+                <input id="nvidia-key" type="password" autocomplete="new-password" placeholder="Enter NVIDIA API key">
+                <label for="nvidia-endpoint">Base URL</label>
+                <input id="nvidia-endpoint" type="url" autocomplete="off" value="https://integrate.api.nvidia.com/v1">
+                <p class="settings-note">One NVIDIA credential unlocks the provider catalog. Aurora can discover the models available to that account.</p>
+                <div class="settings-actions">
+                  <button id="nvidia-test" class="ghost-button" type="button">Test & discover</button>
+                </div>
+                <div id="nvidia-models" class="settings-models"></div>
+              </div>
+            </section>
+          </div>
+          <div id="settings-message" class="settings-message" aria-live="polite"></div>
+        </section>
+
         <section id="view-system" class="view" data-view-panel="system" aria-label="System">
           <div class="view-header">
             <div><div class="eyebrow">AURORA // SYSTEM</div><h1>System</h1><p>Runtime · observability · recovery · learning loop</p></div>
@@ -253,6 +317,7 @@
         <button class="rail-button" data-nav-target="knowledge" type="button" aria-label="Knowledge"><span class="rail-glyph">◌</span><small>KNOW</small></button>
         <button class="rail-button" data-nav-target="models" type="button" aria-label="Models"><span class="rail-glyph">✦</span><small>MODELS</small></button>
         <button class="rail-button" data-nav-target="system" type="button" aria-label="System"><span class="rail-glyph">⚙</span><small>SYSTEM</small></button>
+        <button class="rail-button" data-nav-target="settings" type="button" aria-label="Settings"><span class="rail-glyph">◈</span><small>SETUP</small></button>
         <div class="rail-footer"><span class="rail-online"></span><small>LIVE</small></div>
       </nav>
     </div>
