@@ -474,16 +474,18 @@ Keep responses useful and concise unless the human asks for depth."""
                 (_now(), bootstrap_id, context_manifest_id, session_id),
             )
 
-    @staticmethod
-    def _preferred_models(policy: Mapping[str, Any]) -> tuple[str, ...]:
+    def _preferred_models(self, policy: Mapping[str, Any]) -> tuple[str, ...]:
         models = policy.get("models", ())
-        return tuple(
+        configured = tuple(
             item["id"]
             for item in models
             if isinstance(item, Mapping)
             and isinstance(item.get("id"), str)
             and bool(item.get("enabled", True))
         )
+        if configured:
+            return configured
+        return tuple(model.id for model in self.router.available())
 
     def _validate_requested_model(self, model: str | None, policy: Mapping[str, Any]) -> None:
         if model is None:
