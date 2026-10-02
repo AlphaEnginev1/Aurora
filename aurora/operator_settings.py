@@ -49,7 +49,7 @@ class OperatorSettingsStore:
             key = str(item.pop("api_key", "") or "")
             item["api_key_present"] = bool(key.strip())
             providers[provider_id] = item
-        return {"director": dict(data["director"]), "providers": providers, "path": str(self.path)}
+        return {"director": dict(data["director"]), "providers": providers}
 
     def credential(self, provider_id: str) -> str:
         provider = self.load()["providers"].get(provider_id)
