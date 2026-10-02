@@ -33,6 +33,7 @@ from aurora.skills.improvement import SkillImprovementGenerator
 from aurora.skills.discovery import SkillDiscoveryService
 from aurora.operator_settings import OperatorSettingsStore, settings_path
 from .director import DirectorPlanner, DirectorService
+from .director_provider import InferenceDirectorProvider
 from .gemini_provider import GeminiDirectorProvider
 from .director_bootstrap import (
     DirectorBootstrap,
