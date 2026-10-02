@@ -3,87 +3,183 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="theme-color" content="#07111f">
-  <title>Aurora Operations Center</title>
+  <meta name="theme-color" content="#071019">
+  <title>Aurora Command Center</title>
   <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
   <header class="topbar">
     <div class="brand">
-      <span class="brand-mark">A</span>
-      <div><strong>AURORA</strong><span>Operations Center</span></div>
+      <span class="brand-mark" aria-hidden="true">A</span>
+      <div>
+        <strong>AURORA</strong>
+        <span>Autonomous Command Center</span>
+      </div>
     </div>
     <div class="topbar-meta">
       <span id="system-status" class="status-pill unknown">SYSTEM UNKNOWN</span>
-      <span id="freshness">No snapshot</span>
+      <span id="freshness" class="freshness">No snapshot</span>
       <button id="refresh" class="ghost-button" type="button">Refresh</button>
     </div>
   </header>
+
   <main class="app-shell">
-    <section class="director-card panel">
-      <div class="director-copy">
-        <div class="eyebrow">DIRECTOR CORE</div>
-        <h1 id="director-name">Aurora Director</h1>
-        <p id="director-readiness">Awaiting authoritative dashboard state.</p>
-        <div class="director-metrics">
-          <div><span>Model</span><strong id="director-model">—</strong></div>
-          <div><span>Context</span><strong id="director-context">—</strong></div>
-          <div><span>Projects</span><strong id="project-count">0</strong></div>
+    <section class="command-layout">
+      <aside class="system-rail">
+        <div class="rail-section rail-status">
+          <div class="eyebrow">SYSTEM</div>
+          <div class="rail-state">
+            <span class="state-dot" aria-hidden="true"></span>
+            <strong>Director runtime</strong>
+          </div>
+          <p id="director-readiness">Awaiting authoritative dashboard state.</p>
         </div>
-      </div>
-      <div id="director-portrait" class="portrait-stage" aria-label="Aurora Director portrait">
-        <div class="portrait-ring"></div>
-        <div class="portrait-visual">
-          <img
-            id="director-portrait-image"
-            class="portrait-image"
-            alt="Aurora Director portrait"
-            hidden
-          >
-          <div class="portrait-placeholder" id="portrait-placeholder">
-            <span>👤</span>
-            <small>Director portrait</small>
+
+        <div class="rail-section">
+          <div class="eyebrow">DIRECTOR</div>
+          <h1 id="director-name">Aurora Director</h1>
+          <div class="rail-fact"><span>Model</span><strong id="director-model">—</strong></div>
+          <div class="rail-fact"><span>Context</span><strong id="director-context">—</strong></div>
+        </div>
+
+        <div class="rail-section">
+          <div class="eyebrow">LIVE COUNTS</div>
+          <div class="count-grid">
+            <div><strong id="project-count">0</strong><span>Projects</span></div>
+            <div><strong id="agent-count">0</strong><span>Agents</span></div>
+            <div><strong id="active-project-count">0</strong><span>Active</span></div>
+            <div><strong id="model-count">0</strong><span>Models</span></div>
           </div>
         </div>
-        <div class="avatar-voice-panel" aria-live="polite">
+
+        <div class="rail-footer">
+          <span>Authoritative state</span>
+          <span>Gateway connected</span>
+        </div>
+      </aside>
+
+      <section class="director-stage panel" aria-label="Aurora Director">
+        <div class="stage-header">
+          <div>
+            <div class="eyebrow">DIRECTOR CORE</div>
+            <h2>Meet Aurora</h2>
+          </div>
           <span id="avatar-voice-status" class="avatar-voice-status">IDLE</span>
-          <p id="avatar-transcript">Text conversation remains available when voice is unavailable.</p>
-          <div class="director-chat">
-            <label for="director-message">Conversation</label>
-            <textarea id="director-message" rows="2" maxlength="8000"
-              placeholder="Write to Aurora Director…"></textarea>
-            <div class="avatar-voice-actions">
-              <button id="director-send" class="ghost-button" type="button">Send</button>
-              <button id="avatar-listen" class="ghost-button" type="button">Speak to Aurora</button>
-              <button id="avatar-stop" class="ghost-button" type="button">Stop</button>
+        </div>
+
+        <div id="director-portrait" class="portrait-stage" aria-label="Aurora Director portrait">
+          <div class="portrait-halo halo-a"></div>
+          <div class="portrait-halo halo-b"></div>
+          <div class="portrait-ring"></div>
+          <div class="portrait-visual">
+            <img
+              id="director-portrait-image"
+              class="portrait-image"
+              alt="Aurora Director portrait"
+              hidden
+            >
+            <div class="portrait-placeholder" id="portrait-placeholder">
+              <span aria-hidden="true">A</span>
+              <small>Portrait unavailable</small>
             </div>
           </div>
+          <div class="portrait-caption">
+            <span class="caption-dot" aria-hidden="true"></span>
+            <span>Conversational focus</span>
+          </div>
         </div>
-      </div>
+
+        <div class="stage-footer">
+          <span id="avatar-transcript">Text conversation remains available when voice is unavailable.</span>
+        </div>
+      </section>
+
+      <section class="conversation-panel panel" aria-label="Conversation with Aurora Director">
+        <div class="section-head conversation-head">
+          <div>
+            <div class="eyebrow">CONVERSATION</div>
+            <h2>Talk to Aurora</h2>
+            <p>Text is always available; voice is an optional presentation layer.</p>
+          </div>
+          <span class="conversation-badge">DIRECT</span>
+        </div>
+
+        <div class="conversation-body">
+          <div class="conversation-intro">
+            <div class="intro-orb">A</div>
+            <div>
+              <strong>Aurora Director</strong>
+              <span>Ready for your next instruction</span>
+            </div>
+          </div>
+
+          <label for="director-message" class="sr-only">Message Aurora Director</label>
+          <textarea id="director-message" rows="8" maxlength="8000"
+            placeholder="Write to Aurora…"></textarea>
+
+          <div class="conversation-actions">
+            <button id="director-send" class="primary-button" type="button">Send message</button>
+            <button id="avatar-listen" class="ghost-button" type="button">Speak</button>
+            <button id="avatar-stop" class="ghost-button" type="button">Stop</button>
+          </div>
+
+          <div class="conversation-hint">
+            <span>Enter to send</span>
+            <span>Shift + Enter for a new line</span>
+          </div>
+        </div>
+      </section>
     </section>
-    <section class="topology-grid">
+
+    <section class="workspace-grid">
       <div class="panel topology-panel">
         <div class="section-head">
           <div><div class="eyebrow">AGENT OPERATIONS</div><h2>Organization</h2></div>
-          <span class="muted" id="agent-count">0 agents</span>
+          <span class="muted" id="agent-count-label">0 agents</span>
         </div>
         <div id="agent-orbit" class="agent-orbit" aria-live="polite"></div>
       </div>
+
       <div class="panel projects-panel">
         <div class="section-head">
           <div><div class="eyebrow">PROJECT COCKPIT</div><h2>Projects</h2></div>
-          <span class="muted" id="active-project-count">0 active</span>
+          <span class="muted" id="active-project-count-label">0 active</span>
         </div>
         <div id="projects-list" class="stack-list" aria-live="polite"></div>
       </div>
-    </section>
-    <section class="dashboard-grid">
-      <article class="panel"><div class="section-head"><div><div class="eyebrow">SHARED MAILBOX</div><h2>Recent activity</h2></div><span class="muted" id="mailbox-count">0</span></div><div id="mailbox-list" class="timeline"></div></article>
-      <article class="panel"><div class="section-head"><div><div class="eyebrow">MODEL INTELLIGENCE</div><h2>Providers &amp; models</h2></div><span class="muted" id="model-count">0 models</span></div><div id="model-list" class="stack-list"></div></article>
-      <article class="panel"><div class="section-head"><div><div class="eyebrow">SKILLS &amp; LEARNING</div><h2>Specialization</h2></div></div><div id="skills-list" class="stack-list"></div></article>
-      <article class="panel"><div class="section-head"><div><div class="eyebrow">RUNTIME &amp; RECOVERY</div><h2>Execution state</h2></div></div><div id="runtime-summary" class="runtime-summary"></div></article>
+
+      <article class="panel">
+        <div class="section-head">
+          <div><div class="eyebrow">SHARED MAILBOX</div><h2>Recent activity</h2></div>
+          <span class="muted" id="mailbox-count">0</span>
+        </div>
+        <div id="mailbox-list" class="timeline"></div>
+      </article>
+
+      <article class="panel">
+        <div class="section-head">
+          <div><div class="eyebrow">MODEL INTELLIGENCE</div><h2>Providers &amp; models</h2></div>
+          <span class="muted" id="model-count-label">0 models</span>
+        </div>
+        <div id="model-list" class="stack-list"></div>
+      </article>
+
+      <article class="panel">
+        <div class="section-head">
+          <div><div class="eyebrow">SKILLS &amp; LEARNING</div><h2>Specialization</h2></div>
+        </div>
+        <div id="skills-list" class="stack-list"></div>
+      </article>
+
+      <article class="panel">
+        <div class="section-head">
+          <div><div class="eyebrow">RUNTIME &amp; RECOVERY</div><h2>Execution state</h2></div>
+        </div>
+        <div id="runtime-summary" class="runtime-summary"></div>
+      </article>
     </section>
   </main>
+
   <aside id="inspector" class="inspector" aria-hidden="true">
     <div class="inspector-backdrop" id="inspector-backdrop"></div>
     <div class="inspector-panel">
@@ -94,6 +190,7 @@
       <div id="inspector-body" class="inspector-body"></div>
     </div>
   </aside>
+
   <script src="./avatar_voice.js" defer></script>
   <script src="./app.js" defer></script>
 </body>
