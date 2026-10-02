@@ -54,7 +54,9 @@ def test_dashboard_settings_http_contract():
         assert response.status == 200
         assert data["runtime"]["director_provider"] == "gemini"
         assert data["providers"]["gemini"]["api_key_present"] is True
-        assert "api_key" not in json.dumps(data)
+        encoded = json.dumps(data)
+        assert "gemini-secret" not in encoded
+        assert "nvidia-secret" not in encoded
 
         request = Request(
             base + "/api/dashboard/settings",
