@@ -1,9 +1,9 @@
 $ErrorActionPreference = "Stop"
-$repo = Join-Path $HOME "AURORA"
 $desktop = [Environment]::GetFolderPath("Desktop")
 $shortcutPath = Join-Path $desktop "Aurora.lnk"
 $wsl = "$env:SystemRoot\System32\wsl.exe"
-if (-not (Test-Path $repo)) { throw "Aurora repository was not found at $repo" }
+& $wsl -d Ubuntu -- bash -lc "test -d ~/AURORA"
+if ($LASTEXITCODE -ne 0) { throw "Aurora repository was not found in WSL Ubuntu at ~/AURORA" }
 $action = 'cd ~/AURORA && bash scripts/launch-local.sh'
 $shell = New-Object -ComObject WScript.Shell
 $shortcut = $shell.CreateShortcut($shortcutPath)
