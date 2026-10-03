@@ -132,3 +132,20 @@ The queue is closed. Block 7 establishes the explicit authorization boundary; it
 **Increment 11 remains unapproved.**
 
 The next capability must be derived from the remaining evidence-backed production gaps and explicitly authorized.
+
+
+## Block 13 — Dashboard Full E2E — COMPLETE
+
+The integrated Dashboard/Director/avatar proof is closed on canonical `main`.
+
+Verified proof lanes:
+1. 13A — integrated conversation lifecycle — VERIFIED.
+2. 13B — voice-to-Director handoff and text fallback — VERIFIED.
+3. 13C — conversation persistence across dashboard restart/reconciliation — VERIFIED.
+4. 13D — canonical Aurora portrait HTTP serving plus operator visual acceptance — VERIFIED.
+5. 13E — real Gemini provider gate — VERIFIED; the final local E2E run passed all 4 tests using Gemini 3.8 Flash.
+6. 13F — final acceptance — COMPLETE.
+
+Dashboard proof remains distinct from the frozen production-readiness queue 1–7. Live execution is still fail-closed and requires the existing explicit human authorization boundary.
+
+**Increment 11 remains unapproved.**
