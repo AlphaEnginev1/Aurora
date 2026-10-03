@@ -81,6 +81,35 @@ def test_persistence_survives_new_store_instance(tmp_path: Path):
     assert loaded == ownership
 
 
+def test_get_can_filter_expired_ownership_without_erasing_history(tmp_path: Path):
+    store = DirectorOwnershipStore(tmp_path / "ownership.db")
+    ownership = store.acquire(
+        "mission-expiry",
+        "director-A",
+        lease_seconds=30,
+        now="2026-01-01T00:00:00+00:00",
+    )
+
+    assert (
+        store.get("mission-expiry", now="2026-01-01T00:00:29+00:00")
+        == ownership
+    )
+    assert store.get("mission-expiry", now="2026-01-01T00:00:30+00:00") is None
+
+    store.release(
+        "mission-expiry",
+        "director-A",
+        ownership.fencing_epoch,
+        now="2026-01-01T00:00:31+00:00",
+    )
+    assert store.get("mission-expiry", now="2026-01-01T00:00:31+00:00") is None
+    historical = store.get("mission-expiry")
+    assert historical is not None
+    assert historical.mission_id == ownership.mission_id
+    assert historical.owner_id == ownership.owner_id
+    assert historical.fencing_epoch == ownership.fencing_epoch
+
+
 def test_stale_owner_cannot_release_after_takeover(tmp_path: Path):
     store = DirectorOwnershipStore(tmp_path / "ownership.db")
     a = store.acquire(

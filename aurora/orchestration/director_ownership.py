@@ -80,7 +80,13 @@ class DirectorOwnershipStore:
             updated_at=row["updated_at"],
         )
 
-    def get(self, mission_id: str) -> DirectorOwnership | None:
+    def get(
+        self,
+        mission_id: str,
+        *,
+        now: str | None = None,
+    ) -> DirectorOwnership | None:
+        """Return persisted ownership, optionally filtering out expired leases."""
         if not mission_id.strip():
             raise DirectorOwnershipError("mission_id is empty")
         with self._connect() as db:
@@ -92,7 +98,12 @@ class DirectorOwnershipStore:
                 """,
                 (mission_id,),
             ).fetchone()
-        return self._row_to_ownership(row) if row is not None else None
+        if row is None:
+            return None
+        ownership = self._row_to_ownership(row)
+        if now is not None and ownership.lease_until <= now:
+            return None
+        return ownership
 
     def acquire(
         self,

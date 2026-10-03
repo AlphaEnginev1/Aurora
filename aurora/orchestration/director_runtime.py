@@ -1782,22 +1782,23 @@ class DirectorRuntime:
         """Acquire or renew mission ownership, honoring a cooperative handoff."""
         now = self._ownership_now()
         handoff = self.director_handoff_store.get_active_for_mission(mission_id)
-        current = self.director_ownership.get(mission_id)
+        current = self.director_ownership.get(mission_id, now=now)
 
         if handoff is not None:
             if handoff.state in {"REQUESTED", "QUIESCING"}:
                 return False
             if handoff.state == "RELEASED":
-                if self.worker_id != handoff.successor_id or current is None:
+                if self.worker_id != handoff.successor_id:
                     return False
                 if (
-                    current.owner_id == self.worker_id
+                    current is not None
+                    and current.owner_id == self.worker_id
                     and current.fencing_epoch > handoff.predecessor_epoch
                     and current.lease_until > now
                 ):
                     ownership = current
                 else:
-                    if current.lease_until > now:
+                    if current is not None and current.lease_until > now:
                         return False
                     try:
                         ownership = self.director_ownership.acquire(
@@ -1813,8 +1814,10 @@ class DirectorRuntime:
                             payload={
                                 "owner_id": self.worker_id,
                                 "reason": str(exc),
-                                "current_owner_id": current.owner_id,
-                                "current_fencing_epoch": current.fencing_epoch,
+                                "current_owner_id": current.owner_id if current else None,
+                                "current_fencing_epoch": (
+                                    current.fencing_epoch if current else None
+                                ),
                             },
                         )
                         return False
@@ -1908,7 +1911,7 @@ class DirectorRuntime:
                             },
                         )
                     if self.director_handoff_store.get_active_for_mission(mission_id) is None:
-                        current = self.director_ownership.get(mission_id)
+                        current = self.director_ownership.get(mission_id, now=now)
                     else:
                         return False
                 else:
@@ -1924,7 +1927,7 @@ class DirectorRuntime:
                     now=now,
                 )
             except DirectorOwnershipRejected:
-                current = self.director_ownership.get(mission_id)
+                current = self.director_ownership.get(mission_id, now=now)
             else:
                 self._mission_ownership[mission_id] = ownership
                 self.event_bus.publish(
@@ -1938,6 +1941,10 @@ class DirectorRuntime:
                 )
                 return True
 
+        # A lease-expired record is still historical ownership. Preserve it
+        # before acquire() advances the fencing epoch so the emitted event
+        # distinguishes a real takeover from first acquisition.
+        previous_ownership = self.director_ownership.get(mission_id)
         try:
             ownership = self.director_ownership.acquire(
                 mission_id,
@@ -1946,7 +1953,7 @@ class DirectorRuntime:
                 now=now,
             )
         except DirectorOwnershipRejected as exc:
-            current = self.director_ownership.get(mission_id)
+            current = self.director_ownership.get(mission_id, now=now)
             self.event_bus.publish(
                 mission_id=mission_id,
                 event_type="director_ownership_rejected",
@@ -1959,7 +1966,7 @@ class DirectorRuntime:
             )
             return False
 
-        takeover = current is not None
+        takeover = previous_ownership is not None
         self._mission_ownership[mission_id] = ownership
         self.event_bus.publish(
             mission_id=mission_id,
@@ -2017,7 +2024,7 @@ class DirectorRuntime:
                 now=self._ownership_now(),
             )
         except DirectorOwnershipRejected as exc:
-            current = self.director_ownership.get(mission_id)
+            current = self.director_ownership.get(mission_id, now=self._ownership_now())
             self.event_bus.publish(
                 mission_id=mission_id,
                 event_type="director_ownership_fence_rejected",
