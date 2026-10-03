@@ -129,6 +129,9 @@ def _prepare_handoff(tmp_path: Path):
         handoff_id="handoff-regression-001",
         now="2026-01-01T00:00:01+00:00",
     )
+    # The handoff is released at +1s; move the shared test clock past that
+    # release before the successor attempts acquisition, so fencing advances.
+    clock.value = "2026-01-01T00:00:02+00:00"
     return (
         submission,
         store,
