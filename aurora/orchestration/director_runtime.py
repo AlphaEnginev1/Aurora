@@ -1782,7 +1782,7 @@ class DirectorRuntime:
         """Acquire or renew mission ownership, honoring a cooperative handoff."""
         now = self._ownership_now()
         handoff = self.director_handoff_store.get_active_for_mission(mission_id)
-        current = self.director_ownership.get(mission_id)
+        current = self.director_ownership.get(mission_id, now=now)
 
         if handoff is not None:
             if handoff.state in {"REQUESTED", "QUIESCING"}:
@@ -1908,7 +1908,7 @@ class DirectorRuntime:
                             },
                         )
                     if self.director_handoff_store.get_active_for_mission(mission_id) is None:
-                        current = self.director_ownership.get(mission_id)
+                        current = self.director_ownership.get(mission_id, now=now)
                     else:
                         return False
                 else:
@@ -1924,7 +1924,7 @@ class DirectorRuntime:
                     now=now,
                 )
             except DirectorOwnershipRejected:
-                current = self.director_ownership.get(mission_id)
+                current = self.director_ownership.get(mission_id, now=now)
             else:
                 self._mission_ownership[mission_id] = ownership
                 self.event_bus.publish(
@@ -1946,7 +1946,7 @@ class DirectorRuntime:
                 now=now,
             )
         except DirectorOwnershipRejected as exc:
-            current = self.director_ownership.get(mission_id)
+            current = self.director_ownership.get(mission_id, now=now)
             self.event_bus.publish(
                 mission_id=mission_id,
                 event_type="director_ownership_rejected",
@@ -2017,7 +2017,7 @@ class DirectorRuntime:
                 now=self._ownership_now(),
             )
         except DirectorOwnershipRejected as exc:
-            current = self.director_ownership.get(mission_id)
+            current = self.director_ownership.get(mission_id, now=now)
             self.event_bus.publish(
                 mission_id=mission_id,
                 event_type="director_ownership_fence_rejected",
