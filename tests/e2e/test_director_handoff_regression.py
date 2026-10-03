@@ -159,7 +159,13 @@ def test_predecessor_is_fenced_after_cooperative_handoff(tmp_path: Path):
         status="succeeded",
         reason="stale predecessor must be fenced",
     )
-    assert len(store.events(submission.mission_id)) == before
+    events_after_rejected_mutation = store.events(submission.mission_id)
+    assert len(events_after_rejected_mutation) == before + 1
+    assert events_after_rejected_mutation[-1].event_type == "director_handoff_mutation_rejected"
+    assert not any(
+        event.event_type == "mission_succeeded"
+        for event in events_after_rejected_mutation
+    )
 
 
 def test_only_designated_successor_can_take_cooperative_handoff(tmp_path: Path):
@@ -204,6 +210,7 @@ def test_only_designated_successor_can_take_cooperative_handoff(tmp_path: Path):
         director=director_b,
         store=store,
         bus=bus,
+        ownership=ownership,
         worker_id="director-B",
         event_consumer_id="director-B-events",
         clock=clock,
