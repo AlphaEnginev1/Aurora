@@ -22,6 +22,7 @@ from .durable_director import DurableDirectorError, DurableDirectorService, Miss
 from .engine import CapabilityTaskResult, OrchestrationEngine, TaskResult
 from .event_bus import DurableEventBus, EventBusError, EventSubscription
 from .mission_memory import MailboxScope, MissionMemory, MissionMemoryError, MissionMessage
+from .director_ownership import DirectorOwnership, DirectorOwnershipError, DirectorOwnershipRejected, DirectorOwnershipStore
 from .director_runtime import DirectorRuntime, DirectorRuntimeError, MissionRuntimeResult, RuntimeCycle
 from .director_decision_policy_evolution import (
     DirectorDecisionPolicyEvolution,
@@ -154,6 +155,10 @@ __all__ = [
     "MissionMemory",
     "MissionMemoryError",
     "MissionMessage",
+    "DirectorOwnership",
+    "DirectorOwnershipError",
+    "DirectorOwnershipRejected",
+    "DirectorOwnershipStore",
     "OrchestrationEngine",
     "TaskEngine",
     "TaskEngineError",
