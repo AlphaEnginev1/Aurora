@@ -86,6 +86,10 @@ if [[ -f "$AURORA_PID" ]]; then
       sleep 0.25
     done
   fi
+  if kill -0 "$pid" 2>/dev/null; then
+    write_status "blocked" "$updated" "Aurora process did not stop cleanly"
+    exit 2
+  fi
 fi
 rm -f "$AURORA_PID"
 
