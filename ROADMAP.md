@@ -129,9 +129,11 @@ The queue is closed. Block 7 establishes the explicit authorization boundary; it
 
 ## Increment policy
 
-**Increment 11 remains unapproved.**
+**Increment 11 — Director Handoff / Failover: AUTHORIZED (contract + E2E proof phase).**
 
-The next capability must be derived from the remaining evidence-backed production gaps and explicitly authorized.
+Scope is deliberately isolated to replacement of an active Director during an in-progress durable mission. This phase establishes the contract and deterministic E2E acceptance proof before any production handoff/election implementation. Unrelated dashboard, model, provider, research, and frozen production-readiness work remains out of scope.
+
+The authoritative contract is `docs/operations/INCREMENT_11_DIRECTOR_HANDOFF_FAILOVER_CONTRACT.md`.
 
 
 ## Block 13 — Dashboard Full E2E — COMPLETE
