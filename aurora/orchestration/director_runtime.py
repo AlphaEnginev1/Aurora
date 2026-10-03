@@ -792,10 +792,7 @@ class DirectorRuntime:
                 raise DirectorRuntimeError(
                     f"handoff is durably RELEASED but ownership release needs recovery: {exc}"
                 ) from exc
-            # Retain the predecessor's fenced snapshot locally. It is no longer
-            # authoritative after release, but keeping epoch N lets stale
-            # control attempts reach require_owner() and be recorded as
-            # fencing rejections against the successor's newer epoch.
+            self._mission_ownership.pop(mission_id, None)
             self.event_bus.publish(
                 mission_id=mission_id,
                 event_type="director_ownership_released",
@@ -1944,6 +1941,10 @@ class DirectorRuntime:
                 )
                 return True
 
+        # A lease-expired record is still historical ownership. Preserve it
+        # before acquire() advances the fencing epoch so the emitted event
+        # distinguishes a real takeover from first acquisition.
+        previous_ownership = self.director_ownership.get(mission_id)
         try:
             ownership = self.director_ownership.acquire(
                 mission_id,
@@ -1965,7 +1966,7 @@ class DirectorRuntime:
             )
             return False
 
-        takeover = current is not None
+        takeover = previous_ownership is not None
         self._mission_ownership[mission_id] = ownership
         self.event_bus.publish(
             mission_id=mission_id,
