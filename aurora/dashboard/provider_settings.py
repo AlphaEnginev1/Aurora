@@ -17,7 +17,7 @@ class ProviderSettingsService:
         self.runtime = runtime
 
     def public(self) -> dict[str, Any]:
-        provider = getattr(self.runtime.planner, "provider", None)
+        provider = getattr(self.runtime.director.planner, "provider", None)
         data = self.store.public()
         data["runtime"] = {"director_provider": getattr(provider, "provider_id", "unknown")}
         return data
@@ -25,7 +25,7 @@ class ProviderSettingsService:
     def save_and_apply(self, payload: Mapping[str, Any]) -> dict[str, Any]:
         try:
             settings = self.store.update_from_form(payload)
-            router = self.runtime.planner.router
+            router = self.runtime.director.planner.router
             nvidia_key = self.store.credential("nvidia_api")
             router.nvidia_api_key = nvidia_key or None
             router.provider_registry = default_provider_registry(nvidia_api_key=nvidia_key or None)
@@ -76,7 +76,7 @@ class ProviderSettingsService:
                 provider = GeminiDirectorProvider(api_key=api_key, model=str(director["model"]), endpoint=str(director["endpoint"]))
             else:
                 raise DashboardProviderSettingsError(f"unsupported Director provider: {provider_id}")
-            self.runtime.planner.provider = provider
+            self.runtime.director.planner.provider = provider
             conversation = getattr(self.runtime, "conversation_service", None)
             if conversation is not None:
                 conversation.set_provider(provider)

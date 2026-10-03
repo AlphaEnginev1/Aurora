@@ -14,7 +14,10 @@ class Runtime:
             self.router = router
             self.provider = InferenceDirectorProvider(router)
     def __init__(self, router):
-        self.planner = self.Planner(router)
+        class Director:
+            def __init__(self, planner):
+                self.planner = planner
+        self.director = Director(self.Planner(router))
         self.conversation_service = None
 
 
@@ -50,8 +53,8 @@ def test_gemini_setting_switches_runtime_provider(tmp_path: Path):
     })
 
     assert state["runtime"]["director_provider"] == "gemini"
-    assert runtime.planner.provider.provider_id == "gemini"
-    assert runtime.planner.router.nvidia_api_key is None
+    assert runtime.director.planner.provider.provider_id == "gemini"
+    assert runtime.director.planner.router.nvidia_api_key is None
 
 
 def test_nvidia_selected_model_is_activated_without_editing_repo_policy(tmp_path: Path):
