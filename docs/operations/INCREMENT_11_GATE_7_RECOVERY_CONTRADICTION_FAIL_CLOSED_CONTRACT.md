@@ -1,7 +1,7 @@
 # Increment 11 — Gate 7: Recovery Contradiction / Fail-Closed Contract
 
-**Status:** CONTRACT PHASE — NO IMPLEMENTATION
-**Canonical prerequisite:** Gate 6 handoff interruption/recovery acceptance is complete on canonical main.
+**Status:** CONTRACT + IMPLEMENTATION + ACCEPTANCE COMPLETE
+**Canonical evidence:** Gate 6 and Gate 7 acceptance are complete on canonical main.
 **Scope:** Deterministic handling of contradictory durable Director handoff, ownership/fencing, and mission/task-control state during recovery.
 **Exclusions:** No automatic Director election, distributed consensus, provider/model failover, dashboard takeover controls, live-authorization changes, worker lease redesign, or network/proxy/security changes.
 
@@ -105,8 +105,10 @@ No runtime behavior change is authorized until the contract is merged and a subs
 
 ## 8. Exit criteria
 
-The Gate 7 contract phase closes only when:
+The Gate 7 acceptance closes only when:
 - this contract is merged to canonical main;
-- contradiction classes and required outcomes are explicit and reviewable;
-- the subsequent deterministic acceptance test is defined as a separate gated step;
+- contradiction classes are explicitly covered by deterministic E2E acceptance;
+- Director mission-control mutation is blocked deterministically on contradiction;
+- diagnostic evidence is durably traceable;
+- PR #110 and canonical CI run 1981 are green;
 - no unrelated Aurora subsystem is modified.
