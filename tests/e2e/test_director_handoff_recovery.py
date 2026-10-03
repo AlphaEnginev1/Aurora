@@ -293,7 +293,10 @@ def test_restart_after_release_and_acquisition_preserves_mission(tmp_path: Path)
     )
     after = store.events(submission.mission_id)
     assert len(after) == before + 1
-    assert after[-1].event_type == "director_ownership_rejected"
+    # The durable RELEASED handoff is still active, so the restarted
+    # predecessor is rejected at the handoff boundary before ownership fencing
+    # is consulted.
+    assert after[-1].event_type == "director_handoff_mutation_rejected"
     assert not any(
         event.event_type == "mission_failed"
         and event.payload.get("reason") == "stale predecessor after restart"
@@ -325,6 +328,37 @@ def test_restart_after_release_and_acquisition_preserves_mission(tmp_path: Path)
     assert owner_b.owner_id == "director-B"
     assert owner_b.fencing_epoch == 2
     assert handoff.get("handoff-recovery-002").state == "COMPLETED"
+
+    # A restart after successor acquisition must now hit the mission-level
+    # ownership fence because the cooperative handoff is no longer active.
+    restarted_a_after_acquisition = _runtime(
+        director=DurableDirectorService(
+            planner=_PlannerA(),
+            task_engine=engine,
+            store=store,
+            event_bus=bus,
+        ),
+        store=store,
+        bus=bus,
+        ownership=DirectorOwnershipStore(store.path),
+        handoff=DirectorHandoffStore(store.path),
+        worker_id="director-A",
+        clock=clock,
+    )
+    before = len(store.events(submission.mission_id))
+    restarted_a_after_acquisition._publish_terminal(
+        submission.mission_id,
+        status="failed",
+        reason="stale predecessor after successor acquisition",
+    )
+    after = store.events(submission.mission_id)
+    assert len(after) == before + 1
+    assert after[-1].event_type == "director_ownership_rejected"
+    assert not any(
+        event.event_type == "mission_failed"
+        and event.payload.get("reason") == "stale predecessor after successor acquisition"
+        for event in after
+    )
 
     restarted_b = _runtime(
         director=DurableDirectorService(
