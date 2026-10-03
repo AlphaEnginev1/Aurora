@@ -162,7 +162,7 @@ def test_cooperative_director_handoff_is_integrated_into_runtime(tmp_path: Path)
     )
     assert handoff.state == "RELEASED"
     assert handoff.predecessor_epoch == 1
-    assert runtime_a._require_director_ownership(submission.mission_id) is False
+    assert runtime_a._mission_ownership.get(submission.mission_id) is None
 
     planner_b = _DirectorBPlanner()
     director_b = DurableDirectorService(
@@ -171,6 +171,8 @@ def test_cooperative_director_handoff_is_integrated_into_runtime(tmp_path: Path)
         store=store,
         event_bus=bus,
     )
+    clock.value = "2026-01-01T00:00:01+00:00"
+
     runtime_b = _runtime(
         director=director_b,
         store=store,
