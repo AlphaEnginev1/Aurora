@@ -354,7 +354,7 @@ class ReplanningDirectorProvider(MissionReplayDirectorProvider):
                         'but a second controlled validation step is required.","tasks":['
                         '{"task_id":"validate_result","role":"researcher",'
                         '"objective":"Validate the controlled execution result.",'
-                        '"capability":null,"args":[],"depends_on":[],"skills":[]}]}'
+                        '"capability":null,"args":[],"depends_on":[],"skills":["research.validation"]}]}'
                     ),
                     model=self.response.model,
                     provider="gemini",
