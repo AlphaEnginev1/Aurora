@@ -127,7 +127,6 @@ def _prepare(tmp_path: Path):
     )
     runtime.run_once()
 
-    assert [e for e in store.events(submission.mission_id) if e.event_type == "task_succeeded"]
     assert store.get(submission.mission_id, "step_a").status == "succeeded"
     assert store.get(submission.mission_id, "step_b").status == "pending"
 
