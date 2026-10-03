@@ -81,43 +81,6 @@ class _PlannerB:
         )
 
 
-def _runtime(
-    *,
-    planner,
-    store,
-    bus,
-    ownership,
-    clock,
-    worker_id,
-    tmp_path,
-):
-    from aurora.orchestration.director import DirectorService
-
-    orchestration = _HandoffOrchestration
-    return DirectorRuntime(
-        director=DurableDirectorService(
-            planner=planner,
-            task_engine=TaskEngine(orchestration(), tmp_path / f"workspace-{worker_id}"),
-            store=store,
-            event_bus=bus,
-        ),
-        store=store,
-        event_bus=bus,
-        director_ownership=ownership,
-        director_lease_seconds=30,
-        ownership_now_fn=clock,
-        worker_policy=WorkerPolicy(
-            lease_seconds=30,
-            max_attempts=1,
-            idle_sleep_seconds=0,
-        ),
-        worker_id=worker_id,
-        event_consumer_id=f"{worker_id}-events",
-        worker_concurrency=1,
-        max_review_rounds=1,
-    )
-
-
 def test_runtime_excludes_competing_director_then_takes_over_with_fencing(tmp_path: Path):
     store = DurableTaskStore(tmp_path / "tasks.db")
     bus = DurableEventBus(store)
