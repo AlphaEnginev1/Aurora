@@ -143,6 +143,10 @@ Completed gates on canonical `main`:
 
 The next Increment 11 gate must be scoped separately before implementation begins.
 
+### Gate 5 — Explicit Director Handoff / Release Contract — AUTHORIZED (contract phase)
+
+Gate 5 defines the cooperative handoff path from a live Director to an explicitly designated successor. It is limited to contract definition in this phase; no implementation, automatic election, provider failover, or dashboard controls are authorized. The authoritative contract is `docs/operations/INCREMENT_11_DIRECTOR_HANDOFF_RELEASE_CONTRACT.md`.
+
 
 ## Block 13 — Dashboard Full E2E — COMPLETE
 
