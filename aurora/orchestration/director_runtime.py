@@ -11,6 +11,7 @@ from typing import Any, Callable
 from uuid import uuid4
 
 from .director import DirectorPlanError
+from .director_ownership import DirectorOwnership, DirectorOwnershipRejected, DirectorOwnershipStore
 from .director_decision_learning import DirectorDecisionLearning
 from .director_decision_performance import DirectorDecisionPerformanceStore
 from .director_decision_comparison import (
@@ -91,6 +92,9 @@ class DirectorRuntime:
         *,
         director: DurableDirectorService,
         store: DurableTaskStore,
+        director_ownership: DirectorOwnershipStore | None = None,
+        director_lease_seconds: float = 30.0,
+        ownership_now_fn: Callable[[], str] | None = None,
         event_bus: DurableEventBus | None = None,
         memory: MissionMemory | None = None,
         worker_policy: WorkerPolicy | None = None,
@@ -134,10 +138,16 @@ class DirectorRuntime:
             raise DirectorRuntimeError("max_review_rounds must be at least 1")
         if worker_concurrency < 1:
             raise DirectorRuntimeError("worker_concurrency must be at least 1")
+        if director_lease_seconds <= 0:
+            raise DirectorRuntimeError("director_lease_seconds must be positive")
         self.director = director
         self.store = store
         self.event_bus = event_bus or DurableEventBus(store)
         self.memory = memory or MissionMemory(store)
+        self.director_ownership = director_ownership or DirectorOwnershipStore(store.path)
+        self.director_lease_seconds = director_lease_seconds
+        self._ownership_now = ownership_now_fn or DirectorOwnershipStore._now
+        self._mission_ownership: dict[str, DirectorOwnership] = {}
         self.worker_policy = worker_policy or WorkerPolicy()
         self.worker_id = worker_id or f"director-worker-{uuid4().hex[:12]}"
         self.event_batch_size = event_batch_size
@@ -219,6 +229,7 @@ class DirectorRuntime:
         Comparative findings remain advisory: they never modify the decision
         performance aggregate and never assert causal superiority.
         """
+        self._require_director_ownership(mission_id)
         result = DirectorDecisionComparisonEvaluator.evaluate(
             decision_event_id=decision_event_id,
             chosen_decision=chosen_decision,
@@ -681,6 +692,27 @@ class DirectorRuntime:
         """Plan and durably submit a mission for the continuous worker loop."""
         submission = self.director.submit_mission(**kwargs)
         try:
+            ownership = self.director_ownership.acquire(
+                submission.mission_id,
+                self.worker_id,
+                lease_seconds=self.director_lease_seconds,
+                now=self._ownership_now(),
+            )
+            self._mission_ownership[submission.mission_id] = ownership
+            self.event_bus.publish(
+                mission_id=submission.mission_id,
+                event_type="director_ownership_acquired",
+                payload={
+                    "owner_id": ownership.owner_id,
+                    "fencing_epoch": ownership.fencing_epoch,
+                    "lease_until": ownership.lease_until,
+                },
+            )
+        except DirectorOwnershipRejected as exc:
+            raise DirectorRuntimeError(
+                f"mission ownership could not be acquired after submission: {exc}"
+            ) from exc
+        try:
             self.memory.append(
                 mission_id=submission.mission_id,
                 source="director",
@@ -716,6 +748,11 @@ class DirectorRuntime:
             for mission_id in sorted(mission_ids)
             if self.store.mission_status(mission_id) not in self.TERMINAL
         ]
+        owned_active = [
+            mission_id
+            for mission_id in active
+            if self._ensure_mission_ownership(mission_id)
+        ]
         terminal_candidates = [
             mission_id
             for mission_id in sorted(mission_ids)
@@ -723,7 +760,7 @@ class DirectorRuntime:
             and not self._is_finalized(mission_id)
         ]
 
-        for mission_id in active:
+        for mission_id in owned_active:
             if not self.store.has_event(mission_id, "mission_started"):
                 self.event_bus.publish(
                     mission_id=mission_id,
@@ -733,7 +770,7 @@ class DirectorRuntime:
 
         assignments = [
             (mission_id, slot)
-            for mission_id in active
+            for mission_id in owned_active
             for slot in range(self.worker_concurrency)
         ]
         cycles: list[WorkerCycle] = []
@@ -762,7 +799,8 @@ class DirectorRuntime:
                         terminal_candidates.append(mission_id)
 
         for mission_id in sorted(set(terminal_candidates)):
-            self._review_or_finalize(mission_id)
+            if self._ensure_mission_ownership(mission_id):
+                self._review_or_finalize(mission_id)
 
         observed_missions = set(event_missions) | set(active) | set(terminal_candidates)
         for mission_id in sorted(observed_missions):
@@ -788,7 +826,7 @@ class DirectorRuntime:
         return RuntimeCycle(
             worker_cycles=tuple(cycles),
             events=events,
-            active_missions=tuple(active),
+            active_missions=tuple(owned_active),
         )
 
     def run_until_terminal(
@@ -928,6 +966,8 @@ class DirectorRuntime:
 
     def _review_or_finalize(self, mission_id: str) -> None:
         if self._is_finalized(mission_id):
+            return
+        if not self._require_director_ownership(mission_id):
             return
 
         self._evaluate_pending_director_decisions(mission_id)
@@ -1219,6 +1259,8 @@ class DirectorRuntime:
                     )
                 else:
                     context.append({"role": "user", "content": active_policy_prompt})
+        if not self._require_director_ownership(mission_id):
+            return
         self.event_bus.publish(
             mission_id=mission_id,
             event_type="director_review_started",
@@ -1243,6 +1285,8 @@ class DirectorRuntime:
                 )
             return
 
+        if not self._require_director_ownership(mission_id):
+            return
         review_event = self.event_bus.publish(
             mission_id=mission_id,
             event_type="director_review",
@@ -1279,6 +1323,8 @@ class DirectorRuntime:
             pass
 
         if review.decision == "complete":
+            if not self._require_director_ownership(mission_id):
+                return
             self.event_bus.publish(
                 mission_id=mission_id,
                 event_type="director_decision_executed",
@@ -1296,6 +1342,8 @@ class DirectorRuntime:
             self._evaluate_pending_director_decisions(mission_id)
             return
         if review.decision == "blocked":
+            if not self._require_director_ownership(mission_id):
+                return
             self.event_bus.publish(
                 mission_id=mission_id,
                 event_type="director_decision_executed",
@@ -1314,6 +1362,8 @@ class DirectorRuntime:
             return
 
         tasks = self._phase_tasks(mission_id, round_number, review.tasks)
+        if not self._require_director_ownership(mission_id):
+            return
         try:
             coordinator = getattr(self.director, "team_coordinator", None)
             if coordinator is not None:
@@ -1375,6 +1425,8 @@ class DirectorRuntime:
             pass
 
     def _evaluate_pending_director_decisions(self, mission_id: str) -> None:
+        if not self._require_director_ownership(mission_id):
+            return
         events = self.store.events(mission_id)
         evaluated_ids = {
             int(event.payload.get("decision_event_id"))
@@ -1595,6 +1647,8 @@ class DirectorRuntime:
     ) -> None:
         if self._is_finalized(mission_id):
             return
+        if not self._require_director_ownership(mission_id):
+            return
         payload = {
             "status": status,
             "reason": reason,
@@ -1613,6 +1667,106 @@ class DirectorRuntime:
             event_type=f"mission_{status}",
             payload=payload,
         )
+
+    def _ensure_mission_ownership(self, mission_id: str) -> bool:
+        """Acquire or renew mission-level Director ownership for this runtime."""
+        now = self._ownership_now()
+        current = self.director_ownership.get(mission_id)
+        if current is not None and current.owner_id == self.worker_id:
+            try:
+                ownership = self.director_ownership.renew(
+                    mission_id,
+                    self.worker_id,
+                    current.fencing_epoch,
+                    lease_seconds=self.director_lease_seconds,
+                    now=now,
+                )
+            except DirectorOwnershipRejected:
+                current = self.director_ownership.get(mission_id)
+            else:
+                self._mission_ownership[mission_id] = ownership
+                self.event_bus.publish(
+                    mission_id=mission_id,
+                    event_type="director_ownership_renewed",
+                    payload={
+                        "owner_id": ownership.owner_id,
+                        "fencing_epoch": ownership.fencing_epoch,
+                        "lease_until": ownership.lease_until,
+                    },
+                )
+                return True
+
+        try:
+            ownership = self.director_ownership.acquire(
+                mission_id,
+                self.worker_id,
+                lease_seconds=self.director_lease_seconds,
+                now=now,
+            )
+        except DirectorOwnershipRejected as exc:
+            current = self.director_ownership.get(mission_id)
+            self.event_bus.publish(
+                mission_id=mission_id,
+                event_type="director_ownership_rejected",
+                payload={
+                    "owner_id": self.worker_id,
+                    "reason": str(exc),
+                    "current_owner_id": current.owner_id if current else None,
+                    "current_fencing_epoch": current.fencing_epoch if current else None,
+                },
+            )
+            return False
+
+        takeover = current is not None
+        self._mission_ownership[mission_id] = ownership
+        self.event_bus.publish(
+            mission_id=mission_id,
+            event_type=(
+                "director_ownership_takeover"
+                if takeover
+                else "director_ownership_acquired"
+            ),
+            payload={
+                "owner_id": ownership.owner_id,
+                "fencing_epoch": ownership.fencing_epoch,
+                "lease_until": ownership.lease_until,
+                "previous_owner_id": current.owner_id if current else None,
+                "previous_fencing_epoch": current.fencing_epoch if current else None,
+            },
+        )
+        return True
+
+    def _require_director_ownership(self, mission_id: str) -> bool:
+        """Validate the current mission fence before a control mutation."""
+        ownership = self._mission_ownership.get(mission_id)
+        if ownership is None and not self._ensure_mission_ownership(mission_id):
+            return False
+        ownership = self._mission_ownership.get(mission_id)
+        if ownership is None:
+            return False
+        try:
+            current = self.director_ownership.require_owner(
+                mission_id,
+                ownership.owner_id,
+                ownership.fencing_epoch,
+                now=self._ownership_now(),
+            )
+        except DirectorOwnershipRejected as exc:
+            current = self.director_ownership.get(mission_id)
+            self.event_bus.publish(
+                mission_id=mission_id,
+                event_type="director_ownership_fence_rejected",
+                payload={
+                    "owner_id": ownership.owner_id,
+                    "fencing_epoch": ownership.fencing_epoch,
+                    "current_owner_id": current.owner_id if current else None,
+                    "current_fencing_epoch": current.fencing_epoch if current else None,
+                    "reason": str(exc),
+                },
+            )
+            return False
+        self._mission_ownership[mission_id] = current
+        return True
 
     def _objective_from_memory(self, mission_id: str) -> str:
         for message in self.memory.list(mission_id, limit=50):

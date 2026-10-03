@@ -1,7 +1,10 @@
+from datetime import datetime
 from pathlib import Path
+
 
 from aurora.inference.models import InferenceResponse
 from aurora.orchestration.director import DirectorPlan, DirectorReview
+from aurora.orchestration.director_ownership import DirectorOwnershipStore
 from aurora.orchestration.director_runtime import DirectorRuntime
 from aurora.orchestration.durable_director import DurableDirectorService
 from aurora.orchestration.engine import TaskResult
@@ -78,10 +81,30 @@ class _DirectorBPlanner:
         )
 
 
-def _runtime(*, director, store, bus, worker_id, event_consumer_id, observation_path):
+class _Clock:
+    def __init__(self, value: str):
+        self.value = value
+
+    def __call__(self):
+        return self.value
+
+
+def _runtime(
+    *,
+    director,
+    store,
+    bus,
+    ownership,
+    worker_id,
+    event_consumer_id,
+    clock,
+):
     return DirectorRuntime(
         director=director,
         store=store,
+        director_ownership=ownership,
+        director_lease_seconds=30,
+        ownership_now_fn=clock,
         event_bus=bus,
         worker_policy=WorkerPolicy(
             lease_seconds=30,
@@ -98,6 +121,8 @@ def _runtime(*, director, store, bus, worker_id, event_consumer_id, observation_
 def test_director_handoff_reuses_persisted_mission_without_duplicate_execution(tmp_path: Path):
     store = DurableTaskStore(tmp_path / "tasks.db")
     bus = DurableEventBus(store)
+    ownership = DirectorOwnershipStore(store.path)
+    clock = _Clock("2026-01-01T00:00:00+00:00")
     orchestration = _HandoffOrchestration()
     engine = TaskEngine(orchestration, tmp_path / "workspace")
 
@@ -114,7 +139,8 @@ def test_director_handoff_reuses_persisted_mission_without_duplicate_execution(t
         bus=bus,
         worker_id="director-A",
         event_consumer_id="director-A-events",
-        observation_path=tmp_path / "observability.jsonl",
+        clock=clock,
+        ownership=ownership,
     )
 
     submission = runtime_a.submit_mission(
@@ -142,8 +168,13 @@ def test_director_handoff_reuses_persisted_mission_without_duplicate_execution(t
         bus=bus,
         worker_id="director-B",
         event_consumer_id="director-B-events",
-        observation_path=tmp_path / "observability.jsonl",
+        clock=clock,
+        ownership=ownership,
     )
+
+    # Director A's lease was renewed during its last cycle. Simulate A going
+    # offline by advancing the deterministic clock past the 30-second lease.
+    clock.value = "2026-01-01T00:00:31+00:00"
 
     result = runtime_b.run_until_terminal(submission, max_cycles=20)
 
