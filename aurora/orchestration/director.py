@@ -280,10 +280,10 @@ Rules:
             try:
                 self.organization.resolve_agent(role)
                 canonical = role
-            except OrganizationConfigError:
+            except OrganizationConfigError as exc:
                 matches = by_casefold.get(role.casefold(), set())
                 if len(matches) != 1:
-                    raise
+                    raise DirectorPlanError(str(exc)) from exc
                 canonical = next(iter(matches))
             normalized.append(replace(task, role=canonical) if canonical != task.role else task)
         return tuple(normalized)
