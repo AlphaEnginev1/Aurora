@@ -1075,6 +1075,8 @@ class DirectorRuntime:
         )
 
     def _review_or_finalize(self, mission_id: str) -> None:
+        if not self._recovery_fail_closed(mission_id):
+            return
         if self._is_finalized(mission_id):
             return
         if not self._require_director_ownership(mission_id):
@@ -1738,6 +1740,85 @@ class DirectorRuntime:
             if event.event_type == "director_review_started"
         )
 
+    def _recovery_fail_closed(self, mission_id: str) -> bool:
+        """Validate durable recovery authorities before any Director mutation."""
+        now = self._ownership_now()
+        handoff = self.director_handoff_store.get_active_for_mission(mission_id)
+        ownership = self.director_ownership.get(mission_id)
+        active_ownership = self.director_ownership.get(mission_id, now=now)
+        finalized = [
+            event
+            for event in self.store.events(mission_id)
+            if event.event_type in {"mission_succeeded", "mission_failed", "mission_blocked"}
+        ]
+        runnable = [
+            item.task.task_id
+            for item in self.store.list_tasks(mission_id)
+            if item.status in {"pending", "running"}
+        ]
+
+        reason_code = None
+        if handoff is not None:
+            if handoff.state in {"REQUESTED", "QUIESCING"}:
+                if (
+                    active_ownership is None
+                    or active_ownership.owner_id != handoff.predecessor_id
+                    or active_ownership.fencing_epoch != handoff.predecessor_epoch
+                ):
+                    reason_code = "HANDOFF_OWNERSHIP_MISMATCH"
+            elif handoff.state == "RELEASED":
+                valid_historical = (
+                    ownership is not None
+                    and ownership.owner_id == handoff.predecessor_id
+                    and ownership.fencing_epoch == handoff.predecessor_epoch
+                )
+                valid_partial_acquisition = (
+                    active_ownership is not None
+                    and active_ownership.owner_id == handoff.successor_id
+                    and active_ownership.fencing_epoch > handoff.predecessor_epoch
+                )
+                if not (valid_historical and active_ownership is None or valid_partial_acquisition):
+                    reason_code = "HANDOFF_OWNERSHIP_MISMATCH"
+            elif handoff.state == "ACQUIRED":
+                if (
+                    active_ownership is None
+                    or active_ownership.owner_id != handoff.successor_id
+                    or active_ownership.fencing_epoch != handoff.successor_epoch
+                ):
+                    reason_code = "OWNERSHIP_SUCCESSOR_EPOCH_MISMATCH"
+
+        if finalized and runnable:
+            reason_code = reason_code or "TERMINAL_MISSION_WITH_RUNNABLE_TASKS"
+
+        if reason_code is None:
+            return True
+
+        if not any(
+            event.event_type == "director_recovery_fail_closed"
+            and event.payload.get("reason_code") == reason_code
+            for event in self.store.events(mission_id)
+        ):
+            self.event_bus.publish(
+                mission_id=mission_id,
+                event_type="director_recovery_fail_closed",
+                payload={
+                    "reason_code": reason_code,
+                    "owner_id": active_ownership.owner_id if active_ownership else None,
+                    "fencing_epoch": active_ownership.fencing_epoch if active_ownership else None,
+                    "historical_owner_id": ownership.owner_id if ownership else None,
+                    "historical_fencing_epoch": ownership.fencing_epoch if ownership else None,
+                    "handoff_id": handoff.handoff_id if handoff else None,
+                    "handoff_state": handoff.state if handoff else None,
+                    "predecessor_id": handoff.predecessor_id if handoff else None,
+                    "successor_id": handoff.successor_id if handoff else None,
+                    "predecessor_epoch": handoff.predecessor_epoch if handoff else None,
+                    "successor_epoch": handoff.successor_epoch if handoff else None,
+                    "runnable_task_ids": runnable,
+                },
+            )
+        self._mission_ownership.pop(mission_id, None)
+        return False
+
     def _is_finalized(self, mission_id: str) -> bool:
         return any(
             event.event_type in {
@@ -1780,6 +1861,8 @@ class DirectorRuntime:
 
     def _ensure_mission_ownership(self, mission_id: str) -> bool:
         """Acquire or renew mission ownership, honoring a cooperative handoff."""
+        if not self._recovery_fail_closed(mission_id):
+            return False
         now = self._ownership_now()
         handoff = self.director_handoff_store.get_active_for_mission(mission_id)
         current = self.director_ownership.get(mission_id, now=now)
