@@ -456,9 +456,68 @@
     }
   }
 
+  async function updateAurora() {
+    const button = $("update-aurora");
+    button.disabled = true;
+    showSettingsMessage("Updating Aurora… the dashboard will restart automatically.", false);
+
+    try {
+      const response = await fetch(state.apiBase + "/update", {
+        method: "POST",
+        headers: { Accept: "application/json", "Content-Type": "application/json" },
+        body: JSON.stringify({})
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data && data.error ? data.error : "update request failed");
+
+      const startedAt = Date.now();
+      const poll = async function () {
+        try {
+          const statusResponse = await fetch(state.apiBase + "/update/status", {
+            headers: { Accept: "application/json" },
+            cache: "no-store"
+          });
+          const status = await statusResponse.json();
+          if (status && status.state === "ready") {
+            showSettingsMessage(
+              status.message || ("Aurora updated to " + String(status.commit || "").slice(0, 12)),
+              false
+            );
+            button.disabled = false;
+            loadSnapshot({ quiet: true });
+            return;
+          }
+          if (status && (status.state === "failed" || status.state === "blocked")) {
+            throw new Error(status.message || ("Update " + status.state));
+          }
+        } catch (error) {
+          if (Date.now() - startedAt > 45000) {
+            showSettingsMessage("Update status unavailable: " + error.message, true);
+            button.disabled = false;
+            return;
+          }
+        }
+        if (Date.now() - startedAt <= 60000) {
+          window.setTimeout(poll, 1500);
+        } else {
+          showSettingsMessage("Aurora update is still in progress. Refresh the dashboard to check again.", false);
+          button.disabled = false;
+        }
+      };
+
+      window.setTimeout(poll, 2500);
+    } catch (error) {
+      showSettingsMessage(error.message, true);
+      button.disabled = false;
+    }
+  }
+
   function setupSettings() {
     $("settings-save").addEventListener("click", function () {
       saveSettings();
+    });
+    $("update-aurora").addEventListener("click", function () {
+      updateAurora();
     });
     $("settings-reload").addEventListener("click", function () {
       loadSettings().catch(function (error) { showSettingsMessage(error.message, true); });
