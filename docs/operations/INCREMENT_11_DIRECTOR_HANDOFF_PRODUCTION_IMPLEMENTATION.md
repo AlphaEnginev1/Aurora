@@ -93,6 +93,6 @@ PR #106 merged to canonical `main` as `e7d14c1e97be8b14f6c1cf9402f487fa8b727e4d`
 
 ## Next gate
 
-**Gate 6 — Handoff Interruption / Recovery Contract.**
+**Gate 6 — Handoff Interruption / Recovery acceptance test — IN PROGRESS.**
 
-The next phase is contract-only. It must define deterministic restart/interruption acceptance at cooperative-handoff boundaries before any further implementation is authorized.
+The Gate 6 recovery contract is merged on canonical `main`. This phase adds only deterministic E2E acceptance coverage for process restart/interruption around REQUESTED, QUIESCING, RELEASED, successor acquisition and post-acquisition restart. No runtime behavior changes are authorized by this phase.
