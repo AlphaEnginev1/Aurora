@@ -225,17 +225,18 @@ class DirectorHandoffStore:
                 raise DirectorHandoffRejected(
                     f"expected {expected_state}, found {current.state}"
                 )
-            if actor_id != current.predecessor_id or fencing_epoch != current.predecessor_epoch:
+            expected_actor = current.successor_id if next_state in ("ACQUIRED", "COMPLETED") else current.predecessor_id
+            if actor_id != expected_actor or fencing_epoch != current.predecessor_epoch:
                 db.rollback()
-                raise DirectorHandoffRejected("predecessor identity or fencing epoch mismatch")
+                raise DirectorHandoffRejected("actor identity or predecessor fencing epoch mismatch")
             if next_state == "ACQUIRED":
-                if actor_id != current.successor_id:
-                    db.rollback()
-                    raise DirectorHandoffRejected("only designated successor may acquire handoff")
                 if successor_epoch is None or successor_epoch <= current.predecessor_epoch:
                     db.rollback()
                     raise DirectorHandoffRejected("successor epoch must exceed predecessor epoch")
-            db.execute(
+            if next_state == "COMPLETED" and successor_epoch != current.successor_epoch:
+                db.rollback()
+                raise DirectorHandoffRejected("successor fencing epoch mismatch")
+            updated = db.execute(
                 """UPDATE director_handoffs
                    SET state = ?, version = version + 1, updated_at = ?,
                        released_at = CASE WHEN ? = 'RELEASED' THEN ? ELSE released_at END,
@@ -244,7 +245,7 @@ class DirectorHandoffStore:
                 (next_state, reference, next_state, reference, next_state,
                  successor_epoch, handoff_id, expected_state, current.version),
             )
-            if db.total_changes < 1:
+            if updated.rowcount != 1:
                 db.rollback()
                 raise DirectorHandoffRejected("handoff transition lost its compare-and-set")
             db.execute(
@@ -293,5 +294,6 @@ class DirectorHandoffStore:
             raise DirectorHandoffRejected("successor fencing epoch mismatch")
         # Completion is a handoff lifecycle marker, not a mission terminal outcome.
         return self._transition(handoff_id, "ACQUIRED", "COMPLETED",
-                                "HANDOFF_COMPLETED", record.predecessor_id,
-                                predecessor_epoch, now=now)
+                                "HANDOFF_COMPLETED", successor_id,
+                                predecessor_epoch, now=now,
+                                successor_epoch=successor_epoch)
