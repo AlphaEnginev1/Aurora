@@ -98,6 +98,38 @@ def test_director_planner_rejects_invalid_reviews(response):
         DirectorPlanner(FakeRouter(response)).review(objective="Do work.")
 
 
+
+def test_director_normalizes_role_casing_to_registered_role():
+    registry = OrganizationRegistry(
+        agents={
+            "researcher": AgentSpec(
+                agent_id="researcher",
+                role="researcher",
+                department="research",
+                mission="research",
+                capabilities=frozenset(),
+                model_preferences=(),
+            )
+        },
+        departments={
+            "research": DepartmentSpec(
+                department_id="research",
+                mission="research",
+                agent_ids=("researcher",),
+                model_preferences=(),
+                allowed_capabilities=frozenset(),
+            )
+        },
+    )
+    router = FakeRouter(
+        '{"tasks":[{"task_id":"x","role":"Researcher","objective":"x",'
+        '"capability":null,"args":[],"depends_on":[]}]}'
+    )
+
+    plan = DirectorPlanner(router, organization=registry).plan(objective="Do work.")
+
+    assert plan.tasks[0].role == "researcher"
+
 def test_director_rejects_role_outside_organization():
     registry = OrganizationRegistry(
         agents={
