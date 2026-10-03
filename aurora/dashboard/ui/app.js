@@ -445,7 +445,15 @@
         });
       });
     }
-    showSettingsMessage(provider.toUpperCase() + " connection verified.", false);
+    if (provider === "nvidia_api") {
+      const count = Number(data.staged_count || 0);
+      showSettingsMessage(
+        provider.toUpperCase() + " connection verified · " + count + " model(s) discovered and staged for governance.",
+        false
+      );
+    } else {
+      showSettingsMessage(provider.toUpperCase() + " connection verified.", false);
+    }
   }
 
   function setupSettings() {
