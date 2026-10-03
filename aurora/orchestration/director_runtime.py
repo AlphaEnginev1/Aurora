@@ -1788,16 +1788,17 @@ class DirectorRuntime:
             if handoff.state in {"REQUESTED", "QUIESCING"}:
                 return False
             if handoff.state == "RELEASED":
-                if self.worker_id != handoff.successor_id or current is None:
+                if self.worker_id != handoff.successor_id:
                     return False
                 if (
-                    current.owner_id == self.worker_id
+                    current is not None
+                    and current.owner_id == self.worker_id
                     and current.fencing_epoch > handoff.predecessor_epoch
                     and current.lease_until > now
                 ):
                     ownership = current
                 else:
-                    if current.lease_until > now:
+                    if current is not None and current.lease_until > now:
                         return False
                     try:
                         ownership = self.director_ownership.acquire(
@@ -1813,8 +1814,10 @@ class DirectorRuntime:
                             payload={
                                 "owner_id": self.worker_id,
                                 "reason": str(exc),
-                                "current_owner_id": current.owner_id,
-                                "current_fencing_epoch": current.fencing_epoch,
+                                "current_owner_id": current.owner_id if current else None,
+                                "current_fencing_epoch": (
+                                    current.fencing_epoch if current else None
+                                ),
                             },
                         )
                         return False
