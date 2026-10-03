@@ -2,10 +2,9 @@
 
 ## Status
 
-**IMPLEMENTATION PHASE OPEN — first implementation block only.**
+**IMPLEMENTATION PHASE COMPLETE.**
 
-Gate 5 contract and deterministic E2E acceptance are merged on canonical `main`.
-This phase now implements the cooperative handoff path in production.
+Gate 5 contract, deterministic E2E acceptance, cooperative handoff production implementation, regression coverage, and canonical verification are merged on `main`.
 
 ## Objective
 
@@ -70,16 +69,30 @@ This first production implementation phase is limited to cooperative Director ha
 
 No later block is authorized until the preceding block has passed its deterministic tests.
 
-## Completed block
+## Completed blocks
 
-**Block 1 — Durable handoff store/state machine.**
+**Block 1 — Durable handoff store/state machine — COMPLETE.**
 
 The durable SQLite handoff record, atomic compare-and-set transitions and append-only lifecycle events are merged on canonical `main`.
 
-## Current block
+**Block 2 — DirectorRuntime request/quiesce/release integration — COMPLETE.**
 
-**Block 2 — DirectorRuntime request/quiesce/release integration.**
+The runtime treats cooperative handoff as a cycle boundary, persists REQUESTED → QUIESCING → RELEASED, releases the current Director fence, and prevents the predecessor from continuing after release.
 
-The runtime now treats cooperative handoff as a cycle boundary, persists REQUESTED → QUIESCING → RELEASED, releases the current Director fence, and allows only the explicitly designated successor to acquire the same mission at a strictly higher fencing epoch. The successor consumes the existing durable mission graph and the handoff lifecycle is completed without replanning.
+**Block 3 — Successor acquisition/reconstruction integration — COMPLETE.**
 
-The deterministic runtime E2E must pass alongside the existing Director recovery/regression suite before the next block is started.
+The explicitly designated successor acquires the same mission through `DirectorOwnershipStore` at a strictly higher fencing epoch, reconstructs the existing durable graph and continues unfinished work without re-planning.
+
+**Block 4 — Production E2E and regression suite — COMPLETE.**
+
+The runtime E2E and regression suite prove quiescence, explicit successor fencing, higher-epoch takeover, no duplicate completed work, stale predecessor rejection and exactly one terminal outcome.
+
+**Block 5 — Canonical merge and verification — COMPLETE.**
+
+PR #106 merged to canonical `main` as `e7d14c1e97be8b14f6c1cf9402f487fa8b727e4d`; post-merge `test` and `e2e-network` are green.
+
+## Next gate
+
+**Gate 6 — Handoff Interruption / Recovery Contract.**
+
+The next phase is contract-only. It must define deterministic restart/interruption acceptance at cooperative-handoff boundaries before any further implementation is authorized.
