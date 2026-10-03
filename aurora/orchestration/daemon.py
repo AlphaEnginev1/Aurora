@@ -121,12 +121,14 @@ def main() -> int:
     operator_store = OperatorSettingsStore(settings_path(os.getenv("AURORA_WORKSPACE_ROOT", ".aurora-runtime")))
     provider_settings = ProviderSettingsService(operator_store, runtime)
     update_service = DashboardUpdateService(Path(__file__).resolve().parents[2])
-    health_service = DashboardHealthService(runtime.dashboard_gateway)
     if args.dashboard:
         try:
             if runtime.conversation_service is None:
                 parser.error("Director conversation service is not configured")
             dashboard_api = DashboardConversationAPI(runtime.conversation_service)
+            if runtime.dashboard_gateway is None:
+                parser.error("dashboard gateway is not configured")
+            health_service = DashboardHealthService(runtime.dashboard_gateway)
             dashboard_server = create_dashboard_server(
                 dashboard_gateway=runtime.dashboard_gateway,
                 conversation_api=dashboard_api,
