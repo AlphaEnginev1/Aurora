@@ -92,6 +92,7 @@ def test_live_gemini_director_tool_call(live_gemini_response):
     assert response.tool_calls
     assert response.tool_calls[0].name == "delegate_task"
     assert response.tool_calls[0].arguments["task_id"]
+    assert response.tool_calls[0].arguments["role"] == "engineer"
     assert response.tool_calls[0].arguments["capability"] == "tool:git"
 
 
@@ -327,7 +328,7 @@ def test_live_gemini_director_closes_mission_after_execution_and_review(
     assert len(result.tasks) == 1
     assert result.tasks[0].status is TaskStatus.SUCCEEDED
     assert provider.calls == 2
-    assert len(router.requests) == 1
+    assert len(router.requests) == 0
 
     events = [event.event_type for event in store.events(submission.mission_id)]
     assert "mission_submitted" in events
@@ -351,7 +352,7 @@ class ReplanningDirectorProvider(MissionReplayDirectorProvider):
                     content=(
                         '{"decision":"continue","rationale":"The first execution completed, '
                         'but a second controlled validation step is required.","tasks":['
-                        '{"task_id":"validate_result","role":"researcher",'
+                        '{"task_id":"validate_result","role":"engineer",'
                         '"objective":"Validate the controlled execution result.",'
                         '"capability":null,"args":[],"depends_on":[],"skills":[]}]}'
                     ),
@@ -399,23 +400,23 @@ def test_live_gemini_director_replans_after_review_and_completes(
     skill_registry = SkillRegistry({"research.validation": skill})
     organization = OrganizationRegistry(
         agents={
-            "agent-researcher": AgentSpec(
-                agent_id="agent-researcher",
-                role="researcher",
-                department="research",
-                mission="Perform controlled research validation.",
-                capabilities=frozenset(),
+            "agent-engineer": AgentSpec(
+                agent_id="agent-engineer",
+                role="engineer",
+                department="engineering",
+                mission="Perform controlled repository research validation.",
+                capabilities=frozenset({"tool:git"}),
                 model_preferences=("controlled-task-model",),
                 skill_ids=("research.validation",),
             )
         },
         departments={
-            "research": DepartmentSpec(
-                department_id="research",
-                mission="Research",
-                agent_ids=("agent-researcher",),
+            "engineering": DepartmentSpec(
+                department_id="engineering",
+                mission="Repository research validation",
+                agent_ids=("agent-engineer",),
                 model_preferences=("controlled-task-model",),
-                allowed_capabilities=frozenset(),
+                allowed_capabilities=frozenset({"tool:git"}),
             )
         },
     )
