@@ -185,9 +185,15 @@ def test_runtime_excludes_competing_director_then_takes_over_with_fencing(tmp_pa
     assert all(tasks[key].status == "succeeded" for key in ("step_a", "step_b", "step_c"))
     assert all(tasks[key].attempts == 1 for key in ("step_a", "step_b", "step_c"))
 
+    terminal_types = {
+        "mission_succeeded",
+        "mission_failed",
+        "mission_blocked",
+    }
     terminal_events = [
-        event for event in store.events(submission.mission_id)
-        if event.event_type.startswith("mission_")
+        event
+        for event in store.events(submission.mission_id)
+        if event.event_type in terminal_types
     ]
     assert [event.event_type for event in terminal_events] == ["mission_succeeded"]
 
