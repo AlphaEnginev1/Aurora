@@ -129,7 +129,7 @@ The queue is closed. Block 7 establishes the explicit authorization boundary; it
 
 ## Increment policy
 
-**Increment 11 — Director Handoff / Failover: AUTHORIZED. Gates 1–4 COMPLETE on canonical `main`.**
+**Increment 11 — Director Handoff / Failover: ACTIVE. Gates 1–5 and cooperative handoff implementation are complete on canonical `main`.**
 
 Scope is deliberately isolated to replacement of an active Director during an in-progress durable mission. This phase establishes the contract and deterministic E2E acceptance proof before any production handoff/election implementation. Unrelated dashboard, model, provider, research, and frozen production-readiness work remains out of scope.
 
