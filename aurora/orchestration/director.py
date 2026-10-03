@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from aurora.inference.router import ModelRouter
@@ -135,6 +135,7 @@ Rules:
             if response.tool_calls
             else self._parse(response.content)
         )
+        tasks = self._normalize_organization_roles(tasks)
         self._validate_organization(tasks)
         return DirectorPlan(objective=objective, tasks=tasks, model=response.model)
 
@@ -188,6 +189,7 @@ Rules:
             decision, rationale, tasks, considered_alternatives = self._parse_review_tool_calls(response.tool_calls)
         else:
             decision, rationale, tasks, considered_alternatives = self._parse_review(response.content)
+        tasks = self._normalize_organization_roles(tasks)
         self._validate_organization(tasks)
         return DirectorReview(
             decision=decision,
@@ -253,6 +255,38 @@ Rules:
             depends_on=tuple(depends_on),
             skills=tuple(skills),
         )
+
+    def _normalize_organization_roles(
+        self, tasks: tuple[DelegatedTask, ...]
+    ) -> tuple[DelegatedTask, ...]:
+        """Canonicalize harmless role-name casing before organization validation.
+
+        Model output is treated as untrusted structured data. Case-insensitive
+        matching is allowed only when it resolves to exactly one registered
+        Aurora role/agent identity; the canonical registry role is then stored
+        in the task so downstream validation remains exact and fail-closed.
+        """
+        if self.organization is None:
+            return tasks
+
+        by_casefold: dict[str, set[str]] = {}
+        for agent in self.organization.agents.values():
+            for identity in (agent.role, agent.agent_id):
+                by_casefold.setdefault(identity.strip().casefold(), set()).add(agent.role)
+
+        normalized: list[DelegatedTask] = []
+        for task in tasks:
+            role = task.role.strip()
+            try:
+                self.organization.resolve_agent(role)
+                canonical = role
+            except OrganizationConfigError:
+                matches = by_casefold.get(role.casefold(), set())
+                if len(matches) != 1:
+                    raise
+                canonical = next(iter(matches))
+            normalized.append(replace(task, role=canonical) if canonical != task.role else task)
+        return tuple(normalized)
 
     def _validate_organization(self, tasks: tuple[DelegatedTask, ...]) -> None:
         if self.organization is None:
