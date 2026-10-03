@@ -19,6 +19,7 @@ from aurora.production_authorization import (
 from aurora.operator_settings import OperatorSettingsStore, settings_path
 from aurora.dashboard.provider_settings import ProviderSettingsService
 from aurora.dashboard.update_service import DashboardUpdateService
+from aurora.dashboard.health import DashboardHealthService
 
 
 def _path_env(name: str, default: str) -> Path:
@@ -120,6 +121,7 @@ def main() -> int:
     operator_store = OperatorSettingsStore(settings_path(os.getenv("AURORA_WORKSPACE_ROOT", ".aurora-runtime")))
     provider_settings = ProviderSettingsService(operator_store, runtime)
     update_service = DashboardUpdateService(Path(__file__).resolve().parents[2])
+    health_service = DashboardHealthService(runtime.dashboard_gateway)
     if args.dashboard:
         try:
             if runtime.conversation_service is None:
@@ -133,6 +135,7 @@ def main() -> int:
                 api_token=os.getenv("AURORA_DASHBOARD_API_TOKEN"),
                 provider_settings=provider_settings,
                 update_service=update_service,
+                health_service=health_service,
             )
         except DashboardHTTPError as exc:
             parser.error(str(exc))
