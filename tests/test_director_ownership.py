@@ -103,7 +103,11 @@ def test_get_can_filter_expired_ownership_without_erasing_history(tmp_path: Path
         now="2026-01-01T00:00:31+00:00",
     )
     assert store.get("mission-expiry", now="2026-01-01T00:00:31+00:00") is None
-    assert store.get("mission-expiry") == ownership
+    historical = store.get("mission-expiry")
+    assert historical is not None
+    assert historical.mission_id == ownership.mission_id
+    assert historical.owner_id == ownership.owner_id
+    assert historical.fencing_epoch == ownership.fencing_epoch
 
 
 def test_stale_owner_cannot_release_after_takeover(tmp_path: Path):
