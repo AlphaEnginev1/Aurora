@@ -129,11 +129,19 @@ The queue is closed. Block 7 establishes the explicit authorization boundary; it
 
 ## Increment policy
 
-**Increment 11 — Director Handoff / Failover: AUTHORIZED (contract + E2E proof phase).**
+**Increment 11 — Director Handoff / Failover: AUTHORIZED. Gates 1–4 COMPLETE on canonical `main`.**
 
 Scope is deliberately isolated to replacement of an active Director during an in-progress durable mission. This phase establishes the contract and deterministic E2E acceptance proof before any production handoff/election implementation. Unrelated dashboard, model, provider, research, and frozen production-readiness work remains out of scope.
 
 The authoritative contract is `docs/operations/INCREMENT_11_DIRECTOR_HANDOFF_FAILOVER_CONTRACT.md`.
+
+Completed gates on canonical `main`:
+- Gate 1 — Director Handoff / Failover contract + deterministic E2E — COMPLETE.
+- Gate 2 — Director Ownership & Fenced Takeover contract + acceptance scenario — COMPLETE.
+- Gate 3 — Durable `DirectorOwnershipStore` — COMPLETE.
+- Gate 4 — `DirectorRuntime` ownership/fencing integration + E2E — COMPLETE.
+
+The next Increment 11 gate must be scoped separately before implementation begins.
 
 
 ## Block 13 — Dashboard Full E2E — COMPLETE
@@ -150,4 +158,4 @@ Verified proof lanes:
 
 Dashboard proof remains distinct from the frozen production-readiness queue 1–7. Live execution is still fail-closed and requires the existing explicit human authorization boundary.
 
-**Increment 11 remains unapproved.**
+**Increment 11 is authorized; the next gate is not yet started.**
