@@ -112,27 +112,6 @@ Evidence:
 - duplicate PR checks test and e2e-network were green;
 - canonical post-merge CI run 1965 completed with test and e2e-network green.
 
-## Gate 6 — Handoff Interruption / Recovery acceptance test — COMPLETE
-
-The Gate 6 recovery contract and deterministic acceptance test are merged on canonical main.
-
-Verified:
-- durable REQUESTED and QUIESCING states survive Director restart;
-- predecessor remains unable to resume Director-controlled work while handoff is active;
-- RELEASED remains authoritative after predecessor restart;
-- stale predecessor mutation is rejected at the handoff boundary before successor acquisition;
-- after successor acquisition, stale predecessor control is rejected by mission ownership fencing;
-- successor acquires a strictly higher fencing epoch;
-- successor restart reconstructs the existing durable graph;
-- completed work is not repeated;
-- no re-planning occurs;
-- exactly one terminal mission outcome remains.
-
-Evidence:
-- PR #108 merged to main as 09a7ed503cea03211e2bb8bc5caab06be43b8332;
-- duplicate PR checks test and e2e-network were green;
-- canonical post-merge CI run 1965 completed with test and e2e-network green.
-
 ## Gate 7 — Recovery Contradiction / Fail-Closed acceptance — COMPLETE
 
 Gate 7 defined and verified the fail-closed boundary for contradictory durable recovery state.
@@ -150,10 +129,28 @@ Evidence:
 - PR #110 runs 1979 and 1980 were green;
 - canonical post-merge CI run 1981 was green.
 
-## Next gate
+## Gate 8 — Automatic Director Failover / Election — ACTIVE
 
-**Gate 8 — Automatic Director Failover / Election — CONTRACT PHASE.**
+### Contract — COMPLETE
+The Gate 8 contract defines automatic recovery after lease expiry within one Aurora installation sharing the existing durable mission/ownership authority.
 
-The next phase is limited to defining the automatic recovery protocol for multiple eligible Director runtimes sharing the same durable mission/ownership authority. It must preserve single-owner fencing, deterministic eligibility, no split-brain control, no duplicate mission execution, and fail-closed behavior when eligibility or shared state is ambiguous.
+### Acceptance Block 1 — Expired-lease race + fenced continuation — COMPLETE
+Verified by PR #112:
+- A owns epoch 1 and stops renewing;
+- B and C contend concurrently after expiry;
+- exactly one acquires epoch 2 through DirectorOwnershipStore;
+- the loser cannot mutate mission control;
+- stale A remains fenced;
+- the winner continues the same durable graph;
+- completed work is not repeated;
+- exactly one terminal outcome remains.
 
-No automatic election, runtime implementation, distributed consensus, provider/model failover, dashboard takeover, or live-authorization change is authorized until the Gate 8 contract and a separate deterministic acceptance phase are both closed.
+Evidence:
+- PR #112 merged as c6f5d261ac39d0549f36d339ab6288ffb4a96913;
+- runs 1991 and 1992 were green;
+- canonical run 1993 failed on an unrelated existing bubblewrap loopback test, then failed job rerun attempt 2 completed green.
+
+### Acceptance Block 2 — Candidate Eligibility Authority — OPEN
+No dedicated Director eligibility/membership registry was found in the current repository. The next phase defines that authority before automatic election can be considered complete.
+
+No provider/model failover, distributed consensus, dashboard takeover, task-worker lease redesign, or live-authorization changes are part of this block.

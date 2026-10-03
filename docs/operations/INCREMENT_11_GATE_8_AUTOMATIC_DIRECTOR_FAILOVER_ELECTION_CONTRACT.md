@@ -1,7 +1,7 @@
 # Increment 11 — Gate 8: Automatic Director Failover / Election Contract
 
-**Status:** CONTRACT PHASE — NO IMPLEMENTATION
-**Canonical prerequisite:** Gates 1–7 are complete on canonical main.
+**Status:** CONTRACT COMPLETE; ACCEPTANCE BLOCK 1 COMPLETE; ACCEPTANCE BLOCK 2 OPEN
+**Canonical prerequisite:** Gates 1–7 and the Gate 8 contract are complete on canonical main.
 **Scope:** Automatic recovery of Director control after an active Director lease expires, within one Aurora installation sharing the same authoritative durable mission/ownership state.
 **Exclusions:** No distributed consensus, multi-machine membership discovery, provider/model failover, dashboard takeover controls, live-authorization changes, or worker lease redesign.
 
@@ -104,6 +104,26 @@ The subsequent deterministic E2E phase MUST cover at least:
 10. Restart of the winner preserves ownership and mission state.
 11. A stale predecessor restart remains fenced.
 12. Ambiguous or unavailable eligibility causes fail-closed behavior.
+
+## 5A. Acceptance Block 1 evidence
+
+The core expiry-race acceptance is verified on canonical main:
+- A owns the mission at fencing epoch 1 and its lease expires;
+- eligible B and C contend concurrently;
+- exactly one acquires epoch 2 through DirectorOwnershipStore;
+- the loser remains fenced;
+- stale A remains fenced;
+- the winner continues the existing task graph without re-planning or duplicate completed work;
+- exactly one terminal outcome remains.
+
+Evidence:
+- PR #112 merged as c6f5d261ac39d0549f36d339ab6288ffb4a96913;
+- PR runs 1991 and 1992 are green;
+- canonical post-merge run 1993 required a rerun of its pre-existing bubblewrap loopback test and rerun attempt 2 completed successfully.
+
+## 5B. Remaining acceptance requirement
+
+Acceptance remains open for the candidate eligibility authority described in Section 4. No repository component currently provides that authoritative eligibility source, so the next gated step is a separate candidate-eligibility contract and acceptance phase.
 
 ## 6. Interaction with cooperative handoff
 

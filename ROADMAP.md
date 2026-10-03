@@ -129,7 +129,7 @@ The queue is closed. Block 7 establishes the explicit authorization boundary; it
 
 ## Increment policy
 
-**Increment 11 — Director Handoff / Failover: ACTIVE. Gates 1–7 are COMPLETE on canonical main.**
+**Increment 11 — Director Handoff / Failover: ACTIVE. Gates 1–7 are COMPLETE; Gate 8 is ACTIVE on canonical main.**
 
 Scope remains isolated to safe replacement and recovery of an active Director during an in-progress durable mission. Unrelated dashboard, model, provider, research, and frozen production-readiness work remains out of scope.
 
@@ -138,6 +138,8 @@ Authoritative Increment 11 contracts:
 - docs/operations/INCREMENT_11_DIRECTOR_HANDOFF_RELEASE_CONTRACT.md
 - docs/operations/INCREMENT_11_GATE_6_HANDOFF_INTERRUPTION_RECOVERY_CONTRACT.md
 - docs/operations/INCREMENT_11_GATE_7_RECOVERY_CONTRADICTION_FAIL_CLOSED_CONTRACT.md
+- docs/operations/INCREMENT_11_GATE_8_AUTOMATIC_DIRECTOR_FAILOVER_ELECTION_CONTRACT.md
+- docs/operations/INCREMENT_11_GATE_8_CANDIDATE_ELIGIBILITY_CONTRACT.md
 
 Completed gates on canonical main:
 - Gate 1 — Director Handoff / Failover contract + deterministic E2E — COMPLETE.
@@ -150,12 +152,19 @@ Completed gates on canonical main:
 
 Gate 7 evidence:
 - PR #110 merged to canonical main as eaddeaa6f7892c97b04c363433bf6dc87a774c9a.
-- PR #110 run 1979 (push) and run 1980 (pull request) were green.
-- Canonical post-merge CI run 1981 was green with test: success and e2e-network: success.
-- Gate 7 adds durable director_recovery_fail_closed diagnostics and prevents Director mission-control mutation when durable handoff, ownership/fencing, or mission/task state cannot be reconciled safely.
+- PR #110 runs 1979 and 1980 were green.
+- Canonical post-merge CI run 1981 was green.
 
-**Next Increment 11 gate: Gate 8 — Automatic Director Failover / Election contract.**
-This begins with contract definition only. It will specify how an Aurora installation with multiple eligible Director runtimes can automatically recover an expired Director lease without creating split-brain ownership, arbitrary successor selection, duplicate execution, or bypassing the existing fencing authority. This gate does not authorize distributed consensus, multi-machine membership discovery, provider/model failover, dashboard takeover controls, or live-authorization changes.
+Gate 8 status:
+- Contract — COMPLETE.
+- Acceptance Block 1 — deterministic expired-lease race, epoch advancement, loser fencing, stale predecessor fencing and continuation without duplicate work — VERIFIED.
+- Acceptance evidence: PR #112; runs 1991 and 1992 green; canonical post-merge run 1993 green after rerun attempt 2.
+- Acceptance Block 2 — candidate eligibility authority — OPEN.
+
+A repository search on canonical main found no dedicated Director membership/eligibility registry or equivalent authoritative candidate source. That is a real remaining design/implementation gap, not a reason to invent one implicitly.
+
+**Next Increment 11 step: Gate 8 Block 2 — Candidate Eligibility Authority contract.**
+This phase defines the authoritative eligibility record, identity uniqueness, readiness/ineligibility, restart persistence, stale candidate handling, and fail-closed behavior when the eligibility source is unavailable or contradictory. No automatic election runtime changes are authorized until this contract and its separate acceptance phase are closed.
 
 ## Block 13 — Dashboard Full E2E — COMPLETE
 
