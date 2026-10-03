@@ -54,8 +54,8 @@ def live_gemini_response() -> DirectorModelResponse:
                 "role": "user",
                 "content": (
                     "Create exactly one research task to investigate Aurora architecture. "
-                    "Set capability exactly to tool:git. The task must use the registered "
-                    "git capability; do not omit capability."
+                    "Use the registered researcher role and capability tool:rg. "
+                    "Set capability exactly to tool:rg; do not omit the capability."
                 ),
             },
         ],
@@ -92,8 +92,8 @@ def test_live_gemini_director_tool_call(live_gemini_response):
     assert response.tool_calls
     assert response.tool_calls[0].name == "delegate_task"
     assert response.tool_calls[0].arguments["task_id"]
-    assert response.tool_calls[0].arguments["role"] == "engineer"
-    assert response.tool_calls[0].arguments["capability"] == "tool:git"
+    assert response.tool_calls[0].arguments["role"].strip().casefold() == "researcher"
+    assert response.tool_calls[0].arguments["capability"] == "tool:rg"
 
 
 class ReplayDirectorProvider:
@@ -166,25 +166,25 @@ def test_live_gemini_director_executes_through_real_registered_capability(
     live_gemini_response,
     tmp_path,
 ):
-    executable = tmp_path / "git"
+    executable = tmp_path / "rg"
     executable.write_text("#!/bin/sh\necho controlled\n", encoding="utf-8")
 
     capability_spec = ToolSpec(
-        name="git",
+        name="rg",
         kind="system",
         source="ubuntu-apt",
-        executable="git",
+        executable="rg",
     )
     acquisition = ControlledCapabilityAcquisition(executable)
     capability_sandbox = ControlledCapabilitySandbox()
     capability_runtime = CapabilityRuntime(
         CapabilityBroker(
             Policy(
-                frozenset({"tool:git"}),
+                frozenset({"tool:rg"}),
                 frozenset({"ubuntu-apt"}),
                 require_verification=True,
             ),
-            {"git": capability_spec},
+            {"rg": capability_spec},
             acquisition,
         ),
         capability_sandbox,
@@ -212,7 +212,7 @@ def test_live_gemini_director_executes_through_real_registered_capability(
     assert result.plan.model
     assert len(result.plan.tasks) == 1
     task = result.plan.tasks[0]
-    assert task.capability == "tool:git"
+    assert task.capability == "tool:rg"
 
     assert len(result.tasks) == 1
     execution = result.tasks[0]
@@ -224,9 +224,9 @@ def test_live_gemini_director_executes_through_real_registered_capability(
     capability_result = execution.capability_result
     assert capability_result.execution.returncode == 0
     assert capability_result.execution.stdout == "registered capability executed"
-    assert capability_result.execution.capability.name == "tool:git"
+    assert capability_result.execution.capability.name == "tool:rg"
     assert capability_result.execution.capability.verification == "verified"
-    assert acquisition.calls == ["git"]
+    assert acquisition.calls == ["rg"]
     assert len(capability_sandbox.calls) == 1
     assert capability_sandbox.calls[0][0] == (str(executable),)
 
@@ -265,24 +265,24 @@ def test_live_gemini_director_closes_mission_after_execution_and_review(
     provider = MissionReplayDirectorProvider(live_gemini_response)
     planner = DirectorPlanner(provider=provider, router=None)
 
-    executable = tmp_path / "git"
+    executable = tmp_path / "rg"
     executable.write_text("#!/bin/sh\\necho controlled\\n", encoding="utf-8")
     capability_spec = ToolSpec(
-        name="git",
+        name="rg",
         kind="system",
         source="ubuntu-apt",
-        executable="git",
+        executable="rg",
     )
     acquisition = ControlledCapabilityAcquisition(executable)
     capability_sandbox = ControlledCapabilitySandbox()
     capability_runtime = CapabilityRuntime(
         CapabilityBroker(
             Policy(
-                frozenset({"tool:git"}),
+                frozenset({"tool:rg"}),
                 frozenset({"ubuntu-apt"}),
                 require_verification=True,
             ),
-            {"git": capability_spec},
+            {"rg": capability_spec},
             acquisition,
         ),
         capability_sandbox,
@@ -352,7 +352,7 @@ class ReplanningDirectorProvider(MissionReplayDirectorProvider):
                     content=(
                         '{"decision":"continue","rationale":"The first execution completed, '
                         'but a second controlled validation step is required.","tasks":['
-                        '{"task_id":"validate_result","role":"engineer",'
+                        '{"task_id":"validate_result","role":"researcher",'
                         '"objective":"Validate the controlled execution result.",'
                         '"capability":null,"args":[],"depends_on":[],"skills":[]}]}'
                     ),
@@ -383,7 +383,6 @@ def test_live_gemini_director_replans_after_review_and_completes(
     tmp_path,
 ):
     provider = ReplanningDirectorProvider(live_gemini_response)
-    planner = DirectorPlanner(provider=provider, router=None)
     router = ControlledRouter()
     skill = SkillSpec(
         skill_id="research.validation",
@@ -400,30 +399,62 @@ def test_live_gemini_director_replans_after_review_and_completes(
     skill_registry = SkillRegistry({"research.validation": skill})
     organization = OrganizationRegistry(
         agents={
-            "agent-engineer": AgentSpec(
-                agent_id="agent-engineer",
-                role="engineer",
-                department="engineering",
+            "agent-researcher": AgentSpec(
+                agent_id="agent-researcher",
+                role="researcher",
+                department="research",
                 mission="Perform controlled repository research validation.",
-                capabilities=frozenset({"tool:git"}),
+                capabilities=frozenset({"tool:rg"}),
                 model_preferences=("controlled-task-model",),
                 skill_ids=("research.validation",),
             )
         },
         departments={
-            "engineering": DepartmentSpec(
-                department_id="engineering",
+            "research": DepartmentSpec(
+                department_id="research",
                 mission="Repository research validation",
-                agent_ids=("agent-engineer",),
+                agent_ids=("agent-researcher",),
                 model_preferences=("controlled-task-model",),
-                allowed_capabilities=frozenset({"tool:git"}),
+                allowed_capabilities=frozenset({"tool:rg"}),
             )
         },
     )
+    planner = DirectorPlanner(
+        provider=provider,
+        router=None,
+        organization=organization,
+        skill_registry=skill_registry,
+    )
+
     skill_learning = SkillLearningStore(tmp_path / "skills.db")
     model_performance = ModelPerformanceStore(tmp_path / "model-performance.db")
+    executable = tmp_path / "rg"
+    executable.write_text("#!/bin/sh\\necho controlled\\n", encoding="utf-8")
+    capability_spec = ToolSpec(
+        name="rg",
+        kind="system",
+        source="ubuntu-apt",
+        executable="rg",
+    )
+    acquisition = ControlledCapabilityAcquisition(executable)
+    capability_sandbox = ControlledCapabilitySandbox()
+    capability_runtime = CapabilityRuntime(
+        CapabilityBroker(
+            Policy(
+                frozenset({"tool:rg"}),
+                frozenset({"ubuntu-apt"}),
+                require_verification=True,
+            ),
+            {"rg": capability_spec},
+            acquisition,
+        ),
+        capability_sandbox,
+    )
     task_engine = TaskEngine(
-        orchestration=OrchestrationEngine(router),
+        orchestration=OrchestrationEngine(
+            router,
+            capability_runtime=capability_runtime,
+        ),
         workspace_root=tmp_path / "workspace",
         organization=organization,
         skill_registry=skill_registry,
@@ -465,7 +496,7 @@ def test_live_gemini_director_replans_after_review_and_completes(
     assert result.tasks[1].task.task_id == "r1_validate_result"
 
     assert provider.calls == 3
-    assert len(router.requests) == 2
+    assert len(router.requests) == 1
     scores = model_performance.trusted_scores_for(
         skill_ids=("research.validation",),
         skill_versions={"research.validation": "1.0.0"},
