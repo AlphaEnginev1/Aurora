@@ -141,7 +141,7 @@ Completed gates on canonical `main`:
 - Gate 3 — Durable `DirectorOwnershipStore` — COMPLETE.
 - Gate 4 — `DirectorRuntime` ownership/fencing integration + E2E — COMPLETE.
 
-The next Increment 11 gate must be scoped separately before implementation begins.
+The next Increment 11 gate must be scoped separately before implementation begins.\n\n### Gate 5 — Deterministic Director Handoff / Release E2E — AUTHORIZED (acceptance-test phase)\n\nThis independent gate defines the deterministic acceptance proof for cooperative handoff: Director A requests handoff to explicit Director B, quiesces, releases, B acquires at a higher fencing epoch, reconstructs the same mission, continues only unfinished work, stale A mutations are rejected, no duplicate execution occurs, and exactly one terminal outcome remains. This phase is a contract probe only; it does not implement production handoff runtime behavior.
 
 ### Gate 5 — Explicit Director Handoff / Release Contract — AUTHORIZED (contract phase)
 
