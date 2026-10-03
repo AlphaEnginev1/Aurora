@@ -163,6 +163,7 @@ def _prepare_mission(tmp_path: Path):
 def test_restart_preserves_requested_and_quiescing_handoff(tmp_path: Path):
     state = _prepare_mission(tmp_path)
     store = state["store"]
+    bus = state["bus"]
     ownership = state["ownership"]
     handoff = state["handoff"]
     clock = state["clock"]
