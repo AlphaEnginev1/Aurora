@@ -21,6 +21,7 @@ from aurora.orchestration.director_conversation import (
     DirectorConversationError,
     DirectorConversationService,
 )
+from aurora.orchestration.director_provider import DirectorModelResponse
 from aurora.orchestration.director_decision_knowledge_store import DirectorDecisionKnowledgeStore
 from aurora.orchestration.director_decision_performance import DirectorDecisionPerformanceStore
 from aurora.orchestration.director_decision_policy_active_store import DirectorDecisionPolicyActiveStore
@@ -254,3 +255,32 @@ def test_failed_provider_is_persisted_without_exposing_credentials(tmp_path):
     failed = service.list_turns(session.session_id, limit=10)
     assert failed[-1].state == "failed"
     assert failed[-1].error_code == "runtimeerror"
+
+def test_gemini_style_provider_response_contract(tmp_path):
+    service, _ = _service(tmp_path)
+
+    class GeminiStyleProvider:
+        provider_id = "gemini"
+
+        def generate(self, *, messages, model, role, tools=()):
+            return DirectorModelResponse(
+                content="Respuesta Gemini.",
+                model=model or "gemini-3.7-flash",
+                provider="gemini",
+                request_id="request-gemini",
+                execution_id="execution-gemini",
+                tool_calls=(),
+            )
+
+    service.set_provider(GeminiStyleProvider())
+    session = service.create_session()
+
+    response = service.send_message(
+        session_id=session.session_id,
+        user_input="Hola Aurora",
+    )
+
+    assert response.response_text == "Respuesta Gemini."
+    assert response.provider == "gemini"
+    assert response.model == "gemini-3.7-flash"
+    assert response.execution_id == "execution-gemini"
