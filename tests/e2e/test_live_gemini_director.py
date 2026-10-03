@@ -264,8 +264,33 @@ def test_live_gemini_director_closes_mission_after_execution_and_review(
     provider = MissionReplayDirectorProvider(live_gemini_response)
     planner = DirectorPlanner(provider=provider, router=None)
 
+    executable = tmp_path / "git"
+    executable.write_text("#!/bin/sh\\necho controlled\\n", encoding="utf-8")
+    capability_spec = ToolSpec(
+        name="git",
+        kind="system",
+        source="ubuntu-apt",
+        executable="git",
+    )
+    acquisition = ControlledCapabilityAcquisition(executable)
+    capability_sandbox = ControlledCapabilitySandbox()
+    capability_runtime = CapabilityRuntime(
+        CapabilityBroker(
+            Policy(
+                frozenset({"tool:git"}),
+                frozenset({"ubuntu-apt"}),
+                require_verification=True,
+            ),
+            {"git": capability_spec},
+            acquisition,
+        ),
+        capability_sandbox,
+    )
     router = ControlledRouter()
-    orchestration = OrchestrationEngine(router)
+    orchestration = OrchestrationEngine(
+        router,
+        capability_runtime=capability_runtime,
+    )
     task_engine = TaskEngine(
         orchestration=orchestration,
         workspace_root=tmp_path / "workspace",
