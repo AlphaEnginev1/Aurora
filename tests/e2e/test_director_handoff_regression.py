@@ -151,7 +151,7 @@ def test_predecessor_is_fenced_after_cooperative_handoff(tmp_path: Path):
     assert not cycle.worker_cycles
     assert len(after_events) == before
     assert orchestration.calls == ["step_a"]
-    assert ownership.get(submission.mission_id) is None
+    assert ownership.get(submission.mission_id, now="2026-01-01T00:00:01+00:00") is None
 
     # A cannot create a second terminal outcome after release.
     runtime_a._publish_terminal(
@@ -187,7 +187,7 @@ def test_only_designated_successor_can_take_cooperative_handoff(tmp_path: Path):
     assert not cycle.worker_cycles
     assert planner_c.plan_calls == 0
     assert planner_c.review_calls == 0
-    assert ownership.get(submission.mission_id) is None
+    assert ownership.get(submission.mission_id, now="2026-01-01T00:00:01+00:00") is None
     handoff = runtime_a.director_handoff_store.get_active_for_mission(submission.mission_id)
     assert handoff is not None
     assert handoff.state == "RELEASED"
