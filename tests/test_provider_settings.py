@@ -74,10 +74,10 @@ def test_nvidia_selected_model_is_activated_without_editing_repo_policy(tmp_path
     })
 
     assert state["runtime"]["director_provider"] == "inference_router"
-    model = runtime.planner.router.model_registry.resolve("nvidia/new-model")
+    model = runtime.director.planner.router.model_registry.resolve("nvidia/new-model")
     assert model.enabled is True
     assert model.provider == "nvidia_api"
-    assert runtime.planner.provider.provider_id == "inference_router"
+    assert runtime.director.planner.provider.provider_id == "inference_router"
 
 
 def test_local_nvidia_model_setting_can_be_restored_on_startup(tmp_path: Path):
