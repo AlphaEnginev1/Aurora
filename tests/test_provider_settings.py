@@ -57,6 +57,48 @@ def test_gemini_setting_switches_runtime_provider(tmp_path: Path):
     assert runtime.director.planner.router.nvidia_api_key is None
 
 
+def test_nvidia_discovery_stages_candidates(tmp_path: Path):
+    from types import SimpleNamespace
+
+    runtime = Runtime(router(tmp_path))
+    store = OperatorSettingsStore(tmp_path / "operator-settings.json")
+    store.save({
+        "providers": {"nvidia_api": {"api_key": "secret"}},
+    })
+
+    candidate_a = SimpleNamespace(model=ModelSpec(
+        "nvidia/model-a",
+        "nvidia_api",
+        "https://integrate.api.nvidia.com/v1",
+        enabled=False,
+        healthy=False,
+        available=False,
+    ))
+    candidate_b = SimpleNamespace(model=ModelSpec(
+        "nvidia/model-b",
+        "nvidia_api",
+        "https://integrate.api.nvidia.com/v1",
+        enabled=False,
+        healthy=False,
+        available=False,
+    ))
+
+    class Discovery:
+        def discover_and_stage(self, provider_id):
+            assert provider_id == "nvidia_api"
+            return (candidate_a, candidate_b)
+
+    runtime.model_discovery = Discovery()
+    service = ProviderSettingsService(store, runtime)
+
+    result = service.test_provider("nvidia_api")
+
+    assert result["ok"] is True
+    assert result["models"] == ["nvidia/model-a", "nvidia/model-b"]
+    assert result["staged_count"] == 2
+    assert result["stage_state"] == "discovered"
+
+
 def test_nvidia_selected_model_is_activated_without_editing_repo_policy(tmp_path: Path):
     runtime = Runtime(router(tmp_path))
     store = OperatorSettingsStore(tmp_path / "operator-settings.json")

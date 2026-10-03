@@ -4,6 +4,7 @@ import json, urllib.error, urllib.request
 from typing import Any, Mapping
 from aurora.inference.models import ModelSpec
 from aurora.inference.providers.registry import default_provider_registry
+from aurora.inference.discovery import ModelDiscoveryError
 from aurora.operator_settings import OperatorSettingsError, OperatorSettingsStore
 from aurora.orchestration.director_provider import InferenceDirectorProvider
 from aurora.orchestration.gemini_provider import GeminiDirectorProvider
@@ -101,12 +102,27 @@ class ProviderSettingsService:
             key = self.store.credential("nvidia_api")
             if not key:
                 raise DashboardProviderSettingsError("NVIDIA API key is not configured")
-            endpoint = str(settings["providers"]["nvidia_api"]["base_url"]).rstrip("/")
-            request = urllib.request.Request(f"{endpoint}/models", headers={"Authorization": f"Bearer {key}", "Accept": "application/json"}, method="GET")
-            with _urlopen(request) as response:
-                payload = json.loads(response.read().decode("utf-8"))
-            rows = payload.get("data", []) if isinstance(payload, dict) else []
-            return {"provider":"nvidia_api","ok":True,"models":[x.get("id") for x in rows if isinstance(x, Mapping) and isinstance(x.get("id"),str)][:100]}
+
+            discovery = getattr(self.runtime, "model_discovery", None)
+            if discovery is None:
+                raise DashboardProviderSettingsError("NVIDIA model discovery is not available in the current runtime")
+            try:
+                candidates = tuple(discovery.discover_and_stage("nvidia_api"))
+            except ModelDiscoveryError as exc:
+                raise DashboardProviderSettingsError(str(exc)) from exc
+
+            models = [
+                candidate.model.id
+                for candidate in candidates
+                if getattr(candidate, "model", None) is not None
+            ]
+            return {
+                "provider": "nvidia_api",
+                "ok": True,
+                "models": models[:100],
+                "staged_count": len(models),
+                "stage_state": "discovered",
+            }
         raise DashboardProviderSettingsError("provider test supports gemini or nvidia_api")
 
 def _urlopen(request: urllib.request.Request):
