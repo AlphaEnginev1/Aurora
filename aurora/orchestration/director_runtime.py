@@ -759,11 +759,6 @@ class DirectorRuntime:
             if self.store.mission_status(mission_id) in self.TERMINAL
             and not self._is_finalized(mission_id)
         ]
-        owned_terminal_candidates = [
-            mission_id
-            for mission_id in terminal_candidates
-            if self._ensure_mission_ownership(mission_id)
-        ]
 
         for mission_id in owned_active:
             if not self.store.has_event(mission_id, "mission_started"):
@@ -803,8 +798,9 @@ class DirectorRuntime:
                     if self.store.mission_status(mission_id) in self.TERMINAL:
                         terminal_candidates.append(mission_id)
 
-        for mission_id in sorted(set(owned_terminal_candidates)):
-            self._review_or_finalize(mission_id)
+        for mission_id in sorted(set(terminal_candidates)):
+            if self._ensure_mission_ownership(mission_id):
+                self._review_or_finalize(mission_id)
 
         observed_missions = set(event_missions) | set(active) | set(terminal_candidates)
         for mission_id in sorted(observed_missions):
