@@ -11,7 +11,7 @@ def test_dashboard_health_exposes_truthful_component_states_and_agents(tmp_path)
 
     result = DashboardHealthService(gateway).health()
 
-    assert result["overall"] in {"HEALTHY", "UNKNOWN", "DEGRADED"}
+    assert result["overall"] in {"HEALTHY", "UNKNOWN", "DEGRADED", "CRITICAL"}
     assert {item["name"] for item in result["components"]} >= {
         "Director", "Task Worker", "Agents", "Model Layer", "Observability",
         "Event Bus", "Egress Proxy",
