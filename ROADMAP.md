@@ -129,14 +129,15 @@ The queue is closed. Block 7 establishes the explicit authorization boundary; it
 
 ## Increment policy
 
-**Increment 11 — Director Handoff / Failover: ACTIVE. Gates 1–6 are COMPLETE on canonical main.**
+**Increment 11 — Director Handoff / Failover: ACTIVE. Gates 1–7 are COMPLETE on canonical main.**
 
-Scope remains deliberately isolated to safe replacement of an active Director during an in-progress durable mission. Unrelated dashboard, model, provider, research, and frozen production-readiness work remains out of scope.
+Scope remains isolated to safe replacement and recovery of an active Director during an in-progress durable mission. Unrelated dashboard, model, provider, research, and frozen production-readiness work remains out of scope.
 
-The authoritative contracts are:
+Authoritative Increment 11 contracts:
 - docs/operations/INCREMENT_11_DIRECTOR_HANDOFF_FAILOVER_CONTRACT.md
 - docs/operations/INCREMENT_11_DIRECTOR_HANDOFF_RELEASE_CONTRACT.md
 - docs/operations/INCREMENT_11_GATE_6_HANDOFF_INTERRUPTION_RECOVERY_CONTRACT.md
+- docs/operations/INCREMENT_11_GATE_7_RECOVERY_CONTRADICTION_FAIL_CLOSED_CONTRACT.md
 
 Completed gates on canonical main:
 - Gate 1 — Director Handoff / Failover contract + deterministic E2E — COMPLETE.
@@ -145,14 +146,17 @@ Completed gates on canonical main:
 - Gate 4 — DirectorRuntime ownership/fencing integration + E2E — COMPLETE.
 - Gate 5 — Explicit cooperative Director handoff/release implementation + E2E/regression — COMPLETE.
 - Gate 6 — Handoff interruption/restart recovery deterministic E2E — COMPLETE.
+- Gate 7 — Recovery contradiction / fail-closed runtime boundary + deterministic E2E — COMPLETE.
 
-Gate 6 evidence:
-- PR #108 merged to canonical main as 09a7ed503cea03211e2bb8bc5caab06be43b8332.
-- PR #108 duplicate test and e2e-network checks were green.
-- Canonical post-merge CI run 1965 completed with test: success and e2e-network: success.
+Gate 7 evidence:
+- PR #110 merged to canonical main as eaddeaa6f7892c97b04c363433bf6dc87a774c9a.
+- PR #110 run 1979 (push) and run 1980 (pull request) were green.
+- Canonical post-merge CI run 1981 was green with test: success and e2e-network: success.
+- Gate 7 adds durable director_recovery_fail_closed diagnostics and prevents Director mission-control mutation when durable handoff, ownership/fencing, or mission/task state cannot be reconciled safely.
 
-**Next Increment 11 gate: Gate 7 — Recovery Contradiction / Fail-Closed acceptance.**
-This gate begins with a contract phase only. It will verify that contradictory durable handoff, ownership, mission and task-control state causes Director mission-control mutation to stop deterministically rather than guessing or silently repairing state. No automatic election, provider failover, dashboard takeover, or other unrelated implementation is authorized by this gate.
+**Next Increment 11 gate: Gate 8 — Automatic Director Failover / Election contract.**
+This begins with contract definition only. It will specify how an Aurora installation with multiple eligible Director runtimes can automatically recover an expired Director lease without creating split-brain ownership, arbitrary successor selection, duplicate execution, or bypassing the existing fencing authority. This gate does not authorize distributed consensus, multi-machine membership discovery, provider/model failover, dashboard takeover controls, or live-authorization changes.
+
 ## Block 13 — Dashboard Full E2E — COMPLETE
 
 The integrated Dashboard/Director/avatar proof is closed on canonical `main`.
