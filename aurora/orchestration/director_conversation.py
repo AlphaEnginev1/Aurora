@@ -280,7 +280,7 @@ Keep responses useful and concise unless the human asks for depth."""
             state="completed",
             created_at=_now(),
             correlation_id=correlation_id,
-            model=response.selected_model or response.model,
+            model=getattr(response, "selected_model", None) or response.model,
             provider=response.provider,
             execution_id=response.execution_id,
         )
@@ -310,7 +310,7 @@ Keep responses useful and concise unless the human asks for depth."""
             state="completed",
             correlation_id=correlation_id,
             context_manifest_id=context_manifest_id,
-            model=response.selected_model or response.model,
+            model=getattr(response, "selected_model", None) or response.model,
             provider=response.provider,
             execution_id=response.execution_id,
             presentation_hints={
