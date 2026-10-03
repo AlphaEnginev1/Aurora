@@ -129,25 +129,30 @@ The queue is closed. Block 7 establishes the explicit authorization boundary; it
 
 ## Increment policy
 
-**Increment 11 — Director Handoff / Failover: ACTIVE. Gates 1–5 and cooperative handoff implementation are complete on canonical `main`.**
+**Increment 11 — Director Handoff / Failover: ACTIVE. Gates 1–6 are COMPLETE on canonical main.**
 
-Scope is deliberately isolated to replacement of an active Director during an in-progress durable mission. This phase establishes the contract and deterministic E2E acceptance proof before any production handoff/election implementation. Unrelated dashboard, model, provider, research, and frozen production-readiness work remains out of scope.
+Scope remains deliberately isolated to safe replacement of an active Director during an in-progress durable mission. Unrelated dashboard, model, provider, research, and frozen production-readiness work remains out of scope.
 
-The authoritative contract is `docs/operations/INCREMENT_11_DIRECTOR_HANDOFF_FAILOVER_CONTRACT.md`.
+The authoritative contracts are:
+- docs/operations/INCREMENT_11_DIRECTOR_HANDOFF_FAILOVER_CONTRACT.md
+- docs/operations/INCREMENT_11_DIRECTOR_HANDOFF_RELEASE_CONTRACT.md
+- docs/operations/INCREMENT_11_GATE_6_HANDOFF_INTERRUPTION_RECOVERY_CONTRACT.md
 
-Completed gates on canonical `main`:
+Completed gates on canonical main:
 - Gate 1 — Director Handoff / Failover contract + deterministic E2E — COMPLETE.
 - Gate 2 — Director Ownership & Fenced Takeover contract + acceptance scenario — COMPLETE.
-- Gate 3 — Durable `DirectorOwnershipStore` — COMPLETE.
-- Gate 4 — `DirectorRuntime` ownership/fencing integration + E2E — COMPLETE.
+- Gate 3 — Durable DirectorOwnershipStore — COMPLETE.
+- Gate 4 — DirectorRuntime ownership/fencing integration + E2E — COMPLETE.
+- Gate 5 — Explicit cooperative Director handoff/release implementation + E2E/regression — COMPLETE.
+- Gate 6 — Handoff interruption/restart recovery deterministic E2E — COMPLETE.
 
-The next Increment 11 gate must be scoped separately before implementation begins.\n\n### Gate 5 — Deterministic Director Handoff / Release E2E — AUTHORIZED (acceptance-test phase)\n\nThis independent gate defines the deterministic acceptance proof for cooperative handoff: Director A requests handoff to explicit Director B, quiesces, releases, B acquires at a higher fencing epoch, reconstructs the same mission, continues only unfinished work, stale A mutations are rejected, no duplicate execution occurs, and exactly one terminal outcome remains. This phase is a contract probe only; it does not implement production handoff runtime behavior.
+Gate 6 evidence:
+- PR #108 merged to canonical main as 09a7ed503cea03211e2bb8bc5caab06be43b8332.
+- PR #108 duplicate test and e2e-network checks were green.
+- Canonical post-merge CI run 1965 completed with test: success and e2e-network: success.
 
-### Gate 5 — Explicit Director Handoff / Release Contract — AUTHORIZED (contract phase)
-
-Gate 5 defines the cooperative handoff path from a live Director to an explicitly designated successor. It is limited to contract definition in this phase; no implementation, automatic election, provider failover, or dashboard controls are authorized. The authoritative contract is `docs/operations/INCREMENT_11_DIRECTOR_HANDOFF_RELEASE_CONTRACT.md`.
-
-
+**Next Increment 11 gate: Gate 7 — Recovery Contradiction / Fail-Closed acceptance.**
+This gate begins with a contract phase only. It will verify that contradictory durable handoff, ownership, mission and task-control state causes Director mission-control mutation to stop deterministically rather than guessing or silently repairing state. No automatic election, provider failover, dashboard takeover, or other unrelated implementation is authorized by this gate.
 ## Block 13 — Dashboard Full E2E — COMPLETE
 
 The integrated Dashboard/Director/avatar proof is closed on canonical `main`.
