@@ -79,7 +79,7 @@ class _Clock:
 
 
 def _runtime(*, store, bus, ownership, handoff, worker_id, clock, planner):
-    engine = TaskEngine(_Orchestration(), str(Path(store.path).parent / "workspace"))
+    engine = TaskEngine(_Orchestration(), Path(store.path).parent / "workspace")
     return DirectorRuntime(
         director=DurableDirectorService(
             planner=planner,
