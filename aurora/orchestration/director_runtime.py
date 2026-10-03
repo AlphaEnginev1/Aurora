@@ -1949,7 +1949,7 @@ class DirectorRuntime:
                 now=now,
             )
         except DirectorOwnershipRejected as exc:
-            current = self.director_ownership.get(mission_id, now=now)
+            current = self.director_ownership.get(mission_id, now=self._ownership_now())
             self.event_bus.publish(
                 mission_id=mission_id,
                 event_type="director_ownership_rejected",
