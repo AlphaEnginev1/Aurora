@@ -16,6 +16,12 @@ _SENSITIVE = re.compile(
     r"access[_-]?token|refresh[_-]?token|private[_-]?key|client[_-]?secret|token)",
     re.IGNORECASE,
 )
+_BEARER = re.compile(r"\\bBearer\\s+\\S+", re.IGNORECASE)
+_BASIC = re.compile(r"\\bBasic\\s+[A-Za-z0-9+/=]+", re.IGNORECASE)
+
+
+def _safe_string(value: str) -> str:
+    return _BASIC.sub("Basic [redacted]", _BEARER.sub("Bearer [redacted]", value))
 
 
 def _safe(value: Any) -> Any:
@@ -26,11 +32,9 @@ def _safe(value: Any) -> Any:
         }
     if isinstance(value, (list, tuple)):
         return [_safe(item) for item in value]
+    if isinstance(value, str):
+        return _safe_string(value)
     return value
-
-
-def _rank(status: str) -> int:
-    return {"HEALTHY": 0, "STANDBY": 1, "UNKNOWN": 2, "DEGRADED": 3, "CRITICAL": 4}.get(status, 2)
 
 
 class DashboardHealthService:
