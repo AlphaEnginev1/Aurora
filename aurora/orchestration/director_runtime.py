@@ -792,7 +792,10 @@ class DirectorRuntime:
                 raise DirectorRuntimeError(
                     f"handoff is durably RELEASED but ownership release needs recovery: {exc}"
                 ) from exc
-            self._mission_ownership.pop(mission_id, None)
+            # Retain the predecessor's fenced snapshot locally. It is no longer
+            # authoritative after release, but keeping epoch N lets stale
+            # control attempts reach require_owner() and be recorded as
+            # fencing rejections against the successor's newer epoch.
             self.event_bus.publish(
                 mission_id=mission_id,
                 event_type="director_ownership_released",
