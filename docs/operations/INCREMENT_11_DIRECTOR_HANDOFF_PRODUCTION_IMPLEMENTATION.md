@@ -70,8 +70,16 @@ This first production implementation phase is limited to cooperative Director ha
 
 No later block is authorized until the preceding block has passed its deterministic tests.
 
-## Current block
+## Completed block
 
 **Block 1 — Durable handoff store/state machine.**
 
-The first implementation change must establish the durable handoff record and atomic state transitions without changing DirectorRuntime behavior yet.
+The durable SQLite handoff record, atomic compare-and-set transitions and append-only lifecycle events are merged on canonical `main`.
+
+## Current block
+
+**Block 2 — DirectorRuntime request/quiesce/release integration.**
+
+The runtime now treats cooperative handoff as a cycle boundary, persists REQUESTED → QUIESCING → RELEASED, releases the current Director fence, and allows only the explicitly designated successor to acquire the same mission at a strictly higher fencing epoch. The successor consumes the existing durable mission graph and the handoff lifecycle is completed without replanning.
+
+The deterministic runtime E2E must pass alongside the existing Director recovery/regression suite before the next block is started.
