@@ -18,6 +18,7 @@ from aurora.production_authorization import (
 )
 from aurora.operator_settings import OperatorSettingsStore, settings_path
 from aurora.dashboard.provider_settings import ProviderSettingsService
+from aurora.dashboard.update_service import DashboardUpdateService
 
 
 def _path_env(name: str, default: str) -> Path:
@@ -116,10 +117,9 @@ def main() -> int:
     )
 
     dashboard_server = None
-    provider_settings = ProviderSettingsService(
-        OperatorSettingsStore(settings_path(os.getenv("AURORA_WORKSPACE_ROOT", ".aurora-runtime"))),
-        runtime,
-    )
+    operator_store = OperatorSettingsStore(settings_path(os.getenv("AURORA_WORKSPACE_ROOT", ".aurora-runtime")))
+    provider_settings = ProviderSettingsService(operator_store, runtime)
+    update_service = DashboardUpdateService(Path(__file__).resolve().parents[2])
     if args.dashboard:
         try:
             if runtime.conversation_service is None:
@@ -132,6 +132,7 @@ def main() -> int:
                 port=args.dashboard_port,
                 api_token=os.getenv("AURORA_DASHBOARD_API_TOKEN"),
                 provider_settings=provider_settings,
+                update_service=update_service,
             )
         except DashboardHTTPError as exc:
             parser.error(str(exc))
