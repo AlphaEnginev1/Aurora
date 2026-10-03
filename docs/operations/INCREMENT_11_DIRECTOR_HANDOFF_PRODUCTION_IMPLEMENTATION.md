@@ -91,8 +91,31 @@ The runtime E2E and regression suite prove quiescence, explicit successor fencin
 
 PR #106 merged to canonical `main` as `e7d14c1e97be8b14f6c1cf9402f487fa8b727e4d`; post-merge `test` and `e2e-network` are green.
 
+## Gate 6 — Handoff Interruption / Recovery acceptance test — COMPLETE
+
+The Gate 6 recovery contract and deterministic acceptance test are merged on canonical main.
+
+Verified:
+- durable REQUESTED and QUIESCING states survive Director restart;
+- predecessor remains unable to resume Director-controlled work while handoff is active;
+- RELEASED remains authoritative after predecessor restart;
+- stale predecessor mutation is rejected at the handoff boundary before successor acquisition;
+- after successor acquisition, stale predecessor control is rejected by mission ownership fencing;
+- successor acquires a strictly higher fencing epoch;
+- successor restart reconstructs the existing durable graph;
+- completed work is not repeated;
+- no re-planning occurs;
+- exactly one terminal mission outcome remains.
+
+Evidence:
+- PR #108 merged to main as 09a7ed503cea03211e2bb8bc5caab06be43b8332;
+- duplicate PR checks test and e2e-network were green;
+- canonical post-merge CI run 1965 completed with test and e2e-network green.
+
 ## Next gate
 
-**Gate 6 — Handoff Interruption / Recovery acceptance test — IN PROGRESS.**
+**Gate 7 — Recovery Contradiction / Fail-Closed acceptance — CONTRACT PHASE.**
 
-The Gate 6 recovery contract is merged on canonical `main`. This phase adds only deterministic E2E acceptance coverage for process restart/interruption around REQUESTED, QUIESCING, RELEASED, successor acquisition and post-acquisition restart. No runtime behavior changes are authorized by this phase.
+The next phase is limited to defining and proving the behavior when durable handoff state, Director ownership/fencing state, and mission/task state cannot all be reconciled safely. The required safety property is deterministic fail-closed behavior: no Director-controlled mutation, no guessed repair, no silent ownership transfer, durable traceability of the contradiction, and no duplicate terminal outcome.
+
+No runtime implementation changes are authorized until the Gate 7 contract and subsequent deterministic acceptance test are separately closed.
