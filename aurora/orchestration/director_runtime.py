@@ -5,12 +5,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from concurrent.futures import ThreadPoolExecutor
 import json
-from threading import Event
+from threading import Event, RLock
 from time import sleep
 from typing import Any, Callable
 from uuid import uuid4
 
 from .director import DirectorPlanError
+from .director_handoff_store import DirectorHandoff, DirectorHandoffRejected, DirectorHandoffStore
 from .director_ownership import DirectorOwnership, DirectorOwnershipRejected, DirectorOwnershipStore
 from .director_decision_learning import DirectorDecisionLearning
 from .director_decision_performance import DirectorDecisionPerformanceStore
@@ -93,6 +94,7 @@ class DirectorRuntime:
         director: DurableDirectorService,
         store: DurableTaskStore,
         director_ownership: DirectorOwnershipStore | None = None,
+        director_handoff_store: DirectorHandoffStore | None = None,
         director_lease_seconds: float = 30.0,
         ownership_now_fn: Callable[[], str] | None = None,
         event_bus: DurableEventBus | None = None,
@@ -145,9 +147,11 @@ class DirectorRuntime:
         self.event_bus = event_bus or DurableEventBus(store)
         self.memory = memory or MissionMemory(store)
         self.director_ownership = director_ownership or DirectorOwnershipStore(store.path)
+        self.director_handoff_store = director_handoff_store or DirectorHandoffStore(store.path)
         self.director_lease_seconds = director_lease_seconds
         self._ownership_now = ownership_now_fn or DirectorOwnershipStore._now
         self._mission_ownership: dict[str, DirectorOwnership] = {}
+        self._handoff_lock = RLock()
         self.worker_policy = worker_policy or WorkerPolicy()
         self.worker_id = worker_id or f"director-worker-{uuid4().hex[:12]}"
         self.event_batch_size = event_batch_size
@@ -688,6 +692,118 @@ class DirectorRuntime:
                 },
             )
 
+    def request_director_handoff(
+        self,
+        mission_id: str,
+        successor_id: str,
+        *,
+        handoff_id: str | None = None,
+        now: str | None = None,
+    ) -> DirectorHandoff:
+        """Request and durably release this runtime's mission ownership to successor B."""
+        if not mission_id.strip():
+            raise DirectorRuntimeError("mission_id is empty")
+        if not successor_id.strip():
+            raise DirectorRuntimeError("successor_id is empty")
+        if successor_id == self.worker_id:
+            raise DirectorRuntimeError("successor must differ from current Director")
+        with self._handoff_lock:
+            active = self.director_handoff_store.get_active_for_mission(mission_id)
+            if active is not None:
+                raise DirectorRuntimeError(
+                    f"mission already has an active Director handoff: {active.handoff_id}"
+                )
+            if self.store.mission_status(mission_id) in self.TERMINAL:
+                raise DirectorRuntimeError("cannot handoff a terminal mission")
+            if not self._require_director_ownership(mission_id):
+                raise DirectorRuntimeError(f"current Director does not own mission: {mission_id}")
+            ownership = self._mission_ownership.get(mission_id)
+            if ownership is None:
+                raise DirectorRuntimeError(
+                    f"current Director ownership disappeared before handoff: {mission_id}"
+                )
+            reference = now or self._ownership_now()
+            handoff = self.director_handoff_store.request(
+                mission_id,
+                self.worker_id,
+                successor_id,
+                ownership.fencing_epoch,
+                handoff_id=handoff_id,
+                now=reference,
+            )
+            self.event_bus.publish(
+                mission_id=mission_id,
+                event_type="director_handoff_requested",
+                payload={
+                    "handoff_id": handoff.handoff_id,
+                    "predecessor_id": handoff.predecessor_id,
+                    "successor_id": handoff.successor_id,
+                    "predecessor_epoch": handoff.predecessor_epoch,
+                },
+            )
+            handoff = self.director_handoff_store.begin_quiescing(
+                handoff.handoff_id,
+                self.worker_id,
+                ownership.fencing_epoch,
+                now=reference,
+            )
+            self.event_bus.publish(
+                mission_id=mission_id,
+                event_type="director_handoff_quiescing",
+                payload={
+                    "handoff_id": handoff.handoff_id,
+                    "successor_id": successor_id,
+                    "fencing_epoch": ownership.fencing_epoch,
+                },
+            )
+            handoff = self.director_handoff_store.mark_released(
+                handoff.handoff_id,
+                self.worker_id,
+                ownership.fencing_epoch,
+                now=reference,
+            )
+            self.event_bus.publish(
+                mission_id=mission_id,
+                event_type="director_handoff_released",
+                payload={
+                    "handoff_id": handoff.handoff_id,
+                    "successor_id": successor_id,
+                    "predecessor_epoch": ownership.fencing_epoch,
+                },
+            )
+            try:
+                self.director_ownership.release(
+                    mission_id,
+                    self.worker_id,
+                    ownership.fencing_epoch,
+                    now=reference,
+                )
+            except DirectorOwnershipRejected as exc:
+                self.event_bus.publish(
+                    mission_id=mission_id,
+                    event_type="director_handoff_release_pending",
+                    payload={
+                        "handoff_id": handoff.handoff_id,
+                        "owner_id": self.worker_id,
+                        "fencing_epoch": ownership.fencing_epoch,
+                        "error": str(exc),
+                    },
+                )
+                raise DirectorRuntimeError(
+                    f"handoff is durably RELEASED but ownership release needs recovery: {exc}"
+                ) from exc
+            self._mission_ownership.pop(mission_id, None)
+            self.event_bus.publish(
+                mission_id=mission_id,
+                event_type="director_ownership_released",
+                payload={
+                    "owner_id": self.worker_id,
+                    "fencing_epoch": ownership.fencing_epoch,
+                    "handoff_id": handoff.handoff_id,
+                },
+            )
+            return handoff
+
     def submit_mission(self, **kwargs: Any) -> MissionSubmission:
         """Plan and durably submit a mission for the continuous worker loop."""
         submission = self.director.submit_mission(**kwargs)
@@ -735,99 +851,93 @@ class DirectorRuntime:
 
     def run_once(self) -> RuntimeCycle:
         """Consume events, execute active tasks, and adapt terminal missions."""
-        events = self.event_bus.poll(
-            self._subscription,
-            limit=self.event_batch_size,
-        )
-        event_missions = {event.mission_id for event in events}
-
-        known_missions = set(self.store.list_missions())
-        mission_ids = known_missions | (event_missions & known_missions)
-        active = [
-            mission_id
-            for mission_id in sorted(mission_ids)
-            if self.store.mission_status(mission_id) not in self.TERMINAL
-        ]
-        owned_active = [
-            mission_id
-            for mission_id in active
-            if self._ensure_mission_ownership(mission_id)
-        ]
-        terminal_candidates = [
-            mission_id
-            for mission_id in sorted(mission_ids)
-            if self.store.mission_status(mission_id) in self.TERMINAL
-            and not self._is_finalized(mission_id)
-        ]
-
-        for mission_id in owned_active:
-            if not self.store.has_event(mission_id, "mission_started"):
-                self.event_bus.publish(
-                    mission_id=mission_id,
-                    event_type="mission_started",
-                    payload={"worker_id": self.worker_id},
-                )
-
-        assignments = [
-            (mission_id, slot)
-            for mission_id in owned_active
-            for slot in range(self.worker_concurrency)
-        ]
-        cycles: list[WorkerCycle] = []
-        if assignments:
-            with ThreadPoolExecutor(
-                max_workers=min(self.worker_concurrency, len(assignments)),
-                thread_name_prefix="aurora-worker",
-            ) as pool:
-                futures = [
-                    pool.submit(self._worker_for(mission_id, slot).run_once)
-                    for mission_id, slot in assignments
-                ]
-                for (mission_id, _slot), future in zip(assignments, futures):
-                    try:
-                        cycle = future.result()
-                    except Exception as exc:
-                        cycle = WorkerCycle(action="error")
-                        self.event_bus.publish(
-                            mission_id=mission_id,
-                            event_type="worker.cycle_failed",
-                            payload={"worker_id": self.worker_id, "error": str(exc)},
-                        )
-                    cycles.append(cycle)
-                    self._record_worker_result(mission_id, cycle)
-                    if self.store.mission_status(mission_id) in self.TERMINAL:
-                        terminal_candidates.append(mission_id)
-
-        for mission_id in sorted(set(terminal_candidates)):
-            if self._ensure_mission_ownership(mission_id):
-                self._review_or_finalize(mission_id)
-
-        observed_missions = set(event_missions) | set(active) | set(terminal_candidates)
-        for mission_id in sorted(observed_missions):
-            self._record_observability(mission_id)
-
-        for event in events:
-            if event.event_type in {"skill.evaluated", "skill.evolution_proposed", "team.adapted_runtime", "team.adaptation_failed"}:
-                try:
-                    self.memory.append(
-                        mission_id=event.mission_id,
-                        source="skill-learning",
-                        kind=event.event_type,
-                        content=json.dumps(event.payload, sort_keys=True),
-                        metadata={
-                            "event_id": event.event_id,
-                            "task_id": event.task_id,
-                        },
+        with self._handoff_lock:
+            events = self.event_bus.poll(
+                self._subscription,
+                limit=self.event_batch_size,
+            )
+            event_missions = {event.mission_id for event in events}
+            known_missions = set(self.store.list_missions())
+            mission_ids = known_missions | (event_missions & known_missions)
+            active = [
+                mission_id
+                for mission_id in sorted(mission_ids)
+                if self.store.mission_status(mission_id) not in self.TERMINAL
+            ]
+            owned_active = [
+                mission_id
+                for mission_id in active
+                if self._ensure_mission_ownership(mission_id)
+            ]
+            terminal_candidates = [
+                mission_id
+                for mission_id in sorted(mission_ids)
+                if self.store.mission_status(mission_id) in self.TERMINAL
+                and not self._is_finalized(mission_id)
+            ]
+            for mission_id in owned_active:
+                if not self.store.has_event(mission_id, "mission_started"):
+                    self.event_bus.publish(
+                        mission_id=mission_id,
+                        event_type="mission_started",
+                        payload={"worker_id": self.worker_id},
                     )
-                except MissionMemoryError:
-                    pass
-            self.event_bus.ack(self._subscription, event.event_id)
-
-        return RuntimeCycle(
-            worker_cycles=tuple(cycles),
-            events=events,
-            active_missions=tuple(owned_active),
-        )
+            assignments = [
+                (mission_id, slot)
+                for mission_id in owned_active
+                for slot in range(self.worker_concurrency)
+            ]
+            cycles: list[WorkerCycle] = []
+            if assignments:
+                with ThreadPoolExecutor(
+                    max_workers=min(self.worker_concurrency, len(assignments)),
+                    thread_name_prefix="aurora-worker",
+                ) as pool:
+                    futures = [
+                        pool.submit(self._worker_for(mission_id, slot).run_once)
+                        for mission_id, slot in assignments
+                    ]
+                    for (mission_id, _slot), future in zip(assignments, futures):
+                        try:
+                            cycle = future.result()
+                        except Exception as exc:
+                            cycle = WorkerCycle(action="error")
+                            self.event_bus.publish(
+                                mission_id=mission_id,
+                                event_type="worker.cycle_failed",
+                                payload={"worker_id": self.worker_id, "error": str(exc)},
+                            )
+                        cycles.append(cycle)
+                        self._record_worker_result(mission_id, cycle)
+                        if self.store.mission_status(mission_id) in self.TERMINAL:
+                            terminal_candidates.append(mission_id)
+            for mission_id in sorted(set(terminal_candidates)):
+                if self._ensure_mission_ownership(mission_id):
+                    self._review_or_finalize(mission_id)
+            observed_missions = set(event_missions) | set(active) | set(terminal_candidates)
+            for mission_id in sorted(observed_missions):
+                self._record_observability(mission_id)
+            for event in events:
+                if event.event_type in {"skill.evaluated", "skill.evolution_proposed", "team.adapted_runtime", "team.adaptation_failed"}:
+                    try:
+                        self.memory.append(
+                            mission_id=event.mission_id,
+                            source="skill-learning",
+                            kind=event.event_type,
+                            content=json.dumps(event.payload, sort_keys=True),
+                            metadata={
+                                "event_id": event.event_id,
+                                "task_id": event.task_id,
+                            },
+                        )
+                    except MissionMemoryError:
+                        pass
+                self.event_bus.ack(self._subscription, event.event_id)
+            return RuntimeCycle(
+                worker_cycles=tuple(cycles),
+                events=events,
+                active_missions=tuple(owned_active),
+            )
 
     def run_until_terminal(
         self,
@@ -1669,9 +1779,141 @@ class DirectorRuntime:
         )
 
     def _ensure_mission_ownership(self, mission_id: str) -> bool:
-        """Acquire or renew mission-level Director ownership for this runtime."""
+        """Acquire or renew mission ownership, honoring a cooperative handoff."""
         now = self._ownership_now()
+        handoff = self.director_handoff_store.get_active_for_mission(mission_id)
         current = self.director_ownership.get(mission_id)
+
+        if handoff is not None:
+            if handoff.state in {"REQUESTED", "QUIESCING"}:
+                return False
+            if handoff.state == "RELEASED":
+                if self.worker_id != handoff.successor_id or current is None:
+                    return False
+                if (
+                    current.owner_id == self.worker_id
+                    and current.fencing_epoch > handoff.predecessor_epoch
+                    and current.lease_until > now
+                ):
+                    ownership = current
+                else:
+                    if current.lease_until > now:
+                        return False
+                    try:
+                        ownership = self.director_ownership.acquire(
+                            mission_id,
+                            self.worker_id,
+                            lease_seconds=self.director_lease_seconds,
+                            now=now,
+                        )
+                    except DirectorOwnershipRejected as exc:
+                        self.event_bus.publish(
+                            mission_id=mission_id,
+                            event_type="director_ownership_rejected",
+                            payload={
+                                "owner_id": self.worker_id,
+                                "reason": str(exc),
+                                "current_owner_id": current.owner_id,
+                                "current_fencing_epoch": current.fencing_epoch,
+                            },
+                        )
+                        return False
+                if ownership.fencing_epoch <= handoff.predecessor_epoch:
+                    raise DirectorRuntimeError(
+                        "successor ownership did not advance the handoff fencing epoch"
+                    )
+                self._mission_ownership[mission_id] = ownership
+                try:
+                    acquired_handoff = self.director_handoff_store.mark_acquired(
+                        handoff.handoff_id,
+                        self.worker_id,
+                        handoff.predecessor_epoch,
+                        ownership.fencing_epoch,
+                        now=now,
+                    )
+                except DirectorHandoffRejected:
+                    acquired_handoff = self.director_handoff_store.get(handoff.handoff_id)
+                    if acquired_handoff is None or acquired_handoff.state != "ACQUIRED":
+                        return False
+                self.event_bus.publish(
+                    mission_id=mission_id,
+                    event_type="director_handoff_acquired",
+                    payload={
+                        "handoff_id": handoff.handoff_id,
+                        "successor_id": self.worker_id,
+                        "predecessor_epoch": handoff.predecessor_epoch,
+                        "successor_epoch": ownership.fencing_epoch,
+                    },
+                )
+                try:
+                    completed_handoff = self.director_handoff_store.complete(
+                        handoff.handoff_id,
+                        self.worker_id,
+                        handoff.predecessor_epoch,
+                        ownership.fencing_epoch,
+                        now=now,
+                    )
+                except DirectorHandoffRejected:
+                    completed_handoff = self.director_handoff_store.get(handoff.handoff_id)
+                    if completed_handoff is None or completed_handoff.state != "COMPLETED":
+                        return False
+                self.event_bus.publish(
+                    mission_id=mission_id,
+                    event_type="director_handoff_completed",
+                    payload={
+                        "handoff_id": completed_handoff.handoff_id,
+                        "successor_id": self.worker_id,
+                        "successor_epoch": ownership.fencing_epoch,
+                    },
+                )
+                self.event_bus.publish(
+                    mission_id=mission_id,
+                    event_type="director_ownership_takeover",
+                    payload={
+                        "owner_id": ownership.owner_id,
+                        "fencing_epoch": ownership.fencing_epoch,
+                        "lease_until": ownership.lease_until,
+                        "previous_owner_id": handoff.predecessor_id,
+                        "previous_fencing_epoch": handoff.predecessor_epoch,
+                        "handoff_id": handoff.handoff_id,
+                    },
+                )
+                return True
+            if handoff.state == "ACQUIRED":
+                if self.worker_id != handoff.successor_id or current is None:
+                    return False
+                if (
+                    current.owner_id == self.worker_id
+                    and current.fencing_epoch == handoff.successor_epoch
+                ):
+                    completed_handoff = None
+                    try:
+                        completed_handoff = self.director_handoff_store.complete(
+                            handoff.handoff_id,
+                            self.worker_id,
+                            handoff.predecessor_epoch,
+                            handoff.successor_epoch or 0,
+                            now=now,
+                        )
+                    except DirectorHandoffRejected:
+                        pass
+                    if completed_handoff is not None:
+                        self.event_bus.publish(
+                            mission_id=mission_id,
+                            event_type="director_handoff_completed",
+                            payload={
+                                "handoff_id": completed_handoff.handoff_id,
+                                "successor_id": self.worker_id,
+                                "successor_epoch": handoff.successor_epoch,
+                            },
+                        )
+                    if self.director_handoff_store.get_active_for_mission(mission_id) is None:
+                        current = self.director_ownership.get(mission_id)
+                    else:
+                        return False
+                else:
+                    return False
+
         if current is not None and current.owner_id == self.worker_id:
             try:
                 ownership = self.director_ownership.renew(
@@ -1736,8 +1978,31 @@ class DirectorRuntime:
         )
         return True
 
+    def _reject_stale_predecessor_mutation(self, mission_id: str) -> None:
+        """Block auxiliary Director mutations while this runtime is the predecessor."""
+        handoff = self.director_handoff_store.get_active_for_mission(mission_id)
+        if handoff is None or handoff.predecessor_id != self.worker_id:
+            return
+        raise DirectorRuntimeError(
+            f"Director handoff {handoff.handoff_id} is {handoff.state}; predecessor is quiesced"
+        )
+
     def _require_director_ownership(self, mission_id: str) -> bool:
         """Validate the current mission fence before a control mutation."""
+        handoff = self.director_handoff_store.get_active_for_mission(mission_id)
+        if handoff is not None and handoff.predecessor_id == self.worker_id:
+            self.event_bus.publish(
+                mission_id=mission_id,
+                event_type="director_handoff_mutation_rejected",
+                payload={
+                    "handoff_id": handoff.handoff_id,
+                    "state": handoff.state,
+                    "owner_id": self.worker_id,
+                    "fencing_epoch": handoff.predecessor_epoch,
+                    "successor_id": handoff.successor_id,
+                },
+            )
+            return False
         ownership = self._mission_ownership.get(mission_id)
         if ownership is None and not self._ensure_mission_ownership(mission_id):
             return False
