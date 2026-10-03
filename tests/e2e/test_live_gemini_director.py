@@ -519,4 +519,4 @@ def test_live_gemini_director_replans_after_review_and_completes(
     assert events.count("director_review") == 2
     assert "mission_reopened" in events
     assert "worker.task_succeeded" in events
-    assert events[-1] == "mission_succeeded"
+    assert events[-2:] == ["mission_succeeded", "director_decision_evaluated"]
