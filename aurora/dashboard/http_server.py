@@ -12,6 +12,7 @@ from .conversation_api import DashboardConversationAPI, DashboardConversationAPI
 from .gateway import DashboardGateway, DashboardGatewayError
 from .provider_settings import DashboardProviderSettingsError, ProviderSettingsService
 from .update_service import DashboardUpdateError, DashboardUpdateService
+from .health import DashboardHealthService
 
 
 class DashboardHTTPError(RuntimeError):
@@ -40,6 +41,7 @@ def create_dashboard_server(
     api_token: str | None = None,
     provider_settings: ProviderSettingsService | None = None,
     update_service: DashboardUpdateService | None = None,
+    health_service: DashboardHealthService | None = None,
 ) -> ThreadingHTTPServer:
     _validate_bind(host, api_token)
     if port < 0 or port > 65535:
@@ -57,6 +59,7 @@ def create_dashboard_server(
     Handler.api_token = (api_token or "").strip() or None
     Handler.provider_settings = provider_settings
     Handler.update_service = update_service
+    Handler.health_service = health_service
 
     return ThreadingHTTPServer((host, port), Handler)
 
@@ -68,6 +71,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
     api_token: str | None
     provider_settings: ProviderSettingsService | None
     update_service: DashboardUpdateService | None
+    health_service: DashboardHealthService | None
 
     server_version = "AuroraDashboard/1"
 
@@ -83,6 +87,12 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 if self.update_service is None:
                     raise DashboardHTTPError("dashboard update service is not configured")
                 self._json(200, self.update_service.status())
+                return
+            if path == "/api/dashboard/health":
+                self._require_token()
+                if self.health_service is None:
+                    raise DashboardHTTPError("dashboard health service is not configured")
+                self._json(200, self.health_service.health())
                 return
             if path == "/api/dashboard/settings":
                 self._require_token()

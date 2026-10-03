@@ -399,6 +399,7 @@ def build_director_runtime(*, inference_policy_path: str | Path, autonomy_policy
         policy_proposal_store=policy_proposal_store,
         policy_contract_store=policy_contract_store,
         model_discovery=model_discovery,
+        dashboard_gateway=dashboard_gateway,
         conversation_service=conversation_service)
     runtime.bootstrap=bootstrap
     runtime.bootstrap_state=bootstrap_state

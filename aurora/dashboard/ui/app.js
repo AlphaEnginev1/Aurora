@@ -13,7 +13,10 @@
     conversationSessionId: null,
     conversationInFlight: false,
     activeView: "home",
-    settings: null
+    settings: null,
+    health: null,
+    healthTimer: null,
+    healthInFlight: false
   };
 
   const $ = (id) => document.getElementById(id);
@@ -48,6 +51,9 @@
     state.activeView = view;
     document.querySelectorAll("[data-view-panel]").forEach(function (panel) {
       panel.classList.toggle("active", panel.getAttribute("data-view-panel") === view);
+    });
+    if (view === "health") loadHealth().catch(function (error) {
+      renderHealthError(error);
     });
     if (view === "settings") loadSettings().catch(function (error) {
       showSettingsMessage("Settings unavailable: " + error.message, true);
@@ -143,6 +149,113 @@
       return Math.max(max, Number(event.event_id) || 0);
     }, 0);
     $("freshness").textContent = "Live · snapshot " + dateText(data.generated_at) + (newest ? " · event #" + newest : "");
+  }
+
+  async function loadHealth() {
+    if (state.healthInFlight) return;
+    state.healthInFlight = true;
+    try {
+      const response = await fetch(state.apiBase + "/health", { headers: { Accept: "application/json" } });
+      if (!response.ok) throw new Error("health API " + response.status);
+      const next = await response.json();
+      if (!next || typeof next !== "object" || !next.overall || !Array.isArray(next.components)) {
+        throw new Error("invalid health contract");
+      }
+      state.health = next;
+      renderHealth(next);
+    } catch (error) {
+      renderHealthError(error);
+      throw error;
+    } finally {
+      state.healthInFlight = false;
+      if (state.activeView === "health" && !document.hidden) {
+        if (state.healthTimer) window.clearTimeout(state.healthTimer);
+        state.healthTimer = window.setTimeout(loadHealth, 10000);
+      }
+    }
+  }
+
+  function healthClass(status) {
+    return String(status || "UNKNOWN").toLowerCase();
+  }
+
+  function renderHealth(data) {
+    const summary = safeObject(data.summary);
+    const overall = String(data.overall || "UNKNOWN").toUpperCase();
+    const badge = $("health-overall-badge");
+    badge.textContent = overall;
+    badge.className = "health-header-badge " + healthClass(overall);
+    $("health-overall-title").textContent = overall === "HEALTHY" ? "Aurora is healthy" : "Aurora requires attention";
+    $("health-overall-reason").textContent =
+      overall === "HEALTHY"
+        ? "All directly observable health signals are healthy."
+        : "The panel preserves degraded and unknown signals instead of masking them.";
+    $("health-component-count").textContent = String(summary.components || 0) + " signals";
+    $("health-agent-count").textContent = String(safeArray(data.agents).length) + " agents";
+    $("health-incident-count").textContent = String(safeArray(data.incidents).length) + " incidents";
+
+    const metrics = [
+      ["HEALTHY", summary.healthy || 0],
+      ["DEGRADED", summary.degraded || 0],
+      ["CRITICAL", summary.critical || 0],
+      ["UNKNOWN", summary.unknown || 0],
+      ["STALE TASKS", summary.stale_tasks || 0],
+      ["FAILED TASKS", summary.failed_tasks || 0]
+    ];
+    $("health-metrics").innerHTML = metrics.map(function (item) {
+      return '<div class="health-metric"><span>' + esc(item[0]) + '</span><strong>' + esc(item[1]) + '</strong></div>';
+    }).join("");
+
+    const monitoring = safeObject(data.monitoring);
+    $("health-monitoring-note").textContent = monitoring.truth_rule || "Health is based only on directly observed signals.";
+
+    const components = safeArray(data.components);
+    $("health-components").innerHTML = components.map(function (component) {
+      return '<button class="health-component ' + healthClass(component.status) + '" type="button" data-health-component="' + esc(component.key) + '">' +
+        '<div class="health-component-top"><span>' + esc(component.layer) + '</span><strong>' + esc(component.status) + '</strong></div>' +
+        '<h3>' + esc(component.name) + '</h3><p>' + esc(component.reason) + '</p></button>';
+    }).join("") || '<div class="empty-state">No component health signals.</div>';
+    document.querySelectorAll("[data-health-component]").forEach(function (button) {
+      button.addEventListener("click", function () {
+        const item = components.find(function (component) { return component.key === button.getAttribute("data-health-component"); });
+        if (item) openInspector("Health Signal", item.name, Promise.resolve(item));
+      });
+    });
+
+    const agents = safeArray(data.agents);
+    $("health-agents").innerHTML = agents.map(function (agent) {
+      return '<button class="health-agent-card ' + healthClass(agent.status) + '" type="button" data-health-agent="' + esc(agent.role) + '">' +
+        '<div class="health-agent-top"><strong>' + esc(agent.role) + '</strong><span>' + esc(agent.status) + '</span></div>' +
+        '<p>' + esc(agent.reason) + '</p>' +
+        '<small>' + esc(agent.recent_failures || 0) + ' recent failure signal(s) · ' + esc(agent.recent_events || 0) + ' recent event(s)</small></button>';
+    }).join("") || '<div class="empty-state">No agents registered.</div>';
+
+    const incidents = safeArray(data.incidents);
+    $("health-incidents").innerHTML = incidents.map(function (incident) {
+      return '<button class="health-incident ' + healthClass(incident.status) + '" type="button" data-health-incident="' + esc(incident.incident_id) + '">' +
+        '<div class="health-incident-head"><strong>' + esc(incident.status) + ' · ' + esc(incident.event_type) + '</strong><span>' + esc(dateText(incident.created_at)) + '</span></div>' +
+        '<div class="health-incident-context">' + esc(incident.agent_role || incident.task_id || incident.component || "runtime") + '</div>' +
+        '<p>' + esc(incident.error) + '</p>' +
+        '<small>mission ' + esc(incident.mission_id || "—") + ' · task ' + esc(incident.task_id || "—") + '</small></button>';
+    }).join("") || '<div class="empty-state">No incident history recorded.</div>';
+    document.querySelectorAll("[data-health-incident]").forEach(function (button) {
+      button.addEventListener("click", function () {
+        const item = incidents.find(function (incident) { return incident.incident_id === button.getAttribute("data-health-incident"); });
+        if (item) openInspector("Incident Detail", item.event_type || "Incident", Promise.resolve(item));
+      });
+    });
+  }
+
+  function renderHealthError(error) {
+    const badge = $("health-overall-badge");
+    if (!badge) return;
+    badge.textContent = "UNKNOWN";
+    badge.className = "health-header-badge unknown";
+    $("health-overall-title").textContent = "Health telemetry unavailable";
+    $("health-overall-reason").textContent = "Aurora could not obtain a health snapshot: " + error.message;
+    $("health-components").innerHTML = '<div class="empty-state">No current health state can be asserted.</div>';
+    $("health-agents").innerHTML = '<div class="empty-state">Agent health cannot be asserted.</div>';
+    $("health-incidents").innerHTML = '<div class="empty-state">Incident history could not be loaded.</div>';
   }
 
   function projectButton(project) {
@@ -763,6 +876,9 @@
     }
   });
 
+  $("health-refresh").addEventListener("click", function () {
+    loadHealth().catch(function () {});
+  });
   $("refresh").addEventListener("click", function () {
     state.retryDelay = 10000;
     loadSnapshot();

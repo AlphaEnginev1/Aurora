@@ -19,6 +19,7 @@ from aurora.production_authorization import (
 from aurora.operator_settings import OperatorSettingsStore, settings_path
 from aurora.dashboard.provider_settings import ProviderSettingsService
 from aurora.dashboard.update_service import DashboardUpdateService
+from aurora.dashboard.health import DashboardHealthService
 
 
 def _path_env(name: str, default: str) -> Path:
@@ -125,6 +126,9 @@ def main() -> int:
             if runtime.conversation_service is None:
                 parser.error("Director conversation service is not configured")
             dashboard_api = DashboardConversationAPI(runtime.conversation_service)
+            if runtime.dashboard_gateway is None:
+                parser.error("dashboard gateway is not configured")
+            health_service = DashboardHealthService(runtime.dashboard_gateway)
             dashboard_server = create_dashboard_server(
                 dashboard_gateway=runtime.dashboard_gateway,
                 conversation_api=dashboard_api,
@@ -133,6 +137,7 @@ def main() -> int:
                 api_token=os.getenv("AURORA_DASHBOARD_API_TOKEN"),
                 provider_settings=provider_settings,
                 update_service=update_service,
+                health_service=health_service,
             )
         except DashboardHTTPError as exc:
             parser.error(str(exc))
