@@ -18,6 +18,7 @@ def test_dashboard_ui_assets_are_present():
     assert 'data-nav-target="knowledge"' in html
     assert 'data-nav-target="models"' in html
     assert 'data-nav-target="system"' in html
+    assert 'data-nav-target="health"' in html
     assert 'data-nav-target="settings"' in html
     assert 'id="director-provider"' in html
     assert 'id="gemini-key"' in html
@@ -36,6 +37,8 @@ def test_dashboard_ui_assets_are_present():
     assert ".right-rail" in css
     assert ".history-drawer" in css
     assert "setView" in js
+    assert "renderHealth" in js
+    assert "Incident Detail" in js
 
 
 def test_dashboard_ui_uses_gateway_endpoints_only():
@@ -47,6 +50,7 @@ def test_dashboard_ui_uses_gateway_endpoints_only():
     assert '"/turns"' in js
     assert '"/settings"' in js
     assert '"/settings/test"' in js
+    assert '"/health"' in js
     assert "api_key_present" in js
     assert "AURORA_DASHBOARD_API_BASE" in js
     assert "sqlite" not in js.lower()
