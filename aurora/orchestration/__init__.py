@@ -23,6 +23,7 @@ from .engine import CapabilityTaskResult, OrchestrationEngine, TaskResult
 from .event_bus import DurableEventBus, EventBusError, EventSubscription
 from .mission_memory import MailboxScope, MissionMemory, MissionMemoryError, MissionMessage
 from .director_ownership import DirectorOwnership, DirectorOwnershipError, DirectorOwnershipRejected, DirectorOwnershipStore
+from .director_handoff_store import DirectorHandoff, DirectorHandoffError, DirectorHandoffEvent, DirectorHandoffRejected, DirectorHandoffStore
 from .director_runtime import DirectorRuntime, DirectorRuntimeError, MissionRuntimeResult, RuntimeCycle
 from .director_decision_policy_evolution import (
     DirectorDecisionPolicyEvolution,
@@ -159,6 +160,11 @@ __all__ = [
     "DirectorOwnershipError",
     "DirectorOwnershipRejected",
     "DirectorOwnershipStore",
+    "DirectorHandoff",
+    "DirectorHandoffError",
+    "DirectorHandoffEvent",
+    "DirectorHandoffRejected",
+    "DirectorHandoffStore",
     "OrchestrationEngine",
     "TaskEngine",
     "TaskEngineError",
