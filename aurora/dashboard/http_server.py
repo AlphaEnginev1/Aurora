@@ -11,6 +11,7 @@ from urllib.parse import unquote, urlparse
 from .conversation_api import DashboardConversationAPI, DashboardConversationAPIError
 from .gateway import DashboardGateway, DashboardGatewayError
 from .provider_settings import DashboardProviderSettingsError, ProviderSettingsService
+from .update_service import DashboardUpdateError, DashboardUpdateService
 
 
 class DashboardHTTPError(RuntimeError):
@@ -38,6 +39,7 @@ def create_dashboard_server(
     ui_root: str | Path | None = None,
     api_token: str | None = None,
     provider_settings: ProviderSettingsService | None = None,
+    update_service: DashboardUpdateService | None = None,
 ) -> ThreadingHTTPServer:
     _validate_bind(host, api_token)
     if port < 0 or port > 65535:
@@ -54,6 +56,7 @@ def create_dashboard_server(
     Handler.ui_root = root
     Handler.api_token = (api_token or "").strip() or None
     Handler.provider_settings = provider_settings
+    Handler.update_service = update_service
 
     return ThreadingHTTPServer((host, port), Handler)
 
@@ -64,6 +67,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
     ui_root: Path
     api_token: str | None
     provider_settings: ProviderSettingsService | None
+    update_service: DashboardUpdateService | None
 
     server_version = "AuroraDashboard/1"
 
@@ -73,6 +77,12 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             path = parsed.path
             if path == "/api/dashboard/snapshot":
                 self._json(200, self.dashboard_gateway.snapshot())
+                return
+            if path == "/api/dashboard/update/status":
+                self._require_token()
+                if self.update_service is None:
+                    raise DashboardHTTPError("dashboard update service is not configured")
+                self._json(200, self.update_service.status())
                 return
             if path == "/api/dashboard/settings":
                 self._require_token()
@@ -103,7 +113,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 self._static("index.html")
                 return
             self._static(path.lstrip("/"))
-        except (DashboardGatewayError, DashboardConversationAPIError, DashboardHTTPError, DashboardProviderSettingsError) as exc:
+        except (DashboardGatewayError, DashboardConversationAPIError, DashboardHTTPError, DashboardProviderSettingsError, DashboardUpdateError) as exc:
             self._json(400, {"error": str(exc)})
         except Exception as exc:
             self._json(500, {"error": "internal dashboard error", "type": type(exc).__name__})
@@ -113,6 +123,11 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             self._require_token()
             parsed = urlparse(self.path)
             payload = self._json_body()
+            if parsed.path == "/api/dashboard/update":
+                if self.update_service is None:
+                    raise DashboardHTTPError("dashboard update service is not configured")
+                self._json(202, self.update_service.request_update())
+                return
             if parsed.path == "/api/dashboard/settings":
                 if self.provider_settings is None:
                     raise DashboardHTTPError("provider settings are not configured")
@@ -158,7 +173,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 )
                 return
             self._json(404, {"error": "dashboard route not found"})
-        except (DashboardConversationAPIError, DashboardHTTPError, DashboardProviderSettingsError) as exc:
+        except (DashboardConversationAPIError, DashboardHTTPError, DashboardProviderSettingsError, DashboardUpdateError) as exc:
             self._json(400, {"error": str(exc)})
         except Exception as exc:
             self._json(500, {"error": "internal dashboard error", "type": type(exc).__name__})
