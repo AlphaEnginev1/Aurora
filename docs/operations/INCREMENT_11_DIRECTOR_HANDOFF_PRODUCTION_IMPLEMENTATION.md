@@ -112,10 +112,48 @@ Evidence:
 - duplicate PR checks test and e2e-network were green;
 - canonical post-merge CI run 1965 completed with test and e2e-network green.
 
+## Gate 6 — Handoff Interruption / Recovery acceptance test — COMPLETE
+
+The Gate 6 recovery contract and deterministic acceptance test are merged on canonical main.
+
+Verified:
+- durable REQUESTED and QUIESCING states survive Director restart;
+- predecessor remains unable to resume Director-controlled work while handoff is active;
+- RELEASED remains authoritative after predecessor restart;
+- stale predecessor mutation is rejected at the handoff boundary before successor acquisition;
+- after successor acquisition, stale predecessor control is rejected by mission ownership fencing;
+- successor acquires a strictly higher fencing epoch;
+- successor restart reconstructs the existing durable graph;
+- completed work is not repeated;
+- no re-planning occurs;
+- exactly one terminal mission outcome remains.
+
+Evidence:
+- PR #108 merged to main as 09a7ed503cea03211e2bb8bc5caab06be43b8332;
+- duplicate PR checks test and e2e-network were green;
+- canonical post-merge CI run 1965 completed with test and e2e-network green.
+
+## Gate 7 — Recovery Contradiction / Fail-Closed acceptance — COMPLETE
+
+Gate 7 defined and verified the fail-closed boundary for contradictory durable recovery state.
+
+Verified:
+- handoff/ownership mismatches block Director-controlled mutation;
+- successor/ownership fencing mismatches block mutation;
+- terminal mission state with runnable tasks cannot reopen mission control or create a second terminal outcome;
+- the same contradiction remains visible after process-equivalent restart;
+- durable diagnostic events identify the contradiction and relevant mission/handoff/ownership/task context;
+- no silent repair or guessed authority selection occurs.
+
+Evidence:
+- PR #110 merged to main as eaddeaa6f7892c97b04c363433bf6dc87a774c9a;
+- PR #110 runs 1979 and 1980 were green;
+- canonical post-merge CI run 1981 was green.
+
 ## Next gate
 
-**Gate 7 — Recovery Contradiction / Fail-Closed acceptance — CONTRACT PHASE.**
+**Gate 8 — Automatic Director Failover / Election — CONTRACT PHASE.**
 
-The next phase is limited to defining and proving the behavior when durable handoff state, Director ownership/fencing state, and mission/task state cannot all be reconciled safely. The required safety property is deterministic fail-closed behavior: no Director-controlled mutation, no guessed repair, no silent ownership transfer, durable traceability of the contradiction, and no duplicate terminal outcome.
+The next phase is limited to defining the automatic recovery protocol for multiple eligible Director runtimes sharing the same durable mission/ownership authority. It must preserve single-owner fencing, deterministic eligibility, no split-brain control, no duplicate mission execution, and fail-closed behavior when eligibility or shared state is ambiguous.
 
-No runtime implementation changes are authorized until the Gate 7 contract and subsequent deterministic acceptance test are separately closed.
+No automatic election, runtime implementation, distributed consensus, provider/model failover, dashboard takeover, or live-authorization change is authorized until the Gate 8 contract and a separate deterministic acceptance phase are both closed.
