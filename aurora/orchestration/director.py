@@ -52,6 +52,7 @@ class DirectorPlanner:
     _WORKBENCH_CATALOG = """Universal Work / Cowork capabilities available through Aurora:
 - workbench:census — inspect current Workbench readiness
 - workbench:preflight — verify capability availability, authorization and degradation before mission execution
+- workbench:capability:resolve — discover, acquire and verify a missing governed capability
 - workbench:file:list — list files in configured Workbench roots
 - workbench:file:read — read a bounded local file
 - workbench:file:write — create/replace a local text file in scope

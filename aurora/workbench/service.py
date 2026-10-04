@@ -11,6 +11,8 @@ from pathlib import Path
 from typing import Any, Iterable
 from urllib.parse import urlparse
 
+from aurora.autonomy.capability_resolution import CapabilityResolutionRuntime
+from aurora.autonomy.models import CapabilityRequest
 from aurora.autonomy.policy import Policy
 from aurora.workbench.artifacts import ArtifactError, ArtifactInspector
 from aurora.workbench.local_computer import LocalComputerError, LocalComputerGateway
@@ -45,6 +47,7 @@ class UniversalWorkbench:
         policy: Policy | None = None,
         session_store: WorkSessionStore | None = None,
         audit_path: str | Path | None = None,
+        resolution: CapabilityResolutionRuntime | None = None,
         configured_roots: Iterable[str | Path] = (),
     ) -> None:
         self.repository_root = Path(repository_root).resolve()
@@ -52,6 +55,7 @@ class UniversalWorkbench:
         self.gateway = gateway
         self.policy = policy
         self.session_store = session_store
+        self.resolution = resolution
         self.artifacts = ArtifactInspector()
         registry_path = self.repository_root / "config" / "mcp-registry.json"
         if not registry_path.is_file():
@@ -92,6 +96,14 @@ class UniversalWorkbench:
         github_merge = self.github.merge_enabled and github_available
         mcp_available = any(item.enabled for item in self.mcp_registry.list())
         return (
+            WorkbenchCapability(
+                "workbench:capability:resolve",
+                "capability",
+                self.resolution is not None,
+                self._policy_allows("workbench:capability:resolve"),
+                self.resolution is not None and self._policy_allows("workbench:capability:resolve"),
+                "Governed registry-first discovery, acquisition and verification fallback",
+            ),
             WorkbenchCapability(
                 "workbench:file", "file", True,
                 self._policy_allows("workbench:file:list"),
@@ -214,7 +226,9 @@ class UniversalWorkbench:
                     workspace_root=str(self.repository_root),
                 )
                 self.session_store.record_capability(work_id, capability)
-            if capability == "workbench:census":
+            if capability == "workbench:capability:resolve":
+                result = self._capability_resolve(request)
+            elif capability == "workbench:census":
                 result = WorkbenchResult(
                     capability,
                     "census",
@@ -554,6 +568,64 @@ class UniversalWorkbench:
             status=str(value["status"]) if value.get("status") else None,
         )
         return WorkbenchResult(request.capability, "github_workflow_runs", "succeeded", output=result, provenance="github-api")
+
+
+    def _capability_resolve(self, request: WorkbenchRequest) -> WorkbenchResult:
+        if self.resolution is None:
+            raise WorkbenchError("capability resolution is not configured")
+        if not request.arguments:
+            raise WorkbenchError(
+                "workbench:capability:resolve requires a JSON request object"
+            )
+        try:
+            value = json.loads(request.arguments[0])
+        except json.JSONDecodeError as exc:
+            raise WorkbenchError(
+                "capability resolution request must be valid JSON"
+            ) from exc
+        if not isinstance(value, dict):
+            raise WorkbenchError("capability resolution request must be an object")
+        name = str(value.get("name") or "").strip()
+        if not name:
+            raise WorkbenchError("capability resolution request requires name")
+        constraints = value.get("constraints", {})
+        if not isinstance(constraints, dict):
+            raise WorkbenchError("capability resolution constraints must be an object")
+        resolution = self.resolution.ensure(
+            CapabilityRequest(
+                name=name,
+                actor=request.actor,
+                reason=request.reason,
+                constraints=dict(constraints),
+            )
+        )
+        capability = resolution.result
+        status = (
+            "succeeded"
+            if capability.status in {"installed", "already_available"}
+            else "failed"
+        )
+        return WorkbenchResult(
+            request.capability,
+            "capability_resolution",
+            status,
+            output={
+                "name": capability.name,
+                "status": capability.status,
+                "version": capability.version,
+                "source": capability.source,
+                "verification": capability.verification,
+                "path": capability.path,
+                "sha256": capability.sha256,
+                "artifact_id": capability.artifact_id,
+                "discovered": list(resolution.discovered),
+                "attempts": resolution.attempts,
+            },
+            provenance="aurora-capability-resolution",
+            error=None if status == "succeeded" else (
+                f"capability resolution ended with status={capability.status}"
+            ),
+        )
 
     def _connector_census(self, request: WorkbenchRequest) -> WorkbenchResult:
         return WorkbenchResult(
