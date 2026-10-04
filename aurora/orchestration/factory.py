@@ -131,7 +131,11 @@ def _apply_local_model_settings(router: ModelRouter, settings_store: OperatorSet
         router.models = list(router.model_registry.models)
 
 
-def _build_director_provider(settings_store: OperatorSettingsStore | None = None):
+def _build_director_provider(
+    settings_store: OperatorSettingsStore | None = None,
+    *,
+    router: ModelRouter | None = None,
+):
     settings = settings_store.load() if settings_store is not None else {}
     configured = settings.get("director", {}) if isinstance(settings, dict) else {}
     director_provider_id = os.getenv(
@@ -152,7 +156,20 @@ def _build_director_provider(settings_store: OperatorSettingsStore | None = None
                 configured.get("endpoint", "https://generativelanguage.googleapis.com/v1beta")
             ),
         )
-    if director_provider_id in {"router", "inference_fabric", "nvidia_api", ""}:
+    if director_provider_id == "nvidia_api":
+        key = (
+            (settings_store.credential("nvidia_api") if settings_store is not None else "")
+            or os.getenv("NVIDIA_API_KEY", "")
+        )
+        model = str(configured.get("model", "")).strip()
+        if not key or router is None or not model:
+            return None
+        return BoundInferenceDirectorProvider(
+            router,
+            provider_id="nvidia_api",
+            model=model,
+        )
+    if director_provider_id in {"router", "inference_fabric", ""}:
         return None
     raise RuntimeError(
         "unsupported AURORA_DIRECTOR_PROVIDER: "
@@ -226,9 +243,6 @@ def _build_director_provider_failover(
                     ),
                 )
             )
-
-    if not candidates:
-        return active_provider
 
     def activate(candidate: DirectorProviderCandidate, _provider) -> None:
         settings_store.update_from_form(
@@ -324,7 +338,7 @@ def build_director_service(*, inference_policy_path: str | Path, autonomy_policy
     learning_store=SkillLearningStore(learning_path)
     model_performance=ModelPerformanceStore(root/"model-performance.db")
     task_engine=TaskEngine(orchestration,root,organization=organization,skill_registry=skill_registry,skill_learning=learning_store,model_performance=model_performance)
-    director_provider = _build_director_provider(settings_store)
+    director_provider = _build_director_provider(settings_store, router=router)
 
     planner=DirectorPlanner(
         router,
