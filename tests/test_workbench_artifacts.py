@@ -53,7 +53,24 @@ def test_work_session_store_survives_reload(tmp_path: Path):
     )
     store.record_capability("work-1", "workbench:file:read")
 
+    store.record_artifact("work-1", "artifact-1")
+    store.record_receipt(
+        "work-1",
+        "receipt-1",
+        correlation_id="corr-1",
+        payload={"status": "succeeded", "capability": "workbench:file:read"},
+    )
+    store.update_tool_health("work-1", "workbench:file:read", "healthy")
+    store.set_approval_state("work-1", "approved")
+
     reloaded = WorkSessionStore(path).get("work-1")
     assert reloaded.work_id == created.work_id
     assert reloaded.mission_id == "mission-1"
+    assert reloaded.workspace_roots == (str(tmp_path),)
     assert reloaded.capability_ids == ("workbench:file:read",)
+    assert reloaded.artifact_ids == ("artifact-1",)
+    assert reloaded.execution_receipts == ("receipt-1",)
+    assert reloaded.correlation_ids == ("corr-1",)
+    assert reloaded.tool_health["workbench:file:read"] == "healthy"
+    assert reloaded.approval_state == "approved"
+    assert store.get_receipts("work-1")[0]["payload"]["status"] == "succeeded"
