@@ -2074,7 +2074,11 @@ class DirectorRuntime:
         # before acquire() advances the fencing epoch so the emitted event
         # distinguishes a real takeover from first acquisition.
         previous_ownership = self.director_ownership.get(mission_id)
-        if previous_ownership is not None and self.director_eligibility is not None:
+        if (
+            previous_ownership is not None
+            and current is None
+            and self.director_eligibility is not None
+        ):
             if not self._director_is_eligible(
                 mission_id, now=self._ownership_now()
             ):
