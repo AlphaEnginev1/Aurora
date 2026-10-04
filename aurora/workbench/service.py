@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Iterable
 from urllib.parse import urlparse
 
+from aurora.autonomy.policy import Policy
 from aurora.autonomy.computer_operator import (
     ComputerAction,
     ComputerOperator,
@@ -33,12 +34,14 @@ class UniversalWorkbench:
         repository_root: str | Path,
         runtime_root: str | Path,
         gateway,
+        policy: Policy | None = None,
         audit_path: str | Path | None = None,
         configured_roots: Iterable[str | Path] = (),
     ) -> None:
         self.repository_root = Path(repository_root).resolve()
         self.runtime_root = Path(runtime_root).resolve()
         self.gateway = gateway
+        self.policy = policy
         self.audit_path = Path(audit_path) if audit_path else None
         roots = [self.repository_root, self.runtime_root]
         environment_roots = os.getenv("AURORA_WORKBENCH_ROOTS", "").strip()
@@ -76,6 +79,10 @@ class UniversalWorkbench:
         if not request.actor.strip() or not request.mission_id.strip():
             raise WorkbenchError("actor and mission_id are required")
         capability = request.capability.strip()
+        if not capability.startswith("workbench:"):
+            raise WorkbenchError("UniversalWorkbench only executes workbench:* capabilities")
+        if self.policy is not None and not self.policy.allows_capability(capability):
+            raise WorkbenchError(f"Workbench capability is denied by policy: {capability}")
         try:
             if capability == "workbench:census":
                 result = WorkbenchResult(
