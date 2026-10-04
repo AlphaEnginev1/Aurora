@@ -341,6 +341,74 @@ Keep responses useful and concise unless the human asks for depth."""
             },
         )
 
+    def _execute_conversation_tools(
+        self, *, response: Any, model: str | None, provider_messages: list[dict[str, Any]]
+    ) -> Any:
+        if self.mission_runner is None:
+            raise DirectorConversationError("Director requested execution but mission runner is unavailable")
+        calls = tuple(getattr(response, "tool_calls", ()) or ())
+        if len(calls) > 4:
+            raise DirectorConversationError("Director requested too many conversation missions")
+        results: list[dict[str, Any]] = []
+        for call in calls:
+            if call.name != self._RUN_MISSION_TOOL.name:
+                raise DirectorConversationError(
+                    f"Director requested unregistered conversation tool: {call.name}"
+                )
+            arguments = call.arguments if isinstance(call.arguments, dict) else {}
+            objective = arguments.get("objective")
+            if not isinstance(objective, str) or not objective.strip():
+                raise DirectorConversationError("run_mission requires a non-empty objective")
+            try:
+                mission = self.mission_runner(objective=objective.strip())
+                results.append(self._mission_evidence(mission))
+            except Exception as exc:
+                results.append({
+                    "status": "failed",
+                    "objective": objective.strip(),
+                    "error": str(exc)[:4000],
+                })
+        evidence = json.dumps(results, ensure_ascii=False, sort_keys=True)
+        follow_up = [
+            *provider_messages,
+            {
+                "role": "system",
+                "content": (
+                    "The following governed Aurora mission execution evidence is authoritative. "
+                    "Report only what it establishes. Do not claim success when execution failed.\n"
+                    + "EXECUTION_EVIDENCE:\n" + evidence
+                ),
+            },
+        ]
+        return self.provider.generate(
+            messages=follow_up,
+            model=model,
+            role="director_conversation_result",
+            tools=(),
+        )
+
+    @staticmethod
+    def _mission_evidence(mission: Any) -> dict[str, Any]:
+        tasks: list[dict[str, Any]] = []
+        for item in tuple(getattr(mission, "tasks", ()) or ()):
+            task = getattr(item, "task", None)
+            status = getattr(item, "status", "unknown")
+            value = getattr(status, "value", status)
+            tasks.append({
+                "task_id": getattr(task, "task_id", None),
+                "role": getattr(task, "role", None),
+                "status": str(value),
+                "error": getattr(item, "error", None),
+                "capability": getattr(task, "capability", None),
+            })
+        success = bool(tasks) and all(item["status"] == "succeeded" for item in tasks)
+        return {
+            "status": "succeeded" if success else ("failed" if tasks else "no_tasks"),
+            "objective": getattr(mission, "objective", ""),
+            "task_count": len(tasks),
+            "tasks": tasks,
+        }
+
     def set_provider(self, provider: DirectorProvider) -> None:
         if not getattr(provider, "provider_id", ""):
             raise DirectorConversationError("Director provider must expose provider_id")
