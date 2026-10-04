@@ -63,11 +63,26 @@ class InternetGateway:
         if parsed.username or parsed.password:
             raise InternetPolicyError("embedded URL credentials are not allowed")
 
-    def get_with_metadata(self, url: str) -> InternetResponse:
+    def request_with_metadata(
+        self,
+        url: str,
+        *,
+        method: str = "GET",
+        headers: dict[str, str] | None = None,
+        body: bytes | None = None,
+    ) -> InternetResponse:
         self.authorize(url)
         handler = _PolicyRedirectHandler(self)
         opener = urllib.request.build_opener(handler)
-        request = urllib.request.Request(url, method="GET", headers={"User-Agent": "Aurora/0.1"})
+        request_headers = {"User-Agent": "Aurora/0.1"}
+        if headers:
+            request_headers.update(headers)
+        request = urllib.request.Request(
+            url,
+            method=method,
+            headers=request_headers,
+            data=body,
+        )
         try:
             with opener.open(request, timeout=self.timeout) as response:
                 final_url = response.url
@@ -82,6 +97,16 @@ class InternetGateway:
                 )
         except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError) as exc:
             raise InternetPolicyError(f"network request failed: {exc}") from exc
+
+    def get_with_metadata(self, url: str) -> InternetResponse:
+        return self.request_with_metadata(url)
+
+    def get_json(self, url: str, *, headers: dict[str, str] | None = None):
+        response = self.request_with_metadata(url, headers=headers)
+        try:
+            return json.loads(response.body.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise InternetPolicyError("response was not valid JSON") from exc
 
     def get(self, url: str) -> bytes:
         """Return response bytes while preserving the legacy gateway API."""
