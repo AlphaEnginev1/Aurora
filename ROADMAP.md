@@ -173,3 +173,16 @@ No live authorization is activated by the gate.
 
 Scope remains isolated to safe replacement and recovery of an active Director during an in-progress durable mission. Unrelated dashboard, model, provider, research, and frozen production-readiness work remains out of scope.
 
+
+
+## Universal Work / Cowork Architecture — DESIGN FROZEN
+
+The next architectural direction is frozen in:
+
+`docs/architecture/AURORA_UNIVERSAL_WORKBENCH_ARCHITECTURE.md`
+
+Status: **DESIGN FROZEN — IMPLEMENTATION NOT AUTHORIZED BY THIS DOCUMENT**.
+
+The contract establishes a Universal Work / Cowork operating model in which the Director and all specialist agents use one governed work-capability plane. Required capability families include local computer/workspace access, file/artifact intake, browser and desktop interaction, GitHub and external connectors, MCP bridging, multimodal processing, capability discovery/acquisition/fallback, project intake/source graph, capability census/preflight, durable evidence/audit, and natural Director conversation.
+
+This architectural direction does not reopen Increment 11, Increment 12, or the closed production-readiness queue. Implementation must be separately scoped and validated with deterministic tests plus live/end-to-end evidence where an external boundary is involved.
