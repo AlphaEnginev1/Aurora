@@ -73,6 +73,18 @@
       "executable": "workbench:computer"
     },
     {
+      "name": "workbench:connector:census",
+      "kind": "builtin",
+      "source": "aurora",
+      "executable": "workbench:connector:census"
+    },
+    {
+      "name": "workbench:connector:request",
+      "kind": "builtin",
+      "source": "aurora",
+      "executable": "workbench:connector:request"
+    },
+    {
       "name": "workbench:document:extract",
       "kind": "builtin",
       "source": "aurora",

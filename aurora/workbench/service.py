@@ -14,6 +14,7 @@ from aurora.workbench.artifacts import ArtifactError, ArtifactInspector
 from aurora.workbench.local_computer import LocalComputerError, LocalComputerGateway
 from aurora.workbench.mcp import MCPBridgeError, MCPClientBridge, MCPRegistry
 from aurora.workbench.project_intake import ProjectIntakeError, ProjectIntakeService
+from aurora.workbench.connectors import ConnectorClient, ConnectorError, ConnectorRegistry
 from aurora.workbench.session import WorkSessionStore
 from aurora.autonomy.computer_operator import (
     ComputerAction,
@@ -64,6 +65,10 @@ class UniversalWorkbench:
         roots.extend(Path(item).resolve() for item in configured_roots)
         self.roots = tuple(dict.fromkeys(roots))
         self.github = GitHubConnector(gateway)
+        connector_path = self.repository_root / "config" / "connectors.json"
+        if not connector_path.is_file():
+            connector_path = Path(__file__).resolve().parents[2] / "config" / "connectors.json"
+        self.connectors = ConnectorClient(ConnectorRegistry(str(connector_path)), gateway)
         self.project_intake = ProjectIntakeService(
             projects_path=self.repository_root / "config" / "projects.json",
             graph_path=self.runtime_root / "project-source-graph.json",
@@ -74,6 +79,7 @@ class UniversalWorkbench:
     def census(self) -> tuple[WorkbenchCapability, ...]:
         browser_available = self._playwright_available()
         computer_available = self._local_computer_available()
+        connector_ready = any(item["enabled"] and item["token_configured"] for item in self.connectors.census())
         github_available = self.github.available()
         github_write = self.github.write_enabled and github_available
         github_merge = self.github.merge_enabled and github_available
@@ -98,6 +104,7 @@ class UniversalWorkbench:
                 "Playwright browser automation",
             ),
             WorkbenchCapability("workbench:mcp", "integration", True, True, True, "MCP v2 client bridge"),
+            WorkbenchCapability("workbench:connector", "integration", connector_ready, connector_ready, connector_ready, "Universal external connector registry"),
             WorkbenchCapability(
                 "workbench:computer",
                 "desktop",
@@ -179,13 +186,17 @@ class UniversalWorkbench:
                 result = self._project_register(request)
             elif capability == "workbench:project:register_github":
                 result = self._project_register_github(request)
+            elif capability == "workbench:connector:census":
+                result = self._connector_census(request)
+            elif capability == "workbench:connector:request":
+                result = self._connector_request(request)
             elif capability == "workbench:github:get":
                 result = self._github_get(request)
             elif capability == "workbench:browser":
                 result = self._browser_run(request)
             else:
                 raise WorkbenchError(f"unsupported Workbench capability: {capability}")
-        except (WorkbenchError, GitHubConnectorError, ComputerOperatorError, ArtifactError, MCPBridgeError, LocalComputerError, ProjectIntakeError) as exc:
+        except (WorkbenchError, GitHubConnectorError, ComputerOperatorError, ArtifactError, MCPBridgeError, LocalComputerError, ProjectIntakeError, ConnectorError) as exc:
             result = WorkbenchResult(capability, capability, "failed", error=str(exc))
         self._audit(request, result)
         if result.status == "failed":
@@ -426,6 +437,42 @@ class UniversalWorkbench:
             status=str(value["status"]) if value.get("status") else None,
         )
         return WorkbenchResult(request.capability, "github_workflow_runs", "succeeded", output=result, provenance="github-api")
+
+    def _connector_census(self, request: WorkbenchRequest) -> WorkbenchResult:
+        return WorkbenchResult(
+            request.capability,
+            "connector_census",
+            "succeeded",
+            output=self.connectors.census(),
+            provenance="aurora-connector-registry",
+        )
+
+    def _connector_request(self, request: WorkbenchRequest) -> WorkbenchResult:
+        if len(request.arguments) < 1:
+            raise WorkbenchError("workbench:connector:request requires JSON arguments")
+        try:
+            value = json.loads(request.arguments[0])
+        except json.JSONDecodeError as exc:
+            raise WorkbenchError("connector request must be valid JSON") from exc
+        if not isinstance(value, dict):
+            raise WorkbenchError("connector request must be an object")
+        for field in ("connector_id",):
+            if field not in value:
+                raise WorkbenchError(f"connector request missing field: {field}")
+        result = self.connectors.request(
+            str(value["connector_id"]),
+            path=str(value.get("path") or "/"),
+            method=str(value.get("method") or "GET"),
+            payload=value.get("payload") if isinstance(value.get("payload"), dict) else None,
+            capability=str(value.get("capability") or "read"),
+        )
+        return WorkbenchResult(
+            request.capability,
+            "connector_request",
+            "succeeded",
+            output=result,
+            provenance=f"connector:{value['connector_id']}",
+        )
 
     def _project_inspect(self, request: WorkbenchRequest) -> WorkbenchResult:
         if not request.arguments:

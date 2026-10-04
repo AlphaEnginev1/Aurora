@@ -64,6 +64,8 @@ class DirectorPlanner:
 - workbench:project:inspect — inspect a local project and detect common technologies/manifests
 - workbench:project:register — register a project in Aurora Project Registry
 - workbench:project:register_github — register a project from GitHub metadata
+- workbench:connector:census — inspect registered external connectors and credential readiness
+- workbench:connector:request — execute a governed request against a registered external connector
 - workbench:browser — execute a governed Playwright action plan encoded as one JSON argument
 - workbench:mcp:list_tools — discover tools exposed by an approved MCP server
 - workbench:mcp:call — call a discovered tool on an approved MCP server

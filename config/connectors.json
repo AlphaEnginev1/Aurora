@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "description": "Aurora universal connector registry. Credentials are referenced by environment variable name only.",
+  "connectors": [
+    {
+      "connector_id": "generic-example",
+      "connector_type": "http-api",
+      "base_url": "https://example.invalid/",
+      "enabled": false,
+      "token_env": "AURORA_CONNECTOR_GENERIC_EXAMPLE_TOKEN",
+      "capabilities": [
+        "read",
+        "write"
+      ]
+    }
+  ]
+}
