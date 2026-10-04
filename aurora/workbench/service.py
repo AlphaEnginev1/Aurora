@@ -29,6 +29,8 @@ from aurora.autonomy.computer_operator import (
 )
 from aurora.workbench.github import GitHubConnector, GitHubConnectorError
 from aurora.workbench.models import WorkbenchCapability, WorkbenchRequest, WorkbenchResult
+from aurora.research.models import ResearchRequest
+from aurora.research.service import ResearchService
 
 
 class WorkbenchError(RuntimeError):
@@ -48,6 +50,7 @@ class UniversalWorkbench:
         session_store: WorkSessionStore | None = None,
         audit_path: str | Path | None = None,
         resolution: CapabilityResolutionRuntime | None = None,
+        research: ResearchService | None = None,
         configured_roots: Iterable[str | Path] = (),
     ) -> None:
         self.repository_root = Path(repository_root).resolve()
@@ -56,6 +59,7 @@ class UniversalWorkbench:
         self.policy = policy
         self.session_store = session_store
         self.resolution = resolution
+        self.research = research
         self.artifacts = ArtifactInspector()
         registry_path = self.repository_root / "config" / "mcp-registry.json"
         if not registry_path.is_file():
@@ -96,6 +100,14 @@ class UniversalWorkbench:
         github_merge = self.github.merge_enabled and github_available
         mcp_available = any(item.enabled for item in self.mcp_registry.list())
         return (
+            WorkbenchCapability(
+                "workbench:research",
+                "research",
+                self.research is not None,
+                self._policy_allows("workbench:research:discover"),
+                self.research is not None and self._policy_allows("workbench:research:discover"),
+                "Evidence-first research discovery/retrieval through InternetGateway",
+            ),
             WorkbenchCapability(
                 "workbench:capability:resolve",
                 "capability",
@@ -226,7 +238,13 @@ class UniversalWorkbench:
                     workspace_root=str(self.repository_root),
                 )
                 self.session_store.record_capability(work_id, capability)
-            if capability == "workbench:capability:resolve":
+            if capability == "workbench:research:discover":
+                result = self._research_discover(request)
+            elif capability == "workbench:research:retrieve":
+                result = self._research_retrieve(request, extract=False)
+            elif capability == "workbench:research:retrieve_extract":
+                result = self._research_retrieve(request, extract=True)
+            elif capability == "workbench:capability:resolve":
                 result = self._capability_resolve(request)
             elif capability == "workbench:census":
                 result = WorkbenchResult(
@@ -569,6 +587,108 @@ class UniversalWorkbench:
         )
         return WorkbenchResult(request.capability, "github_workflow_runs", "succeeded", output=result, provenance="github-api")
 
+
+
+    def _research_request(self, request: WorkbenchRequest) -> ResearchRequest:
+        if not request.arguments:
+            raise WorkbenchError(
+                "research capability requires a JSON request object"
+            )
+        try:
+            value = json.loads(request.arguments[0])
+        except json.JSONDecodeError as exc:
+            raise WorkbenchError("research request must be valid JSON") from exc
+        if not isinstance(value, dict):
+            raise WorkbenchError("research request must be an object")
+        request_id = str(value.get("request_id") or f"research-{request.mission_id}").strip()
+        objective = str(value.get("objective") or request.reason).strip()
+        required_sources = value.get("required_sources", [])
+        constraints = value.get("constraints", [])
+        max_sources = value.get("max_sources", 10)
+        if not isinstance(required_sources, list) or not all(isinstance(item, str) for item in required_sources):
+            raise WorkbenchError("required_sources must be a string array")
+        if not isinstance(constraints, list) or not all(isinstance(item, str) for item in constraints):
+            raise WorkbenchError("constraints must be a string array")
+        if not isinstance(max_sources, int) or isinstance(max_sources, bool) or max_sources < 1:
+            raise WorkbenchError("max_sources must be a positive integer")
+        return ResearchRequest(
+            request_id=request_id,
+            objective=objective,
+            required_sources=tuple(required_sources),
+            constraints=tuple(constraints),
+            max_sources=max_sources,
+        )
+
+    def _research_discover(self, request: WorkbenchRequest) -> WorkbenchResult:
+        if self.research is None:
+            raise WorkbenchError("research service is not configured")
+        research_request = self._research_request(request)
+        urls = self.research.discover(research_request)
+        return WorkbenchResult(
+            request.capability,
+            "research_discover",
+            "succeeded",
+            output={"request_id": research_request.request_id, "objective": research_request.objective, "urls": list(urls)},
+            provenance="aurora-research:discovery",
+        )
+
+    def _research_retrieve(self, request: WorkbenchRequest, *, extract: bool) -> WorkbenchResult:
+        if self.research is None:
+            raise WorkbenchError("research service is not configured")
+        research_request = self._research_request(request)
+        if extract:
+            sources, claims = self.research.retrieve_and_extract(research_request)
+            output = {
+                "request_id": research_request.request_id,
+                "sources": [
+                    {
+                        "source_id": item.source_id,
+                        "url": item.url,
+                        "final_url": item.final_url,
+                        "status_code": item.status_code,
+                        "content_type": item.content_type,
+                        "content_sha256": item.content_sha256,
+                        "content_text": item.content_text,
+                    }
+                    for item in sources
+                ],
+                "claims": [
+                    {
+                        "claim_id": item.claim_id,
+                        "source_id": item.source_id,
+                        "claim": item.claim,
+                        "state": item.state.value,
+                        "extraction_confidence": item.extraction_confidence,
+                    }
+                    for item in claims
+                ],
+            }
+            operation = "research_retrieve_extract"
+        else:
+            sources = self.research.retrieve(research_request)
+            output = {
+                "request_id": research_request.request_id,
+                "sources": [
+                    {
+                        "source_id": item.source_id,
+                        "url": item.url,
+                        "final_url": item.final_url,
+                        "status_code": item.status_code,
+                        "content_type": item.content_type,
+                        "content_sha256": item.content_sha256,
+                        "content_text": item.content_text,
+                    }
+                    for item in sources
+                ],
+            }
+            operation = "research_retrieve"
+        return WorkbenchResult(
+            request.capability,
+            operation,
+            "succeeded",
+            output=output,
+            provenance="aurora-research:retrieval",
+        )
 
     def _capability_resolve(self, request: WorkbenchRequest) -> WorkbenchResult:
         if self.resolution is None:
