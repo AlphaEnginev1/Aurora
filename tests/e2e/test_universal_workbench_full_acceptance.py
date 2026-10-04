@@ -276,14 +276,14 @@ class Router(ModelRouter):
                 }]
             })
         else:
-            content = f"{role} completed using authoritative Workbench evidence."
+            content = f"{task_id} completed using authoritative Workbench evidence."
 
         return InferenceResponse(
             model=decision.selected_model,
             provider="controlled",
             content=content,
             request_id=request.request_id,
-            execution_id=f"acceptance-{role}-{step}",
+            execution_id=f"acceptance-{task_id}-{step}",
             selected_model=decision.selected_model,
             routing_score=decision.selected_score,
             routing_factors=decision.factors,
