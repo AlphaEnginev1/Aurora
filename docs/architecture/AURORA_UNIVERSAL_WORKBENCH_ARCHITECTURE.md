@@ -388,3 +388,15 @@ Before implementation begins, every capability family above must be mapped to:
 - evidence requirements.
 
 No implementation increment is considered complete until the corresponding acceptance evidence exists on canonical `main`.
+
+## 22. Final acceptance record
+
+As of canonical \`main\`, the Universal Workbench final acceptance mission is certified by PR #142 and merge commit \`520d654a1c45455564923ea48093dda4d742b07d\`.
+
+The final acceptance E2E exercised all twelve requirements above in one Director-led controlled mission with two concurrent specialist agents sharing the same Workbench. The final CI run for the acceptance branch passed both \`test\` and \`e2e-network\` (run 2405).
+
+During that acceptance, concurrent WorkSession updates exposed a real loss-of-state defect. The canonical fix is included in the same accepted change: all WorkSession read-modify-write mutations now use atomic SQLite \`BEGIN IMMEDIATE\` transactions, with a dedicated concurrent 12-writer losslessness test.
+
+The final canonical main validation after merge also passed both \`test\` and \`e2e-network\` (run 2407).
+
+This record certifies the Universal Workbench implementation boundary. It does not itself authorize live production execution; the frozen production-readiness and controlled-live authorization boundaries remain authoritative.
