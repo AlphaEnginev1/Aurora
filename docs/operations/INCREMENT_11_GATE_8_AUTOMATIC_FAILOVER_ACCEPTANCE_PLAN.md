@@ -1,17 +1,18 @@
 # Increment 11 — Gate 8 Block 3: Automatic Director Failover Acceptance Plan
 
-**Status:** ACTIVE — full deterministic E2E acceptance  
-**Prerequisites:** Gate 8 contract, Acceptance Block 1, Candidate Eligibility Authority contract, and Acceptance Block 2 are complete on canonical `main`.  
-**Objective:** Prove the complete automatic failover path using the authoritative candidate eligibility source together with the existing `DirectorOwnershipStore`, while preserving the durable mission graph, fencing, restart semantics and single terminal outcome.
+**Status:** CLOSED — full deterministic E2E acceptance verified on canonical main
+**Canonical evidence commit:** af595971199b55d78d52a0769228feefe864ea35
+**Acceptance PR:** #119
+**Canonical CI:** #2057 — success
 
 ## 1. Scope
 
-This block completes the acceptance boundary already defined by the Gate 8 contract. It joins the two previously accepted concerns:
+This block completed the acceptance boundary already defined by the Gate 8 contract. It joined the two previously accepted concerns:
 
 1. candidate eligibility determines whether a Director may contend;
-2. `DirectorOwnershipStore` remains the sole authority that grants ownership and advances the fencing epoch.
+2. DirectorOwnershipStore remains the sole authority that grants ownership and advances the fencing epoch.
 
-In scope:
+Accepted scope:
 
 - deterministic end-to-end automatic failover after lease expiry;
 - two eligible candidates observing the same expired mission;
@@ -23,10 +24,10 @@ In scope:
 - winner restart with durable ownership and mission state;
 - stale predecessor restart remaining fenced;
 - ambiguous/unavailable eligibility fail-closed during the full path;
-- durable traceability of takeover, rejection and fencing evidence;
+- durable traceability of takeover, rejection, fencing and terminal outcome;
 - preservation of exactly one terminal mission outcome.
 
-Out of scope:
+Out of scope and unchanged:
 
 - distributed consensus or cross-machine membership discovery;
 - provider/model failover;
@@ -38,25 +39,25 @@ Out of scope:
 
 ## 2. Acceptance matrix
 
-| ID | Scenario | Required result |
-|---|---|---|
-| G8-B3-1 | A owns E1; lease expires; B and C are both eligible | Exactly one candidate acquires E2 through `DirectorOwnershipStore` |
-| G8-B3-2 | One candidate is explicitly ineligible | Ineligible candidate cannot mutate ownership; eligible candidate may contend |
-| G8-B3-3 | Candidate becomes stale or ineligible before contention | Candidate fails closed and cannot acquire |
-| G8-B3-4 | Eligibility authority unavailable or contradictory | No candidate acquires; no guessed authority |
-| G8-B3-5 | Losing contender attempts mission mutation | Mutation is rejected by ownership/fencing authority |
-| G8-B3-6 | Expired predecessor attempts mutation after E2 | Mutation remains fenced |
-| G8-B3-7 | Winner continues recovered mission | Same mission/task graph resumes; completed tasks are not repeated |
-| G8-B3-8 | Winner restarts while ownership is valid | Same Director identity/ownership state continues without a new fencing epoch |
-| G8-B3-9 | Stale predecessor restarts after E2 | Restarted predecessor remains fenced and cannot reclaim mission |
-| G8-B3-10 | Mission reaches terminal state after failover | Exactly one authoritative terminal outcome remains |
+| ID | Scenario | Required result | Evidence |
+|---|---|---|---|
+| G8-B3-1 | A owns E1; lease expires; B and C are both eligible | Exactly one candidate acquires E2 through DirectorOwnershipStore | PASS — PR #119 / CI #2056 |
+| G8-B3-2 | One candidate is explicitly ineligible | Ineligible candidate cannot mutate ownership; eligible candidate may contend | PASS — PR #119 / CI #2056 |
+| G8-B3-3 | Candidate becomes stale or ineligible before contention | Candidate fails closed and cannot acquire | PASS — PR #119 / CI #2056 |
+| G8-B3-4 | Eligibility authority unavailable or contradictory | No candidate acquires; no guessed authority | PASS — PR #119 / CI #2056 |
+| G8-B3-5 | Losing contender attempts mission mutation | Mutation is rejected by ownership/fencing authority | PASS — PR #119 / CI #2056 |
+| G8-B3-6 | Expired predecessor attempts mutation after E2 | Mutation remains fenced | PASS — PR #119 / CI #2056 |
+| G8-B3-7 | Winner continues recovered mission | Same mission/task graph resumes; completed tasks are not repeated | PASS — PR #119 / CI #2056 |
+| G8-B3-8 | Winner restarts while ownership is valid | Same Director identity/ownership state continues without a new fencing epoch | PASS — PR #119 / CI #2056 |
+| G8-B3-9 | Stale predecessor restarts after E2 | Restarted predecessor remains fenced and cannot reclaim mission | PASS — PR #119 / CI #2056 |
+| G8-B3-10 | Mission reaches terminal state after failover | Exactly one authoritative terminal outcome remains | PASS — PR #119 / CI #2056 |
 
 ## 3. Required assertions
 
-Every accepted failover run MUST establish:
+The accepted failover suite establishes:
 
 - eligibility is consulted before expired-lease takeover;
-- a rejected candidate does not successfully call the ownership acquisition path;
+- rejected candidates do not successfully acquire ownership;
 - successful acquisition advances the fencing epoch exactly once;
 - only one candidate becomes owner;
 - losing candidates and stale predecessors cannot perform authoritative mission mutations;
@@ -64,19 +65,20 @@ Every accepted failover run MUST establish:
 - no completed task is re-executed;
 - winner restart preserves stable identity and current ownership while the lease remains valid;
 - ambiguous/unavailable eligibility is fail-closed;
-- takeover and rejection evidence remains attributable to mission ID, Director ID and fencing epoch;
+- takeover/rejection/fencing/terminal evidence carries deterministic failover correlation where applicable;
 - the mission reaches exactly one terminal outcome.
 
 ## 4. Implementation boundary
 
-The minimum implementation/test changes permitted by this block are:
+The accepted Block 3 implementation contains only:
 
-1. inject the existing `DirectorEligibilityStore` into the automatic failover E2E fixtures;
-2. register deterministic eligible/ineligible candidates for the scenarios above;
-3. add controlled restart/clock cases for winner and stale predecessor;
-4. add full-path assertions for eligibility rejection, ownership fencing and terminal-state uniqueness.
+1. the existing DirectorEligibilityStore injected into automatic failover E2E fixtures;
+2. deterministic eligible/ineligible candidate registration;
+3. controlled restart/clock cases;
+4. deterministic failover correlation propagation on takeover/rejection/fencing/terminal events;
+5. full-path assertions for eligibility, ownership fencing and terminal-state uniqueness.
 
-No new ownership authority, election algorithm or membership subsystem is permitted.
+No new ownership authority, election algorithm or membership subsystem was introduced.
 
 ## 5. Acceptance sequence
 
@@ -84,7 +86,7 @@ No new ownership authority, election algorithm or membership subsystem is permit
 2. A's ownership lease expires.
 3. B/C observe the same durable mission and eligibility authority.
 4. Eligibility is evaluated immediately before takeover contention.
-5. Candidates race through `DirectorOwnershipStore`.
+5. Candidates race through DirectorOwnershipStore.
 6. Exactly one candidate acquires the next fencing epoch.
 7. Losing candidates and A remain fenced.
 8. Winner reconstructs durable mission state and completes only unfinished work.
@@ -93,14 +95,24 @@ No new ownership authority, election algorithm or membership subsystem is permit
 11. The mission reaches one terminal outcome.
 12. CI provides canonical evidence.
 
-## 6. Exit criteria
+## 6. Closure evidence
 
-- [ ] G8-B3-1 through G8-B3-10 pass deterministically.
-- [ ] Gate 8 Acceptance Block 1 remains green.
-- [ ] Block 2 remains closed and unchanged.
-- [ ] `DirectorOwnershipStore` remains the sole ownership/fencing authority.
-- [ ] No out-of-scope subsystem changes.
-- [ ] Required PR `test` and `e2e-network` checks pass.
-- [ ] Canonical post-merge CI passes.
+- PR #119: merged to canonical main.
+- PR #119 head: 239c54a0dd06c09bb3a075536a1eaf1a6d057df1.
+- Canonical merge commit: af595971199b55d78d52a0769228feefe864ea35.
+- PR CI #2056: success; test and e2e-network both succeeded.
+- Canonical CI #2057: success; test and e2e-network both succeeded.
+- During acceptance, one E2E assertion was corrected to distinguish a restarted stale predecessor's normal ownership rejection from a predecessor holding a stale local fence; the final PR and canonical CI passed.
+- No changes were made to DirectorOwnershipStore ownership/fencing semantics.
 
-**Gate 8 Block 3 is not complete until all criteria above are verified on canonical `main`.**
+## 7. Exit criteria
+
+- [x] G8-B3-1 through G8-B3-10 pass deterministically.
+- [x] Gate 8 Acceptance Block 1 remains green.
+- [x] Block 2 remains closed and unchanged.
+- [x] DirectorOwnershipStore remains the sole ownership/fencing authority.
+- [x] No out-of-scope subsystem changes.
+- [x] Required PR test and e2e-network checks pass.
+- [x] Canonical post-merge CI passes.
+
+**Gate 8 Block 3 — CLOSED.**
