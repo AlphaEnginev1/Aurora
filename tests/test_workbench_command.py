@@ -108,7 +108,7 @@ def test_workbench_command_rejects_arbitrary_executable_names(tmp_path: Path):
             )
         )
     except Exception as exc:
-        assert "registered non-Workbench capability" in str(exc)
+        assert "command capability is not registered" in str(exc)
     else:
         raise AssertionError("arbitrary executable requests must be rejected")
     assert runtime_exec.requests == []
