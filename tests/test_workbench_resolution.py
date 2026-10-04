@@ -116,3 +116,37 @@ def test_workbench_catalog_reports_resolution_availability(tmp_path: Path):
     assert row.available is True
     assert row.authorized is True
     assert row.healthy is True
+
+
+def test_factory_wires_capability_resolution_into_runtime_workbench(tmp_path: Path):
+    from aurora.orchestration.factory import build_director_service
+    import os
+
+    monkeypatch_env = {
+        "AURORA_DIRECTOR_PROVIDER": "router",
+        "AURORA_WORKBENCH_ROOTS": str(tmp_path),
+    }
+    previous = {key: os.environ.get(key) for key in monkeypatch_env}
+    try:
+        os.environ.update(monkeypatch_env)
+        service = build_director_service(
+            inference_policy_path="config/inference-policy.json",
+            autonomy_policy_path="config/autonomy-policy.json",
+            registry_path="config/capability-registry.json",
+            network_policy_path="config/network-policy.json",
+            workspace_root=tmp_path,
+            egress_proxy_host="127.0.0.1",
+            egress_proxy_port=3128,
+            organization_path="config/organization.json",
+            skills_path="config/skills.json",
+            projects_path="config/projects.json",
+        )
+        workbench = service.task_engine.orchestration._workbench
+        assert workbench is not None
+        assert workbench.resolution is not None
+    finally:
+        for key, value in previous.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
