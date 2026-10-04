@@ -14,11 +14,16 @@ class FakeWorkbench:
 
     def execute(self, request):
         self.calls.append(request)
+        output = (
+            [{"mime_type": "image/png", "data": "ZmFrZS1zY3JlZW5zaG90"}]
+            if request.capability == "workbench:computer"
+            else {"value": request.arguments[0] if request.arguments else "ok"}
+        )
         return WorkbenchResult(
             capability=request.capability,
             operation=request.capability.split(":", 1)[-1],
             status="succeeded",
-            output={"value": request.arguments[0] if request.arguments else "ok"},
+            output=output,
             artifact_id="artifact-1",
             provenance="fake-workbench",
         )
@@ -110,3 +115,31 @@ def test_agent_workbench_budget_fails_closed():
         assert "budget" in str(exc)
     else:
         raise AssertionError("tool loop must fail closed when its call budget is exceeded")
+
+
+def test_agent_receives_native_media_evidence_from_workbench():
+    workbench = FakeWorkbench()
+    router = FakeRouter()
+    router.responses = [
+        '{"workbench_calls":[{"capability":"workbench:computer","arguments":["[{\\"action\\":\\"screenshot\\"}]"]}]}',
+        "I inspected the screenshot evidence.",
+    ]
+    loop = AgentWorkbenchToolLoop(workbench)
+
+    from aurora.inference.models import InferenceRequest
+
+    response = loop.run(
+        request=InferenceRequest(
+            messages=[{"role": "user", "content": "Take a screenshot and inspect it."}],
+        ),
+        actor="researcher",
+        mission_id="mission-media",
+        reason="Inspect screenshot",
+        router=router,
+    )
+
+    assert response.content.startswith("I inspected")
+    evidence_message = router.requests[1].messages[-1]
+    assert isinstance(evidence_message["content"], list)
+    assert evidence_message["content"][1]["modality"] == "image"
+    assert evidence_message["content"][1]["mime_type"] == "image/png"

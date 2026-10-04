@@ -9,6 +9,7 @@ if TYPE_CHECKING:
     from aurora.context import ContextGate
 
 from .models import InferenceRequest, InferenceResponse, ModelSpec, new_execution_id
+from .multimodal import MultimodalContentError, message_modalities
 from .registry import ModelRegistry, ModelRegistryError
 from .providers.registry import ProviderRegistry, ProviderRegistryError, default_provider_registry
 
@@ -81,9 +82,22 @@ class ModelRouter:
                 raise ModelRoutingError(
                     f"Requested model {request.model} is outside the request allowlist"
                 )
+            try:
+                modalities = message_modalities(request.messages)
+            except MultimodalContentError as exc:
+                raise ModelRoutingError(f"Invalid multimodal request: {exc}") from exc
+            required_modalities = {item for item in modalities if item != "text"}
             for model in self.available():
                 if model.id != request.model:
                     continue
+                if required_modalities and not all(
+                    modality in model.capabilities or "multimodal" in model.capabilities
+                    for modality in required_modalities
+                ):
+                    raise ModelRoutingError(
+                        f"Requested model {request.model} does not support modalities: "
+                        + ", ".join(sorted(required_modalities))
+                    )
                 if capability and capability not in model.capabilities:
                     raise ModelRoutingError(
                         f"Requested model {request.model} does not satisfy capability={capability!r}"
@@ -106,11 +120,24 @@ class ModelRouter:
             )
 
         candidates = self.available()
+        try:
+            modalities = message_modalities(request.messages)
+        except MultimodalContentError as exc:
+            raise ModelRoutingError(f"Invalid multimodal request: {exc}") from exc
+        required_modalities = {item for item in modalities if item != "text"}
         allowed_models = _allowed_models(request)
         if allowed_models is not None:
             candidates = [m for m in candidates if m.id in allowed_models]
         if capability:
             candidates = [m for m in candidates if capability in m.capabilities]
+        if required_modalities:
+            candidates = [
+                m for m in candidates
+                if all(
+                    modality in m.capabilities or "multimodal" in m.capabilities
+                    for modality in required_modalities
+                )
+            ]
         candidates = [m for m in candidates if self._meets_constraints(m, request)]
         if not candidates:
             raise ModelRoutingError(

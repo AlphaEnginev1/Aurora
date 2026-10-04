@@ -149,3 +149,33 @@ def test_invalid_json_is_typed(monkeypatch):
     with pytest.raises(ProviderResponseError) as caught:
         _provider().generate(InferenceRequest(messages=[]))
     assert caught.value.code == "provider_invalid_response"
+
+
+def test_nvidia_provider_preserves_image_content_in_openai_request(monkeypatch):
+    captured = {}
+
+    def fake_urlopen(request, timeout):
+        captured["body"] = json.loads(request.data)
+        return _Response({
+            "model": "nvidia/model-a",
+            "choices": [{"message": {"content": "seen"}}],
+        })
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    response = _provider().generate(
+        InferenceRequest(
+            messages=[{
+                "role": "user",
+                "content": [
+                    {"modality": "text", "text": "Inspect"},
+                    {"modality": "image", "mime_type": "image/png", "data": "ZmFrZQ=="},
+                ],
+            }]
+        ),
+        execution_id="exec-image",
+    )
+
+    assert response.content == "seen"
+    content = captured["body"]["messages"][0]["content"]
+    assert content[1]["type"] == "image_url"
+    assert content[1]["image_url"]["url"] == "data:image/png;base64,ZmFrZQ=="
