@@ -621,6 +621,7 @@ class UniversalWorkbench:
                 "discovered": list(resolution.discovered),
                 "attempts": resolution.attempts,
             },
+            artifact_id=capability.artifact_id,
             provenance="aurora-capability-resolution",
             error=None if status == "succeeded" else (
                 f"capability resolution ended with status={capability.status}"
