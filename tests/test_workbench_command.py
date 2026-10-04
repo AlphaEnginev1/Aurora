@@ -15,9 +15,15 @@ class FakeGateway:
     )
 
 
+class FakeBroker:
+    def resolve(self, request):
+        return object() if request.name == "tool:rg" else None
+
+
 class FakeCapabilityRuntime:
     def __init__(self):
         self.requests = []
+        self.broker = FakeBroker()
 
     def execute(self, request, *, workspace, args=(), environment=None):
         self.requests.append((request, workspace, tuple(args), dict(environment or {})))
