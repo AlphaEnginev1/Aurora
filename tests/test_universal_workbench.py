@@ -34,7 +34,7 @@ def test_workbench_scoped_file_operations_and_census(tmp_path: Path, monkeypatch
 
     listed = wb.execute(WorkbenchRequest("workbench:file:list", "engineer", "m1", arguments=(".",)))
     assert listed.status == "succeeded"
-    assert listed.output[0]["name"] == "note.txt"
+    assert any(item["name"] == "note.txt" for item in listed.output)
 
     read = wb.execute(WorkbenchRequest("workbench:file:read", "researcher", "m1", arguments=("note.txt",)))
     assert read.output == "hello Aurora"

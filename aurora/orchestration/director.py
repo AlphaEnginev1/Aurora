@@ -56,6 +56,14 @@ class DirectorPlanner:
 - workbench:file:write — create/replace a local text file in scope
 - workbench:artifact:intake — ingest a local file as a durable hashed artifact
 - workbench:github:get — read GitHub API resources; use repo:owner/name[/path] in args
+- workbench:github:branch — create a governed GitHub branch from a commit SHA
+- workbench:github:file:write — write a UTF-8 file to a GitHub branch under write policy
+- workbench:github:pr — create a pull request under write policy
+- workbench:github:merge — merge a PR only when merge policy is explicitly enabled
+- workbench:github:workflow:read — inspect GitHub Actions workflow runs
+- workbench:project:inspect — inspect a local project and detect common technologies/manifests
+- workbench:project:register — register a project in Aurora Project Registry
+- workbench:project:register_github — register a project from GitHub metadata
 - workbench:browser — execute a governed Playwright action plan encoded as one JSON argument
 - workbench:mcp:list_tools — discover tools exposed by an approved MCP server
 - workbench:mcp:call — call a discovered tool on an approved MCP server

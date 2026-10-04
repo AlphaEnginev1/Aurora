@@ -13,6 +13,7 @@ from aurora.autonomy.policy import Policy
 from aurora.workbench.artifacts import ArtifactError, ArtifactInspector
 from aurora.workbench.local_computer import LocalComputerError, LocalComputerGateway
 from aurora.workbench.mcp import MCPBridgeError, MCPClientBridge, MCPRegistry
+from aurora.workbench.project_intake import ProjectIntakeError, ProjectIntakeService
 from aurora.workbench.session import WorkSessionStore
 from aurora.autonomy.computer_operator import (
     ComputerAction,
@@ -63,11 +64,19 @@ class UniversalWorkbench:
         roots.extend(Path(item).resolve() for item in configured_roots)
         self.roots = tuple(dict.fromkeys(roots))
         self.github = GitHubConnector(gateway)
+        self.project_intake = ProjectIntakeService(
+            projects_path=self.repository_root / "config" / "projects.json",
+            graph_path=self.runtime_root / "project-source-graph.json",
+            github=self.github,
+        )
         self._browser = None
 
     def census(self) -> tuple[WorkbenchCapability, ...]:
         browser_available = self._playwright_available()
         computer_available = self._local_computer_available()
+        github_available = self.github.available()
+        github_write = self.github.write_enabled and github_available
+        github_merge = self.github.merge_enabled and github_available
         return (
             WorkbenchCapability("workbench:file", "file", True, True, True, "scoped local filesystem"),
             WorkbenchCapability("workbench:artifact", "artifact", True, True, True, "hashable artifact intake"),
@@ -76,9 +85,9 @@ class UniversalWorkbench:
                 "workbench:github",
                 "connector",
                 True,
-                self.github.available(),
-                self.github.available(),
-                "GitHub API read connector; credential is environment-only",
+                github_available,
+                github_available,
+                f"GitHub read={github_available}; write={github_write}; merge={github_merge}",
             ),
             WorkbenchCapability(
                 "workbench:browser",
@@ -154,13 +163,29 @@ class UniversalWorkbench:
                 result = self._mcp_call(request)
             elif capability == "workbench:computer":
                 result = self._computer_action(request)
+            elif capability == "workbench:github:branch":
+                result = self._github_branch(request)
+            elif capability == "workbench:github:file:write":
+                result = self._github_file_write(request)
+            elif capability == "workbench:github:pr":
+                result = self._github_pr(request)
+            elif capability == "workbench:github:merge":
+                result = self._github_merge(request)
+            elif capability == "workbench:github:workflow:read":
+                result = self._github_workflow_runs(request)
+            elif capability == "workbench:project:inspect":
+                result = self._project_inspect(request)
+            elif capability == "workbench:project:register":
+                result = self._project_register(request)
+            elif capability == "workbench:project:register_github":
+                result = self._project_register_github(request)
             elif capability == "workbench:github:get":
                 result = self._github_get(request)
             elif capability == "workbench:browser":
                 result = self._browser_run(request)
             else:
                 raise WorkbenchError(f"unsupported Workbench capability: {capability}")
-        except (WorkbenchError, GitHubConnectorError, ComputerOperatorError, ArtifactError, MCPBridgeError, LocalComputerError) as exc:
+        except (WorkbenchError, GitHubConnectorError, ComputerOperatorError, ArtifactError, MCPBridgeError, LocalComputerError, ProjectIntakeError) as exc:
             result = WorkbenchResult(capability, capability, "failed", error=str(exc))
         self._audit(request, result)
         if result.status == "failed":
@@ -341,6 +366,109 @@ class UniversalWorkbench:
             },
             artifact_id=digest[:24],
             provenance=str(source),
+        )
+
+    @staticmethod
+    def _github_json_arg(request: WorkbenchRequest, required: tuple[str, ...] = ()) -> dict[str, Any]:
+        if not request.arguments:
+            raise WorkbenchError("GitHub operation requires a JSON argument")
+        try:
+            value = json.loads(request.arguments[0])
+        except json.JSONDecodeError as exc:
+            raise WorkbenchError("GitHub operation argument must be valid JSON") from exc
+        if not isinstance(value, dict):
+            raise WorkbenchError("GitHub operation argument must be an object")
+        missing = [key for key in required if key not in value]
+        if missing:
+            raise WorkbenchError("GitHub operation is missing required fields: " + ", ".join(missing))
+        return value
+
+    def _github_branch(self, request: WorkbenchRequest) -> WorkbenchResult:
+        value = self._github_json_arg(request, ("owner", "repo", "branch", "sha"))
+        result = self.github.create_branch(
+            str(value["owner"]), str(value["repo"]), str(value["branch"]), str(value["sha"])
+        )
+        return WorkbenchResult(request.capability, "github_branch", "succeeded", output=result, provenance="github-api")
+
+    def _github_file_write(self, request: WorkbenchRequest) -> WorkbenchResult:
+        value = self._github_json_arg(request, ("owner", "repo", "path", "content", "message", "branch"))
+        result = self.github.upsert_file(
+            str(value["owner"]), str(value["repo"]), str(value["path"]),
+            str(value["content"]), str(value["message"]), str(value["branch"]),
+            str(value["sha"]) if value.get("sha") else None,
+        )
+        return WorkbenchResult(request.capability, "github_file_write", "succeeded", output=result, provenance="github-api")
+
+    def _github_pr(self, request: WorkbenchRequest) -> WorkbenchResult:
+        value = self._github_json_arg(request, ("owner", "repo", "title", "head", "base"))
+        result = self.github.create_pull_request(
+            str(value["owner"]), str(value["repo"]), str(value["title"]),
+            str(value["head"]), str(value["base"]), str(value.get("body") or ""),
+            bool(value.get("draft", False)),
+        )
+        return WorkbenchResult(request.capability, "github_pr", "succeeded", output=result, provenance="github-api")
+
+    def _github_merge(self, request: WorkbenchRequest) -> WorkbenchResult:
+        value = self._github_json_arg(request, ("owner", "repo", "number"))
+        result = self.github.merge_pull_request(
+            str(value["owner"]), str(value["repo"]), int(value["number"]),
+            method=str(value.get("method") or "merge"),
+            expected_head_sha=str(value["expected_head_sha"]) if value.get("expected_head_sha") else None,
+        )
+        status = "succeeded" if result.get("merged") else "failed"
+        return WorkbenchResult(request.capability, "github_merge", status, output=result, provenance="github-api")
+
+    def _github_workflow_runs(self, request: WorkbenchRequest) -> WorkbenchResult:
+        value = self._github_json_arg(request, ("owner", "repo"))
+        result = self.github.workflow_runs(
+            str(value["owner"]), str(value["repo"]),
+            branch=str(value["branch"]) if value.get("branch") else None,
+            status=str(value["status"]) if value.get("status") else None,
+        )
+        return WorkbenchResult(request.capability, "github_workflow_runs", "succeeded", output=result, provenance="github-api")
+
+    def _project_inspect(self, request: WorkbenchRequest) -> WorkbenchResult:
+        if not request.arguments:
+            raise WorkbenchError("workbench:project:inspect requires a local path")
+        report = self.project_intake.inspect_local(
+            request.arguments[0],
+            project_id=str(request.options.get("project_id") or "unregistered"),
+        )
+        return WorkbenchResult(request.capability, "project_inspect", "succeeded", output=report.__dict__, provenance=report.path)
+
+    def _project_register(self, request: WorkbenchRequest) -> WorkbenchResult:
+        value = self._github_json_arg(request)
+        project = self.project_intake.register(
+            project_id=str(value["project_id"]),
+            name=str(value["name"]),
+            objective=str(value["objective"]),
+            workspace=str(value["workspace"]) if value.get("workspace") else None,
+            repository=str(value["repository"]) if value.get("repository") else None,
+            status=str(value.get("status") or "active"),
+        )
+        return WorkbenchResult(
+            request.capability,
+            "project_register",
+            "succeeded",
+            output=project.__dict__,
+            provenance=str(self.project_intake.projects_path),
+        )
+
+    def _project_register_github(self, request: WorkbenchRequest) -> WorkbenchResult:
+        value = self._github_json_arg(request)
+        project = self.project_intake.register_github(
+            project_id=str(value["project_id"]),
+            name=str(value["name"]) if value.get("name") else None,
+            objective=str(value["objective"]),
+            owner=str(value["owner"]),
+            repo=str(value["repo"]),
+        )
+        return WorkbenchResult(
+            request.capability,
+            "project_register_github",
+            "succeeded",
+            output=project.__dict__,
+            provenance=str(self.project_intake.projects_path),
         )
 
     def _github_get(self, request: WorkbenchRequest) -> WorkbenchResult:
