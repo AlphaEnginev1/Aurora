@@ -67,6 +67,12 @@
       "executable": "workbench:census"
     },
     {
+      "name": "workbench:computer",
+      "kind": "builtin",
+      "source": "aurora",
+      "executable": "workbench:computer"
+    },
+    {
       "name": "workbench:document:extract",
       "kind": "builtin",
       "source": "aurora",
@@ -95,6 +101,18 @@
       "kind": "builtin",
       "source": "aurora",
       "executable": "workbench:github:get"
+    },
+    {
+      "name": "workbench:mcp:call",
+      "kind": "builtin",
+      "source": "aurora",
+      "executable": "workbench:mcp:call"
+    },
+    {
+      "name": "workbench:mcp:list_tools",
+      "kind": "builtin",
+      "source": "aurora",
+      "executable": "workbench:mcp:list_tools"
     }
   ]
 }
