@@ -51,6 +51,7 @@ Registered capabilities:
 - workbench:census
 - workbench:preflight
 - workbench:capability:resolve
+- workbench:command — execute one registered capability inside Aurora's governed sandbox (never an arbitrary executable)
 - workbench:research:discover
 - workbench:research:retrieve
 - workbench:research:retrieve_extract
