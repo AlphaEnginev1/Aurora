@@ -4,6 +4,7 @@ from aurora.autonomy.internet import InternetGateway, InternetPolicy
 from aurora.autonomy.policy import Policy
 from aurora.organization import OrganizationRegistry
 from aurora.workbench import UniversalWorkbench, WorkbenchRequest
+from aurora.workbench.session import WorkSessionStore
 
 
 class FakeGateway:
@@ -24,16 +25,25 @@ def test_workbench_scoped_file_operations_and_census(tmp_path: Path, monkeypatch
     runtime.mkdir()
 
 
+    sessions = WorkSessionStore(runtime / "sessions.db")
     wb = UniversalWorkbench(
         repository_root=repo,
         runtime_root=runtime,
         gateway=FakeGateway(),
         policy=Policy(frozenset({"workbench:*"}), frozenset()),
+        session_store=sessions,
+        audit_path=runtime / "audit.jsonl",
         configured_roots=(),
     )
 
-    listed = wb.execute(WorkbenchRequest("workbench:file:list", "engineer", "m1", arguments=(".",)))
+    listed = wb.execute(
+        WorkbenchRequest(
+            "workbench:file:list", "engineer", "m1", arguments=(".",), correlation_id="corr-list"
+        )
+    )
     assert listed.status == "succeeded"
+    assert listed.receipt_id
+    assert listed.correlation_id == "corr-list"
     assert any(item["name"] == "note.txt" for item in listed.output)
 
     read = wb.execute(WorkbenchRequest("workbench:file:read", "researcher", "m1", arguments=("note.txt",)))
@@ -52,11 +62,28 @@ def test_workbench_scoped_file_operations_and_census(tmp_path: Path, monkeypatch
     assert intake.artifact_id
     assert Path(intake.output["path"]).is_file()
 
+    preflight = wb.execute(WorkbenchRequest("workbench:preflight", "director", "m1"))
+    assert preflight.status == "succeeded"
+    assert preflight.output["critical_ready"] is True
+    assert set(preflight.output["required_capabilities"]) == {
+        "workbench:file",
+        "workbench:artifact",
+        "workbench:document",
+    }
+
     census = wb.execute(WorkbenchRequest("workbench:census", "director", "m1"))
     by_id = {item["capability_id"]: item for item in census.output}
     assert by_id["workbench:file"]["available"] is True
     assert by_id["workbench:artifact"]["available"] is True
     assert isinstance(by_id["workbench:github"]["available"], bool)
+
+    session = sessions.get("m1")
+    assert session.execution_receipts
+    assert "corr-list" in session.correlation_ids
+    assert "workbench:file:read" in session.capability_ids
+    assert session.artifact_ids
+    assert sessions.get_receipts("m1")
+    assert "receipt_id" in (runtime / "audit.jsonl").read_text(encoding="utf-8")
 
 
 def test_all_configured_agents_have_universal_work_access():
@@ -83,3 +110,29 @@ def test_workbench_policy_fail_closed(tmp_path: Path):
         assert "denied by policy" in str(exc)
     else:
         raise AssertionError("Workbench must fail closed when policy denies the capability")
+
+
+def test_work_session_store_reads_legacy_payload_with_new_defaults(tmp_path: Path):
+    path = tmp_path / "legacy.db"
+    store = WorkSessionStore(path)
+    legacy = (
+        '{"work_id":"legacy-work","mission_id":"legacy-mission","actor":"agent",'
+        '"environment":"local","workspace_root":"%s","state":"active",'
+        '"capability_ids":[],"resources":{},"created_at":"2026-01-01T00:00:00+00:00",'
+        '"updated_at":"2026-01-01T00:00:00+00:00"}'
+    ) % tmp_path
+    import sqlite3
+    with sqlite3.connect(path) as db:
+        db.execute(
+            "CREATE TABLE work_sessions (work_id TEXT PRIMARY KEY, payload TEXT NOT NULL)"
+        )
+        db.execute(
+            "CREATE TABLE work_session_receipts ("
+            "receipt_id TEXT PRIMARY KEY, work_id TEXT NOT NULL, correlation_id TEXT,"
+            "created_at TEXT NOT NULL, payload TEXT NOT NULL)"
+        )
+        db.execute("INSERT INTO work_sessions(work_id,payload) VALUES (?,?)", ("legacy-work", legacy))
+    loaded = WorkSessionStore(path).get("legacy-work")
+    assert loaded.work_id == "legacy-work"
+    assert loaded.execution_receipts == ()
+    assert loaded.approval_state == "not_required"
