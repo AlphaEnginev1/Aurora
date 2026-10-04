@@ -90,6 +90,12 @@ If no Workbench action is needed, answer normally.
         capability: str = "reasoning",
     ):
         messages = list(request.messages)
+        if not any(
+            message.get("role") == "system"
+            and self.INSTRUCTION in str(message.get("content", ""))
+            for message in messages
+        ):
+            messages.insert(0, {"role": "system", "content": self.INSTRUCTION})
         executed = 0
         while True:
             current_metadata = dict(request.metadata or {})
