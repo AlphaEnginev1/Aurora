@@ -76,6 +76,10 @@ class BootstrapStub:
     def initialize(self):
         return self._state
 
+    @property
+    def messages(self):
+        return self._state.context.messages
+
 
 class RouterStub:
     def configure_context_gate(self, context_gate, *, enforce=True) -> None:
@@ -163,7 +167,7 @@ def test_same_mission_and_task_graph_survive_provider_failover(tmp_path: Path):
         objective=submission.plan.objective,
         context=[{"role":"user","content":"The durable mission still contains task-1 and it has not been duplicated."}],
     )
-    task_ids_after = [task.task_id for task in db.list_tasks(submission.mission_id)]
+    task_ids_after = [task.task.task_id for task in db.list_tasks(submission.mission_id)]
 
     assert submission.mission_id
     assert task_ids_before == ["task-1"]
