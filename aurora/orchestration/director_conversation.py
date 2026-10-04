@@ -6,12 +6,12 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 import sqlite3
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 from uuid import uuid4
 
 from aurora.inference.models import InferenceRequest, InferenceResponse
 from aurora.inference.router import ModelRouter, ModelRoutingError
-from .director_provider import DirectorProvider, InferenceDirectorProvider
+from .director_provider import DirectorProvider, DirectorToolSpec, InferenceDirectorProvider
 
 from .director_bootstrap import DirectorBootstrap, DirectorBootstrapError
 
@@ -73,6 +73,17 @@ Keep responses useful and concise unless the human asks for depth."""
     SESSION_STATES = frozenset({"active", "closed"})
     TURN_STATES = frozenset({"processing", "completed", "failed"})
 
+    _RUN_MISSION_TOOL = DirectorToolSpec(
+        name="run_mission",
+        description="Execute a real Aurora mission through governed Director planning and TaskEngine. Use this when the human explicitly asks Aurora to perform work.",
+        parameters={
+            "type": "object",
+            "required": ["objective"],
+            "properties": {"objective": {"type": "string"}},
+            "additionalProperties": False,
+        },
+    )
+
     def __init__(
         self,
         *,
@@ -81,6 +92,7 @@ Keep responses useful and concise unless the human asks for depth."""
         db_path: str | Path,
         max_history_turns: int = 20,
         provider: DirectorProvider | None = None,
+        mission_runner: Callable[..., Any] | None = None,
     ) -> None:
         if max_history_turns < 1:
             raise DirectorConversationError("max_history_turns must be at least 1")
@@ -89,6 +101,7 @@ Keep responses useful and concise unless the human asks for depth."""
         self.db_path = Path(db_path)
         self.max_history_turns = max_history_turns
         self.provider: DirectorProvider = provider or InferenceDirectorProvider(router)
+        self.mission_runner = mission_runner
         self.router.configure_context_gate(bootstrap.context_gate, enforce=True)
         self._initialize_schema()
 
