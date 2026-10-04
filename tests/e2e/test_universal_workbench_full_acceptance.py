@@ -479,7 +479,11 @@ def test_full_universal_workbench_acceptance_mission(tmp_path: Path):
         "workbench:github:file:write",
         "workbench:github:pr",
     }
-    assert required_caps.issubset(set(session.capability_ids))
+    missing_capabilities = required_caps - set(session.capability_ids)
+    assert not missing_capabilities, (
+        f"missing Workbench capabilities: {sorted(missing_capabilities)}; "
+        f"observed={sorted(set(session.capability_ids))}; counters={router.counters}"
+    )
     assert len(session.execution_receipts) == 15
     assert "artifact-screenshot" in session.artifact_ids
     assert "artifact-resolved" in session.artifact_ids
