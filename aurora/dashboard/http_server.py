@@ -5,6 +5,8 @@ from __future__ import annotations
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from pathlib import Path
+import re
+import uuid
 from typing import Any
 from urllib.parse import unquote, urlparse
 
@@ -42,6 +44,7 @@ def create_dashboard_server(
     provider_settings: ProviderSettingsService | None = None,
     update_service: DashboardUpdateService | None = None,
     health_service: DashboardHealthService | None = None,
+    workbench=None,
 ) -> ThreadingHTTPServer:
     _validate_bind(host, api_token)
     if port < 0 or port > 65535:
@@ -60,6 +63,7 @@ def create_dashboard_server(
     Handler.provider_settings = provider_settings
     Handler.update_service = update_service
     Handler.health_service = health_service
+    Handler.workbench = workbench
 
     return ThreadingHTTPServer((host, port), Handler)
 
@@ -72,6 +76,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
     provider_settings: ProviderSettingsService | None
     update_service: DashboardUpdateService | None
     health_service: DashboardHealthService | None
+    workbench: Any | None
 
     server_version = "AuroraDashboard/1"
 
@@ -132,6 +137,39 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         try:
             self._require_token()
             parsed = urlparse(self.path)
+            if parsed.path == "/api/dashboard/artifacts":
+                if self.workbench is None:
+                    raise DashboardHTTPError("dashboard Workbench is not configured")
+                filename = self.headers.get("X-Aurora-Filename", "").strip()
+                if not filename:
+                    raise DashboardConversationAPIError("X-Aurora-Filename is required")
+                filename = unquote(filename)
+                safe_name = Path(filename).name
+                if not safe_name or safe_name in {".", ".."} or len(safe_name) > 180:
+                    raise DashboardConversationAPIError("invalid upload filename")
+                content_length = int(self.headers.get("Content-Length", "0"))
+                max_bytes = 25 * 1024 * 1024
+                if content_length <= 0 or content_length > max_bytes:
+                    raise DashboardConversationAPIError("upload must be between 1 byte and 25 MiB")
+                uploads = self.workbench.runtime_root / "uploads"
+                uploads.mkdir(parents=True, exist_ok=True)
+                destination = uploads / f"{uuid.uuid4().hex}-{re.sub(r'[^A-Za-z0-9._-]', '_', safe_name)}"
+                data = self.rfile.read(content_length)
+                if len(data) != content_length:
+                    raise DashboardConversationAPIError("upload body was incomplete")
+                destination.write_bytes(data)
+                mission_id = self.headers.get("X-Aurora-Mission-Id", "").strip() or f"dashboard-upload-{uuid.uuid4().hex}"
+                result = self.workbench.execute(
+                    __import__("aurora.workbench", fromlist=["WorkbenchRequest"]).WorkbenchRequest(
+                        capability="workbench:artifact:intake",
+                        actor="dashboard",
+                        mission_id=mission_id,
+                        arguments=(str(destination),),
+                        options={"work_id": mission_id},
+                    )
+                )
+                self._json(201, {"artifact": result.output, "mission_id": mission_id})
+                return
             payload = self._json_body()
             if parsed.path == "/api/dashboard/update":
                 if self.update_service is None:
