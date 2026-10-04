@@ -302,9 +302,6 @@ def test_gate_8_block_3_full_failover_uses_eligibility_and_preserves_graph(tmp_p
     assert after[-1].correlation_id == correlation_id
 
     winner_runtime = runtime_b if winner == "director-B" else runtime_c
-    result = winner_runtime.run_until_terminal(submission, max_cycles=20)
-    assert result.status is TaskStatus.SUCCEEDED
-    assert orchestration.calls == ["step_a", "step_b"]
 
     restarted = _candidate(
         store=store,
@@ -342,6 +339,10 @@ def test_gate_8_block_3_full_failover_uses_eligibility_and_preserves_graph(tmp_p
     assert len(stale_events) == events_before_stale + 1
     assert stale_events[-1].event_type == "director_ownership_fence_rejected"
     assert stale_events[-1].correlation_id == correlation_id
+
+    result = winner_runtime.run_until_terminal(submission, max_cycles=20)
+    assert result.status is TaskStatus.SUCCEEDED
+    assert orchestration.calls == ["step_a", "step_b"]
 
     assert store.get(submission.mission_id, "step_a").attempts == 1
     assert store.get(submission.mission_id, "step_b").attempts == 1
