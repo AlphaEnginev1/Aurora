@@ -64,9 +64,11 @@ class UniversalWorkbench:
 
     def census(self) -> tuple[WorkbenchCapability, ...]:
         browser_available = self._playwright_available()
+        computer_available = self._local_computer_available()
         return (
             WorkbenchCapability("workbench:file", "file", True, True, True, "scoped local filesystem"),
             WorkbenchCapability("workbench:artifact", "artifact", True, True, True, "hashable artifact intake"),
+            WorkbenchCapability("workbench:document", "document", True, True, True, "bounded extraction from supported work formats"),
             WorkbenchCapability(
                 "workbench:github",
                 "connector",
@@ -82,6 +84,15 @@ class UniversalWorkbench:
                 browser_available,
                 browser_available,
                 "Playwright browser automation",
+            ),
+            WorkbenchCapability("workbench:mcp", "integration", True, True, True, "MCP v2 client bridge"),
+            WorkbenchCapability(
+                "workbench:computer",
+                "desktop",
+                computer_available,
+                computer_available,
+                computer_available,
+                "Local workstation companion when installed and authenticated",
             ),
         )
 
