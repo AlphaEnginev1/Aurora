@@ -130,6 +130,38 @@ The queue is closed. Block 7 establishes the explicit authorization boundary; it
 
 **Increment 11 — Director Handoff / Failover: COMPLETE. Gates 1–8 are COMPLETE and canonically verified on main.**
 
+
+## Increment 12 — Director Provider Failover / Replacement — ACTIVE
+
+**Scope:** provider-level replacement only. Increment 11 remains COMPLETE and is not reopened.
+
+Target lifecycle:
+
+    active Director provider -> provider failure -> eligible alternative -> replacement active -> same Aurora state -> continuation
+
+Current implementation:
+- durable provider failure/failover evidence store;
+- provider-neutral failover controller;
+- operator-configurable fallback order;
+- Gemini failure classification for failoverable versus non-transient client errors;
+- runtime integration for planning, review and durable conversation;
+- successful replacement persisted for restart continuity;
+- automatic switchback to a previously failed primary provider is not performed.
+
+Acceptance plan:
+- docs/operations/INCREMENT_12_DIRECTOR_PROVIDER_FAILOVER_CONTRACT.md
+- docs/operations/INCREMENT_12_DIRECTOR_PROVIDER_FAILOVER_ACCEPTANCE_PLAN.md
+
+Required final proof:
+- Gemini primary success;
+- controlled Gemini failure;
+- NVIDIA/Router successful replacement;
+- same mission/session/task/knowledge/decision state;
+- no duplicate completed work;
+- durable transition evidence;
+- fail-closed when all alternatives fail;
+- restart retains the successful replacement.
+
 Scope remains isolated to safe replacement and recovery of an active Director during an in-progress durable mission. Unrelated dashboard, model, provider, research, and frozen production-readiness work remains out of scope.
 
 Authoritative Increment 11 contracts:
