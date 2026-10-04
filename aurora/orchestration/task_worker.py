@@ -229,7 +229,6 @@ class TaskWorker:
                 execution_scope=(
                     f"{self.mission_id}:{claimed.task.task_id}:attempt:{claimed.attempts}"
                 ),
-                mission_id=self.mission_id,
             )
         except Exception as exc:
             result = DelegatedTaskResult(
