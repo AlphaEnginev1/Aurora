@@ -422,7 +422,6 @@ def test_g8_eligibility_authority_is_default_and_absence_fails_closed_for_takeov
         store=store,
         bus=bus,
         ownership=ownership,
-        eligibility=DirectorEligibilityStore(store.path),
         director_id="director-B",
         event_consumer_id="director-B-events",
         clock=clock,
