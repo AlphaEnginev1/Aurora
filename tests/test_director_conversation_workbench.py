@@ -139,5 +139,5 @@ def test_conversation_can_use_shared_workbench_directly(tmp_path: Path):
     assert workbench.requests[0].capability == "workbench:file:read"
     assert workbench.requests[0].actor == "director"
     assert workbench.requests[0].mission_id.startswith("conversation:")
-    assert ("director_conversation", ("run_mission", "workbench")) in provider.calls
+    assert ("director_conversation", ("workbench",)) in provider.calls
     assert ("director_conversation_result", ()) in provider.calls
