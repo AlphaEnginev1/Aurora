@@ -49,6 +49,17 @@ class MissionResult:
 class DirectorPlanner:
     """Ask the inference fabric for a machine-valid, policy-filterable task plan."""
 
+    _WORKBENCH_CATALOG = """Universal Work / Cowork capabilities available through Aurora:
+- workbench:census — inspect current Workbench readiness
+- workbench:file:list — list files in configured Workbench roots
+- workbench:file:read — read a bounded local file
+- workbench:file:write — create/replace a local text file in scope
+- workbench:artifact:intake — ingest a local file as a durable hashed artifact
+- workbench:github:get — read GitHub API resources; use repo:owner/name[/path] in args
+- workbench:browser — execute a governed Playwright action plan encoded as one JSON argument
+The Workbench is shared by Director and all specialist agents. Use the capability required by the mission; role specialization must not be used as an artificial capability restriction. The Workbench remains policy- and scope-controlled.
+"""
+
     _DELEGATE_TOOL = DirectorToolSpec(
         name="delegate_task",
         description="Request Aurora to validate and enqueue one delegated task. The tool never executes the task itself.",
@@ -109,7 +120,7 @@ Rules:
         if not objective:
             raise DirectorPlanError("objective is empty")
 
-        system = self._SYSTEM
+        system = self._SYSTEM + "\n" + self._WORKBENCH_CATALOG
         if self.organization is not None:
             roles = ", ".join(sorted(self.organization.agents_by_role()))
             system += f"\nRegistered roles: {roles}\n"
@@ -164,7 +175,7 @@ Rules:
         objective = objective.strip()
         if not objective:
             raise DirectorPlanError("objective is empty")
-        system = self._REVIEW_SYSTEM
+        system = self._REVIEW_SYSTEM + "\n" + self._WORKBENCH_CATALOG
         if self.organization is not None:
             roles = ", ".join(sorted(self.organization.agents_by_role()))
             system += f"\nRegistered roles: {roles}\n"
