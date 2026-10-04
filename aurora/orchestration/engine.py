@@ -74,6 +74,7 @@ class OrchestrationEngine:
         model: str | None = None,
         model_preferences: Sequence[str] | None = None,
         project_id: str | None = None,
+        mission_id: str | None = None,
         context: list[dict[str, Any]] | None = None,
         skill_ids: Sequence[str] | None = None,
         skill_tags: Sequence[str] | None = None,
@@ -110,7 +111,7 @@ class OrchestrationEngine:
                 response = self._workbench_loop.run(
                     request=request,
                     actor=role,
-                    mission_id=task_id,
+                    mission_id=mission_id or task_id,
                     reason=objective,
                     preferred_models=tuple(model_preferences or ()),
                     router=self._router,
