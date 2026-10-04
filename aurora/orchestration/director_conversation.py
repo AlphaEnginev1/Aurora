@@ -373,8 +373,6 @@ Keep responses useful and concise unless the human asks for depth."""
     def _execute_conversation_tools(
         self, *, response: Any, model: str | None, provider_messages: list[dict[str, Any]]
     ) -> Any:
-        if self.mission_runner is None:
-            raise DirectorConversationError("Director requested execution but mission runner is unavailable")
         calls = tuple(getattr(response, "tool_calls", ()) or ())
         if len(calls) > 4:
             raise DirectorConversationError("Director requested too many conversation tools")
