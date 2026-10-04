@@ -172,19 +172,19 @@ class Router(ModelRouter):
             )
         ])
         self.requests: list[InferenceRequest] = []
-        self.counters = {"researcher": 0, "engineer": 0}
+        self.counters = {"research-specialist": 0, "engineering-specialist": 0}
         self.lock = threading.Lock()
 
     def generate(self, request, *, capability="reasoning", preferred_models=None):
         with self.lock:
             self.requests.append(request)
-            role = str(request.metadata.get("role", ""))
-            self.counters[role] = self.counters.get(role, 0) + 1
-            step = self.counters[role]
+            task_id = str(request.metadata.get("task_id", ""))
+            self.counters[task_id] = self.counters.get(task_id, 0) + 1
+            step = self.counters[task_id]
 
         decision = self.route(request, capability=capability, preferred_models=preferred_models)
         calls = {
-            "researcher": {
+            "research-specialist": {
                 1: ("workbench:project:inspect", ["."], {}),
                 2: ("workbench:project:register", [
                     json.dumps({
@@ -211,14 +211,20 @@ class Router(ModelRouter):
                 ], {}),
                 5: ("workbench:document:extract", ["brief.docx"], {"max_chars": 10000}),
                 6: ("workbench:computer", ['[{"action":"screenshot"}]'], {}),
-                7: ("workbench:capability:resolve", [
+                7: ("workbench:browser", [
+                    json.dumps([{
+                        "action": "navigate",
+                        "url": "https://example.com/research-a",
+                    }])
+                ], {}),
+                8: ("workbench:capability:resolve", [
                     json.dumps({
                         "name": "tool.acceptance:demo",
                         "constraints": {"source": "controlled"},
                     })
                 ], {}),
             },
-            "engineer": {
+            "engineering-specialist": {
                 1: ("workbench:file:read", ["notes.txt"], {}),
                 2: ("workbench:artifact:intake", ["notes.txt"], {}),
                 3: ("workbench:file:write", ["result.txt", "IMPLEMENTED"], {}),
@@ -260,8 +266,8 @@ class Router(ModelRouter):
             },
         }
 
-        if role in calls and step <= max(calls[role]):
-            capability_name, args, options = calls[role][step]
+        if task_id in calls and step <= max(calls[task_id]):
+            capability_name, args, options = calls[task_id][step]
             content = json.dumps({
                 "workbench_calls": [{
                     "capability": capability_name,
@@ -469,6 +475,7 @@ def test_full_universal_workbench_acceptance_mission(tmp_path: Path):
         "workbench:research:retrieve_extract",
         "workbench:document:extract",
         "workbench:computer",
+        "workbench:browser",
         "workbench:capability:resolve",
         "workbench:file:read",
         "workbench:artifact:intake",
@@ -484,7 +491,7 @@ def test_full_universal_workbench_acceptance_mission(tmp_path: Path):
         f"missing Workbench capabilities: {sorted(missing_capabilities)}; "
         f"observed={sorted(set(session.capability_ids))}; counters={router.counters}"
     )
-    assert len(session.execution_receipts) == 15
+    assert len(session.execution_receipts) == 16
     assert "artifact-screenshot" in session.artifact_ids
     assert "artifact-resolved" in session.artifact_ids
     assert "artifact-python" in session.artifact_ids
