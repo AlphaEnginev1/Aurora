@@ -135,6 +135,7 @@ def main() -> int:
                 host=args.dashboard_host,
                 port=args.dashboard_port,
                 api_token=os.getenv("AURORA_DASHBOARD_API_TOKEN"),
+                workbench=getattr(runtime, "workbench", None),
                 provider_settings=provider_settings,
                 update_service=update_service,
                 health_service=health_service,
