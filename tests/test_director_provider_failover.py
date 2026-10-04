@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from aurora.orchestration.director_provider import DirectorModelResponse
+from aurora.operator_settings import OperatorSettingsStore
 from aurora.orchestration.director_provider_failover import (
     DirectorProviderCandidate,
     DirectorProviderFailoverController,
@@ -148,3 +149,67 @@ def test_candidate_is_not_active_until_success(tmp_path: Path):
 
     assert activated == []
     assert controller.provider_id == "gemini"
+
+
+def test_successful_nvidia_failover_persists_and_reloads_after_restart(tmp_path: Path):
+    settings = OperatorSettingsStore(tmp_path / "operator-settings.json")
+    settings.save(
+        {
+            "director": {
+                "provider": "gemini",
+                "model": "gemini-3.7-flash",
+                "endpoint": "https://generativelanguage.googleapis.com/v1beta",
+                "failover": {"enabled": True, "order": ["nvidia_api", "router"]},
+            },
+            "providers": {
+                "gemini": {"api_key": "gemini-secret"},
+                "nvidia_api": {
+                    "api_key": "nvidia-secret",
+                    "base_url": "https://integrate.api.nvidia.com/v1",
+                },
+            },
+        }
+    )
+    gemini = FakeProvider("gemini", [ProviderFailure("forced outage")])
+    nvidia = FakeProvider("nvidia_api", ["replacement"])
+    store = DirectorProviderFailoverStore(str(tmp_path / "runtime.db"))
+
+    activated = []
+
+    def activate(candidate, _provider):
+        settings.update_from_form(
+            {
+                "director": {
+                    "provider": candidate.provider_id,
+                    "model": candidate.model or "router",
+                    "endpoint": candidate.endpoint or "https://example.invalid",
+                }
+            }
+        )
+        activated.append(candidate.provider_id)
+
+    controller = DirectorProviderFailoverController(
+        active_provider=gemini,
+        candidates=(
+            _candidate("nvidia_api", nvidia, "nvidia/test-model"),
+        ),
+        store=store,
+        activate=activate,
+    )
+    response = controller.generate(
+        messages=[{"role": "user", "content": "continue"}],
+        model="gemini-3.7-flash",
+        role="director_planner",
+    )
+
+    assert response.provider == "nvidia_api"
+    assert activated == ["nvidia_api"]
+    persisted = settings.load()["director"]
+    assert persisted["provider"] == "nvidia_api"
+    assert persisted["model"] == "nvidia/test-model"
+
+    from aurora.orchestration.factory import _build_director_provider
+
+    restarted_provider = _build_director_provider(settings, router=object())
+    assert restarted_provider is not None
+    assert restarted_provider.provider_id == "nvidia_api"
