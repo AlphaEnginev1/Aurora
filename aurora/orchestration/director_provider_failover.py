@@ -202,8 +202,6 @@ class DirectorProviderFailoverController:
     ) -> None:
         if not getattr(active_provider, "provider_id", "").strip():
             raise DirectorProviderFailoverError("active Director provider must expose provider_id")
-        if not candidates:
-            raise DirectorProviderFailoverError("at least one Director provider candidate is required")
         self._active_provider = active_provider
         self._candidates = candidates
         self._store = store
@@ -280,9 +278,9 @@ class DirectorProviderFailoverController:
                 )
                 last_error: Exception = exc
                 for candidate in candidates:
-                    transition_id = f"director-provider-failover:{correlation_id}:{candidate.provider_id}"
+                    attempt_id = f"director-provider-failover:{correlation_id}:{candidate.provider_id}"
                     self._store.record(
-                        transition_id=transition_id,
+                        transition_id=f"{attempt_id}:attempted",
                         correlation_id=correlation_id,
                         phase="attempted",
                         role=role,
@@ -312,7 +310,7 @@ class DirectorProviderFailoverController:
                         self._activate(candidate, replacement)
                         self._active_provider = replacement
                         self._store.record(
-                            transition_id=transition_id,
+                            transition_id=f"{attempt_id}:succeeded",
                             correlation_id=correlation_id,
                             phase="succeeded",
                             role=role,
@@ -338,7 +336,7 @@ class DirectorProviderFailoverController:
                         last_error = replacement_error
                         self._failed_provider_ids.add(candidate.provider_id)
                         self._store.record(
-                            transition_id=transition_id,
+                            transition_id=f"{attempt_id}:failed",
                             correlation_id=correlation_id,
                             phase="failed",
                             role=role,
