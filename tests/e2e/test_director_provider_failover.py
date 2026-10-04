@@ -66,7 +66,9 @@ class BootstrapStub:
             director_model_policy={
                 "default_capability": "reasoning",
                 "providers": {},
-                "models": [],
+                "models": [
+                    {"id": "test/director-model", "provider": "test", "enabled": True}
+                ],
                 "routing": {},
             },
         )
@@ -155,7 +157,7 @@ def test_same_mission_and_task_graph_survive_provider_failover(tmp_path: Path):
     submission = director.submit_mission(
         objective="continue one mission across Director provider failure"
     )
-    task_ids_before = [task.task_id for task in db.list_tasks(submission.mission_id)]
+    task_ids_before = [task.task.task_id for task in db.list_tasks(submission.mission_id)]
 
     review = planner.review(
         objective=submission.plan.objective,
