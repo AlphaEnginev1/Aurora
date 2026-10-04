@@ -41,6 +41,9 @@ class UniversalWorkbench:
         self.gateway = gateway
         self.audit_path = Path(audit_path) if audit_path else None
         roots = [self.repository_root, self.runtime_root]
+        environment_roots = os.getenv("AURORA_WORKBENCH_ROOTS", "").strip()
+        if environment_roots:
+            configured_roots = (*configured_roots, *(item for item in environment_roots.split(os.pathsep) if item.strip()))
         roots.extend(Path(item).resolve() for item in configured_roots)
         self.roots = tuple(dict.fromkeys(roots))
         self.github = GitHubConnector(gateway)
@@ -187,7 +190,7 @@ class UniversalWorkbench:
     def _artifact_intake(self, request: WorkbenchRequest) -> WorkbenchResult:
         if not request.arguments:
             raise WorkbenchError("workbench:artifact:intake requires a source path")
-        source = Path(request.arguments[0]).resolve()
+        source = self._safe_path(request.arguments[0], must_exist=True)
         if not source.is_file():
             raise WorkbenchError(f"artifact source is not a file: {source}")
         target_root = self.runtime_root / "artifacts"
@@ -214,7 +217,14 @@ class UniversalWorkbench:
     def _github_get(self, request: WorkbenchRequest) -> WorkbenchResult:
         if not request.arguments:
             raise WorkbenchError("workbench:github:get requires an API path")
-        data = self.github.get(request.arguments[0])
+        target = request.arguments[0].strip()
+        if target.startswith("repo:"):
+            parts = target.removeprefix("repo:").split("/", 2)
+            if len(parts) < 2:
+                raise WorkbenchError("repo:owner/name requires an owner and repository")
+            suffix = "/" + parts[2] if len(parts) == 3 else ""
+            target = self.github.repo_path(parts[0], parts[1], suffix)
+        data = self.github.get(target)
         return WorkbenchResult(
             request.capability,
             "github_get",
@@ -238,6 +248,9 @@ class UniversalWorkbench:
             if isinstance(action, dict) and action.get("action") == "navigate"
         }
         hosts = {host for host in hosts if host}
+        unauthorized = sorted(host for host in hosts if host.lower() not in {item.lower() for item in self.gateway.policy.allowed_hosts})
+        if unauthorized:
+            raise WorkbenchError("browser hosts are blocked by network policy: " + ", ".join(unauthorized))
         operator = ComputerOperator(
             ComputerPolicy(
                 allowed_hosts=frozenset(hosts),
