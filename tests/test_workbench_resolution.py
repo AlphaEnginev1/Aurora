@@ -132,7 +132,7 @@ def test_factory_wires_capability_resolution_into_runtime_workbench(tmp_path: Pa
         service = build_director_service(
             inference_policy_path="config/inference-policy.json",
             autonomy_policy_path="config/autonomy-policy.json",
-            registry_path="config/capability-registry.json",
+            registry_path="config/tool-registry.json",
             network_policy_path="config/network-policy.json",
             workspace_root=tmp_path,
             egress_proxy_host="127.0.0.1",
