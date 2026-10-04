@@ -76,7 +76,7 @@ class AgentSelector:
         for agent in self.organization.agents.values():
             if allowed and agent.role not in allowed:
                 continue
-            if capability is not None and capability not in agent.capabilities:
+            if capability is not None and not (agent.universal_access or capability in agent.capabilities):
                 continue
             assignment_skill_ids = tuple(agent.skill_ids)
             assignment_tags: tuple[str, ...] = ()
@@ -107,7 +107,7 @@ class AgentSelector:
             tag_match = self._tag_match(tagset, assignment_tags or assignment_skill_ids)
             learned_score = learned.get(agent.role, 0.5)
             preference = 1.0 if agent.role in preferred else 0.0
-            capability_fit = 1.0 if capability is None or capability in agent.capabilities else 0.0
+            capability_fit = 1.0 if capability is None or agent.universal_access or capability in agent.capabilities else 0.0
 
             factors = {
                 "skill_match": skill_match,
