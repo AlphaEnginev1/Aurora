@@ -11,7 +11,7 @@ on:
 
 jobs:
   live-research-discovery:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       AURORA_LIVE_RESEARCH_GATE: "1"
       AURORA_RESEARCH_DISCOVERY_ENDPOINT: ${{ inputs.endpoint }}
