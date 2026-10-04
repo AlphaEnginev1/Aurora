@@ -13,6 +13,8 @@ from threading import RLock
 from typing import Any, Callable, Mapping
 
 from .director_provider import DirectorModelResponse, DirectorProvider, DirectorToolSpec
+from aurora.inference.models import InferenceRequest
+from aurora.inference.router import ModelRouter
 
 
 class DirectorProviderFailoverError(RuntimeError):
@@ -34,6 +36,52 @@ class DirectorProviderCandidate:
             "model": self.model,
             "endpoint": self.endpoint,
         }
+
+
+class BoundInferenceDirectorProvider:
+    """Expose a stable failover identity over Aurora's inference fabric."""
+
+    def __init__(
+        self,
+        router: ModelRouter,
+        *,
+        provider_id: str,
+        model: str | None = None,
+    ) -> None:
+        if not provider_id.strip():
+            raise ValueError("provider_id is empty")
+        self._router = router
+        self._provider_id = provider_id
+        self._model = model
+
+    @property
+    def provider_id(self) -> str:
+        return self._provider_id
+
+    def generate(
+        self,
+        *,
+        messages: list[dict[str, Any]],
+        model: str | None,
+        role: str,
+        tools: tuple[DirectorToolSpec, ...] = (),
+    ) -> DirectorModelResponse:
+        request = InferenceRequest(
+            messages=messages,
+            model=self._model if self._model is not None else model,
+            temperature=0.0,
+            max_tokens=3000,
+            metadata={"role": role, "director_tools": [tool.name for tool in tools]},
+        )
+        response = self._router.generate(request, capability="reasoning")
+        return DirectorModelResponse(
+            content=response.content,
+            model=response.model,
+            provider=response.provider,
+            request_id=response.request_id,
+            execution_id=response.execution_id,
+            tool_calls=(),
+        )
 
 
 class DirectorProviderFailoverStore:
@@ -163,6 +211,7 @@ class DirectorProviderFailoverController:
         self._event_sink = event_sink
         self._context_provider = context_provider
         self._lock = RLock()
+        self._failed_provider_ids: set[str] = set()
 
     @property
     def provider_id(self) -> str:
@@ -227,6 +276,7 @@ class DirectorProviderFailoverController:
                     candidate
                     for candidate in self._candidates
                     if candidate.provider_id != getattr(active, "provider_id", "")
+                    and candidate.provider_id not in self._failed_provider_ids
                 )
                 last_error: Exception = exc
                 for candidate in candidates:
@@ -286,6 +336,7 @@ class DirectorProviderFailoverController:
                         return response
                     except Exception as replacement_error:
                         last_error = replacement_error
+                        self._failed_provider_ids.add(candidate.provider_id)
                         self._store.record(
                             transition_id=transition_id,
                             correlation_id=correlation_id,
@@ -405,6 +456,7 @@ def _now() -> str:
 
 
 __all__ = [
+    "BoundInferenceDirectorProvider",
     "DirectorProviderCandidate",
     "DirectorProviderFailoverController",
     "DirectorProviderFailoverError",
