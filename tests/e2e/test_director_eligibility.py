@@ -488,4 +488,3 @@ def test_expired_owner_requires_eligibility_before_takeover(tmp_path: Path):
     _register(eligibility, "director-B", last_seen_at="2026-01-01T00:00:30+00:00")
     assert candidate._ensure_mission_ownership(submission.mission_id)
     assert ownership.get(submission.mission_id).owner_id == "director-B"
-\n
