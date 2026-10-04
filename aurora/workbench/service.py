@@ -148,7 +148,7 @@ class UniversalWorkbench:
                     "name": item.name,
                     "kind": "directory" if item.is_dir() else "file",
                     "size": item.stat().st_size if item.is_file() else None,
-                    "path": str(item.relative_to(self.repository_root)),
+                    "path": str(item.relative_to(self.repository_root)) if self.repository_root == item or self.repository_root in item.parents else str(item),
                 }
             )
         return WorkbenchResult(request.capability, "list", "succeeded", output=entries, provenance=str(root))
