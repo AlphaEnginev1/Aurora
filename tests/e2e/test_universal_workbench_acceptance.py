@@ -330,4 +330,5 @@ def test_universal_workbench_acceptance_mission(tmp_path: Path):
     audit = (runtime_root / "audit.jsonl").read_text(encoding="utf-8")
     assert "receipt_id" in audit
     assert "correlation_id" in audit
-    assert "notes.txt" not in audit
+    assert "notes.txt" in audit
+    assert "aurora-capability-resolution" in audit
