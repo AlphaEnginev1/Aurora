@@ -57,6 +57,9 @@ class DirectorPlanner:
 - workbench:artifact:intake — ingest a local file as a durable hashed artifact
 - workbench:github:get — read GitHub API resources; use repo:owner/name[/path] in args
 - workbench:browser — execute a governed Playwright action plan encoded as one JSON argument
+- workbench:mcp:list_tools — discover tools exposed by an approved MCP server
+- workbench:mcp:call — call a discovered tool on an approved MCP server
+- workbench:computer — execute a governed local workstation action list through the local companion
 The Workbench is shared by Director and all specialist agents. Use the capability required by the mission; role specialization must not be used as an artificial capability restriction. The Workbench remains policy- and scope-controlled.
 """
 
