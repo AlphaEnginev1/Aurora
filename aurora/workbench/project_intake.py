@@ -1,6 +1,7 @@
 """Project intake and multi-source project graph for Aurora Workbench."""
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -126,7 +127,7 @@ class ProjectIntakeService:
 
         now = datetime.now(timezone.utc).isoformat()
         source = ProjectSource(
-            source_id=f"local:{project_id}:{hash(str(root)) & 0xffffffff:08x}",
+            source_id=f"local:{project_id}:{hashlib.sha256(str(root).encode('utf-8')).hexdigest()[:12]}",
             source_type="local",
             locator=str(root),
             project_id=project_id,
@@ -201,7 +202,7 @@ class ProjectIntakeService:
         )
         if workspace:
             self.graph.add(ProjectSource(
-                source_id=f"local:{project.project_id}:{hash(workspace) & 0xffffffff:08x}",
+                source_id=f"local:{project.project_id}:{hashlib.sha256(workspace.encode('utf-8')).hexdigest()[:12]}",
                 source_type="local",
                 locator=workspace,
                 project_id=project.project_id,
