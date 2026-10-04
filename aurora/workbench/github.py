@@ -39,34 +39,15 @@ class GitHubConnector:
         if not normalized.startswith("/"):
             normalized = "/" + normalized
         url = self.api_base + normalized
+        headers = {
+            "Accept": "application/vnd.github+json",
+            "Authorization": f"Bearer {token}",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
         try:
-            self.gateway.authorize(url)
+            decoded = self.gateway.get_json(url, headers=headers)
         except Exception as exc:
-            raise GitHubConnectorError(f"GitHub URL is blocked by network policy: {url}") from exc
-        request = urllib.request.Request(
-            url,
-            method="GET",
-            headers={
-                "Accept": "application/vnd.github+json",
-                "Authorization": f"Bearer {token}",
-                "X-GitHub-Api-Version": "2022-11-28",
-                "User-Agent": "Aurora-Workbench/1.0",
-            },
-        )
-        try:
-            with urllib.request.urlopen(request, timeout=self.gateway.timeout) as response:
-                payload = response.read()
-                content_type = response.headers.get_content_type()
-                if content_type != "application/json":
-                    raise GitHubConnectorError(
-                        f"GitHub returned unexpected content type: {content_type}"
-                    )
-        except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError) as exc:
             raise GitHubConnectorError(f"GitHub request failed: {exc}") from exc
-        try:
-            decoded = json.loads(payload.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise GitHubConnectorError("GitHub response was not valid JSON") from exc
         if not isinstance(decoded, dict):
             return {"data": decoded}
         return decoded
