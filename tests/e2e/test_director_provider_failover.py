@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from aurora.context import ContextManifest
+from aurora.context import ContextManifest, ContextScope
 from aurora.orchestration.director import DirectorPlanner
 from aurora.orchestration.director_conversation import DirectorConversationService
 from aurora.orchestration.director_provider import DirectorModelResponse
@@ -57,13 +57,11 @@ class BootstrapStub:
             boot_id="boot-test",
             context=ContextManifest(
                 manifest_id="ctx-provider-failover",
-                scope="director",
+                created_at="2026-10-04T00:00:00+00:00",
+                scope=ContextScope.DIRECTOR,
                 project_id=None,
-                freshness="current",
-                provenance="deterministic-test",
-                authoritative=True,
-                generated=False,
-                messages=(),
+                fragments=(),
+                unknown_fields=(),
             ),
             director_model_policy={
                 "default_capability": "reasoning",
