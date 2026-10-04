@@ -137,7 +137,6 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         try:
             self._require_token()
             parsed = urlparse(self.path)
-            payload = self._json_body()
             if parsed.path == "/api/dashboard/artifacts":
                 if self.workbench is None:
                     raise DashboardHTTPError("dashboard Workbench is not configured")
@@ -171,6 +170,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 )
                 self._json(201, {"artifact": result.output, "mission_id": mission_id})
                 return
+            payload = self._json_body()
             if parsed.path == "/api/dashboard/update":
                 if self.update_service is None:
                     raise DashboardHTTPError("dashboard update service is not configured")
