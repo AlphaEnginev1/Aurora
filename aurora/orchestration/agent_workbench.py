@@ -51,6 +51,9 @@ Registered capabilities:
 - workbench:census
 - workbench:preflight
 - workbench:capability:resolve
+- workbench:research:discover
+- workbench:research:retrieve
+- workbench:research:retrieve_extract
 - workbench:file:list
 - workbench:file:read
 - workbench:file:write
