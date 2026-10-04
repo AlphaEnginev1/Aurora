@@ -540,5 +540,6 @@ def build_director_runtime(*, inference_policy_path: str | Path, autonomy_policy
         conversation_service=conversation_service)
     runtime.bootstrap=bootstrap
     runtime.bootstrap_state=bootstrap_state
+    runtime.workbench=service._workbench
     return runtime
 
