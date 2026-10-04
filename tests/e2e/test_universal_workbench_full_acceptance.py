@@ -555,5 +555,9 @@ def test_full_universal_workbench_acceptance_mission(tmp_path: Path):
         worker_concurrency=2,
         max_review_rounds=1,
     )
+    before_restart_events = len(reopened_store.events(submission.mission_id))
     restarted = restarted_runtime.run_once()
-    assert restarted.did_work is False
+    after_restart_events = len(reopened_store.events(submission.mission_id))
+    assert restarted.worker_cycles == ()
+    assert restarted.active_missions == ()
+    assert after_restart_events == before_restart_events
