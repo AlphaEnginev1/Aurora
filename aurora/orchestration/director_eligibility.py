@@ -261,38 +261,6 @@ class DirectorEligibilityStore:
             )
         return self._record(latest[0])
 
-    def identities(self) -> tuple[str, ...]:
-        try:
-            with self._connect() as db:
-                rows = db.execute(
-                    "SELECT DISTINCT director_id FROM director_eligibility "
-                    "ORDER BY director_id"
-                ).fetchall()
-        except DirectorEligibilityError:
-            raise
-        except sqlite3.Error as exc:
-            raise DirectorEligibilityUnavailable(
-                "eligibility authority could not list identities"
-            ) from exc
-        return tuple(row["director_id"] for row in rows)
-
-    def resolve_unique_identity(self) -> str:
-        identities = self.identities()
-        current = []
-        for director_id in identities:
-            record = self.current(director_id)
-            if record is not None and record.state != self.REMOVED:
-                current.append(record)
-        if len(current) == 1:
-            return current[0].director_id
-        if not current:
-            raise DirectorEligibilityError(
-                "no unique durable Director identity is registered"
-            )
-        raise DirectorEligibilityAmbiguous(
-            "multiple durable Director identities are registered"
-        )
-
     def evaluate(
         self,
         director_id: str,

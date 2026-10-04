@@ -52,6 +52,7 @@ from .engine import OrchestrationEngine
 from .event_bus import DurableEventBus
 from .mission_memory import MissionMemory
 from .director_runtime import DirectorRuntime
+from .director_eligibility import DirectorEligibilityStore
 from .director_conversation import DirectorConversationService
 from .task_engine import TaskEngine
 from .task_store import DurableTaskStore
@@ -386,7 +387,9 @@ def build_director_runtime(*, inference_policy_path: str | Path, autonomy_policy
         director_model_policy=bootstrap_state.director_model_policy,
     )
 
-    runtime=DirectorRuntime(director=durable_director,store=store,event_bus=event_bus,worker_policy=worker_policy,
+    director_eligibility=DirectorEligibilityStore(store.path)
+    runtime=DirectorRuntime(director=durable_director,store=store,event_bus=event_bus,
+        director_eligibility=director_eligibility,worker_policy=worker_policy,
         worker_id=worker_id,worker_concurrency=worker_concurrency,skill_evaluator=skill_evaluator,
         observability=observability,
         memory=memory,

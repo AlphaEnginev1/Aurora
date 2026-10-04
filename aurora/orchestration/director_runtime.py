@@ -160,8 +160,6 @@ class DirectorRuntime:
         self._mission_ownership: dict[str, DirectorOwnership] = {}
         self._handoff_lock = RLock()
         self.worker_policy = worker_policy or WorkerPolicy()
-        if self.director_eligibility is not None and worker_id is None:
-            worker_id = self.director_eligibility.resolve_unique_identity()
         self.worker_id = worker_id or f"director-worker-{uuid4().hex[:12]}"
         self.event_batch_size = event_batch_size
         self.idle_sleep_seconds = idle_sleep_seconds
@@ -1914,8 +1912,6 @@ class DirectorRuntime:
         now = self._ownership_now()
         handoff = self.director_handoff_store.get_active_for_mission(mission_id)
         current = self.director_ownership.get(mission_id, now=now)
-        if not self._director_is_eligible(mission_id, now=now):
-            return False
 
         if handoff is not None:
             if handoff.state in {"REQUESTED", "QUIESCING"}:
@@ -1932,8 +1928,6 @@ class DirectorRuntime:
                     ownership = current
                 else:
                     if current is not None and current.lease_until > now:
-                        return False
-                    if not self._director_is_eligible(mission_id, now=self._ownership_now()):
                         return False
                     try:
                         ownership = self.director_ownership.acquire(
@@ -2080,8 +2074,15 @@ class DirectorRuntime:
         # before acquire() advances the fencing epoch so the emitted event
         # distinguishes a real takeover from first acquisition.
         previous_ownership = self.director_ownership.get(mission_id)
-        if not self._director_is_eligible(mission_id, now=self._ownership_now()):
-            return False
+        if (
+            previous_ownership is not None
+            and current is None
+            and self.director_eligibility is not None
+        ):
+            if not self._director_is_eligible(
+                mission_id, now=self._ownership_now()
+            ):
+                return False
         try:
             ownership = self.director_ownership.acquire(
                 mission_id,

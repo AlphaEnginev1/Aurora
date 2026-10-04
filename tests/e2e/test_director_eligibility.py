@@ -308,12 +308,12 @@ def test_g8_ea6_restart_reconstructs_same_stable_identity_and_state(tmp_path: Pa
 
     first = _runtime(
         store=store, bus=bus, ownership=ownership, eligibility=eligibility,
-        director_id=None, event_consumer_id="director-B-events-1",
+        director_id="director-B", event_consumer_id="director-B-events-1",
         clock=clock, workspace=tmp_path / "workspace-1",
     )
     second = _runtime(
         store=DurableTaskStore(store.path), bus=bus, ownership=DirectorOwnershipStore(store.path),
-        eligibility=DirectorEligibilityStore(store.path), director_id=None,
+        eligibility=DirectorEligibilityStore(store.path), director_id="director-B",
         event_consumer_id="director-B-events-2", clock=clock, workspace=tmp_path / "workspace-2",
     )
 
@@ -413,3 +413,78 @@ def test_g8_ea8_eligible_director_cannot_bypass_any_cooperative_handoff_state(tm
     assert current is not None
     assert current.owner_id == "director-C"
     assert current.fencing_epoch == 2
+
+def test_active_owner_restart_is_not_treated_as_takeover_candidate(tmp_path: Path):
+    store = DurableTaskStore(tmp_path / "state.db")
+    bus = DurableEventBus(store)
+    ownership = DirectorOwnershipStore(store.path)
+    eligibility = DirectorEligibilityStore(store.path)
+    clock = _Clock("2026-01-01T00:00:00+00:00")
+    first = _runtime(
+        store=store,
+        bus=bus,
+        ownership=ownership,
+        eligibility=eligibility,
+        director_id="director-A",
+        event_consumer_id="director-A-events-1",
+        clock=clock,
+        workspace=tmp_path / "workspace-1",
+    )
+    submission = first.submit_mission(objective="active owner restart must remain operable")
+    assert first._ensure_mission_ownership(submission.mission_id)
+
+    restarted = _runtime(
+        store=DurableTaskStore(store.path),
+        bus=bus,
+        ownership=DirectorOwnershipStore(store.path),
+        eligibility=DirectorEligibilityStore(store.path),
+        director_id="director-A",
+        event_consumer_id="director-A-events-2",
+        clock=clock,
+        workspace=tmp_path / "workspace-2",
+    )
+
+    # No eligibility record is needed merely to renew the still-valid owner.
+    assert restarted._ensure_mission_ownership(submission.mission_id)
+    current = ownership.get(submission.mission_id)
+    assert current is not None
+    assert current.owner_id == "director-A"
+    assert current.fencing_epoch == 1
+
+
+def test_expired_owner_requires_eligibility_before_takeover(tmp_path: Path):
+    store = DurableTaskStore(tmp_path / "state.db")
+    bus = DurableEventBus(store)
+    ownership = DirectorOwnershipStore(store.path)
+    eligibility = DirectorEligibilityStore(store.path)
+    clock = _Clock("2026-01-01T00:00:00+00:00")
+    first = _runtime(
+        store=store,
+        bus=bus,
+        ownership=ownership,
+        eligibility=eligibility,
+        director_id="director-A",
+        event_consumer_id="director-A-events",
+        clock=clock,
+        workspace=tmp_path / "workspace-a",
+    )
+    submission = first.submit_mission(objective="expired owner requires candidate eligibility")
+    assert first._ensure_mission_ownership(submission.mission_id)
+
+    clock.value = "2026-01-01T00:00:31+00:00"
+    candidate = _runtime(
+        store=DurableTaskStore(store.path),
+        bus=bus,
+        ownership=DirectorOwnershipStore(store.path),
+        eligibility=DirectorEligibilityStore(store.path),
+        director_id="director-B",
+        event_consumer_id="director-B-events",
+        clock=clock,
+        workspace=tmp_path / "workspace-b",
+    )
+    assert not candidate._ensure_mission_ownership(submission.mission_id)
+    assert ownership.get(submission.mission_id).fencing_epoch == 1
+
+    _register(eligibility, "director-B", last_seen_at="2026-01-01T00:00:30+00:00")
+    assert candidate._ensure_mission_ownership(submission.mission_id)
+    assert ownership.get(submission.mission_id).owner_id == "director-B"
