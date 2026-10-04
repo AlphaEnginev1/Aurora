@@ -1,9 +1,9 @@
-$ErrorActionPreference = "Stop"
-
 param(
   [string]$Python = "python",
   [string]$InstallRoot = "$env:LOCALAPPDATA\AuroraLocalGateway"
 )
+
+$ErrorActionPreference = "Stop"
 
 New-Item -ItemType Directory -Force -Path $InstallRoot | Out-Null
 & $Python -m pip install --upgrade pyautogui pillow
