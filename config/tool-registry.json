@@ -97,10 +97,40 @@
       "executable": "workbench:file:write"
     },
     {
+      "name": "workbench:github:branch",
+      "kind": "builtin",
+      "source": "aurora",
+      "executable": "workbench:github:branch"
+    },
+    {
+      "name": "workbench:github:file:write",
+      "kind": "builtin",
+      "source": "aurora",
+      "executable": "workbench:github:file:write"
+    },
+    {
       "name": "workbench:github:get",
       "kind": "builtin",
       "source": "aurora",
       "executable": "workbench:github:get"
+    },
+    {
+      "name": "workbench:github:merge",
+      "kind": "builtin",
+      "source": "aurora",
+      "executable": "workbench:github:merge"
+    },
+    {
+      "name": "workbench:github:pr",
+      "kind": "builtin",
+      "source": "aurora",
+      "executable": "workbench:github:pr"
+    },
+    {
+      "name": "workbench:github:workflow:read",
+      "kind": "builtin",
+      "source": "aurora",
+      "executable": "workbench:github:workflow:read"
     },
     {
       "name": "workbench:mcp:call",
@@ -113,6 +143,24 @@
       "kind": "builtin",
       "source": "aurora",
       "executable": "workbench:mcp:list_tools"
+    },
+    {
+      "name": "workbench:project:inspect",
+      "kind": "builtin",
+      "source": "aurora",
+      "executable": "workbench:project:inspect"
+    },
+    {
+      "name": "workbench:project:register",
+      "kind": "builtin",
+      "source": "aurora",
+      "executable": "workbench:project:register"
+    },
+    {
+      "name": "workbench:project:register_github",
+      "kind": "builtin",
+      "source": "aurora",
+      "executable": "workbench:project:register_github"
     }
   ]
 }
