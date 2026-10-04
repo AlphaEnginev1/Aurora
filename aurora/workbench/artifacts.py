@@ -59,7 +59,7 @@ class ArtifactInspector:
             except Exception as exc:
                 raise ArtifactError(f"PDF extraction failed: {exc}") from exc
             return self._bounded(text, max_chars)
-        raise ArtifactError(f"no text extractor is registered for {ext or \"unknown\"}")
+        raise ArtifactError(f"no text extractor is registered for {ext or 'unknown'}")
 
     @staticmethod
     def _docx_text(source: Path) -> str:
