@@ -10,6 +10,8 @@ from typing import Any, Iterable
 from urllib.parse import urlparse
 
 from aurora.autonomy.policy import Policy
+from aurora.workbench.artifacts import ArtifactError, ArtifactInspector
+from aurora.workbench.session import WorkSessionStore
 from aurora.autonomy.computer_operator import (
     ComputerAction,
     ComputerOperator,
@@ -35,6 +37,7 @@ class UniversalWorkbench:
         runtime_root: str | Path,
         gateway,
         policy: Policy | None = None,
+        session_store: WorkSessionStore | None = None,
         audit_path: str | Path | None = None,
         configured_roots: Iterable[str | Path] = (),
     ) -> None:
@@ -42,6 +45,8 @@ class UniversalWorkbench:
         self.runtime_root = Path(runtime_root).resolve()
         self.gateway = gateway
         self.policy = policy
+        self.session_store = session_store
+        self.artifacts = ArtifactInspector()
         self.audit_path = Path(audit_path) if audit_path else None
         roots = [self.repository_root, self.runtime_root]
         environment_roots = os.getenv("AURORA_WORKBENCH_ROOTS", "").strip()
@@ -116,7 +121,7 @@ class UniversalWorkbench:
                 result = self._browser_run(request)
             else:
                 raise WorkbenchError(f"unsupported Workbench capability: {capability}")
-        except (WorkbenchError, GitHubConnectorError, ComputerOperatorError) as exc:
+        except (WorkbenchError, GitHubConnectorError, ComputerOperatorError, ArtifactError) as exc:
             result = WorkbenchResult(capability, capability, "failed", error=str(exc))
         self._audit(request, result)
         if result.status == "failed":
