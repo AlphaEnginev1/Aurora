@@ -55,6 +55,7 @@ def test_live_gemini_to_nvidia_provider_failover(tmp_path):
                 nvidia_model,
                 "nvidia_api",
                 os.getenv("NVIDIA_API_ENDPOINT", "https://integrate.api.nvidia.com/v1"),
+                capabilities=("reasoning",),
                 quality_score=0.8,
                 latency_score=0.8,
                 cost_score=0.8,
