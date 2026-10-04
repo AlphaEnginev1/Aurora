@@ -50,3 +50,14 @@ The ordered production-readiness blocks 1–7 are verified on canonical `main`:
 Block 7 provides the explicit live-operation authorization boundary. It does not grant live access automatically: Aurora remains fail-closed until a human operator supplies a valid, scoped, non-expired authorization record matching the verified canonical commit and prerequisites.
 
 Historical branches and closed PRs are not alternate work queues. Increment 11 remains explicitly unapproved by the consolidation record.
+
+
+## Universal Work / Cowork architecture
+
+The next architectural direction is **frozen as a design baseline** (implementation not yet authorized):
+
+`docs/architecture/AURORA_UNIVERSAL_WORKBENCH_ARCHITECTURE.md`
+
+Aurora's target operating model is Universal Work / Cowork: the Director and every specialist agent can request the work capability required by the mission—local files/computer, documents and images, web/browser, research, GitHub, external connectors, code/tools and multimodal processing—through one governed Workbench. Roles specialize in responsibility and authority, not by creating artificial capability silos.
+
+The contract preserves least-privilege, approvals, sandboxing, credential isolation, provenance, evidence and auditability. It also explicitly preserves all previously closed acceptance boundaries.

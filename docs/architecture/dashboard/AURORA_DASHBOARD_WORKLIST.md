@@ -184,3 +184,18 @@ Do the work in this order and do not jump ahead:
 The prior consolidation and production-readiness queue remain closed. This worklist is the new architectural completion path for the **Dashboard + Universal Aurora Context/Model Plane**.
 
 Increment 11 must be treated as implementation of these explicitly defined contracts, with CI and live gates for every boundary. No unrelated feature work should be introduced into this sequence.
+
+
+---
+
+## Supersession notice — 2026-10-04
+
+**This document is HISTORICAL / SUPERSEDED and is not an implementation queue.**
+
+Its dashboard/context/model sequencing was written before the later canonical closures of Increment 11, Increment 12 and Dashboard Block 13. It must not be used to reopen those completed boundaries or to create a parallel workstream.
+
+For the next architectural direction, the authoritative baseline is:
+
+`docs/architecture/AURORA_UNIVERSAL_WORKBENCH_ARCHITECTURE.md`
+
+That contract defines the Universal Work / Cowork model and the missing world-facing capability plane (local computer/files, browser, documents, GitHub/connectors, MCP bridge, multimodal processing, capability discovery/fallback, project intake, audit and end-to-end acceptance).
