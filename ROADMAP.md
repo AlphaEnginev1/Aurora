@@ -163,8 +163,8 @@ Gate 8 status:
 
 A repository search on canonical main found no dedicated Director membership/eligibility registry or equivalent authoritative candidate source. That is a real remaining design/implementation gap, not a reason to invent one implicitly.
 
-**Next Increment 11 step: Gate 8 Block 2 — Candidate Eligibility Authority contract.**
-This phase defines the authoritative eligibility record, identity uniqueness, readiness/ineligibility, restart persistence, stale candidate handling, and fail-closed behavior when the eligibility source is unavailable or contradictory. No automatic election runtime changes are authorized until this contract and its separate acceptance phase are closed.
+**Next Increment 11 step: Gate 8 Block 2 — Candidate Eligibility Acceptance.**
+The Candidate Eligibility Authority contract is COMPLETE and merged as PR #113. The active phase is deterministic acceptance for its eight required cases, followed only by the minimal durable eligibility authority/runtime gate needed to pass them. Eligibility filters contenders; atomic DirectorOwnershipStore acquisition alone grants ownership and advances fencing. No distributed discovery, consensus, provider failover, dashboard controls, worker-lease redesign, or live-authorization changes are in scope. Gate 8 remains open until acceptance and canonical post-merge CI are green.
 
 ## Block 13 — Dashboard Full E2E — COMPLETE
 
@@ -180,4 +180,4 @@ Verified proof lanes:
 
 Dashboard proof remains distinct from the frozen production-readiness queue 1–7. Live execution is still fail-closed and requires the existing explicit human authorization boundary.
 
-**Increment 11 is authorized; the next gate is not yet started.**
+**Increment 11 is active at Gate 8 Block 2 — Candidate Eligibility Acceptance.** Gates 1–7, Gate 8 contract, Acceptance Block 1, and the candidate eligibility contract are complete; eligibility acceptance/runtime integration remains open.
