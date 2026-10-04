@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import hashlib
+import uuid
+from dataclasses import replace
 import json
 import os
 import shutil
@@ -79,41 +81,117 @@ class UniversalWorkbench:
     def census(self) -> tuple[WorkbenchCapability, ...]:
         browser_available = self._playwright_available()
         computer_available = self._local_computer_available()
-        connector_ready = any(item["enabled"] and item["token_configured"] for item in self.connectors.census())
+        connector_rows = self.connectors.census()
+        connector_ready = any(
+            item["enabled"]
+            and (not item.get("credential_required", True) or item["token_configured"])
+            for item in connector_rows
+        )
         github_available = self.github.available()
         github_write = self.github.write_enabled and github_available
         github_merge = self.github.merge_enabled and github_available
+        mcp_available = any(item.enabled for item in self.mcp_registry.list())
         return (
-            WorkbenchCapability("workbench:file", "file", True, True, True, "scoped local filesystem"),
-            WorkbenchCapability("workbench:artifact", "artifact", True, True, True, "hashable artifact intake"),
-            WorkbenchCapability("workbench:document", "document", True, True, True, "bounded extraction from supported work formats"),
+            WorkbenchCapability(
+                "workbench:file", "file", True,
+                self._policy_allows("workbench:file:list"),
+                self._policy_allows("workbench:file:list"),
+                "scoped local filesystem",
+            ),
+            WorkbenchCapability(
+                "workbench:artifact", "artifact", True,
+                self._policy_allows("workbench:artifact:intake"),
+                self._policy_allows("workbench:artifact:intake"),
+                "hashable artifact intake",
+            ),
+            WorkbenchCapability(
+                "workbench:document", "document", True,
+                self._policy_allows("workbench:document:extract"),
+                self._policy_allows("workbench:document:extract"),
+                "bounded extraction from supported work formats",
+            ),
             WorkbenchCapability(
                 "workbench:github",
                 "connector",
-                True,
                 github_available,
-                github_available,
+                self._policy_allows("workbench:github:get"),
+                github_available and self._policy_allows("workbench:github:get"),
                 f"GitHub read={github_available}; write={github_write}; merge={github_merge}",
             ),
             WorkbenchCapability(
                 "workbench:browser",
                 "browser",
                 browser_available,
-                browser_available,
-                browser_available,
+                self._policy_allows("workbench:browser"),
+                browser_available and self._policy_allows("workbench:browser"),
                 "Playwright browser automation",
             ),
-            WorkbenchCapability("workbench:mcp", "integration", True, True, True, "MCP v2 client bridge"),
-            WorkbenchCapability("workbench:connector", "integration", connector_ready, connector_ready, connector_ready, "Universal external connector registry"),
+            WorkbenchCapability(
+                "workbench:mcp",
+                "integration",
+                mcp_available,
+                self._policy_allows("workbench:mcp:list_tools"),
+                mcp_available and self._policy_allows("workbench:mcp:list_tools"),
+                "MCP registry has enabled servers; remote tool health is not actively probed",
+            ),
+            WorkbenchCapability(
+                "workbench:connector",
+                "integration",
+                bool(connector_rows),
+                self._policy_allows("workbench:connector:census"),
+                connector_ready and self._policy_allows("workbench:connector:census"),
+                "Registered external connectors; remote target health is not actively probed",
+            ),
             WorkbenchCapability(
                 "workbench:computer",
                 "desktop",
                 computer_available,
-                computer_available,
-                computer_available,
+                self._policy_allows("workbench:computer"),
+                computer_available and self._policy_allows("workbench:computer"),
                 "Local workstation companion when installed and authenticated",
             ),
         )
+
+
+    def preflight(self) -> dict[str, Any]:
+        capabilities = self.census()
+        rows = [
+            {
+                "capability_id": item.capability_id,
+                "kind": item.kind,
+                "available": item.available,
+                "authorized": item.authorized,
+                "healthy": item.healthy,
+                "details": item.details,
+            }
+            for item in capabilities
+        ]
+        blocked = [item["capability_id"] for item in rows if item["available"] and not item["authorized"]]
+        unavailable = [item["capability_id"] for item in rows if not item["available"]]
+        degraded = [
+            item["capability_id"]
+            for item in rows
+            if item["available"] and item["authorized"] and not item["healthy"]
+        ]
+        required = ("workbench:file", "workbench:artifact", "workbench:document")
+        critical_failures = [
+            item["capability_id"]
+            for item in rows
+            if item["capability_id"] in required and not item["healthy"]
+        ]
+        return {
+            "ready": not critical_failures and not degraded,
+            "critical_ready": not critical_failures,
+            "capabilities": rows,
+            "blocked": blocked,
+            "unavailable": unavailable,
+            "degraded": degraded,
+            "critical_failures": critical_failures,
+            "required_capabilities": list(required),
+        }
+
+    def _policy_allows(self, capability: str) -> bool:
+        return self.policy is None or self.policy.allows_capability(capability)
 
     def execute(self, request: WorkbenchRequest) -> WorkbenchResult:
         if not request.actor.strip() or not request.mission_id.strip():
@@ -123,9 +201,11 @@ class UniversalWorkbench:
             raise WorkbenchError("UniversalWorkbench only executes workbench:* capabilities")
         if self.policy is not None and not self.policy.allows_capability(capability):
             raise WorkbenchError(f"Workbench capability is denied by policy: {capability}")
+        work_id = str(request.options.get("work_id") or request.mission_id).strip()
+        correlation_id = request.correlation_id or f"corr-{uuid.uuid4().hex}"
+        receipt_id = f"receipt-{uuid.uuid4().hex}"
         try:
             if self.session_store is not None:
-                work_id = str(request.options.get("work_id") or request.mission_id).strip()
                 self.session_store.create_or_get(
                     work_id=work_id,
                     mission_id=request.mission_id,
@@ -151,6 +231,14 @@ class UniversalWorkbench:
                         for item in self.census()
                     ],
                     provenance="aurora-workbench:census",
+                )
+            elif capability == "workbench:preflight":
+                result = WorkbenchResult(
+                    capability,
+                    "preflight",
+                    "succeeded",
+                    output=self.preflight(),
+                    provenance="aurora-workbench:preflight",
                 )
             elif capability == "workbench:file:list":
                 result = self._file_list(request)
@@ -198,6 +286,35 @@ class UniversalWorkbench:
                 raise WorkbenchError(f"unsupported Workbench capability: {capability}")
         except (WorkbenchError, GitHubConnectorError, ComputerOperatorError, ArtifactError, MCPBridgeError, LocalComputerError, ProjectIntakeError, ConnectorError) as exc:
             result = WorkbenchResult(capability, capability, "failed", error=str(exc))
+        result = replace(
+            result,
+            receipt_id=receipt_id,
+            correlation_id=correlation_id,
+        )
+        if self.session_store is not None:
+            try:
+                self.session_store.record_receipt(
+                    work_id,
+                    receipt_id,
+                    correlation_id=correlation_id,
+                    payload={
+                        "capability": capability,
+                        "operation": result.operation,
+                        "status": result.status,
+                        "artifact_id": result.artifact_id,
+                        "provenance": result.provenance,
+                        "error": result.error,
+                    },
+                )
+                if result.artifact_id:
+                    self.session_store.record_artifact(work_id, result.artifact_id)
+                self.session_store.update_tool_health(
+                    work_id,
+                    capability,
+                    "healthy" if result.status == "succeeded" else "failed",
+                )
+            except Exception as exc:
+                raise WorkbenchError(f"failed to persist Workbench receipt: {exc}") from exc
         self._audit(request, result)
         if result.status == "failed":
             raise WorkbenchError(result.error or "Workbench operation failed")
@@ -605,6 +722,8 @@ class UniversalWorkbench:
                 "artifact_id": result.artifact_id,
                 "provenance": result.provenance,
                 "error": result.error,
+                "receipt_id": result.receipt_id,
+                "correlation_id": result.correlation_id,
             },
         )
 
