@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 import json
 from threading import Event, RLock
 from time import sleep
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 from uuid import uuid4
 
 from .director import DirectorPlanError
