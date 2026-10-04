@@ -53,6 +53,25 @@ class DirectorProvider(Protocol):
         role: str,
         tools: tuple[DirectorToolSpec, ...] = (),
     ) -> DirectorModelResponse:
+        ...
+
+
+class InferenceDirectorProvider:
+    """Compatibility adapter from Aurora's inference fabric to DirectorProvider."""
+
+    provider_id = "inference_router"
+
+    def __init__(self, router: ModelRouter) -> None:
+        self._router = router
+
+    def generate(
+        self,
+        *,
+        messages: list[dict[str, Any]],
+        model: str | None,
+        role: str,
+        tools: tuple[DirectorToolSpec, ...] = (),
+    ) -> DirectorModelResponse:
         prompt_messages = list(messages)
         if tools:
             instruction = self._tool_instruction(tools)
