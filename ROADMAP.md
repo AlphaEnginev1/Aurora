@@ -128,7 +128,7 @@ The queue is closed. Block 7 establishes the explicit authorization boundary; it
 
 ## Increment policy
 
-**Increment 11 — Director Handoff / Failover: ACTIVE. Gates 1–7 are COMPLETE; Gate 8 is ACTIVE on canonical main.**
+**Increment 11 — Director Handoff / Failover: COMPLETE. Gates 1–8 are COMPLETE and canonically verified on main.**
 
 Scope remains isolated to safe replacement and recovery of an active Director during an in-progress durable mission. Unrelated dashboard, model, provider, research, and frozen production-readiness work remains out of scope.
 
@@ -159,12 +159,23 @@ Gate 8 status:
 - Contract — COMPLETE.
 - Acceptance Block 1 — deterministic expired-lease race, epoch advancement, loser fencing, stale predecessor fencing and continuation without duplicate work — VERIFIED.
 - Acceptance Block 2 — Candidate Eligibility Authority — COMPLETE and formally closed by PR #117; canonical merge `d4b70b7932d50c33dfcbaa255dfd38a18827a091`; CI #2042 green.
-- Acceptance Block 3 — Automatic Failover Full E2E — OPEN.
+- Acceptance Block 3 — Automatic Failover Full E2E — COMPLETE and formally verified by PR #119; canonical merge `af595971199b55d78d52a0769228feefe864ea35`; CI #2057 green.
 
-Block 3 objective:
-Join the accepted candidate eligibility authority to the already verified expiry-race path and prove the complete automatic failover lifecycle. The E2E must verify authoritative eligibility filtering, exactly one atomic epoch-advancing winner, loser/predecessor fencing, durable mission reconstruction, no duplicate completed work, winner restart continuity, stale predecessor restart fencing, fail-closed eligibility ambiguity/unavailability, traceability, and one terminal outcome.
+Block 3 evidence:
+- authoritative eligibility is connected to the full expiry-race path;
+- eligible/ineligible/stale/no-record candidates are filtered fail-closed;
+- unavailable/contradictory eligibility authority fails closed;
+- exactly one candidate advances ownership from E1 to E2 through DirectorOwnershipStore;
+- loser and stale predecessor remain unable to mutate authoritative mission state;
+- the winner reuses the same durable mission/task graph without duplicate completed work;
+- winner restart preserves ownership and fencing epoch;
+- stale predecessor restart cannot reclaim ownership;
+- failover correlation identifiers make takeover/rejection/fencing/terminal evidence attributable;
+- exactly one terminal mission outcome remains.
 
-The dedicated acceptance plan is:
+The dedicated acceptance plan records the complete evidence:
 `docs/operations/INCREMENT_11_GATE_8_AUTOMATIC_FAILOVER_ACCEPTANCE_PLAN.md`
 
-No distributed consensus, multi-machine membership discovery, provider/model failover, dashboard takeover controls, worker-lease redesign, or live-authorization changes are authorized by Block 3.
+**Gate 8 is COMPLETE. Increment 11 is COMPLETE.**
+
+No distributed consensus, multi-machine membership discovery, provider/model failover, dashboard takeover controls, worker-lease redesign, or live-authorization changes were introduced by Increment 11.

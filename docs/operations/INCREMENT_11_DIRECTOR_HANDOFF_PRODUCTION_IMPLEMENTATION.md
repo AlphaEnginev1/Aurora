@@ -2,168 +2,66 @@
 
 ## Status
 
-**IMPLEMENTATION PHASE COMPLETE.**
+**INCREMENT 11 COMPLETE.**
 
-Gate 5 contract, deterministic E2E acceptance, cooperative handoff production implementation, regression coverage, and canonical verification are merged on `main`.
+Gates 1–8, including automatic Director failover eligibility and full E2E acceptance, are merged and canonically verified on main.
 
 ## Objective
 
-Provide a durable, explicit handoff operation for an active Director:
+Provide a durable, explicit handoff/failover capability for an active Director without losing authoritative mission state, repeating completed work, or creating competing ownership.
 
-1. Director A requests handoff to an explicitly designated successor B.
-2. The mission enters a durable handoff/quiescing state.
-3. A is prevented from starting new Director-controlled mutations.
-4. A completes or leaves recoverable any already-running operation.
-5. A releases the mission ownership at its current fencing epoch.
-6. B acquires the same mission through `DirectorOwnershipStore`, receiving a strictly higher fencing epoch.
-7. B reconstructs the existing durable mission state and continues without re-planning.
-8. Stale A mutations remain fenced.
-9. Handoff state and transitions are durably traceable.
+## Completed implementation and acceptance
 
-## Implementation boundary
+### Cooperative handoff
+Blocks 1–5 are complete and canonically verified.
 
-This first production implementation phase is limited to cooperative Director handoff.
+### Gate 6 — Handoff interruption / recovery
+Complete and canonically verified.
 
-### In scope
+### Gate 7 — Recovery contradiction / fail-closed
+Complete and canonically verified.
 
-- durable handoff record/state;
-- explicit successor identity;
-- atomic request/quiesce/release boundaries;
-- integration with the existing `DirectorOwnershipStore`;
-- runtime quiescence checks;
-- durable handoff events;
-- stale predecessor fencing;
-- deterministic production tests derived from the merged Gate 5 E2E.
+### Gate 8 — Automatic Director Failover / Election
+Complete.
 
-### Explicitly out of scope
+#### Acceptance Block 1 — Expired-lease race
+Complete. The concurrent expiry race advances ownership from E1 to exactly one E2 winner while fencing losers and the stale predecessor.
 
-- automatic Director election;
-- distributed consensus;
-- provider/model failover;
-- dashboard controls;
-- changes to task-worker lease ownership;
-- network/proxy/security changes;
-- live-authorization changes;
-- re-planning or graph replacement during handoff.
+#### Acceptance Block 2 — Candidate Eligibility Authority
+Complete. DirectorEligibilityStore is the authoritative eligibility source; stable Director identity remains a runtime/deployment bootstrap invariant; DirectorOwnershipStore remains the sole ownership/fencing authority.
 
-## Required invariants
-
-- One mission remains one durable mission identity.
-- Successor must be explicitly designated.
-- Handoff cannot silently transfer to an unspecified Director.
-- Once quiescing begins, no new Director-controlled mutation may be accepted by A.
-- Release must be fenced by A's current owner ID and epoch.
-- Successor acquisition must advance the fencing epoch.
-- A cannot mutate authoritative mission state after release.
-- B must consume the existing durable graph/state.
-- Completed work must not be repeated.
-- Exactly one terminal mission outcome remains possible.
-
-## Implementation order
-
-1. **Durable handoff store/state machine**
-2. **DirectorRuntime request/quiesce/release integration**
-3. **Successor acquisition/reconstruction integration**
-4. **Production E2E and regression suite**
-5. **Canonical merge and verification**
-
-No later block is authorized until the preceding block has passed its deterministic tests.
-
-## Completed blocks
-
-**Block 1 — Durable handoff store/state machine — COMPLETE.**
-
-The durable SQLite handoff record, atomic compare-and-set transitions and append-only lifecycle events are merged on canonical `main`.
-
-**Block 2 — DirectorRuntime request/quiesce/release integration — COMPLETE.**
-
-The runtime treats cooperative handoff as a cycle boundary, persists REQUESTED → QUIESCING → RELEASED, releases the current Director fence, and prevents the predecessor from continuing after release.
-
-**Block 3 — Successor acquisition/reconstruction integration — COMPLETE.**
-
-The explicitly designated successor acquires the same mission through `DirectorOwnershipStore` at a strictly higher fencing epoch, reconstructs the existing durable graph and continues unfinished work without re-planning.
-
-**Block 4 — Production E2E and regression suite — COMPLETE.**
-
-The runtime E2E and regression suite prove quiescence, explicit successor fencing, higher-epoch takeover, no duplicate completed work, stale predecessor rejection and exactly one terminal outcome.
-
-**Block 5 — Canonical merge and verification — COMPLETE.**
-
-PR #106 merged to canonical `main` as `e7d14c1e97be8b14f6c1cf9402f487fa8b727e4d`; post-merge `test` and `e2e-network` are green.
-
-## Gate 6 — Handoff Interruption / Recovery acceptance test — COMPLETE
-
-The Gate 6 recovery contract and deterministic acceptance test are merged on canonical main.
+#### Acceptance Block 3 — Full Automatic Failover E2E
+Complete.
 
 Verified:
-- durable REQUESTED and QUIESCING states survive Director restart;
-- predecessor remains unable to resume Director-controlled work while handoff is active;
-- RELEASED remains authoritative after predecessor restart;
-- stale predecessor mutation is rejected at the handoff boundary before successor acquisition;
-- after successor acquisition, stale predecessor control is rejected by mission ownership fencing;
-- successor acquires a strictly higher fencing epoch;
-- successor restart reconstructs the existing durable graph;
-- completed work is not repeated;
-- no re-planning occurs;
-- exactly one terminal mission outcome remains.
+
+- eligible/ineligible candidate filtering;
+- stale candidate rejection;
+- unavailable/contradictory eligibility fail-closed behavior;
+- no-record self-promotion rejection;
+- exactly one atomic takeover winner;
+- loser and predecessor fencing/rejection;
+- durable mission/task-graph continuation;
+- no duplicate completed work;
+- winner restart continuity;
+- stale predecessor restart safety;
+- deterministic failover correlation evidence;
+- exactly one terminal mission outcome.
 
 Evidence:
-- PR #108 merged to main as 09a7ed503cea03211e2bb8bc5caab06be43b8332;
-- duplicate PR checks test and e2e-network were green;
-- canonical post-merge CI run 1965 completed with test and e2e-network green.
 
-## Gate 7 — Recovery Contradiction / Fail-Closed acceptance — COMPLETE
+- PR #119 merged as af595971199b55d78d52a0769228feefe864ea35;
+- PR CI #2056 green;
+- canonical CI #2057 green, with test and e2e-network successful.
 
-Gate 7 defined and verified the fail-closed boundary for contradictory durable recovery state.
+## Scope boundary after completion
 
-Verified:
-- handoff/ownership mismatches block Director-controlled mutation;
-- successor/ownership fencing mismatches block mutation;
-- terminal mission state with runnable tasks cannot reopen mission control or create a second terminal outcome;
-- the same contradiction remains visible after process-equivalent restart;
-- durable diagnostic events identify the contradiction and relevant mission/handoff/ownership/task context;
-- no silent repair or guessed authority selection occurs.
+Increment 11 does not authorize or define another Gate 9. Any future work must be opened as a separately justified roadmap increment after a new scope/contract decision. Historical branches remain archived evidence, not alternate implementation queues.
 
-Evidence:
-- PR #110 merged to main as eaddeaa6f7892c97b04c363433bf6dc87a774c9a;
-- PR #110 runs 1979 and 1980 were green;
-- canonical post-merge CI run 1981 was green.
+## Final authority boundaries
 
-## Gate 8 — Automatic Director Failover / Election — ACTIVE
-
-### Contract — COMPLETE
-The Gate 8 contract defines automatic recovery after lease expiry within one Aurora installation sharing the existing durable mission/ownership authority.
-
-### Acceptance Block 1 — Expired-lease race + fenced continuation — COMPLETE
-Verified by PR #112:
-- A owns epoch 1 and stops renewing;
-- B and C contend concurrently after expiry;
-- exactly one acquires epoch 2 through DirectorOwnershipStore;
-- the loser cannot mutate mission control;
-- stale A remains fenced;
-- the winner continues the same durable graph;
-- completed work is not repeated;
-- exactly one terminal outcome remains.
-
-### Candidate Eligibility Authority — CLOSED
-The authoritative eligibility contract and acceptance are closed on canonical main. The stable Director identity is a runtime/deployment bootstrap concern; DirectorEligibilityStore is authoritative for eligibility; DirectorOwnershipStore remains authoritative for ownership/fencing.
-
-Evidence:
-- PR #115 and PR #116 merged;
-- PR #117 formally closed the Block 2 acceptance documentation;
-- canonical merge after PR #117 is `d4b70b7932d50c33dfcbaa255dfd38a18827a091`;
-- canonical CI #2042 is green.
-
-### Acceptance Block 3 — Automatic Failover Full E2E — OPEN
-Purpose:
-- connect the accepted eligibility authority to the existing expiry-race E2E;
-- prove eligible/ineligible/stale/ambiguous/unavailable candidate behavior in the full failover path;
-- prove exactly one epoch-advancing winner;
-- prove loser/predecessor fencing;
-- prove winner reconstruction, no duplicate completed work and one terminal outcome;
-- prove winner restart continuity and stale predecessor restart fencing.
-
-Canonical plan:
-`docs/operations/INCREMENT_11_GATE_8_AUTOMATIC_FAILOVER_ACCEPTANCE_PLAN.md`
-
-Only the minimum test/fixture/runtime wiring required to prove these behaviors is authorized. No new election algorithm or ownership authority is introduced.
+- DirectorOwnershipStore is the sole mission ownership/fencing authority.
+- DirectorEligibilityStore determines candidate eligibility only.
+- Cooperative handoff remains distinct from automatic failover.
+- Live authorization remains an independent explicit human-controlled boundary.
+- No provider/model failover, distributed consensus, dashboard takeover, or worker-lease redesign was introduced by Increment 11.
