@@ -6,6 +6,7 @@ import sqlite3
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Callable
 
 
 @dataclass(frozen=True)
@@ -32,7 +33,11 @@ class WorkSession:
 
 
 class WorkSessionStore:
-    """Persist WorkSession metadata without storing secrets."""
+    """Persist WorkSession metadata without storing secrets.
+
+    All read-modify-write mutations use one SQLite IMMEDIATE transaction so
+    concurrent specialist agents cannot overwrite each other's session state.
+    """
 
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
@@ -53,10 +58,22 @@ class WorkSessionStore:
                 """
             )
 
-    def create_or_get(self, *, work_id: str, mission_id: str, actor: str, environment: str, workspace_root: str) -> WorkSession:
+    def create_or_get(
+        self,
+        *,
+        work_id: str,
+        mission_id: str,
+        actor: str,
+        environment: str,
+        workspace_root: str,
+    ) -> WorkSession:
         now = datetime.now(timezone.utc).isoformat()
         with sqlite3.connect(self.path, timeout=30) as db:
-            row = db.execute("SELECT payload FROM work_sessions WHERE work_id = ?", (work_id,)).fetchone()
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT payload FROM work_sessions WHERE work_id = ?",
+                (work_id,),
+            ).fetchone()
             if row is not None:
                 return self._decode(row[0])
             session = WorkSession(
@@ -70,61 +87,85 @@ class WorkSessionStore:
                 created_at=now,
                 updated_at=now,
             )
-            db.execute("INSERT INTO work_sessions(work_id, payload) VALUES (?, ?)", (work_id, json.dumps(asdict(session), sort_keys=True)))
+            db.execute(
+                "INSERT INTO work_sessions(work_id, payload) VALUES (?, ?)",
+                (
+                    work_id,
+                    json.dumps(
+                        asdict(session),
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        default=str,
+                    ),
+                ),
+            )
             return session
 
     def record_capability(self, work_id: str, capability_id: str) -> WorkSession:
-        session = self.get(work_id)
-        capabilities = tuple(dict.fromkeys((*session.capability_ids, capability_id)))
-        updated = WorkSession(**{**asdict(session), "capability_ids": capabilities, "updated_at": datetime.now(timezone.utc).isoformat()})
-        self._save(updated)
-        return updated
-
+        if not capability_id.strip():
+            raise ValueError("capability_id is empty")
+        return self._mutate(
+            work_id,
+            lambda session: WorkSession(
+                **{
+                    **asdict(session),
+                    "capability_ids": tuple(
+                        dict.fromkeys((*session.capability_ids, capability_id.strip()))
+                    ),
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }
+            ),
+        )
 
     def record_artifact(self, work_id: str, artifact_id: str) -> WorkSession:
         if not artifact_id.strip():
             raise ValueError("artifact_id is empty")
-        session = self.get(work_id)
-        artifact_ids = tuple(dict.fromkeys((*session.artifact_ids, artifact_id)))
-        updated = WorkSession(
-            **{
-                **asdict(session),
-                "artifact_ids": artifact_ids,
-                "updated_at": datetime.now(timezone.utc).isoformat(),
-            }
+        return self._mutate(
+            work_id,
+            lambda session: WorkSession(
+                **{
+                    **asdict(session),
+                    "artifact_ids": tuple(
+                        dict.fromkeys((*session.artifact_ids, artifact_id.strip()))
+                    ),
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }
+            ),
         )
-        self._save(updated)
-        return updated
 
-    def update_tool_health(self, work_id: str, capability_id: str, state: str) -> WorkSession:
+    def update_tool_health(
+        self,
+        work_id: str,
+        capability_id: str,
+        state: str,
+    ) -> WorkSession:
         if not capability_id.strip() or not state.strip():
             raise ValueError("capability_id and state are required")
-        session = self.get(work_id)
-        health = dict(session.tool_health)
-        health[capability_id] = state.strip()
-        updated = WorkSession(
-            **{
-                **asdict(session),
-                "tool_health": health,
-                "updated_at": datetime.now(timezone.utc).isoformat(),
-            }
-        )
-        self._save(updated)
-        return updated
+        def mutate(session: WorkSession) -> WorkSession:
+            health = dict(session.tool_health)
+            health[capability_id.strip()] = state.strip()
+            return WorkSession(
+                **{
+                    **asdict(session),
+                    "tool_health": health,
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }
+            )
+        return self._mutate(work_id, mutate)
 
     def set_approval_state(self, work_id: str, state: str) -> WorkSession:
         if not state.strip():
             raise ValueError("approval state is empty")
-        session = self.get(work_id)
-        updated = WorkSession(
-            **{
-                **asdict(session),
-                "approval_state": state.strip(),
-                "updated_at": datetime.now(timezone.utc).isoformat(),
-            }
+        return self._mutate(
+            work_id,
+            lambda session: WorkSession(
+                **{
+                    **asdict(session),
+                    "approval_state": state.strip(),
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }
+            ),
         )
-        self._save(updated)
-        return updated
 
     def record_receipt(
         self,
@@ -136,15 +177,32 @@ class WorkSessionStore:
     ) -> WorkSession:
         if not receipt_id.strip():
             raise ValueError("receipt_id is empty")
-        session = self.get(work_id)
-        receipt_ids = tuple(dict.fromkeys((*session.execution_receipts, receipt_id)))
-        correlation_ids = (
-            tuple(dict.fromkeys((*session.correlation_ids, correlation_id)))
-            if correlation_id
-            else session.correlation_ids
-        )
+
         now = datetime.now(timezone.utc).isoformat()
-        with sqlite3.connect(self.path, timeout=30) as db:
+
+        def mutate(session: WorkSession) -> WorkSession:
+            receipt_ids = tuple(
+                dict.fromkeys((*session.execution_receipts, receipt_id.strip()))
+            )
+            correlation_ids = (
+                tuple(dict.fromkeys((*session.correlation_ids, correlation_id)))
+                if correlation_id
+                else session.correlation_ids
+            )
+            return WorkSession(
+                **{
+                    **asdict(session),
+                    "execution_receipts": receipt_ids,
+                    "correlation_ids": correlation_ids,
+                    "continuity": {
+                        **session.continuity,
+                        "last_receipt_id": receipt_id.strip(),
+                    },
+                    "updated_at": now,
+                }
+            )
+
+        def side_effect(db: sqlite3.Connection) -> None:
             db.execute(
                 """
                 INSERT OR REPLACE INTO work_session_receipts (
@@ -152,24 +210,20 @@ class WorkSessionStore:
                 ) VALUES (?, ?, ?, ?, ?)
                 """,
                 (
-                    receipt_id,
+                    receipt_id.strip(),
                     work_id,
                     correlation_id,
                     now,
-                    json.dumps(payload or {}, ensure_ascii=False, sort_keys=True, default=str),
+                    json.dumps(
+                        payload or {},
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        default=str,
+                    ),
                 ),
             )
-        updated = WorkSession(
-            **{
-                **asdict(session),
-                "execution_receipts": receipt_ids,
-                "correlation_ids": correlation_ids,
-                "continuity": {**session.continuity, "last_receipt_id": receipt_id},
-                "updated_at": now,
-            }
-        )
-        self._save(updated)
-        return updated
+
+        return self._mutate(work_id, mutate, side_effect=side_effect)
 
     def get_receipts(self, work_id: str) -> tuple[dict[str, object], ...]:
         with sqlite3.connect(self.path, timeout=30) as db:
@@ -194,29 +248,86 @@ class WorkSessionStore:
         )
 
     def get(self, work_id: str) -> WorkSession:
-        with sqlite3.connect(self.path) as db:
-            row = db.execute("SELECT payload FROM work_sessions WHERE work_id = ?", (work_id,)).fetchone()
+        with sqlite3.connect(self.path, timeout=30) as db:
+            row = db.execute(
+                "SELECT payload FROM work_sessions WHERE work_id = ?",
+                (work_id,),
+            ).fetchone()
         if row is None:
             raise KeyError(work_id)
         return self._decode(row[0])
 
     def close(self, work_id: str) -> WorkSession:
-        session = self.get(work_id)
-        updated = WorkSession(**{**asdict(session), "state": "closed", "updated_at": datetime.now(timezone.utc).isoformat()})
-        self._save(updated)
-        return updated
+        return self._mutate(
+            work_id,
+            lambda session: WorkSession(
+                **{
+                    **asdict(session),
+                    "state": "closed",
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }
+            ),
+        )
+
+    def _mutate(
+        self,
+        work_id: str,
+        transform: Callable[[WorkSession], WorkSession],
+        *,
+        side_effect: Callable[[sqlite3.Connection], None] | None = None,
+    ) -> WorkSession:
+        with sqlite3.connect(self.path, timeout=30) as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT payload FROM work_sessions WHERE work_id = ?",
+                (work_id,),
+            ).fetchone()
+            if row is None:
+                raise KeyError(work_id)
+            session = self._decode(row[0])
+            updated = transform(session)
+            db.execute(
+                "UPDATE work_sessions SET payload = ? WHERE work_id = ?",
+                (
+                    json.dumps(
+                        asdict(updated),
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        default=str,
+                    ),
+                    work_id,
+                ),
+            )
+            if side_effect is not None:
+                side_effect(db)
+            return updated
 
     def _save(self, session: WorkSession) -> None:
-        with sqlite3.connect(self.path) as db:
-            db.execute("UPDATE work_sessions SET payload = ? WHERE work_id = ?", (json.dumps(asdict(session), sort_keys=True), session.work_id))
+        with sqlite3.connect(self.path, timeout=30) as db:
+            db.execute(
+                "UPDATE work_sessions SET payload = ? WHERE work_id = ?",
+                (
+                    json.dumps(
+                        asdict(session),
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        default=str,
+                    ),
+                    session.work_id,
+                ),
+            )
 
     @staticmethod
     def _decode(payload: str) -> WorkSession:
         value = json.loads(payload)
         return WorkSession(
-            work_id=value["work_id"], mission_id=value["mission_id"], actor=value["actor"],
-            environment=value["environment"], workspace_root=value["workspace_root"],
-            state=value["state"], capability_ids=tuple(value.get("capability_ids", ())),
+            work_id=value["work_id"],
+            mission_id=value["mission_id"],
+            actor=value["actor"],
+            environment=value["environment"],
+            workspace_root=value["workspace_root"],
+            state=value["state"],
+            capability_ids=tuple(value.get("capability_ids", ())),
             resources=dict(value.get("resources", {})),
             workspace_roots=tuple(value.get("workspace_roots", ())),
             capability_grants=tuple(value.get("capability_grants", ())),
@@ -227,7 +338,8 @@ class WorkSessionStore:
             correlation_ids=tuple(value.get("correlation_ids", ())),
             continuity=dict(value.get("continuity", {})),
             approval_state=str(value.get("approval_state", "not_required")),
-            created_at=value["created_at"], updated_at=value["updated_at"],
+            created_at=value["created_at"],
+            updated_at=value["updated_at"],
         )
 
 
