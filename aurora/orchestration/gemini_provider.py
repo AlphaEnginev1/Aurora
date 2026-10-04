@@ -20,6 +20,10 @@ from .director_provider import DirectorModelResponse, DirectorProvider, Director
 class GeminiDirectorError(RuntimeError):
     """Raised when Gemini cannot produce a valid Director response."""
 
+    def __init__(self, message: str, *, failoverable: bool = True) -> None:
+        super().__init__(message)
+        self.failoverable = failoverable
+
 
 @dataclass(frozen=True)
 class GeminiDirectorConfig:
@@ -60,13 +64,13 @@ class GeminiDirectorProvider:
             max_retries=max_retries,
         )
         if not self.config.api_key.strip():
-            raise GeminiDirectorError("GEMINI_API_KEY is not configured")
+            raise GeminiDirectorError("GEMINI_API_KEY is not configured", failoverable=False)
         if not self.config.model.strip():
-            raise GeminiDirectorError("Gemini model is empty")
+            raise GeminiDirectorError("Gemini model is empty", failoverable=False)
         if self.config.timeout_seconds <= 0:
-            raise GeminiDirectorError("Gemini timeout must be positive")
+            raise GeminiDirectorError("Gemini timeout must be positive", failoverable=False)
         if self.config.max_retries < 0:
-            raise GeminiDirectorError("Gemini max_retries must be non-negative")
+            raise GeminiDirectorError("Gemini max_retries must be non-negative", failoverable=False)
 
     def generate(
         self,
@@ -118,7 +122,8 @@ class GeminiDirectorProvider:
                 detail = exc.read().decode("utf-8", errors="replace")[:500]
                 if exc.code not in {429, 500, 502, 503, 504} or attempt >= self.config.max_retries:
                     raise GeminiDirectorError(
-                        f"Gemini HTTP {exc.code}: {detail}"
+                        f"Gemini HTTP {exc.code}: {detail}",
+                        failoverable=False,
                     ) from exc
                 sleep(0.5 * (2**attempt))
             except (URLError, TimeoutError, OSError) as exc:
@@ -144,7 +149,7 @@ class GeminiDirectorProvider:
     def _gemini_schema(schema: dict[str, Any]) -> dict[str, Any]:
         """Translate Aurora's JSON Schema subset to Gemini's schema shape."""
         if not isinstance(schema, dict):
-            raise GeminiDirectorError("Gemini tool parameters must be an object")
+            raise GeminiDirectorError("Gemini tool parameters must be an object", failoverable=False)
 
         translated: dict[str, Any] = {}
         for key, value in schema.items():
@@ -158,7 +163,7 @@ class GeminiDirectorProvider:
                     translated["type"] = non_null[0]
                     translated["nullable"] = True
                     continue
-                raise GeminiDirectorError("Gemini schema type unions must be string|null")
+                raise GeminiDirectorError("Gemini schema type unions must be string|null", failoverable=False)
             if key == "properties" and isinstance(value, dict):
                 translated[key] = {
                     name: GeminiDirectorProvider._gemini_schema(prop)
@@ -192,7 +197,7 @@ class GeminiDirectorProvider:
                 "parts": [{"text": content}],
             })
         if not contents:
-            raise GeminiDirectorError("Gemini request contains no user/model content")
+            raise GeminiDirectorError("Gemini request contains no user/model content", failoverable=False)
         return "\n\n".join(system_parts), contents
 
     @staticmethod
