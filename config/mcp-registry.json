@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "servers": [
+    {
+      "id": "placeholder",
+      "server_id": "placeholder",
+      "enabled": false,
+      "transport": "streamable-http",
+      "url": "https://example.invalid/mcp",
+      "header_env": {}
+    }
+  ]
+}
