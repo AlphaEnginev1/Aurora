@@ -211,7 +211,10 @@ def _build_director_provider_failover(
                 )
             )
         elif provider_id == "router":
-            if active_id in {"router", "inference_router"}:
+            has_router_reasoning_model = any(
+                "reasoning" in model.capabilities for model in router.available()
+            )
+            if active_id in {"router", "inference_router"} or not has_router_reasoning_model:
                 continue
             candidates.append(
                 DirectorProviderCandidate(
