@@ -569,6 +569,34 @@
     }
   }
 
+  async function uploadAurora(files) {
+    const selected = Array.from(files || []);
+    if (!selected.length) return;
+    const button = $("upload-aurora");
+    button.disabled = true;
+    showSettingsMessage("Uploading " + selected.length + " file(s) to Aurora…", false);
+    try {
+      for (const file of selected) {
+        const response = await fetch(state.apiBase + "/artifacts", {
+          method: "POST",
+          headers: {
+            Accept: "application/json",
+            "Content-Type": file.type || "application/octet-stream",
+            "X-Aurora-Filename": encodeURIComponent(file.name)
+          },
+          body: await file.arrayBuffer()
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data && data.error ? data.error : "upload failed");
+      }
+      showSettingsMessage("Uploaded " + selected.length + " file(s) to Aurora.", false);
+    } catch (error) {
+      showSettingsMessage("Upload failed: " + error.message, true);
+    } finally {
+      button.disabled = false;
+      $("aurora-file-input").value = "";
+    }
+  }
   async function updateAurora() {
     const button = $("update-aurora");
     button.disabled = true;
@@ -628,6 +656,12 @@
   function setupSettings() {
     $("settings-save").addEventListener("click", function () {
       saveSettings();
+    });
+    $("upload-aurora").addEventListener("click", function () {
+      $("aurora-file-input").click();
+    });
+    $("aurora-file-input").addEventListener("change", function () {
+      uploadAurora($("aurora-file-input").files);
     });
     $("update-aurora").addEventListener("click", function () {
       updateAurora();
