@@ -131,7 +131,7 @@ The queue is closed. Block 7 establishes the explicit authorization boundary; it
 **Increment 11 — Director Handoff / Failover: COMPLETE. Gates 1–8 are COMPLETE and canonically verified on main.**
 
 
-## Increment 12 — Director Provider Failover / Replacement — IMPLEMENTATION COMPLETE; LIVE VERIFICATION PENDING
+## Increment 12 — Director Provider Failover / Replacement — COMPLETE / LIVE VERIFIED
 
 **Scope:** provider-level replacement only. Increment 11 remains COMPLETE and is not reopened.
 
@@ -161,63 +161,15 @@ External live proof:
 - workflow: `.github/workflows/live-director-provider-failover.yml`;
 - test: `tests/e2e/test_live_director_provider_failover.py`;
 - environment: `director-provider-failover-live`;
-- required secrets: `GEMINI_API_KEY` and `NVIDIA_API_KEY`;
-- status: READY / NOT YET EXECUTED.
+- live run: GitHub Actions run `37179243481` (job `111368251139`);
+- primary: real Gemini `gemini-3.7-flash`;
+- replacement: real NVIDIA provider using the NVIDIA served model supplied to the gate;
+- result: SUCCESS — real primary response, controlled Gemini failure, real NVIDIA replacement response, provider transition evidence recorded;
+- credential leakage: none observed in the gate output.
 
-The live gate must prove:
-- real Gemini primary success;
-- controlled Gemini failure after a real primary response;
-- real NVIDIA replacement response;
-- durable failover evidence without credential leakage.
+**Increment 12 acceptance: CLOSED / VERIFIED.**
 
 No live authorization is activated by the gate.
 
 Scope remains isolated to safe replacement and recovery of an active Director during an in-progress durable mission. Unrelated dashboard, model, provider, research, and frozen production-readiness work remains out of scope.
 
-Authoritative Increment 11 contracts:
-- docs/operations/INCREMENT_11_DIRECTOR_HANDOFF_FAILOVER_CONTRACT.md
-- docs/operations/INCREMENT_11_DIRECTOR_HANDOFF_RELEASE_CONTRACT.md
-- docs/operations/INCREMENT_11_GATE_6_HANDOFF_INTERRUPTION_RECOVERY_CONTRACT.md
-- docs/operations/INCREMENT_11_GATE_7_RECOVERY_CONTRADICTION_FAIL_CLOSED_CONTRACT.md
-- docs/operations/INCREMENT_11_GATE_8_AUTOMATIC_DIRECTOR_FAILOVER_ELECTION_CONTRACT.md
-- docs/operations/INCREMENT_11_GATE_8_CANDIDATE_ELIGIBILITY_CONTRACT.md
-- docs/operations/INCREMENT_11_GATE_8_AUTOMATIC_FAILOVER_ACCEPTANCE_PLAN.md
-
-Completed gates on canonical main:
-- Gate 1 — Director Handoff / Failover contract + deterministic E2E — COMPLETE.
-- Gate 2 — Director Ownership & Fenced Takeover contract + acceptance scenario — COMPLETE.
-- Gate 3 — Durable DirectorOwnershipStore — COMPLETE.
-- Gate 4 — DirectorRuntime ownership/fencing integration + E2E — COMPLETE.
-- Gate 5 — Explicit cooperative Director handoff/release implementation + E2E/regression — COMPLETE.
-- Gate 6 — Handoff interruption/restart recovery deterministic E2E — COMPLETE.
-- Gate 7 — Recovery contradiction / fail-closed runtime boundary + deterministic E2E — COMPLETE.
-
-Gate 7 evidence:
-- PR #110 merged to canonical main as eaddeaa6f7892c97b04c363433bf6dc87a774c9a.
-- PR #110 runs 1979 and 1980 were green.
-- Canonical post-merge CI run 1981 was green.
-
-Gate 8 status:
-- Contract — COMPLETE.
-- Acceptance Block 1 — deterministic expired-lease race, epoch advancement, loser fencing, stale predecessor fencing and continuation without duplicate work — VERIFIED.
-- Acceptance Block 2 — Candidate Eligibility Authority — COMPLETE and formally closed by PR #117; canonical merge `d4b70b7932d50c33dfcbaa255dfd38a18827a091`; CI #2042 green.
-- Acceptance Block 3 — Automatic Failover Full E2E — COMPLETE and formally verified by PR #119; canonical merge `af595971199b55d78d52a0769228feefe864ea35`; CI #2057 green.
-
-Block 3 evidence:
-- authoritative eligibility is connected to the full expiry-race path;
-- eligible/ineligible/stale/no-record candidates are filtered fail-closed;
-- unavailable/contradictory eligibility authority fails closed;
-- exactly one candidate advances ownership from E1 to E2 through DirectorOwnershipStore;
-- loser and stale predecessor remain unable to mutate authoritative mission state;
-- the winner reuses the same durable mission/task graph without duplicate completed work;
-- winner restart preserves ownership and fencing epoch;
-- stale predecessor restart cannot reclaim ownership;
-- failover correlation identifiers make takeover/rejection/fencing/terminal evidence attributable;
-- exactly one terminal mission outcome remains.
-
-The dedicated acceptance plan records the complete evidence:
-`docs/operations/INCREMENT_11_GATE_8_AUTOMATIC_FAILOVER_ACCEPTANCE_PLAN.md`
-
-**Gate 8 is COMPLETE. Increment 11 is COMPLETE.**
-
-No distributed consensus, multi-machine membership discovery, provider/model failover, dashboard takeover controls, worker-lease redesign, or live-authorization changes were introduced by Increment 11.
