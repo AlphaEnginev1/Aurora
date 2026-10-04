@@ -49,7 +49,10 @@ class UniversalWorkbench:
         self.policy = policy
         self.session_store = session_store
         self.artifacts = ArtifactInspector()
-        self.mcp_registry = MCPRegistry(str(self.repository_root / "config" / "mcp-registry.json"))
+        registry_path = self.repository_root / "config" / "mcp-registry.json"
+        if not registry_path.is_file():
+            registry_path = Path(__file__).resolve().parents[2] / "config" / "mcp-registry.json"
+        self.mcp_registry = MCPRegistry(str(registry_path))
         self.mcp = MCPClientBridge(self.mcp_registry)
         self.local_computer = LocalComputerGateway()
         self.audit_path = Path(audit_path) if audit_path else None
