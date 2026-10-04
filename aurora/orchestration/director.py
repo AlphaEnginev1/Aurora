@@ -53,6 +53,7 @@ class DirectorPlanner:
 - workbench:census — inspect current Workbench readiness
 - workbench:preflight — verify capability availability, authorization and degradation before mission execution
 - workbench:capability:resolve — discover, acquire and verify a missing governed capability
+- workbench:command — execute a registered tool/capability through the governed sandbox (never an arbitrary executable)
 - workbench:research:discover — discover candidate research sources through the governed research provider
 - workbench:research:retrieve — retrieve authoritative source snapshots through InternetGateway
 - workbench:research:retrieve_extract — retrieve sources and extract candidate claims into durable ResearchStore
