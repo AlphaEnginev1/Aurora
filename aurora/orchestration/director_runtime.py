@@ -1860,13 +1860,29 @@ class DirectorRuntime:
                 for item in self.store.list_tasks(mission_id)
             ],
         }
+        correlation_id = None
+        for event in reversed(self.store.events(mission_id)):
+            if event.correlation_id and event.event_type in {
+                "director_ownership_takeover",
+                "director_ownership_rejected",
+                "director_eligibility_rejected",
+            }:
+                correlation_id = event.correlation_id
+                break
         self.event_bus.publish(
             mission_id=mission_id,
             event_type=f"mission_{status}",
             payload=payload,
+            correlation_id=correlation_id,
         )
 
-    def _director_is_eligible(self, mission_id: str, *, now: str) -> bool:
+    def _director_is_eligible(
+        self,
+        mission_id: str,
+        *,
+        now: str,
+        correlation_id: str | None = None,
+    ) -> bool:
         """Gate Director control on the authoritative durable eligibility source."""
         if self.director_eligibility is None:
             return True
@@ -1886,6 +1902,7 @@ class DirectorRuntime:
                     "reason": str(exc),
                     "source": "authoritative_durable_eligibility",
                 },
+                correlation_id=correlation_id,
             )
             return False
         if not decision.eligible:
@@ -1901,6 +1918,7 @@ class DirectorRuntime:
                     "state": record.state if record else None,
                     "source": "authoritative_durable_eligibility",
                 },
+                correlation_id=correlation_id,
             )
             return False
         return True
@@ -2074,13 +2092,20 @@ class DirectorRuntime:
         # before acquire() advances the fencing epoch so the emitted event
         # distinguishes a real takeover from first acquisition.
         previous_ownership = self.director_ownership.get(mission_id)
+        failover_correlation_id = None
         if (
             previous_ownership is not None
             and current is None
             and self.director_eligibility is not None
         ):
+            failover_correlation_id = (
+                f"director-failover:{mission_id}:epoch-"
+                f"{previous_ownership.fencing_epoch + 1}"
+            )
             if not self._director_is_eligible(
-                mission_id, now=self._ownership_now()
+                mission_id,
+                now=self._ownership_now(),
+                correlation_id=failover_correlation_id,
             ):
                 return False
         try:
@@ -2101,6 +2126,7 @@ class DirectorRuntime:
                     "current_owner_id": current.owner_id if current else None,
                     "current_fencing_epoch": current.fencing_epoch if current else None,
                 },
+                correlation_id=failover_correlation_id,
             )
             return False
 
@@ -2120,6 +2146,7 @@ class DirectorRuntime:
                 "previous_owner_id": current.owner_id if current else None,
                 "previous_fencing_epoch": current.fencing_epoch if current else None,
             },
+            correlation_id=failover_correlation_id,
         )
         return True
 
@@ -2163,6 +2190,15 @@ class DirectorRuntime:
             )
         except DirectorOwnershipRejected as exc:
             current = self.director_ownership.get(mission_id, now=self._ownership_now())
+            correlation_id = None
+            if (
+                current is not None
+                and current.fencing_epoch > ownership.fencing_epoch
+            ):
+                correlation_id = (
+                    f"director-failover:{mission_id}:epoch-"
+                    f"{current.fencing_epoch}"
+                )
             self.event_bus.publish(
                 mission_id=mission_id,
                 event_type="director_ownership_fence_rejected",
@@ -2173,6 +2209,7 @@ class DirectorRuntime:
                     "current_fencing_epoch": current.fencing_epoch if current else None,
                     "reason": str(exc),
                 },
+                correlation_id=correlation_id,
             )
             return False
         self._mission_ownership[mission_id] = current
