@@ -2108,6 +2108,18 @@ class DirectorRuntime:
                 correlation_id=failover_correlation_id,
             ):
                 return False
+        elif (
+            current is not None
+            and current.owner_id != self.worker_id
+            and current.fencing_epoch >= 2
+            and self.director_eligibility is not None
+        ):
+            # A contender that observes an already-completed takeover still
+            # belongs to the same deterministic failover attempt.
+            failover_correlation_id = (
+                f"director-failover:{mission_id}:epoch-"
+                f"{current.fencing_epoch}"
+            )
         try:
             ownership = self.director_ownership.acquire(
                 mission_id,
