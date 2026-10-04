@@ -157,6 +157,12 @@
       "executable": "workbench:mcp:list_tools"
     },
     {
+      "name": "workbench:preflight",
+      "kind": "builtin",
+      "source": "aurora",
+      "executable": "workbench:preflight"
+    },
+    {
       "name": "workbench:project:inspect",
       "kind": "builtin",
       "source": "aurora",
