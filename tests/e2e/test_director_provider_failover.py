@@ -49,6 +49,10 @@ class BootstrapState:
     context: ContextManifest
     director_model_policy: dict
 
+    @property
+    def messages(self):
+        return self.context.messages
+
 
 class BootstrapStub:
     def __init__(self) -> None:
@@ -75,10 +79,6 @@ class BootstrapStub:
 
     def initialize(self):
         return self._state
-
-    @property
-    def messages(self):
-        return self._state.context.messages
 
 
 class RouterStub:
