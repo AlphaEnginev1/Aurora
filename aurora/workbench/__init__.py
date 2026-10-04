@@ -5,6 +5,7 @@ from .local_computer import LocalComputerError, LocalComputerGateway
 from .mcp import MCPBridgeError, MCPClientBridge, MCPRegistry, MCPServerSpec
 from .artifacts import ArtifactDescriptor, ArtifactError, ArtifactInspector
 from .session import WorkSession, WorkSessionStore
+from .project_intake import ProjectIntakeError, ProjectIntakeReport, ProjectIntakeService, ProjectSource, ProjectSourceGraph
 from .service import UniversalWorkbench, WorkbenchError
 
 __all__ = [
@@ -24,4 +25,9 @@ __all__ = [
     "ArtifactInspector",
     "WorkSession",
     "WorkSessionStore",
+    "ProjectIntakeError",
+    "ProjectIntakeReport",
+    "ProjectIntakeService",
+    "ProjectSource",
+    "ProjectSourceGraph",
 ]
