@@ -551,11 +551,6 @@ class TaskEngine:
             )
 
         if task.capability:
-            request = CapabilityRequest(
-                name=task.capability,
-                actor=task.role,
-                reason=task.objective,
-            )
             execution_workspace = workspace or self.workspace_root
             request = CapabilityRequest(
                 name=task.capability,
