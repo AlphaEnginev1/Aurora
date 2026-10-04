@@ -167,6 +167,8 @@ class DirectorRuntime:
         self.model_discovery = model_discovery
         self.dashboard_gateway = dashboard_gateway
         self.conversation_service = conversation_service
+        self._provider_failover_context: dict[str, str] | None = None
+        self._configure_provider_failover_telemetry()
         self.worker_concurrency = worker_concurrency
         self.skill_evaluator = skill_evaluator
         self.skill_learning = skill_learning
@@ -811,9 +813,46 @@ class DirectorRuntime:
             )
             return handoff
 
+    def _configure_provider_failover_telemetry(self) -> None:
+        provider = getattr(self.director.planner, "provider", None)
+        if hasattr(provider, "set_context_provider"):
+            provider.set_context_provider(lambda: self._provider_failover_context)
+        if hasattr(provider, "set_event_sink"):
+            provider.set_event_sink(self._publish_provider_failover_event)
+
+    def _publish_provider_failover_event(self, event: Mapping[str, Any]) -> None:
+        mission_id = event.get("mission_id")
+        event_type = event.get("event_type")
+        if not isinstance(mission_id, str) or not mission_id.strip():
+            return
+        if not isinstance(event_type, str) or not event_type.strip():
+            return
+        payload = {
+            str(key): value
+            for key, value in event.items()
+            if key not in {"event_type", "mission_id", "correlation_id"}
+        }
+        self.event_bus.publish(
+            mission_id=mission_id,
+            event_type=event_type,
+            payload=payload,
+            agent_role="director",
+            correlation_id=event.get("correlation_id") if isinstance(event.get("correlation_id"), str) else None,
+        )
+
     def submit_mission(self, **kwargs: Any) -> MissionSubmission:
         """Plan and durably submit a mission for the continuous worker loop."""
-        submission = self.director.submit_mission(**kwargs)
+        mission_id = str(kwargs.get("mission_id") or f"mission-{uuid4().hex}")
+        next_kwargs = dict(kwargs)
+        next_kwargs["mission_id"] = mission_id
+        self._provider_failover_context = {
+            "mission_id": mission_id,
+            "role": "director_planner",
+        }
+        try:
+            submission = self.director.submit_mission(**next_kwargs)
+        finally:
+            self._provider_failover_context = None
         try:
             ownership = self.director_ownership.acquire(
                 submission.mission_id,
@@ -1385,6 +1424,10 @@ class DirectorRuntime:
             event_type="director_review_started",
             payload={"round": round_number, "worker_id": self.worker_id},
         )
+        self._provider_failover_context = {
+            "mission_id": mission_id,
+            "role": "director_reviewer",
+        }
         try:
             review = self.director.planner.review(
                 objective=objective,
@@ -1403,6 +1446,8 @@ class DirectorRuntime:
                     reason=f"Director review failed: {exc}",
                 )
             return
+        finally:
+            self._provider_failover_context = None
 
         if not self._require_director_ownership(mission_id):
             return
