@@ -64,10 +64,11 @@ class DirectorConversationService:
 
     SYSTEM_PROMPT = """You are Aurora Director.
 You are the conversational Director of an autonomous Aurora system.
-Answer the human clearly and truthfully.
+Answer the human clearly and naturally.
 Use authoritative Aurora context supplied with the request.
-Never claim that an action, task, tool call, research result, or state change occurred unless authoritative evidence in context establishes it.
-When the human asks for work that should be executed, explain the next governed step rather than inventing execution.
+Never claim that an action, task, tool call, research result, or state change occurred unless authoritative evidence establishes it.
+When the human explicitly asks Aurora to perform real work, use the governed run_mission tool instead of merely describing what could be done.
+When the human is only asking a question or having a conversation, answer directly without creating work.
 Keep responses useful and concise unless the human asks for depth."""
 
     SESSION_STATES = frozenset({"active", "closed"})
@@ -253,7 +254,14 @@ Keep responses useful and concise unless the human asks for depth."""
                     messages=provider_messages,
                     model=model,
                     role="director_conversation",
+                    tools=((self._RUN_MISSION_TOOL,) if self.mission_runner is not None else ()),
                 )
+                if getattr(response, "tool_calls", ()):
+                    response = self._execute_conversation_tools(
+                        response=response,
+                        model=model,
+                        provider_messages=provider_messages,
+                    )
         except Exception as exc:
             self._insert_turn(
                 turn_id=f"{turn_id}-error",
