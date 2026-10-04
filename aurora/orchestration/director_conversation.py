@@ -432,16 +432,18 @@ Keep responses useful and concise unless the human asks for depth."""
                 f"Director requested unregistered conversation tool: {call.name}"
             )
         evidence = json.dumps(results, ensure_ascii=False, sort_keys=True)
+        evidence_content: list[dict[str, Any]] = [{
+            "modality": "text",
+            "text": (
+                "The following governed Aurora execution evidence is authoritative. "
+                "Report only what it establishes. Do not claim success when execution failed.\n"
+                + "EXECUTION_EVIDENCE:\n" + evidence
+            ),
+        }]
+        evidence_content.extend(media_parts)
         follow_up = [
             *provider_messages,
-            {
-                "role": "system",
-                "content": (
-                    "The following governed Aurora mission execution evidence is authoritative. "
-                    "Report only what it establishes. Do not claim success when execution failed.\n"
-                    + "EXECUTION_EVIDENCE:\n" + evidence
-                ),
-            },
+            {"role": "user", "content": evidence_content},
         ]
         return self.provider.generate(
             messages=follow_up,
