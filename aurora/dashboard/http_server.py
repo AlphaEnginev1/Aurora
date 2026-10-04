@@ -144,6 +144,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 filename = self.headers.get("X-Aurora-Filename", "").strip()
                 if not filename:
                     raise DashboardConversationAPIError("X-Aurora-Filename is required")
+                filename = unquote(filename)
                 safe_name = Path(filename).name
                 if not safe_name or safe_name in {".", ".."} or len(safe_name) > 180:
                     raise DashboardConversationAPIError("invalid upload filename")
