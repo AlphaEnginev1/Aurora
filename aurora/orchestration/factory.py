@@ -219,7 +219,7 @@ def _build_director_provider_failover(
             candidates.append(
                 DirectorProviderCandidate(
                     provider_id="router",
-                    model="router",
+                    model=None,
                     endpoint=None,
                     factory=lambda r=router: BoundInferenceDirectorProvider(
                         r, provider_id="router", model=None
