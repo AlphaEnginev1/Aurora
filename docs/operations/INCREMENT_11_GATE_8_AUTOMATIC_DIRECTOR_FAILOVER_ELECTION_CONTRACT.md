@@ -1,6 +1,6 @@
 # Increment 11 — Gate 8: Automatic Director Failover / Election Contract
 
-**Status:** CONTRACT COMPLETE; ACCEPTANCE BLOCK 1 COMPLETE; ACCEPTANCE BLOCK 2 OPEN
+**Status:** CONTRACT COMPLETE; ACCEPTANCE BLOCK 1 VERIFIED; CANDIDATE ELIGIBILITY CONTRACT COMPLETE; ACCEPTANCE BLOCK 2 ACTIVE
 **Canonical prerequisite:** Gates 1–7 and the Gate 8 contract are complete on canonical main.
 **Scope:** Automatic recovery of Director control after an active Director lease expires, within one Aurora installation sharing the same authoritative durable mission/ownership state.
 **Exclusions:** No distributed consensus, multi-machine membership discovery, provider/model failover, dashboard takeover controls, live-authorization changes, or worker lease redesign.
@@ -123,7 +123,7 @@ Evidence:
 
 ## 5B. Remaining acceptance requirement
 
-Acceptance remains open for the candidate eligibility authority described in Section 4. No repository component currently provides that authoritative eligibility source, so the next gated step is a separate candidate-eligibility contract and acceptance phase.
+Acceptance Block 1 is verified. The candidate eligibility authority contract is merged in PR #113. Acceptance Block 2 is active: deterministic tests for eligible/ineligible filtering, revocation race, freshness expiry, unavailable/contradictory source, stable identity across restart, separation from ownership, and cooperative-handoff precedence.
 
 ## 6. Interaction with cooperative handoff
 
@@ -152,7 +152,7 @@ This phase authorizes only:
 - deterministic acceptance-test design;
 - documentation of implementation gaps.
 
-No runtime implementation changes are authorized until this contract is merged and the subsequent acceptance-test gate is separately opened.
+The candidate eligibility contract is merged and Acceptance Block 2 is separately opened. Only implementation directly required to satisfy its deterministic acceptance cases is in scope; all non-goals in Section 7 remain prohibited.
 
 ## 9. Exit criteria
 
@@ -160,5 +160,5 @@ The Gate 8 contract phase closes only when:
 
 - this contract is merged to canonical main;
 - candidate eligibility and race semantics are explicit and reviewable;
-- the subsequent deterministic E2E acceptance phase is separately scoped;
+- Acceptance Block 2 is separately scoped and its required cases are explicit;
 - no unrelated Aurora subsystem is modified.
