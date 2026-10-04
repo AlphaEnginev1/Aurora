@@ -18,6 +18,13 @@ from .director_provider import (
     InferenceDirectorProvider,
 )
 from .gemini_provider import GeminiDirectorConfig, GeminiDirectorError, GeminiDirectorProvider
+from .director_provider_failover import (
+    BoundInferenceDirectorProvider,
+    DirectorProviderCandidate,
+    DirectorProviderFailoverController,
+    DirectorProviderFailoverError,
+    DirectorProviderFailoverStore,
+)
 from .durable_director import DurableDirectorError, DurableDirectorService, MissionSubmission
 from .engine import CapabilityTaskResult, OrchestrationEngine, TaskResult
 from .event_bus import DurableEventBus, EventBusError, EventSubscription
@@ -111,6 +118,11 @@ __all__ = [
     "GeminiDirectorConfig",
     "GeminiDirectorError",
     "GeminiDirectorProvider",
+    "BoundInferenceDirectorProvider",
+    "DirectorProviderCandidate",
+    "DirectorProviderFailoverController",
+    "DirectorProviderFailoverError",
+    "DirectorProviderFailoverStore",
     "DurableDirectorError",
     "DurableDirectorService",
     "MissionSubmission",
