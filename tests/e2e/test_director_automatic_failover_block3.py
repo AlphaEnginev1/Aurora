@@ -337,8 +337,10 @@ def test_gate_8_block_3_full_failover_uses_eligibility_and_preserves_graph(tmp_p
     )
     stale_events = store.events(submission.mission_id)
     assert len(stale_events) == events_before_stale + 1
-    assert stale_events[-1].event_type == "director_ownership_fence_rejected"
-    assert stale_events[-1].correlation_id == correlation_id
+    assert stale_events[-1].event_type == "director_ownership_rejected"
+    assert stale_events[-1].payload["owner_id"] == "director-A"
+    assert stale_events[-1].payload["current_owner_id"] == winner
+    assert stale_events[-1].payload["current_fencing_epoch"] == 2
 
     result = winner_runtime.run_until_terminal(submission, max_cycles=20)
     assert result.status is TaskStatus.SUCCEEDED
