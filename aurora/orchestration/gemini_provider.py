@@ -123,7 +123,7 @@ class GeminiDirectorProvider:
                 if exc.code not in {429, 500, 502, 503, 504} or attempt >= self.config.max_retries:
                     raise GeminiDirectorError(
                         f"Gemini HTTP {exc.code}: {detail}",
-                        failoverable=False,
+                        failoverable=exc.code in {408, 429, 500, 502, 503, 504},
                     ) from exc
                 sleep(0.5 * (2**attempt))
             except (URLError, TimeoutError, OSError) as exc:
