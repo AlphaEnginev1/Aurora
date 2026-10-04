@@ -219,16 +219,17 @@ class DirectorEligibilityStore:
                 "eligibility record could not be persisted"
             ) from exc
 
-        record = self.current(director_id)
-        if record is None:
-            raise DirectorEligibilityUnavailable(
-                "persisted eligibility record could not be reconstructed"
-            )
-        if record.generation != generation_value or record.state != state:
-            raise DirectorEligibilityAmbiguous(
-                "latest eligibility generation is contradictory"
-            )
-        return record
+        return DirectorEligibility(
+            director_id=director_id,
+            generation=generation_value,
+            state=state,
+            ready=bool(ready),
+            required_capabilities=capabilities,
+            registration_at=registration_at,
+            updated_at=updated_at,
+            last_seen_at=last_seen_at,
+            freshness_seconds=float(freshness_seconds),
+        )
 
     def current(self, director_id: str) -> DirectorEligibility | None:
         if not director_id.strip():
