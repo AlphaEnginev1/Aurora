@@ -23,6 +23,7 @@ class WorkbenchRequest:
     reason: str = ""
     arguments: tuple[str, ...] = ()
     options: dict[str, Any] = field(default_factory=dict)
+    correlation_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -34,6 +35,8 @@ class WorkbenchResult:
     artifact_id: str | None = None
     provenance: str | None = None
     error: str | None = None
+    receipt_id: str | None = None
+    correlation_id: str | None = None
 
 
 __all__ = ["WorkbenchCapability", "WorkbenchRequest", "WorkbenchResult"]

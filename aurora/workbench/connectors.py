@@ -88,6 +88,7 @@ class ConnectorClient:
                 "connector_type": spec.connector_type,
                 "base_url": spec.base_url,
                 "enabled": spec.enabled,
+                "credential_required": bool(spec.token_env),
                 "token_configured": token_present,
                 "capabilities": list(spec.capabilities),
             })

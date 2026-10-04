@@ -61,6 +61,9 @@ class MCPRegistry:
             result[server_id] = spec
         return result
 
+    def list(self) -> tuple[MCPServerSpec, ...]:
+        return tuple(sorted(self._servers.values(), key=lambda item: item.server_id))
+
     def get(self, server_id: str) -> MCPServerSpec:
         try:
             spec = self._servers[server_id]

@@ -48,6 +48,7 @@ Rules:
 - Keep calls minimal and directly related to the task.
 Registered capabilities:
 - workbench:census
+- workbench:preflight
 - workbench:file:list
 - workbench:file:read
 - workbench:file:write
