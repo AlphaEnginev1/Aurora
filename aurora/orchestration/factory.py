@@ -335,9 +335,10 @@ def build_director_service(*, inference_policy_path: str | Path, autonomy_policy
         resolution=resolution,
     )
     workbench=UniversalWorkbench(
-        repository_root=Path.cwd(),
+        repository_root=Path(__file__).resolve().parents[2],
         runtime_root=root,
         gateway=gateway,
+        policy=policy,
         audit_path=audit_path,
     )
     orchestration=OrchestrationEngine(
