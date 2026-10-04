@@ -15,7 +15,7 @@ on:
 
 jobs:
   live-nvidia-learning:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     environment: nvidia-live
     steps:
       - uses: actions/checkout@v7
