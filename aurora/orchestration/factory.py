@@ -22,6 +22,7 @@ from aurora.research.models import ResearchRequest
 from aurora.research.service import ResearchService
 from aurora.research.store import ResearchStore
 from aurora.context import AuroraContextPlane, ContextGate
+from aurora.workbench import UniversalWorkbench
 from aurora.organization import AgentSelector, OrganizationRegistry
 from aurora.projects import ProjectRegistry
 from aurora.observability import ProductionObservability
@@ -333,7 +334,18 @@ def build_director_service(*, inference_policy_path: str | Path, autonomy_policy
         audit_path=audit_path,
         resolution=resolution,
     )
-    orchestration=OrchestrationEngine(router,capability_runtime=capability_runtime)
+    workbench=UniversalWorkbench(
+        repository_root=Path(__file__).resolve().parents[2],
+        runtime_root=root,
+        gateway=gateway,
+        policy=policy,
+        audit_path=audit_path,
+    )
+    orchestration=OrchestrationEngine(
+        router,
+        capability_runtime=capability_runtime,
+        workbench=workbench,
+    )
     learning_path=Path(skill_learning_path).resolve() if skill_learning_path is not None else root/"skill-learning.db"
     learning_store=SkillLearningStore(learning_path)
     model_performance=ModelPerformanceStore(root/"model-performance.db")
@@ -484,6 +496,7 @@ def build_director_runtime(*, inference_policy_path: str | Path, autonomy_policy
         bootstrap=bootstrap,
         db_path=runtime_root/"conversations.db",
         provider=service.planner.provider,
+        mission_runner=service.run_mission,
     )
 
     observability=ProductionObservability(runtime_root/"observability.jsonl")

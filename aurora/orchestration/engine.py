@@ -10,6 +10,7 @@ from aurora.autonomy.capability_runtime import (
     CapabilityRuntime,
 )
 from aurora.autonomy.models import CapabilityRequest, CapabilityResult
+from aurora.workbench import UniversalWorkbench, WorkbenchRequest
 from aurora.inference.models import InferenceRequest, InferenceResponse
 from aurora.inference.router import ModelRouter
 
@@ -35,9 +36,11 @@ class OrchestrationEngine:
         self,
         router: ModelRouter,
         capability_runtime: CapabilityRuntime | None = None,
+        workbench: UniversalWorkbench | None = None,
     ) -> None:
         self._router = router
         self._capability_runtime = capability_runtime
+        self._workbench = workbench
 
     def prepare_capabilities(
         self,
@@ -120,7 +123,25 @@ class OrchestrationEngine:
         workspace: str | Path,
         args: Sequence[str] = (),
     ) -> CapabilityTaskResult:
-        """Execute an agent-requested capability through the brokered runtime."""
+        """Execute an agent-requested capability through the governed Workbench or broker."""
+        if request.name.startswith("workbench:"):
+            if self._workbench is None:
+                raise CapabilityExecutionError("Universal Workbench is not configured")
+            result = self._workbench.execute(
+                WorkbenchRequest(
+                    capability=request.name,
+                    actor=request.actor,
+                    mission_id=request.constraints.get("mission_id", task_id),
+                    reason=request.reason,
+                    arguments=tuple(args),
+                    options=dict(request.constraints),
+                )
+            )
+            return CapabilityTaskResult(
+                task_id=task_id,
+                role=role,
+                execution=result,
+            )
         if self._capability_runtime is None:
             raise CapabilityExecutionError(
                 "orchestration capability runtime is not configured"

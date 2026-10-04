@@ -170,7 +170,11 @@ class SkillRegistry:
         resolved: list[SkillSpec] = []
         for skill_id in ordered_ids:
             skill = self.resolve(skill_id)
-            missing = sorted(skill.required_capabilities - agent_capabilities)
+            missing = sorted(
+                skill.required_capabilities - agent_capabilities
+                if "workbench:*" not in agent_capabilities
+                else frozenset()
+            )
             if missing:
                 raise SkillRegistryError(
                     f"skill {skill_id} requires unauthorized capabilities for {role}: "

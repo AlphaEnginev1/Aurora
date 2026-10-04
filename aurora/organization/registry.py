@@ -20,6 +20,7 @@ class AgentSpec:
     capabilities: frozenset[str]
     model_preferences: tuple[str, ...]
     skill_ids: tuple[str, ...] = ()
+    universal_access: bool = False
 
 
 @dataclass(frozen=True)
@@ -82,6 +83,9 @@ class OrganizationRegistry:
             capabilities = item.get("capabilities", [])
             model_preferences = item.get("model_preferences", [])
             skill_ids = item.get("skill_ids", [])
+            universal_access = item.get("universal_access", False)
+            if not isinstance(universal_access, bool):
+                raise OrganizationConfigError(f"invalid universal_access for agent {item.get('agent_id')!r}")
             if (
                 not isinstance(capabilities, list)
                 or not all(isinstance(value, str) and value.strip() for value in capabilities)
@@ -114,6 +118,7 @@ class OrganizationRegistry:
                 capabilities=frozenset(capabilities),
                 model_preferences=tuple(model_preferences),
                 skill_ids=tuple(skill_ids),
+                universal_access=universal_access,
             )
             if agent.agent_id in agents:
                 raise OrganizationConfigError(
@@ -247,6 +252,12 @@ class OrganizationRegistry:
     def capabilities_for(self, role_or_agent_id: str) -> frozenset[str]:
         return self.resolve_agent(role_or_agent_id).capabilities
 
+    def allows_capability(self, role_or_agent_id: str, capability: str | None) -> bool:
+        agent = self.resolve_agent(role_or_agent_id)
+        if capability is None:
+            return True
+        return agent.universal_access or capability in agent.capabilities
+
     def validate_task(
         self,
         *,
@@ -254,7 +265,7 @@ class OrganizationRegistry:
         capability: str | None,
     ) -> AgentSpec:
         agent = self.resolve_agent(role)
-        if capability is not None and capability not in agent.capabilities:
+        if capability is not None and not (agent.universal_access or capability in agent.capabilities):
             raise OrganizationConfigError(
                 f"agent {role} is not authorized for capability {capability}"
             )

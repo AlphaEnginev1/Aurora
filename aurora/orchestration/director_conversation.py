@@ -3,15 +3,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 import sqlite3
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 from uuid import uuid4
 
 from aurora.inference.models import InferenceRequest, InferenceResponse
 from aurora.inference.router import ModelRouter, ModelRoutingError
-from .director_provider import DirectorProvider, InferenceDirectorProvider
+from .director_provider import DirectorProvider, DirectorToolSpec, InferenceDirectorProvider
 
 from .director_bootstrap import DirectorBootstrap, DirectorBootstrapError
 
@@ -64,14 +65,26 @@ class DirectorConversationService:
 
     SYSTEM_PROMPT = """You are Aurora Director.
 You are the conversational Director of an autonomous Aurora system.
-Answer the human clearly and truthfully.
+Answer the human clearly and naturally.
 Use authoritative Aurora context supplied with the request.
-Never claim that an action, task, tool call, research result, or state change occurred unless authoritative evidence in context establishes it.
-When the human asks for work that should be executed, explain the next governed step rather than inventing execution.
+Never claim that an action, task, tool call, research result, or state change occurred unless authoritative evidence establishes it.
+When the human explicitly asks Aurora to perform real work, use the governed run_mission tool instead of merely describing what could be done.
+When the human is only asking a question or having a conversation, answer directly without creating work.
 Keep responses useful and concise unless the human asks for depth."""
 
     SESSION_STATES = frozenset({"active", "closed"})
     TURN_STATES = frozenset({"processing", "completed", "failed"})
+
+    _RUN_MISSION_TOOL = DirectorToolSpec(
+        name="run_mission",
+        description="Execute a real Aurora mission through governed Director planning and TaskEngine. Use this when the human explicitly asks Aurora to perform work.",
+        parameters={
+            "type": "object",
+            "required": ["objective"],
+            "properties": {"objective": {"type": "string"}},
+            "additionalProperties": False,
+        },
+    )
 
     def __init__(
         self,
@@ -81,6 +94,7 @@ Keep responses useful and concise unless the human asks for depth."""
         db_path: str | Path,
         max_history_turns: int = 20,
         provider: DirectorProvider | None = None,
+        mission_runner: Callable[..., Any] | None = None,
     ) -> None:
         if max_history_turns < 1:
             raise DirectorConversationError("max_history_turns must be at least 1")
@@ -89,6 +103,7 @@ Keep responses useful and concise unless the human asks for depth."""
         self.db_path = Path(db_path)
         self.max_history_turns = max_history_turns
         self.provider: DirectorProvider = provider or InferenceDirectorProvider(router)
+        self.mission_runner = mission_runner
         self.router.configure_context_gate(bootstrap.context_gate, enforce=True)
         self._initialize_schema()
 
@@ -240,7 +255,14 @@ Keep responses useful and concise unless the human asks for depth."""
                     messages=provider_messages,
                     model=model,
                     role="director_conversation",
+                    tools=((self._RUN_MISSION_TOOL,) if self.mission_runner is not None else ()),
                 )
+                if getattr(response, "tool_calls", ()):
+                    response = self._execute_conversation_tools(
+                        response=response,
+                        model=model,
+                        provider_messages=provider_messages,
+                    )
         except Exception as exc:
             self._insert_turn(
                 turn_id=f"{turn_id}-error",
@@ -319,6 +341,74 @@ Keep responses useful and concise unless the human asks for depth."""
                 "voice_requested": False,
             },
         )
+
+    def _execute_conversation_tools(
+        self, *, response: Any, model: str | None, provider_messages: list[dict[str, Any]]
+    ) -> Any:
+        if self.mission_runner is None:
+            raise DirectorConversationError("Director requested execution but mission runner is unavailable")
+        calls = tuple(getattr(response, "tool_calls", ()) or ())
+        if len(calls) > 4:
+            raise DirectorConversationError("Director requested too many conversation missions")
+        results: list[dict[str, Any]] = []
+        for call in calls:
+            if call.name != self._RUN_MISSION_TOOL.name:
+                raise DirectorConversationError(
+                    f"Director requested unregistered conversation tool: {call.name}"
+                )
+            arguments = call.arguments if isinstance(call.arguments, dict) else {}
+            objective = arguments.get("objective")
+            if not isinstance(objective, str) or not objective.strip():
+                raise DirectorConversationError("run_mission requires a non-empty objective")
+            try:
+                mission = self.mission_runner(objective=objective.strip())
+                results.append(self._mission_evidence(mission))
+            except Exception as exc:
+                results.append({
+                    "status": "failed",
+                    "objective": objective.strip(),
+                    "error": str(exc)[:4000],
+                })
+        evidence = json.dumps(results, ensure_ascii=False, sort_keys=True)
+        follow_up = [
+            *provider_messages,
+            {
+                "role": "system",
+                "content": (
+                    "The following governed Aurora mission execution evidence is authoritative. "
+                    "Report only what it establishes. Do not claim success when execution failed.\n"
+                    + "EXECUTION_EVIDENCE:\n" + evidence
+                ),
+            },
+        ]
+        return self.provider.generate(
+            messages=follow_up,
+            model=model,
+            role="director_conversation_result",
+            tools=(),
+        )
+
+    @staticmethod
+    def _mission_evidence(mission: Any) -> dict[str, Any]:
+        tasks: list[dict[str, Any]] = []
+        for item in tuple(getattr(mission, "tasks", ()) or ()):
+            task = getattr(item, "task", None)
+            status = getattr(item, "status", "unknown")
+            value = getattr(status, "value", status)
+            tasks.append({
+                "task_id": getattr(task, "task_id", None),
+                "role": getattr(task, "role", None),
+                "status": str(value),
+                "error": getattr(item, "error", None),
+                "capability": getattr(task, "capability", None),
+            })
+        success = bool(tasks) and all(item["status"] == "succeeded" for item in tasks)
+        return {
+            "status": "succeeded" if success else ("failed" if tasks else "no_tasks"),
+            "objective": getattr(mission, "objective", ""),
+            "task_count": len(tasks),
+            "tasks": tasks,
+        }
 
     def set_provider(self, provider: DirectorProvider) -> None:
         if not getattr(provider, "provider_id", ""):
