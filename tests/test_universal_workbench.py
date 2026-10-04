@@ -114,7 +114,6 @@ def test_workbench_policy_fail_closed(tmp_path: Path):
 
 def test_work_session_store_reads_legacy_payload_with_new_defaults(tmp_path: Path):
     path = tmp_path / "legacy.db"
-    store = WorkSessionStore(path)
     legacy = (
         '{"work_id":"legacy-work","mission_id":"legacy-mission","actor":"agent",'
         '"environment":"local","workspace_root":"%s","state":"active",'
