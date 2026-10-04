@@ -50,6 +50,7 @@ Rules:
 Registered capabilities:
 - workbench:census
 - workbench:preflight
+- workbench:capability:resolve
 - workbench:file:list
 - workbench:file:read
 - workbench:file:write
