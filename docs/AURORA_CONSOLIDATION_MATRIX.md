@@ -60,7 +60,7 @@ remains as an auditable snapshot of the gate work and is not a second implementa
 | Empirical decision knowledge promotion | YES | YES | YES | N/A | None identified |
 | Director policy evolution / canary / rollback | YES | YES | YES | N/A | None identified in frozen queue |
 | Active typed policy contract | YES | YES | YES | N/A | None identified |
-| Live provider workflows | YES (workflow code) | YES (workflow definition) | OPT-IN ONLY | **YES** | Dedicated live gates verified; live activation remains separately authorized |
+| Live provider workflows | YES (workflow code) | YES (workflow definition) | OPT-IN ONLY | **YES** | Dedicated provider gates verified; live activation remains separately authorized |
 
 ### Meaning of the five columns
 
@@ -114,6 +114,19 @@ The dedicated live-provider gates have been executed successfully and are closed
 - LIVE-RESEARCH-DISCOVERY — verified by the dedicated research discovery gate sequence through the final green gate (#27).
 
 These runs prove the intended provider/runtime integration paths. They do not create an automatic production authorization.
+
+## 3.1 Director provider failover / replacement
+
+Increment 12 is externally verified on canonical `main`.
+
+- deterministic provider failover and durable continuity tests: VERIFIED;
+- combined LIVE gate: VERIFIED on GitHub Actions run `37179243481`;
+- real Gemini primary success: VERIFIED;
+- controlled Gemini failure after the primary response: VERIFIED;
+- real NVIDIA replacement response: VERIFIED;
+- durable failover evidence with no credential leakage in workflow output: VERIFIED;
+- automatic switchback is not performed;
+- explicit live authorization remains a separate human-controlled boundary.
 
 ## 4. Network enforcement
 
