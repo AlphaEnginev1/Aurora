@@ -7,7 +7,6 @@ from aurora.inference.providers.registry import default_provider_registry
 from aurora.inference.discovery import ModelDiscoveryError
 from aurora.operator_settings import OperatorSettingsError, OperatorSettingsStore
 from aurora.orchestration.director_provider import InferenceDirectorProvider
-from aurora.orchestration.director_provider_failover import BoundInferenceDirectorProvider
 from aurora.orchestration.gemini_provider import GeminiDirectorProvider
 
 class DashboardProviderSettingsError(RuntimeError):
@@ -69,14 +68,8 @@ class ProviderSettingsService:
 
             director = settings["director"]
             provider_id = str(director.get("provider", "")).strip().lower()
-            if provider_id == "router":
+            if provider_id in {"router", "nvidia_api"}:
                 provider = InferenceDirectorProvider(router)
-            elif provider_id == "nvidia_api":
-                provider = BoundInferenceDirectorProvider(
-                    router,
-                    provider_id="nvidia_api",
-                    model=selected_model or None,
-                )
             elif provider_id == "gemini":
                 api_key = self.store.credential("gemini")
                 if not api_key:
