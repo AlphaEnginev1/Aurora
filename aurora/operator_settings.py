@@ -10,7 +10,12 @@ from threading import RLock
 from typing import Any, Mapping
 
 DEFAULT_SETTINGS: dict[str, Any] = {
-    "director": {"provider": "gemini", "model": "gemini-3.7-flash", "endpoint": "https://generativelanguage.googleapis.com/v1beta"},
+    "director": {
+        "provider": "gemini",
+        "model": "gemini-3.7-flash",
+        "endpoint": "https://generativelanguage.googleapis.com/v1beta",
+        "failover": {"enabled": True, "order": ["nvidia_api", "router"]},
+    },
     "providers": {
         "gemini": {"enabled": True, "api_key": ""},
         "nvidia_api": {"enabled": True, "api_key": "", "base_url": "https://integrate.api.nvidia.com/v1"},
@@ -93,6 +98,20 @@ def _validate(data: Mapping[str, Any]) -> None:
         raise OperatorSettingsError("director.model cannot be empty")
     if not str(director.get("endpoint", "")).strip().startswith("https://"):
         raise OperatorSettingsError("director.endpoint must use HTTPS")
+    failover = director.get("failover", {})
+    if not isinstance(failover, Mapping):
+        raise OperatorSettingsError("director.failover must be an object")
+    if not isinstance(failover.get("enabled", True), bool):
+        raise OperatorSettingsError("director.failover.enabled must be boolean")
+    order = failover.get("order", [])
+    if not isinstance(order, list) or not all(isinstance(item, str) for item in order):
+        raise OperatorSettingsError("director.failover.order must be a string array")
+    allowed_failover = {"router", "nvidia_api"}
+    normalized_order = [item.strip().lower() for item in order]
+    if any(item not in allowed_failover for item in normalized_order):
+        raise OperatorSettingsError("director.failover.order contains an unsupported provider")
+    if len(set(normalized_order)) != len(normalized_order):
+        raise OperatorSettingsError("director.failover.order must not contain duplicates")
     for provider_id in ("gemini", "nvidia_api"):
         provider_data = providers.get(provider_id)
         if not isinstance(provider_data, Mapping):

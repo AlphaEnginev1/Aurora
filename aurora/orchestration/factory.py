@@ -36,6 +36,12 @@ from aurora.operator_settings import OperatorSettingsStore, settings_path
 from .director import DirectorPlanner, DirectorService
 from .director_provider import InferenceDirectorProvider
 from .gemini_provider import GeminiDirectorProvider
+from .director_provider_failover import (
+    BoundInferenceDirectorProvider,
+    DirectorProviderCandidate,
+    DirectorProviderFailoverController,
+    DirectorProviderFailoverStore,
+)
 from .director_bootstrap import (
     DirectorBootstrap,
     build_context_knowledge_adapter,
@@ -125,7 +131,11 @@ def _apply_local_model_settings(router: ModelRouter, settings_store: OperatorSet
         router.models = list(router.model_registry.models)
 
 
-def _build_director_provider(settings_store: OperatorSettingsStore | None = None):
+def _build_director_provider(
+    settings_store: OperatorSettingsStore | None = None,
+    *,
+    router: ModelRouter | None = None,
+):
     settings = settings_store.load() if settings_store is not None else {}
     configured = settings.get("director", {}) if isinstance(settings, dict) else {}
     director_provider_id = os.getenv(
@@ -146,7 +156,20 @@ def _build_director_provider(settings_store: OperatorSettingsStore | None = None
                 configured.get("endpoint", "https://generativelanguage.googleapis.com/v1beta")
             ),
         )
-    if director_provider_id in {"router", "inference_fabric", "nvidia_api", ""}:
+    if director_provider_id == "nvidia_api":
+        key = (
+            (settings_store.credential("nvidia_api") if settings_store is not None else "")
+            or os.getenv("NVIDIA_API_KEY", "")
+        )
+        model = str(configured.get("model", "")).strip()
+        if not key or router is None or not model:
+            return None
+        return BoundInferenceDirectorProvider(
+            router,
+            provider_id="nvidia_api",
+            model=model,
+        )
+    if director_provider_id in {"router", "inference_fabric", ""}:
         return None
     raise RuntimeError(
         "unsupported AURORA_DIRECTOR_PROVIDER: "
@@ -155,11 +178,99 @@ def _build_director_provider(settings_store: OperatorSettingsStore | None = None
     )
 
 
+def _build_director_provider_failover(
+    *,
+    settings_store: OperatorSettingsStore,
+    router: ModelRouter,
+    active_provider,
+    db_path: str | Path,
+):
+    settings = settings_store.load()
+    director = settings.get("director", {}) if isinstance(settings, dict) else {}
+    failover = director.get("failover", {}) if isinstance(director, dict) else {}
+    if not bool(failover.get("enabled", True)):
+        return active_provider
+
+    order = failover.get("order", ["nvidia_api", "router"])
+    if not isinstance(order, list):
+        raise RuntimeError("director.failover.order must be a list")
+
+    candidates: list[DirectorProviderCandidate] = []
+    active_id = str(getattr(active_provider, "provider_id", "") or "")
+    nvidia_base_url = str(
+        settings.get("providers", {}).get("nvidia_api", {}).get(
+            "base_url", "https://integrate.api.nvidia.com/v1"
+        )
+    ).rstrip("/")
+
+    nvidia_model = next(
+        (
+            model.id
+            for model in router.available()
+            if model.provider == "nvidia_api"
+            and "reasoning" in model.capabilities
+        ),
+        None,
+    )
+    for provider_id in (str(item).strip().lower() for item in order):
+        if provider_id == "nvidia_api":
+            key = settings_store.credential("nvidia_api") or os.getenv("NVIDIA_API_KEY", "")
+            if active_id == "nvidia_api" or not key or not nvidia_model:
+                continue
+            candidates.append(
+                DirectorProviderCandidate(
+                    provider_id="nvidia_api",
+                    model=nvidia_model,
+                    endpoint=nvidia_base_url,
+                    factory=lambda r=router, m=nvidia_model: BoundInferenceDirectorProvider(
+                        r, provider_id="nvidia_api", model=m
+                    ),
+                )
+            )
+        elif provider_id == "router":
+            has_router_reasoning_model = any(
+                "reasoning" in model.capabilities for model in router.available()
+            )
+            if active_id in {"router", "inference_router"} or not has_router_reasoning_model:
+                continue
+            candidates.append(
+                DirectorProviderCandidate(
+                    provider_id="router",
+                    model=None,
+                    endpoint=None,
+                    factory=lambda r=router: BoundInferenceDirectorProvider(
+                        r, provider_id="router", model=None
+                    ),
+                )
+            )
+
+    def activate(candidate: DirectorProviderCandidate, _provider) -> None:
+        settings_store.update_from_form(
+            {
+                "director": {
+                    "provider": candidate.provider_id,
+                    "model": candidate.model or "router",
+                    "endpoint": candidate.endpoint
+                    or str(director.get("endpoint", "https://generativelanguage.googleapis.com/v1beta")),
+                }
+            }
+        )
+
+    return DirectorProviderFailoverController(
+        active_provider=active_provider,
+        candidates=tuple(candidates),
+        store=DirectorProviderFailoverStore(str(db_path)),
+        activate=activate,
+    )
+
+
 def build_director_service(*, inference_policy_path: str | Path, autonomy_policy_path: str | Path,
     registry_path: str | Path, network_policy_path: str | Path, workspace_root: str | Path,
     egress_proxy_host: str, egress_proxy_port: int=3128, organization_path: str | Path="config/organization.json",
     skills_path: str | Path="config/skills.json", skill_learning_path: str | Path | None=None,
-    projects_path: str | Path="config/projects.json") -> DirectorService:
+    projects_path: str | Path="config/projects.json",
+    provider_failover_db_path: str | Path | None = None,
+) -> DirectorService:
     settings_store = OperatorSettingsStore(settings_path(workspace_root))
     nvidia_key = settings_store.credential("nvidia_api") or os.getenv("NVIDIA_API_KEY")
     provider_registry = default_provider_registry(nvidia_api_key=nvidia_key)
@@ -227,7 +338,7 @@ def build_director_service(*, inference_policy_path: str | Path, autonomy_policy
     learning_store=SkillLearningStore(learning_path)
     model_performance=ModelPerformanceStore(root/"model-performance.db")
     task_engine=TaskEngine(orchestration,root,organization=organization,skill_registry=skill_registry,skill_learning=learning_store,model_performance=model_performance)
-    director_provider = _build_director_provider(settings_store)
+    director_provider = _build_director_provider(settings_store, router=router)
 
     planner=DirectorPlanner(
         router,
@@ -235,6 +346,13 @@ def build_director_service(*, inference_policy_path: str | Path, autonomy_policy
         skill_registry=skill_registry,
         project_registry=project_registry,
         provider=director_provider or InferenceDirectorProvider(router),
+    )
+    active_provider = planner.provider
+    planner.provider = _build_director_provider_failover(
+        settings_store=settings_store,
+        router=router,
+        active_provider=active_provider,
+        db_path=provider_failover_db_path or (Path(workspace_root).resolve() / "tasks.db"),
     )
     return DirectorService(planner,task_engine)
 
@@ -245,10 +363,12 @@ def build_director_runtime(*, inference_policy_path: str | Path, autonomy_policy
     organization_path: str | Path="config/organization.json", skills_path: str | Path="config/skills.json",
     skill_learning_path: str | Path | None=None,
     projects_path: str | Path="config/projects.json") -> DirectorRuntime:
+    runtime_store_path = Path(task_db_path).resolve() if task_db_path else Path(workspace_root).resolve()/"tasks.db"
     service=build_director_service(inference_policy_path=inference_policy_path,autonomy_policy_path=autonomy_policy_path,
         registry_path=registry_path,network_policy_path=network_policy_path,workspace_root=workspace_root,
         egress_proxy_host=egress_proxy_host,egress_proxy_port=egress_proxy_port,organization_path=organization_path,
-        skills_path=skills_path,skill_learning_path=skill_learning_path,projects_path=projects_path)
+        skills_path=skills_path,skill_learning_path=skill_learning_path,projects_path=projects_path,
+        provider_failover_db_path=runtime_store_path)
     runtime_root=Path(workspace_root).resolve()
     autonomy_data=json.loads(Path(autonomy_policy_path).read_text(encoding="utf-8"))
     policy=Policy(allowed_capabilities=frozenset(autonomy_data.get("allowed_capabilities",[])),

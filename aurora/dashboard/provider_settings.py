@@ -77,10 +77,16 @@ class ProviderSettingsService:
                 provider = GeminiDirectorProvider(api_key=api_key, model=str(director["model"]), endpoint=str(director["endpoint"]))
             else:
                 raise DashboardProviderSettingsError(f"unsupported Director provider: {provider_id}")
-            self.runtime.director.planner.provider = provider
+            active = self.runtime.director.planner.provider
+            if hasattr(active, "set_active_provider"):
+                active.set_active_provider(provider)
+                provider_for_runtime = active
+            else:
+                self.runtime.director.planner.provider = provider
+                provider_for_runtime = provider
             conversation = getattr(self.runtime, "conversation_service", None)
             if conversation is not None:
-                conversation.set_provider(provider)
+                conversation.set_provider(provider_for_runtime)
             return self.public()
         except (OperatorSettingsError, KeyError, TypeError, ValueError) as exc:
             raise DashboardProviderSettingsError(str(exc)) from exc
