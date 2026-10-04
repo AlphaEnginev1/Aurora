@@ -15,8 +15,7 @@ Authoritative status:
 - CI 1398/1399: SUCCESS — Recovery Drills V1
 - CI 1414: SUCCESS — Controlled Live Authorization V1 on canonical main
 
-The repository is no longer tracking historical increments as future work. The sections below describe what is
-already integrated and what remains genuinely required.
+The repository is no longer tracking historical increments as future work. The sections below describe what is already integrated and what remains genuinely required.
 
 ## Phase 0 — Foundation / Governance — INTEGRATED
 
@@ -140,6 +139,7 @@ Authoritative Increment 11 contracts:
 - docs/operations/INCREMENT_11_GATE_7_RECOVERY_CONTRADICTION_FAIL_CLOSED_CONTRACT.md
 - docs/operations/INCREMENT_11_GATE_8_AUTOMATIC_DIRECTOR_FAILOVER_ELECTION_CONTRACT.md
 - docs/operations/INCREMENT_11_GATE_8_CANDIDATE_ELIGIBILITY_CONTRACT.md
+- docs/operations/INCREMENT_11_GATE_8_AUTOMATIC_FAILOVER_ACCEPTANCE_PLAN.md
 
 Completed gates on canonical main:
 - Gate 1 — Director Handoff / Failover contract + deterministic E2E — COMPLETE.
@@ -158,26 +158,13 @@ Gate 7 evidence:
 Gate 8 status:
 - Contract — COMPLETE.
 - Acceptance Block 1 — deterministic expired-lease race, epoch advancement, loser fencing, stale predecessor fencing and continuation without duplicate work — VERIFIED.
-- Acceptance evidence: PR #112; runs 1991 and 1992 green; canonical post-merge run 1993 green after rerun attempt 2.
-- Acceptance Block 2 — candidate eligibility authority — OPEN.
+- Acceptance Block 2 — Candidate Eligibility Authority — COMPLETE and formally closed by PR #117; canonical merge `d4b70b7932d50c33dfcbaa255dfd38a18827a091`; CI #2042 green.
+- Acceptance Block 3 — Automatic Failover Full E2E — OPEN.
 
-A repository search on canonical main found no dedicated Director membership/eligibility registry or equivalent authoritative candidate source. That is a real remaining design/implementation gap, not a reason to invent one implicitly.
+Block 3 objective:
+Join the accepted candidate eligibility authority to the already verified expiry-race path and prove the complete automatic failover lifecycle. The E2E must verify authoritative eligibility filtering, exactly one atomic epoch-advancing winner, loser/predecessor fencing, durable mission reconstruction, no duplicate completed work, winner restart continuity, stale predecessor restart fencing, fail-closed eligibility ambiguity/unavailability, traceability, and one terminal outcome.
 
-**Next Increment 11 step: Gate 8 Block 2 — Candidate Eligibility Acceptance.**
-The Candidate Eligibility Authority contract is COMPLETE and merged as PR #113. The active phase is deterministic acceptance for its eight required cases, followed only by the minimal durable eligibility authority/runtime gate needed to pass them. Eligibility filters contenders; atomic DirectorOwnershipStore acquisition alone grants ownership and advances fencing. No distributed discovery, consensus, provider failover, dashboard controls, worker-lease redesign, or live-authorization changes are in scope. Gate 8 remains open until acceptance and canonical post-merge CI are green.
+The dedicated acceptance plan is:
+`docs/operations/INCREMENT_11_GATE_8_AUTOMATIC_FAILOVER_ACCEPTANCE_PLAN.md`
 
-## Block 13 — Dashboard Full E2E — COMPLETE
-
-The integrated Dashboard/Director/avatar proof is closed on canonical `main`.
-
-Verified proof lanes:
-1. 13A — integrated conversation lifecycle — VERIFIED.
-2. 13B — voice-to-Director handoff and text fallback — VERIFIED.
-3. 13C — conversation persistence across dashboard restart/reconciliation — VERIFIED.
-4. 13D — canonical Aurora portrait HTTP serving plus operator visual acceptance — VERIFIED.
-5. 13E — real Gemini provider gate — VERIFIED; the final local E2E run passed all 4 tests using Gemini 3.8 Flash.
-6. 13F — final acceptance — COMPLETE.
-
-Dashboard proof remains distinct from the frozen production-readiness queue 1–7. Live execution is still fail-closed and requires the existing explicit human authorization boundary.
-
-**Increment 11 is active at Gate 8 Block 2 — Candidate Eligibility Acceptance.** Gates 1–7, Gate 8 contract, Acceptance Block 1, and the candidate eligibility contract are complete; eligibility acceptance/runtime integration remains open.
+No distributed consensus, multi-machine membership discovery, provider/model failover, dashboard takeover controls, worker-lease redesign, or live-authorization changes are authorized by Block 3.
