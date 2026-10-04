@@ -43,6 +43,12 @@
       "executable": "rg"
     },
     {
+      "name": "workbench:artifact:inspect",
+      "kind": "builtin",
+      "source": "aurora",
+      "executable": "workbench:artifact:inspect"
+    },
+    {
       "name": "workbench:artifact:intake",
       "kind": "builtin",
       "source": "aurora",
@@ -59,6 +65,12 @@
       "kind": "builtin",
       "source": "aurora",
       "executable": "workbench:census"
+    },
+    {
+      "name": "workbench:document:extract",
+      "kind": "builtin",
+      "source": "aurora",
+      "executable": "workbench:document:extract"
     },
     {
       "name": "workbench:file:list",
