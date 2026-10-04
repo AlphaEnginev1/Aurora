@@ -154,7 +154,7 @@ class DirectorRuntime:
         self.memory = memory or MissionMemory(store)
         self.director_ownership = director_ownership or DirectorOwnershipStore(store.path)
         self.director_handoff_store = director_handoff_store or DirectorHandoffStore(store.path)
-        self.director_eligibility = director_eligibility or DirectorEligibilityStore(store.path)
+        self.director_eligibility = director_eligibility
         self.director_lease_seconds = director_lease_seconds
         self._ownership_now = ownership_now_fn or DirectorOwnershipStore._now
         self._mission_ownership: dict[str, DirectorOwnership] = {}
@@ -1929,8 +1929,6 @@ class DirectorRuntime:
                 else:
                     if current is not None and current.lease_until > now:
                         return False
-                    if not self._director_is_eligible(mission_id, now=self._ownership_now()):
-                        return False
                     try:
                         ownership = self.director_ownership.acquire(
                             mission_id,
@@ -2076,10 +2074,11 @@ class DirectorRuntime:
         # before acquire() advances the fencing epoch so the emitted event
         # distinguishes a real takeover from first acquisition.
         previous_ownership = self.director_ownership.get(mission_id)
-        if previous_ownership is not None and not self._director_is_eligible(
-            mission_id, now=self._ownership_now()
-        ):
-            return False
+        if previous_ownership is not None and self.director_eligibility is not None:
+            if not self._director_is_eligible(
+                mission_id, now=self._ownership_now()
+            ):
+                return False
         try:
             ownership = self.director_ownership.acquire(
                 mission_id,
