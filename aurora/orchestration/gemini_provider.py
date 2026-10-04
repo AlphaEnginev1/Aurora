@@ -196,8 +196,7 @@ class GeminiDirectorProvider:
                     failoverable=False,
                 ) from exc
             if role == "system":
-                system_text = "
-".join(
+                system_text = "\\n".join(
                     part.text or ""
                     for part in parts
                     if part.modality == "text"
