@@ -15,6 +15,7 @@ from urllib.request import Request, urlopen
 from uuid import uuid4
 
 from .director_provider import DirectorModelResponse, DirectorProvider, DirectorToolSpec, DirectorToolCall
+from aurora.inference.multimodal import MultimodalContentError, parse_content
 
 
 class GeminiDirectorError(RuntimeError):
@@ -186,15 +187,32 @@ class GeminiDirectorProvider:
         for message in messages:
             role = message.get("role")
             content = message.get("content", "")
-            if not isinstance(content, str):
-                content = str(content)
+            try:
+                parts = parse_content(content)
+                gemini_parts = [part.as_gemini_part() for part in parts]
+            except MultimodalContentError as exc:
+                raise GeminiDirectorError(
+                    f"invalid multimodal message content: {exc}",
+                    failoverable=False,
+                ) from exc
             if role == "system":
-                system_parts.append(content)
+                system_text = "
+".join(
+                    part.text or ""
+                    for part in parts
+                    if part.modality == "text"
+                )
+                if any(part.modality != "text" for part in parts):
+                    raise GeminiDirectorError(
+                        "system messages may contain text only",
+                        failoverable=False,
+                    )
+                system_parts.append(system_text)
                 continue
             mapped_role = "model" if role in {"assistant", "model"} else "user"
             contents.append({
                 "role": mapped_role,
-                "parts": [{"text": content}],
+                "parts": gemini_parts,
             })
         if not contents:
             raise GeminiDirectorError("Gemini request contains no user/model content", failoverable=False)
