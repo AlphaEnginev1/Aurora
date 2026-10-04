@@ -11,6 +11,7 @@ from aurora.autonomy.capability_runtime import (
 )
 from aurora.autonomy.models import CapabilityRequest, CapabilityResult
 from aurora.workbench import UniversalWorkbench, WorkbenchRequest
+from .agent_workbench import AgentWorkbenchToolError, AgentWorkbenchToolLoop
 from aurora.inference.models import InferenceRequest, InferenceResponse
 from aurora.inference.router import ModelRouter
 
@@ -41,6 +42,9 @@ class OrchestrationEngine:
         self._router = router
         self._capability_runtime = capability_runtime
         self._workbench = workbench
+        self._workbench_loop = (
+            AgentWorkbenchToolLoop(workbench) if workbench is not None else None
+        )
 
     def prepare_capabilities(
         self,
@@ -70,6 +74,7 @@ class OrchestrationEngine:
         model: str | None = None,
         model_preferences: Sequence[str] | None = None,
         project_id: str | None = None,
+        mission_id: str | None = None,
         context: list[dict[str, Any]] | None = None,
         skill_ids: Sequence[str] | None = None,
         skill_tags: Sequence[str] | None = None,
@@ -101,17 +106,30 @@ class OrchestrationEngine:
             model=model,
             metadata=request_metadata,
         )
-        if model_preferences:
-            response = self._router.generate(
-                request,
-                capability=capability,
-                preferred_models=model_preferences,
-            )
-        else:
-            response = self._router.generate(
-                request,
-                capability=capability,
-            )
+        try:
+            if self._workbench_loop is not None:
+                response = self._workbench_loop.run(
+                    request=request,
+                    actor=role,
+                    mission_id=mission_id or task_id,
+                    reason=objective,
+                    preferred_models=tuple(model_preferences or ()),
+                    router=self._router,
+                    capability=capability,
+                )
+            elif model_preferences:
+                response = self._router.generate(
+                    request,
+                    capability=capability,
+                    preferred_models=model_preferences,
+                )
+            else:
+                response = self._router.generate(
+                    request,
+                    capability=capability,
+                )
+        except AgentWorkbenchToolError as exc:
+            raise CapabilityExecutionError(str(exc)) from exc
         return TaskResult(task_id=task_id, role=role, response=response)
 
     def run_capability_task(

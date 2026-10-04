@@ -264,6 +264,7 @@ class TaskEngine:
                 task,
                 workspace=workspace,
                 trusted_artifact_ids=trusted_artifacts,
+                execution_scope=execution_scope,
             )
         except (CapabilityExecutionError, RuntimeError, ValueError) as exc:
             result = DelegatedTaskResult(
@@ -471,6 +472,7 @@ class TaskEngine:
         *,
         workspace: Path | None = None,
         trusted_artifact_ids: tuple[str, ...] = (),
+        execution_scope: str | None = None,
     ):
         skill_assignment = None
         if self.skill_registry is not None and self.organization is not None:
@@ -548,12 +550,21 @@ class TaskEngine:
             )
 
         if task.capability:
+            execution_workspace = workspace or self.workspace_root
+            mission_identity = (
+                execution_scope.split(":", 1)[0]
+                if execution_scope and ":" in execution_scope
+                else execution_scope or task.task_id
+            )
             request = CapabilityRequest(
                 name=task.capability,
                 actor=task.role,
                 reason=task.objective,
+                constraints={
+                    "mission_id": mission_identity,
+                    "work_id": mission_identity,
+                },
             )
-            execution_workspace = workspace or self.workspace_root
             return self.orchestration.run_capability_task(
                 task_id=task.task_id,
                 role=task.role,
@@ -618,10 +629,16 @@ class TaskEngine:
                 "Use only through Aurora's capability boundary; do not bypass it.\n"
                 + manifest
             )
+        mission_identity = (
+            execution_scope.split(":", 1)[0]
+            if execution_scope and ":" in execution_scope
+            else execution_scope or task.task_id
+        )
         return self.orchestration.run_task(
             task_id=task.task_id,
             role=task.role,
             objective=task.objective,
+            mission_id=mission_identity,
             model_preferences=model_preferences,
             skill_ids=skill_ids,
             skill_tags=skill_tags,
