@@ -333,7 +333,6 @@ def build_director_service(*, inference_policy_path: str | Path, autonomy_policy
         offline_sandbox,
         audit_path=audit_path,
         resolution=resolution,
-        capability_runtime=capability_runtime,
     )
     workbench=UniversalWorkbench(
         repository_root=Path(__file__).resolve().parents[2],
@@ -343,6 +342,7 @@ def build_director_service(*, inference_policy_path: str | Path, autonomy_policy
         session_store=WorkSessionStore(root / "work-sessions.db"),
         audit_path=audit_path,
         resolution=resolution,
+        capability_runtime=capability_runtime,
     )
     orchestration=OrchestrationEngine(
         router,
