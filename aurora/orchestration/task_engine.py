@@ -243,6 +243,7 @@ class TaskEngine:
         task: DelegatedTask,
         *,
         execution_scope: str | None = None,
+        mission_id: str | None = None,
     ) -> DelegatedTaskResult:
         """Execute one already-dependency-resolved task for a durable worker."""
         self._validate_task_fields(task)
@@ -264,6 +265,7 @@ class TaskEngine:
                 task,
                 workspace=workspace,
                 trusted_artifact_ids=trusted_artifacts,
+                mission_id=mission_id,
             )
         except (CapabilityExecutionError, RuntimeError, ValueError) as exc:
             result = DelegatedTaskResult(
@@ -471,6 +473,7 @@ class TaskEngine:
         *,
         workspace: Path | None = None,
         trusted_artifact_ids: tuple[str, ...] = (),
+        mission_id: str | None = None,
     ):
         skill_assignment = None
         if self.skill_registry is not None and self.organization is not None:
@@ -554,6 +557,15 @@ class TaskEngine:
                 reason=task.objective,
             )
             execution_workspace = workspace or self.workspace_root
+            request = CapabilityRequest(
+                name=task.capability,
+                actor=task.role,
+                reason=task.objective,
+                constraints={
+                    "mission_id": mission_id or task.task_id,
+                    "work_id": mission_id or task.task_id,
+                },
+            )
             return self.orchestration.run_capability_task(
                 task_id=task.task_id,
                 role=task.role,
