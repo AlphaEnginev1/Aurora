@@ -465,7 +465,17 @@ def test_full_universal_workbench_acceptance_mission(tmp_path: Path):
         "research-specialist",
         "engineering-specialist",
     }
-    assert all(item.status is TaskStatus.SUCCEEDED for item in result.tasks)
+    failed_tasks = [
+        {
+            "task_id": item.task.task_id,
+            "status": item.status.value,
+            "error": item.error,
+            "capability": item.task.capability,
+        }
+        for item in result.tasks
+        if item.status is not TaskStatus.SUCCEEDED
+    ]
+    assert not failed_tasks, f"Universal Workbench specialist failures: {failed_tasks}"
 
     session = sessions.get(submission.mission_id)
     required_caps = {
