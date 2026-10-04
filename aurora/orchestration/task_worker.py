@@ -389,6 +389,18 @@ class TaskWorker:
             if execution is not None:
                 stdout = str(getattr(execution, "stdout", ""))[:limit]
                 stderr = str(getattr(execution, "stderr", ""))[:limit]
+                output = getattr(execution, "output", None)
+                if output is not None:
+                    serialized = str(output)
+                    return {
+                        "type": "workbench" if not hasattr(execution, "returncode") else "capability",
+                        "status": getattr(execution, "status", None),
+                        "operation": getattr(execution, "operation", None),
+                        "output": serialized[:limit],
+                        "artifact_id": getattr(execution, "artifact_id", None),
+                        "provenance": getattr(execution, "provenance", None),
+                        "truncated": len(serialized) > limit,
+                    }
                 return {
                     "type": "capability",
                     "returncode": getattr(execution, "returncode", None),
