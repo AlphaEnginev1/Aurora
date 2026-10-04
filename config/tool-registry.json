@@ -1,11 +1,88 @@
 {
   "tools": [
-    {"name":"git","kind":"system","source":"ubuntu-apt","executable":"git"},
-    {"name":"curl","kind":"system","source":"ubuntu-apt","executable":"curl"},
-    {"name":"jq","kind":"system","source":"ubuntu-apt","executable":"jq"},
-    {"name":"rg","kind":"system","source":"ubuntu-apt","executable":"rg"},
-    {"name":"fd","kind":"system","source":"ubuntu-apt","executable":"fd"},
-    {"name":"python","kind":"runtime","source":"ubuntu-apt","executable":"python3"},
-    {"name":"pip","kind":"runtime","source":"pypi","executable":"pip"}
+    {
+      "name": "curl",
+      "kind": "system",
+      "source": "ubuntu-apt",
+      "executable": "curl"
+    },
+    {
+      "name": "fd",
+      "kind": "system",
+      "source": "ubuntu-apt",
+      "executable": "fd"
+    },
+    {
+      "name": "git",
+      "kind": "system",
+      "source": "ubuntu-apt",
+      "executable": "git"
+    },
+    {
+      "name": "jq",
+      "kind": "system",
+      "source": "ubuntu-apt",
+      "executable": "jq"
+    },
+    {
+      "name": "pip",
+      "kind": "runtime",
+      "source": "pypi",
+      "executable": "pip"
+    },
+    {
+      "name": "python",
+      "kind": "runtime",
+      "source": "ubuntu-apt",
+      "executable": "python3"
+    },
+    {
+      "name": "rg",
+      "kind": "system",
+      "source": "ubuntu-apt",
+      "executable": "rg"
+    },
+    {
+      "name": "workbench:artifact:intake",
+      "kind": "builtin",
+      "source": "aurora",
+      "executable": "workbench:artifact:intake"
+    },
+    {
+      "name": "workbench:browser",
+      "kind": "builtin",
+      "source": "aurora",
+      "executable": "workbench:browser"
+    },
+    {
+      "name": "workbench:census",
+      "kind": "builtin",
+      "source": "aurora",
+      "executable": "workbench:census"
+    },
+    {
+      "name": "workbench:file:list",
+      "kind": "builtin",
+      "source": "aurora",
+      "executable": "workbench:file:list"
+    },
+    {
+      "name": "workbench:file:read",
+      "kind": "builtin",
+      "source": "aurora",
+      "executable": "workbench:file:read"
+    },
+    {
+      "name": "workbench:file:write",
+      "kind": "builtin",
+      "source": "aurora",
+      "executable": "workbench:file:write"
+    },
+    {
+      "name": "workbench:github:get",
+      "kind": "builtin",
+      "source": "aurora",
+      "executable": "workbench:github:get"
+    }
   ]
 }
