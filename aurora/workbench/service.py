@@ -74,6 +74,9 @@ class UniversalWorkbench:
     def census(self) -> tuple[WorkbenchCapability, ...]:
         browser_available = self._playwright_available()
         computer_available = self._local_computer_available()
+        github_available = self.github.available()
+        github_write = self.github.write_enabled and github_available
+        github_merge = self.github.merge_enabled and github_available
         return (
             WorkbenchCapability("workbench:file", "file", True, True, True, "scoped local filesystem"),
             WorkbenchCapability("workbench:artifact", "artifact", True, True, True, "hashable artifact intake"),
@@ -82,9 +85,9 @@ class UniversalWorkbench:
                 "workbench:github",
                 "connector",
                 True,
-                self.github.available(),
-                self.github.available(),
-                "GitHub API read connector; credential is environment-only",
+                github_available,
+                github_available,
+                f"GitHub read={github_available}; write={github_write}; merge={github_merge}",
             ),
             WorkbenchCapability(
                 "workbench:browser",
