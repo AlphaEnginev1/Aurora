@@ -24,6 +24,7 @@ from ..errors import (
     ProviderTimeoutError,
     ProviderTransportError,
 )
+from ..multimodal import MultimodalContentError, openai_messages
 from ..models import (
     InferenceRequest,
     InferenceResponse,
@@ -80,9 +81,20 @@ class NVIDIAAPIProvider:
                 context=context,
             )
 
+        try:
+            messages = openai_messages(
+                request.messages,
+                allowed_modalities=frozenset({"text", "image"}),
+            )
+        except MultimodalContentError as exc:
+            raise ProviderResponseError(
+                f"NVIDIA request contains unsupported multimodal content: {exc}",
+                context=context,
+            ) from exc
+
         payload = {
             "model": request.model or self.spec.id,
-            "messages": request.messages,
+            "messages": messages,
         }
         if request.temperature is not None:
             payload["temperature"] = request.temperature
