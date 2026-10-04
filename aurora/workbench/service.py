@@ -366,7 +366,7 @@ class UniversalWorkbench:
         )
 
     @staticmethod
-    def _github_json_arg(request: WorkbenchRequest) -> dict[str, Any]:
+    def _github_json_arg(request: WorkbenchRequest, required: tuple[str, ...] = ()) -> dict[str, Any]:
         if not request.arguments:
             raise WorkbenchError("GitHub operation requires a JSON argument")
         try:
@@ -375,17 +375,20 @@ class UniversalWorkbench:
             raise WorkbenchError("GitHub operation argument must be valid JSON") from exc
         if not isinstance(value, dict):
             raise WorkbenchError("GitHub operation argument must be an object")
+        missing = [key for key in required if key not in value]
+        if missing:
+            raise WorkbenchError("GitHub operation is missing required fields: " + ", ".join(missing))
         return value
 
     def _github_branch(self, request: WorkbenchRequest) -> WorkbenchResult:
-        value = self._github_json_arg(request)
+        value = self._github_json_arg(request, ("owner", "repo", "branch", "sha"))
         result = self.github.create_branch(
             str(value["owner"]), str(value["repo"]), str(value["branch"]), str(value["sha"])
         )
         return WorkbenchResult(request.capability, "github_branch", "succeeded", output=result, provenance="github-api")
 
     def _github_file_write(self, request: WorkbenchRequest) -> WorkbenchResult:
-        value = self._github_json_arg(request)
+        value = self._github_json_arg(request, ("owner", "repo", "path", "content", "message", "branch"))
         result = self.github.upsert_file(
             str(value["owner"]), str(value["repo"]), str(value["path"]),
             str(value["content"]), str(value["message"]), str(value["branch"]),
@@ -394,7 +397,7 @@ class UniversalWorkbench:
         return WorkbenchResult(request.capability, "github_file_write", "succeeded", output=result, provenance="github-api")
 
     def _github_pr(self, request: WorkbenchRequest) -> WorkbenchResult:
-        value = self._github_json_arg(request)
+        value = self._github_json_arg(request, ("owner", "repo", "title", "head", "base"))
         result = self.github.create_pull_request(
             str(value["owner"]), str(value["repo"]), str(value["title"]),
             str(value["head"]), str(value["base"]), str(value.get("body") or ""),
@@ -403,7 +406,7 @@ class UniversalWorkbench:
         return WorkbenchResult(request.capability, "github_pr", "succeeded", output=result, provenance="github-api")
 
     def _github_merge(self, request: WorkbenchRequest) -> WorkbenchResult:
-        value = self._github_json_arg(request)
+        value = self._github_json_arg(request, ("owner", "repo", "number"))
         result = self.github.merge_pull_request(
             str(value["owner"]), str(value["repo"]), int(value["number"]),
             method=str(value.get("method") or "merge"),
@@ -413,7 +416,7 @@ class UniversalWorkbench:
         return WorkbenchResult(request.capability, "github_merge", status, output=result, provenance="github-api")
 
     def _github_workflow_runs(self, request: WorkbenchRequest) -> WorkbenchResult:
-        value = self._github_json_arg(request)
+        value = self._github_json_arg(request, ("owner", "repo"))
         result = self.github.workflow_runs(
             str(value["owner"]), str(value["repo"]),
             branch=str(value["branch"]) if value.get("branch") else None,
