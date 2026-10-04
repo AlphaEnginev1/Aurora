@@ -85,9 +85,13 @@ def test_gemini_translation_preserves_inline_image(monkeypatch):
         def read(self):
             return json.dumps({"candidates": [{"content": {"parts": [{"text": "ok"}]}}]}).encode()
 
+    def fake_urlopen(request, timeout):
+        captured["request"] = request
+        return Response()
+
     monkeypatch.setattr(
         "aurora.orchestration.gemini_provider.urlopen",
-        lambda request, timeout: (captured.setdefault("request", request) or Response()),
+        fake_urlopen,
     )
     provider = GeminiDirectorProvider(
         GeminiDirectorConfig(api_key="test-key", model="gemini-3.7-flash")
