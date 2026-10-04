@@ -12,6 +12,7 @@ from uuid import uuid4
 
 from .director import DirectorPlanError
 from .director_handoff_store import DirectorHandoff, DirectorHandoffRejected, DirectorHandoffStore
+from .director_eligibility import DirectorEligibilityError, DirectorEligibilityStore
 from .director_ownership import DirectorOwnership, DirectorOwnershipRejected, DirectorOwnershipStore
 from .director_decision_learning import DirectorDecisionLearning
 from .director_decision_performance import DirectorDecisionPerformanceStore
@@ -87,6 +88,10 @@ class DirectorRuntime:
     """Own continuous mission execution and adaptive Director review."""
 
     TERMINAL = frozenset({"succeeded", "failed", "blocked"})
+    DIRECTOR_CONTROL_CAPABILITIES = (
+        "durable_mission_access",
+        "durable_ownership_access",
+    )
 
     def __init__(
         self,
@@ -95,6 +100,7 @@ class DirectorRuntime:
         store: DurableTaskStore,
         director_ownership: DirectorOwnershipStore | None = None,
         director_handoff_store: DirectorHandoffStore | None = None,
+        director_eligibility: DirectorEligibilityStore | None = None,
         director_lease_seconds: float = 30.0,
         ownership_now_fn: Callable[[], str] | None = None,
         event_bus: DurableEventBus | None = None,
@@ -148,11 +154,14 @@ class DirectorRuntime:
         self.memory = memory or MissionMemory(store)
         self.director_ownership = director_ownership or DirectorOwnershipStore(store.path)
         self.director_handoff_store = director_handoff_store or DirectorHandoffStore(store.path)
+        self.director_eligibility = director_eligibility
         self.director_lease_seconds = director_lease_seconds
         self._ownership_now = ownership_now_fn or DirectorOwnershipStore._now
         self._mission_ownership: dict[str, DirectorOwnership] = {}
         self._handoff_lock = RLock()
         self.worker_policy = worker_policy or WorkerPolicy()
+        if self.director_eligibility is not None and worker_id is None:
+            worker_id = self.director_eligibility.resolve_unique_identity()
         self.worker_id = worker_id or f"director-worker-{uuid4().hex[:12]}"
         self.event_batch_size = event_batch_size
         self.idle_sleep_seconds = idle_sleep_seconds
@@ -1859,6 +1868,45 @@ class DirectorRuntime:
             payload=payload,
         )
 
+    def _director_is_eligible(self, mission_id: str, *, now: str) -> bool:
+        """Gate Director control on the authoritative durable eligibility source."""
+        if self.director_eligibility is None:
+            return True
+        try:
+            decision = self.director_eligibility.evaluate(
+                self.worker_id,
+                now=now,
+                required_capabilities=self.DIRECTOR_CONTROL_CAPABILITIES,
+            )
+        except DirectorEligibilityError as exc:
+            self.event_bus.publish(
+                mission_id=mission_id,
+                event_type="director_eligibility_rejected",
+                payload={
+                    "director_id": self.worker_id,
+                    "eligible": False,
+                    "reason": str(exc),
+                    "source": "authoritative_durable_eligibility",
+                },
+            )
+            return False
+        if not decision.eligible:
+            record = decision.record
+            self.event_bus.publish(
+                mission_id=mission_id,
+                event_type="director_eligibility_rejected",
+                payload={
+                    "director_id": self.worker_id,
+                    "eligible": False,
+                    "reason": decision.reason,
+                    "generation": record.generation if record else None,
+                    "state": record.state if record else None,
+                    "source": "authoritative_durable_eligibility",
+                },
+            )
+            return False
+        return True
+
     def _ensure_mission_ownership(self, mission_id: str) -> bool:
         """Acquire or renew mission ownership, honoring a cooperative handoff."""
         if not self._recovery_fail_closed(mission_id):
@@ -1866,6 +1914,8 @@ class DirectorRuntime:
         now = self._ownership_now()
         handoff = self.director_handoff_store.get_active_for_mission(mission_id)
         current = self.director_ownership.get(mission_id, now=now)
+        if not self._director_is_eligible(mission_id, now=now):
+            return False
 
         if handoff is not None:
             if handoff.state in {"REQUESTED", "QUIESCING"}:
@@ -1882,6 +1932,8 @@ class DirectorRuntime:
                     ownership = current
                 else:
                     if current is not None and current.lease_until > now:
+                        return False
+                    if not self._director_is_eligible(mission_id, now=self._ownership_now()):
                         return False
                     try:
                         ownership = self.director_ownership.acquire(
@@ -2028,6 +2080,8 @@ class DirectorRuntime:
         # before acquire() advances the fencing epoch so the emitted event
         # distinguishes a real takeover from first acquisition.
         previous_ownership = self.director_ownership.get(mission_id)
+        if not self._director_is_eligible(mission_id, now=self._ownership_now()):
+            return False
         try:
             ownership = self.director_ownership.acquire(
                 mission_id,
