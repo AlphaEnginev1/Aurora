@@ -11,6 +11,8 @@ from urllib.parse import urlparse
 
 from aurora.autonomy.policy import Policy
 from aurora.workbench.artifacts import ArtifactError, ArtifactInspector
+from aurora.workbench.local_computer import LocalComputerError, LocalComputerGateway
+from aurora.workbench.mcp import MCPBridgeError, MCPClientBridge, MCPRegistry
 from aurora.workbench.session import WorkSessionStore
 from aurora.autonomy.computer_operator import (
     ComputerAction,
@@ -47,6 +49,12 @@ class UniversalWorkbench:
         self.policy = policy
         self.session_store = session_store
         self.artifacts = ArtifactInspector()
+        registry_path = self.repository_root / "config" / "mcp-registry.json"
+        if not registry_path.is_file():
+            registry_path = Path(__file__).resolve().parents[2] / "config" / "mcp-registry.json"
+        self.mcp_registry = MCPRegistry(str(registry_path))
+        self.mcp = MCPClientBridge(self.mcp_registry)
+        self.local_computer = LocalComputerGateway()
         self.audit_path = Path(audit_path) if audit_path else None
         roots = [self.repository_root, self.runtime_root]
         environment_roots = os.getenv("AURORA_WORKBENCH_ROOTS", "").strip()
@@ -59,9 +67,11 @@ class UniversalWorkbench:
 
     def census(self) -> tuple[WorkbenchCapability, ...]:
         browser_available = self._playwright_available()
+        computer_available = self._local_computer_available()
         return (
             WorkbenchCapability("workbench:file", "file", True, True, True, "scoped local filesystem"),
             WorkbenchCapability("workbench:artifact", "artifact", True, True, True, "hashable artifact intake"),
+            WorkbenchCapability("workbench:document", "document", True, True, True, "bounded extraction from supported work formats"),
             WorkbenchCapability(
                 "workbench:github",
                 "connector",
@@ -77,6 +87,15 @@ class UniversalWorkbench:
                 browser_available,
                 browser_available,
                 "Playwright browser automation",
+            ),
+            WorkbenchCapability("workbench:mcp", "integration", True, True, True, "MCP v2 client bridge"),
+            WorkbenchCapability(
+                "workbench:computer",
+                "desktop",
+                computer_available,
+                computer_available,
+                computer_available,
+                "Local workstation companion when installed and authenticated",
             ),
         )
 
@@ -129,13 +148,19 @@ class UniversalWorkbench:
                 result = self._artifact_inspect(request)
             elif capability == "workbench:document:extract":
                 result = self._document_extract(request)
+            elif capability == "workbench:mcp:list_tools":
+                result = self._mcp_list_tools(request)
+            elif capability == "workbench:mcp:call":
+                result = self._mcp_call(request)
+            elif capability == "workbench:computer":
+                result = self._computer_action(request)
             elif capability == "workbench:github:get":
                 result = self._github_get(request)
             elif capability == "workbench:browser":
                 result = self._browser_run(request)
             else:
                 raise WorkbenchError(f"unsupported Workbench capability: {capability}")
-        except (WorkbenchError, GitHubConnectorError, ComputerOperatorError, ArtifactError) as exc:
+        except (WorkbenchError, GitHubConnectorError, ComputerOperatorError, ArtifactError, MCPBridgeError, LocalComputerError) as exc:
             result = WorkbenchResult(capability, capability, "failed", error=str(exc))
         self._audit(request, result)
         if result.status == "failed":
@@ -213,6 +238,43 @@ class UniversalWorkbench:
             provenance=str(path),
         )
 
+    def _mcp_list_tools(self, request: WorkbenchRequest) -> WorkbenchResult:
+        if not request.arguments:
+            raise WorkbenchError("workbench:mcp:list_tools requires server_id")
+        server_id = request.arguments[0].strip()
+        tools = self.mcp.list_tools(server_id)
+        return WorkbenchResult(request.capability, "mcp_list_tools", "succeeded", output=tools, provenance="mcp:"+server_id)
+
+    def _mcp_call(self, request: WorkbenchRequest) -> WorkbenchResult:
+        if len(request.arguments) < 2:
+            raise WorkbenchError("workbench:mcp:call requires server_id and tool name")
+        server_id, name = request.arguments[0].strip(), request.arguments[1].strip()
+        raw = request.arguments[2] if len(request.arguments) >= 3 else "{}"
+        try:
+            arguments = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise WorkbenchError("MCP tool arguments must be valid JSON") from exc
+        result = self.mcp.call_tool(server_id, name, arguments)
+        status = "failed" if result.get("is_error") else "succeeded"
+        return WorkbenchResult(request.capability, "mcp_call", status, output=result, provenance="mcp:"+server_id)
+
+    def _computer_action(self, request: WorkbenchRequest) -> WorkbenchResult:
+        if not request.arguments:
+            raise WorkbenchError("workbench:computer requires a JSON action list")
+        try:
+            actions = json.loads(request.arguments[0])
+        except json.JSONDecodeError as exc:
+            raise WorkbenchError("computer action plan must be valid JSON") from exc
+        if not isinstance(actions, list):
+            raise WorkbenchError("computer action plan must be a JSON array")
+        output = self.local_computer.execute(actions, mission_id=request.mission_id, actor=request.actor)
+        return WorkbenchResult(request.capability, "computer", "succeeded", output=output, provenance="local-computer-gateway")
+
+    def _local_computer_available(self) -> bool:
+        try:
+            return self.local_computer.available()
+        except LocalComputerError:
+            return False
     def _artifact_inspect(self, request: WorkbenchRequest) -> WorkbenchResult:
         if not request.arguments:
             raise WorkbenchError("workbench:artifact:inspect requires a source path")

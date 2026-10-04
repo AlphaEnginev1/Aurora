@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "description": "Aurora MCP server catalog. Secrets are referenced by environment variable name only.",
+  "servers": [
+    {
+      "server_id": "placeholder",
+      "enabled": false,
+      "transport": "streamable-http",
+      "url": "https://example.invalid/mcp",
+      "header_env": {}
+    }
+  ]
+}
