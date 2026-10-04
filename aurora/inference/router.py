@@ -9,6 +9,7 @@ if TYPE_CHECKING:
     from aurora.context import ContextGate
 
 from .models import InferenceRequest, InferenceResponse, ModelSpec, new_execution_id
+from .multimodal import MultimodalContentError, message_modalities
 from .registry import ModelRegistry, ModelRegistryError
 from .providers.registry import ProviderRegistry, ProviderRegistryError, default_provider_registry
 
@@ -106,6 +107,11 @@ class ModelRouter:
             )
 
         candidates = self.available()
+        try:
+            modalities = message_modalities(request.messages)
+        except MultimodalContentError as exc:
+            raise ModelRoutingError(f"Invalid multimodal request: {exc}") from exc
+        required_modalities = {item for item in modalities if item != "text"}
         allowed_models = _allowed_models(request)
         if allowed_models is not None:
             candidates = [m for m in candidates if m.id in allowed_models]
