@@ -13,6 +13,7 @@ from uuid import uuid4
 from aurora.inference.models import InferenceRequest, InferenceResponse
 from aurora.inference.router import ModelRouter, ModelRoutingError
 from .director_provider import DirectorProvider, DirectorToolSpec, InferenceDirectorProvider
+from aurora.workbench import UniversalWorkbench, WorkbenchRequest
 
 from .director_bootstrap import DirectorBootstrap, DirectorBootstrapError
 
@@ -69,6 +70,7 @@ Answer the human clearly and naturally.
 Use authoritative Aurora context supplied with the request.
 Never claim that an action, task, tool call, research result, or state change occurred unless authoritative evidence establishes it.
 When the human explicitly asks Aurora to perform real work, use the governed run_mission tool instead of merely describing what could be done.
+When you need direct evidence from Aurora's shared tools, use the governed workbench tool.
 When the human is only asking a question or having a conversation, answer directly without creating work.
 Keep responses useful and concise unless the human asks for depth."""
 
@@ -86,6 +88,21 @@ Keep responses useful and concise unless the human asks for depth."""
         },
     )
 
+    _WORKBENCH_TOOL = DirectorToolSpec(
+        name="workbench",
+        description="Execute one governed Universal Workbench capability directly for inspection or evidence. Use run_mission instead when the human asks Aurora to perform a full mission.",
+        parameters={
+            "type": "object",
+            "required": ["capability"],
+            "properties": {
+                "capability": {"type": "string"},
+                "arguments": {"type": "array", "items": {"type": "string"}},
+                "options": {"type": "object"},
+            },
+            "additionalProperties": False,
+        },
+    )
+
     def __init__(
         self,
         *,
@@ -95,6 +112,7 @@ Keep responses useful and concise unless the human asks for depth."""
         max_history_turns: int = 20,
         provider: DirectorProvider | None = None,
         mission_runner: Callable[..., Any] | None = None,
+        workbench: UniversalWorkbench | None = None,
     ) -> None:
         if max_history_turns < 1:
             raise DirectorConversationError("max_history_turns must be at least 1")
@@ -104,6 +122,7 @@ Keep responses useful and concise unless the human asks for depth."""
         self.max_history_turns = max_history_turns
         self.provider: DirectorProvider = provider or InferenceDirectorProvider(router)
         self.mission_runner = mission_runner
+        self.workbench = workbench
         self.router.configure_context_gate(bootstrap.context_gate, enforce=True)
         self._initialize_schema()
 
@@ -255,7 +274,7 @@ Keep responses useful and concise unless the human asks for depth."""
                     messages=provider_messages,
                     model=model,
                     role="director_conversation",
-                    tools=((self._RUN_MISSION_TOOL,) if self.mission_runner is not None else ()),
+                    tools=self._conversation_tools(),
                 )
                 if getattr(response, "tool_calls", ()):
                     response = self._execute_conversation_tools(
@@ -342,44 +361,89 @@ Keep responses useful and concise unless the human asks for depth."""
             },
         )
 
+
+    def _conversation_tools(self) -> tuple[DirectorToolSpec, ...]:
+        tools: list[DirectorToolSpec] = []
+        if self.mission_runner is not None:
+            tools.append(self._RUN_MISSION_TOOL)
+        if self.workbench is not None:
+            tools.append(self._WORKBENCH_TOOL)
+        return tuple(tools)
+
     def _execute_conversation_tools(
         self, *, response: Any, model: str | None, provider_messages: list[dict[str, Any]]
     ) -> Any:
-        if self.mission_runner is None:
-            raise DirectorConversationError("Director requested execution but mission runner is unavailable")
         calls = tuple(getattr(response, "tool_calls", ()) or ())
         if len(calls) > 4:
-            raise DirectorConversationError("Director requested too many conversation missions")
+            raise DirectorConversationError("Director requested too many conversation tools")
         results: list[dict[str, Any]] = []
+        media_parts: list[dict[str, Any]] = []
         for call in calls:
-            if call.name != self._RUN_MISSION_TOOL.name:
-                raise DirectorConversationError(
-                    f"Director requested unregistered conversation tool: {call.name}"
-                )
             arguments = call.arguments if isinstance(call.arguments, dict) else {}
-            objective = arguments.get("objective")
-            if not isinstance(objective, str) or not objective.strip():
-                raise DirectorConversationError("run_mission requires a non-empty objective")
-            try:
-                mission = self.mission_runner(objective=objective.strip())
-                results.append(self._mission_evidence(mission))
-            except Exception as exc:
-                results.append({
-                    "status": "failed",
-                    "objective": objective.strip(),
-                    "error": str(exc)[:4000],
-                })
+            if call.name == self._RUN_MISSION_TOOL.name:
+                if self.mission_runner is None:
+                    raise DirectorConversationError("run_mission is unavailable")
+                objective = arguments.get("objective")
+                if not isinstance(objective, str) or not objective.strip():
+                    raise DirectorConversationError("run_mission requires a non-empty objective")
+                try:
+                    mission = self.mission_runner(objective=objective.strip())
+                    results.append(self._mission_evidence(mission))
+                except Exception as exc:
+                    results.append({
+                        "status": "failed",
+                        "objective": objective.strip(),
+                        "error": str(exc)[:4000],
+                    })
+                continue
+            if call.name == self._WORKBENCH_TOOL.name:
+                if self.workbench is None:
+                    raise DirectorConversationError("workbench is unavailable")
+                capability = arguments.get("capability")
+                call_args = arguments.get("arguments", [])
+                options = arguments.get("options", {})
+                if not isinstance(capability, str) or not capability.strip():
+                    raise DirectorConversationError("workbench requires a non-empty capability")
+                if not isinstance(call_args, list) or not all(isinstance(item, str) for item in call_args):
+                    raise DirectorConversationError("workbench arguments must be a string array")
+                if not isinstance(options, dict):
+                    raise DirectorConversationError("workbench options must be an object")
+                try:
+                    result = self.workbench.execute(
+                        WorkbenchRequest(
+                            capability=capability.strip(),
+                            actor="director",
+                            mission_id=f"conversation:{call.call_id}",
+                            reason="Director conversation direct Workbench evidence",
+                            arguments=tuple(call_args),
+                            options=dict(options),
+                        )
+                    )
+                    results.append(self._workbench_evidence(result))
+                    self._append_media_parts(media_parts, result.output)
+                except Exception as exc:
+                    results.append({
+                        "status": "failed",
+                        "capability": capability.strip(),
+                        "error": str(exc)[:4000],
+                    })
+                continue
+            raise DirectorConversationError(
+                f"Director requested unregistered conversation tool: {call.name}"
+            )
         evidence = json.dumps(results, ensure_ascii=False, sort_keys=True)
+        evidence_content: list[dict[str, Any]] = [{
+            "modality": "text",
+            "text": (
+                "The following governed Aurora execution evidence is authoritative. "
+                "Report only what it establishes. Do not claim success when execution failed.\n"
+                + "EXECUTION_EVIDENCE:\n" + evidence
+            ),
+        }]
+        evidence_content.extend(media_parts)
         follow_up = [
             *provider_messages,
-            {
-                "role": "system",
-                "content": (
-                    "The following governed Aurora mission execution evidence is authoritative. "
-                    "Report only what it establishes. Do not claim success when execution failed.\n"
-                    + "EXECUTION_EVIDENCE:\n" + evidence
-                ),
-            },
+            {"role": "user", "content": evidence_content},
         ]
         return self.provider.generate(
             messages=follow_up,
@@ -387,6 +451,45 @@ Keep responses useful and concise unless the human asks for depth."""
             role="director_conversation_result",
             tools=(),
         )
+
+
+    @staticmethod
+    def _workbench_evidence(result: Any) -> dict[str, Any]:
+        return {
+            "status": result.status,
+            "capability": result.capability,
+            "operation": result.operation,
+            "output": result.output,
+            "artifact_id": result.artifact_id,
+            "provenance": result.provenance,
+            "receipt_id": result.receipt_id,
+            "correlation_id": result.correlation_id,
+            "error": result.error,
+        }
+
+    @staticmethod
+    def _append_media_parts(target: list[dict[str, Any]], output: Any) -> None:
+        if not isinstance(output, list):
+            return
+        for item in output:
+            if not isinstance(item, dict):
+                continue
+            mime_type = item.get("mime_type") or item.get("mimeType")
+            data = item.get("data")
+            if not isinstance(mime_type, str) or not isinstance(data, str):
+                continue
+            modality = (
+                "image" if mime_type.startswith("image/")
+                else "audio" if mime_type.startswith("audio/")
+                else "video" if mime_type.startswith("video/")
+                else None
+            )
+            if modality:
+                target.append({
+                    "modality": modality,
+                    "mime_type": mime_type,
+                    "data": data,
+                })
 
     @staticmethod
     def _mission_evidence(mission: Any) -> dict[str, Any]:
