@@ -10,6 +10,7 @@ import json
 from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
+from aurora.inference.multimodal import MultimodalContentError, parse_content
 from aurora.workbench import UniversalWorkbench, WorkbenchRequest, WorkbenchResult
 
 
@@ -140,17 +141,22 @@ If no Workbench action is needed, answer normally.
                 )
                 executed += 1
                 results.append(_bounded_result(call, result, self.MAX_RESULT_CHARS))
+            evidence_content: list[dict[str, Any]] = [
+                {
+                    "modality": "text",
+                    "text": (
+                        "WORKBENCH_RESULTS (authoritative Aurora execution evidence):\n"
+                        + json.dumps(results, ensure_ascii=False, sort_keys=True, default=str)
+                        + "\nContinue the task using only this evidence."
+                    ),
+                }
+            ]
+            for result in results:
+                _append_media_parts(evidence_content, result.get("output"))
             messages.extend(
                 (
                     {"role": "assistant", "content": response.content},
-                    {
-                        "role": "user",
-                        "content": (
-                            "WORKBENCH_RESULTS (authoritative Aurora execution evidence):\n"
-                            + json.dumps(results, ensure_ascii=False, sort_keys=True, default=str)
-                            + "\nContinue the task using only this evidence."
-                        ),
-                    },
+                    {"role": "user", "content": evidence_content},
                 )
             )
 
@@ -228,3 +234,36 @@ __all__ = [
     "AgentWorkbenchToolLoop",
     "parse_workbench_calls",
 ]
+
+
+def _append_media_parts(target: list[dict[str, Any]], output: Any) -> None:
+    """Attach embedded media evidence as native multimodal message parts."""
+    candidates: list[Any] = []
+    if isinstance(output, Mapping):
+        candidates.append(output)
+        nested = output.get("results")
+        if isinstance(nested, list):
+            candidates.extend(nested)
+    elif isinstance(output, list):
+        candidates.extend(output)
+    for item in candidates:
+        if not isinstance(item, Mapping):
+            continue
+        mime_type = item.get("mime_type") or item.get("mimeType")
+        data = item.get("data")
+        if not isinstance(mime_type, str) or not isinstance(data, str):
+            continue
+        modality = (
+            "image" if mime_type.startswith("image/")
+            else "audio" if mime_type.startswith("audio/")
+            else "video" if mime_type.startswith("video/")
+            else None
+        )
+        if modality is None:
+            continue
+        part = {"modality": modality, "mime_type": mime_type, "data": data}
+        try:
+            parse_content([part])
+        except MultimodalContentError:
+            continue
+        target.append(part)
