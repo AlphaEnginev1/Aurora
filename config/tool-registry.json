@@ -163,6 +163,12 @@
       "executable": "workbench:preflight"
     },
     {
+      "name": "workbench:capability:resolve",
+      "kind": "builtin",
+      "source": "aurora",
+      "executable": "workbench:capability:resolve"
+    },
+    {
       "name": "workbench:project:inspect",
       "kind": "builtin",
       "source": "aurora",
