@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 import sqlite3
