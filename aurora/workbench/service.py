@@ -12,6 +12,7 @@ from typing import Any, Iterable
 from urllib.parse import urlparse
 
 from aurora.autonomy.capability_resolution import CapabilityResolutionRuntime
+from aurora.autonomy.capability_runtime import CapabilityRuntime, CapabilityExecutionError
 from aurora.autonomy.models import CapabilityRequest
 from aurora.autonomy.policy import Policy
 from aurora.workbench.artifacts import ArtifactError, ArtifactInspector
@@ -50,6 +51,7 @@ class UniversalWorkbench:
         session_store: WorkSessionStore | None = None,
         audit_path: str | Path | None = None,
         resolution: CapabilityResolutionRuntime | None = None,
+        capability_runtime: CapabilityRuntime | None = None,
         research: ResearchService | None = None,
         configured_roots: Iterable[str | Path] = (),
     ) -> None:
@@ -59,6 +61,7 @@ class UniversalWorkbench:
         self.policy = policy
         self.session_store = session_store
         self.resolution = resolution
+        self.capability_runtime = capability_runtime
         self.research = research
         self.artifacts = ArtifactInspector()
         registry_path = self.repository_root / "config" / "mcp-registry.json"
@@ -100,6 +103,14 @@ class UniversalWorkbench:
         github_merge = self.github.merge_enabled and github_available
         mcp_available = any(item.enabled for item in self.mcp_registry.list())
         return (
+            WorkbenchCapability(
+                "workbench:command",
+                "execution",
+                self.capability_runtime is not None,
+                self._policy_allows("workbench:command"),
+                self.capability_runtime is not None and self._policy_allows("workbench:command"),
+                "Registered capability execution through CapabilityRuntime and sandbox",
+            ),
             WorkbenchCapability(
                 "workbench:research",
                 "research",
@@ -238,7 +249,9 @@ class UniversalWorkbench:
                     workspace_root=str(self.repository_root),
                 )
                 self.session_store.record_capability(work_id, capability)
-            if capability == "workbench:research:discover":
+            if capability == "workbench:command":
+                result = self._command_execute(request)
+            elif capability == "workbench:research:discover":
                 result = self._research_discover(request)
             elif capability == "workbench:research:retrieve":
                 result = self._research_retrieve(request, extract=False)
@@ -588,6 +601,74 @@ class UniversalWorkbench:
         return WorkbenchResult(request.capability, "github_workflow_runs", "succeeded", output=result, provenance="github-api")
 
 
+
+
+    def _command_execute(self, request: WorkbenchRequest) -> WorkbenchResult:
+        if self.capability_runtime is None:
+            raise WorkbenchError("capability runtime is not configured")
+        if not request.arguments:
+            raise WorkbenchError("workbench:command requires a JSON execution request")
+        try:
+            value = json.loads(request.arguments[0])
+        except json.JSONDecodeError as exc:
+            raise WorkbenchError("command request must be valid JSON") from exc
+        if not isinstance(value, dict):
+            raise WorkbenchError("command request must be an object")
+        name = str(value.get("capability") or value.get("name") or "").strip()
+        if not name or name.startswith("workbench:"):
+            raise WorkbenchError(
+                "command requires a registered non-Workbench capability name"
+            )
+        args = value.get("args", [])
+        environment = value.get("environment")
+        workspace = str(value.get("workspace") or self.repository_root)
+        if not isinstance(args, list) or not all(isinstance(item, str) for item in args):
+            raise WorkbenchError("command args must be a string array")
+        if environment is not None and (
+            not isinstance(environment, dict)
+            or not all(isinstance(key, str) and isinstance(val, str) for key, val in environment.items())
+        ):
+            raise WorkbenchError("command environment must be a string map")
+        request_obj = CapabilityRequest(
+            name=name,
+            actor=request.actor,
+            reason=request.reason,
+            constraints={
+                "mission_id": request.mission_id,
+                "work_id": str(request.options.get("work_id") or request.mission_id),
+            },
+        )
+        if self.capability_runtime.broker.resolve(request_obj) is None:
+            raise WorkbenchError(f"command capability is not registered: {name}")
+        try:
+            execution = self.capability_runtime.execute(
+                request_obj,
+                workspace=workspace,
+                args=tuple(args),
+                environment=dict(environment or {}),
+            )
+        except CapabilityExecutionError as exc:
+            raise WorkbenchError(str(exc)) from exc
+        return WorkbenchResult(
+            request.capability,
+            "command_execute",
+            "succeeded" if execution.returncode == 0 and not execution.timed_out else "failed",
+            output={
+                "capability": name,
+                "command": list(execution.command),
+                "returncode": execution.returncode,
+                "stdout": execution.stdout,
+                "stderr": execution.stderr,
+                "timed_out": execution.timed_out,
+            },
+            artifact_id=execution.capability.artifact_id,
+            provenance="aurora-capability-runtime",
+            error=(
+                execution.stderr[:4000]
+                if execution.returncode != 0 or execution.timed_out
+                else None
+            ),
+        )
 
     def _research_request(self, request: WorkbenchRequest) -> ResearchRequest:
         if not request.arguments:
