@@ -638,6 +638,8 @@ class UniversalWorkbench:
                 "work_id": str(request.options.get("work_id") or request.mission_id),
             },
         )
+        if self.capability_runtime.broker.resolve(request_obj) is None:
+            raise WorkbenchError(f"command capability is not registered: {name}")
         try:
             execution = self.capability_runtime.execute(
                 request_obj,
