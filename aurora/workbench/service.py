@@ -79,7 +79,7 @@ class UniversalWorkbench:
     def census(self) -> tuple[WorkbenchCapability, ...]:
         browser_available = self._playwright_available()
         computer_available = self._local_computer_available()
-        connector_ready = bool(self.connectors.registry.list())
+        connector_ready = any(item["enabled"] and item["token_configured"] for item in self.connectors.census())
         github_available = self.github.available()
         github_write = self.github.write_enabled and github_available
         github_merge = self.github.merge_enabled and github_available
