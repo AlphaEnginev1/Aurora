@@ -264,7 +264,13 @@ class ProjectIntakeService:
             line = line.strip()
             if line.startswith("url = "):
                 value = line[6:].strip()
-                value = re.sub(r"^git@", "https://", value).replace(":", "/", 1)
+                if value.startswith("git@"):
+                    host_path = value[4:]
+                    host, separator, remote_path = host_path.partition(":")
+                    if separator and host and remote_path:
+                        value = f"https://{host}/{remote_path}"
+                elif value.startswith("ssh://git@"):
+                    value = "https://" + value[len("ssh://git@"):].replace(":", "/", 1)
                 return value.removesuffix(".git")
         return None
 
