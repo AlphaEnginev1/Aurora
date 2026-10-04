@@ -22,7 +22,7 @@ from aurora.research.models import ResearchRequest
 from aurora.research.service import ResearchService
 from aurora.research.store import ResearchStore
 from aurora.context import AuroraContextPlane, ContextGate
-from aurora.workbench import UniversalWorkbench
+from aurora.workbench import UniversalWorkbench, WorkSessionStore
 from aurora.organization import AgentSelector, OrganizationRegistry
 from aurora.projects import ProjectRegistry
 from aurora.observability import ProductionObservability
@@ -339,6 +339,7 @@ def build_director_service(*, inference_policy_path: str | Path, autonomy_policy
         runtime_root=root,
         gateway=gateway,
         policy=policy,
+        session_store=WorkSessionStore(root / "work-sessions.db"),
         audit_path=audit_path,
     )
     orchestration=OrchestrationEngine(
