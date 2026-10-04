@@ -150,7 +150,10 @@ Evidence:
 - runs 1991 and 1992 were green;
 - canonical run 1993 failed on an unrelated existing bubblewrap loopback test, then failed job rerun attempt 2 completed green.
 
-### Acceptance Block 2 — Candidate Eligibility Authority — OPEN
-No dedicated Director eligibility/membership registry was found in the current repository. The next phase defines that authority before automatic election can be considered complete.
+### Candidate Eligibility Authority — CONTRACT COMPLETE
+The authoritative eligibility contract is merged in PR #113. It requires stable identity, explicit eligibility/capabilities, readiness freshness, restart persistence, explicit ineligibility, fail-closed ambiguity, and strict separation from ownership.
+
+### Acceptance Block 2 — Candidate Eligibility — ACTIVE
+Implement deterministic coverage for the contract's eight required cases, then introduce only the minimal durable eligibility source and candidate gate necessary for those tests. Eligibility may filter candidates but may not grant ownership; `DirectorOwnershipStore` remains the only acquisition/fencing authority. Gate 8 remains incomplete until acceptance and canonical CI pass.
 
 No provider/model failover, distributed consensus, dashboard takeover, task-worker lease redesign, or live-authorization changes are part of this block.
