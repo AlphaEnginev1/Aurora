@@ -17,6 +17,12 @@ Increment 11 is closed on canonical main. Gate 8 remains complete.
 9. Force every candidate to fail and verify DirectorProviderFailoverError plus no activation.
 10. Restart from the same runtime database and verify the successful replacement remains active.
 
+## Canonical deterministic acceptance evidence
+
+The deterministic provider, mission, conversation, fail-closed and restart-persistence acceptance suite is green on canonical main after PR #121:
+- PR #121 merged as `69edf62465e6aebea6a064d23b06efc3df38058d`;
+- canonical CI #2104 passed with `test` and `e2e-network` green.
+
 ## Deterministic E2E topology
 
     Gemini(primary fake success)
@@ -40,5 +46,9 @@ The live gate proves:
 - real alternative provider response;
 - durable active-provider persistence;
 - no credential leakage in failover evidence.
+
+Workflow: `.github/workflows/live-director-provider-failover.yml`.
+Environment: `director-provider-failover-live`.
+Status after implementation merge: READY / NOT YET EXECUTED.
 
 No live external execution authorization is activated by this gate.
