@@ -13,6 +13,8 @@ from pathlib import Path
 HOST = os.getenv("AURORA_LOCAL_GATEWAY_BIND", "127.0.0.1")
 PORT = int(os.getenv("AURORA_LOCAL_GATEWAY_PORT", "8790"))
 TOKEN = os.getenv("AURORA_LOCAL_GATEWAY_TOKEN", "").strip()
+ALLOW_GUI = os.getenv("AURORA_LOCAL_ALLOW_GUI", "0").strip().lower() in {"1", "true", "yes"}
+AUDIT_PATH = Path(os.getenv("AURORA_LOCAL_GATEWAY_AUDIT", str(Path.home() / ".aurora-local-gateway-audit.jsonl"))).expanduser()
 MAX_STEPS = 40
 MAX_BODY = 2 * 1024 * 1024
 ROOTS = tuple(Path(item).expanduser().resolve() for item in os.getenv("AURORA_LOCAL_ROOTS", "").split(os.pathsep) if item.strip())
@@ -29,6 +31,13 @@ def _safe_path(raw: str) -> Path:
     if not ROOTS or not any(candidate == root or root in candidate.parents for root in ROOTS):
         raise ValueError("path is outside AURORA_LOCAL_ROOTS")
     return candidate
+
+
+def _audit(mission_id: str, actor: str, action: str, result: str) -> None:
+    AUDIT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    record = {"mission_id": mission_id, "actor": actor, "action": action, "result": result}
+    with AUDIT_PATH.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(record, sort_keys=True) + "\n")
 
 
 def _json(handler: BaseHTTPRequestHandler, status: int, payload: dict) -> None:
@@ -67,7 +76,19 @@ class Handler(BaseHTTPRequestHandler):
             actions = payload.get("actions")
             if not isinstance(actions, list) or len(actions) == 0 or len(actions) > MAX_STEPS:
                 raise ValueError("invalid action list")
-            results = [self._run(action) for action in actions]
+            mission_id = str(payload.get("mission_id", "")).strip()
+            actor = str(payload.get("actor", "")).strip()
+            if not mission_id or not actor:
+                raise ValueError("mission_id and actor are required")
+            results = []
+            for action in actions:
+                try:
+                    result = self._run(action)
+                    _audit(mission_id, actor, str(action.get("action", "unknown")), "succeeded")
+                    results.append(result)
+                except Exception:
+                    _audit(mission_id, actor, str(action.get("action", "unknown")), "failed")
+                    raise
             _json(self, 200, {"ok": True, "results": results})
         except Exception as exc:
             _json(self, 400, {"ok": False, "error": str(exc)[:1000]})
@@ -114,6 +135,8 @@ class Handler(BaseHTTPRequestHandler):
             buffer = io.BytesIO()
             image.save(buffer, format="PNG")
             return {"action": kind, "mime_type": "image/png", "data": base64.b64encode(buffer.getvalue()).decode("ascii")}
+        if kind in {"click", "type", "hotkey"} and not ALLOW_GUI:
+            raise ValueError("GUI mutation actions are disabled; set AURORA_LOCAL_ALLOW_GUI=1")
         if kind == "click":
             try:
                 import pyautogui
