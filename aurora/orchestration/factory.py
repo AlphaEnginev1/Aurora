@@ -416,6 +416,7 @@ def build_director_runtime(*, inference_policy_path: str | Path, autonomy_policy
         if research_discovery_endpoint else None
     )
     research_service=ResearchService(gateway,research_store,discovery=research_discovery)
+    service.task_engine.orchestration._workbench.research = research_service
     model_candidate_store=ModelCandidateStore(runtime_root/"model-candidates.db")
     if service.planner.router.provider_registry is None or service.planner.router.model_registry is None:
         raise RuntimeError("model registries are not configured")
