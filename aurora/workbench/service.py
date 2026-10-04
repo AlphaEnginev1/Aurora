@@ -89,6 +89,16 @@ class UniversalWorkbench:
         if self.policy is not None and not self.policy.allows_capability(capability):
             raise WorkbenchError(f"Workbench capability is denied by policy: {capability}")
         try:
+            if self.session_store is not None:
+                work_id = str(request.options.get("work_id") or request.mission_id).strip()
+                self.session_store.create_or_get(
+                    work_id=work_id,
+                    mission_id=request.mission_id,
+                    actor=request.actor,
+                    environment=str(request.options.get("environment", "local")),
+                    workspace_root=str(self.repository_root),
+                )
+                self.session_store.record_capability(work_id, capability)
             if capability == "workbench:census":
                 result = WorkbenchResult(
                     capability,
@@ -115,6 +125,10 @@ class UniversalWorkbench:
                 result = self._file_write(request)
             elif capability == "workbench:artifact:intake":
                 result = self._artifact_intake(request)
+            elif capability == "workbench:artifact:inspect":
+                result = self._artifact_inspect(request)
+            elif capability == "workbench:document:extract":
+                result = self._document_extract(request)
             elif capability == "workbench:github:get":
                 result = self._github_get(request)
             elif capability == "workbench:browser":
@@ -199,6 +213,47 @@ class UniversalWorkbench:
             provenance=str(path),
         )
 
+    def _artifact_inspect(self, request: WorkbenchRequest) -> WorkbenchResult:
+        if not request.arguments:
+            raise WorkbenchError("workbench:artifact:inspect requires a source path")
+        path = self._safe_path(request.arguments[0], must_exist=True)
+        descriptor = self.artifacts.inspect(path)
+        return WorkbenchResult(
+            request.capability,
+            "inspect",
+            "succeeded",
+            output={
+                "path": descriptor.path,
+                "filename": descriptor.filename,
+                "media_type": descriptor.media_type,
+                "size": descriptor.size,
+                "sha256": descriptor.sha256,
+                "extension": descriptor.extension,
+            },
+            artifact_id=descriptor.sha256[:24],
+            provenance=str(path),
+        )
+
+    def _document_extract(self, request: WorkbenchRequest) -> WorkbenchResult:
+        if not request.arguments:
+            raise WorkbenchError("workbench:document:extract requires a source path")
+        path = self._safe_path(request.arguments[0], must_exist=True)
+        max_chars = int(request.options.get("max_chars", 2_000_000))
+        content = self.artifacts.extract_text(path, max_chars=max_chars)
+        descriptor = self.artifacts.inspect(path)
+        return WorkbenchResult(
+            request.capability,
+            "extract",
+            "succeeded",
+            output={
+                "filename": descriptor.filename,
+                "media_type": descriptor.media_type,
+                "sha256": descriptor.sha256,
+                "text": content,
+            },
+            artifact_id=descriptor.sha256[:24],
+            provenance=str(path),
+        )
     def _artifact_intake(self, request: WorkbenchRequest) -> WorkbenchResult:
         if not request.arguments:
             raise WorkbenchError("workbench:artifact:intake requires a source path")
