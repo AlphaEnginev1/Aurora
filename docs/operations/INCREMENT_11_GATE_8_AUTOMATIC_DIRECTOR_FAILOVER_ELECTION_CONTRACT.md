@@ -1,8 +1,8 @@
 # Increment 11 — Gate 8: Automatic Director Failover / Election Contract
 
-**Status:** CONTRACT COMPLETE; ACCEPTANCE BLOCK 1 VERIFIED; CANDIDATE ELIGIBILITY CONTRACT COMPLETE; ACCEPTANCE BLOCK 2 ACTIVE
-**Canonical prerequisite:** Gates 1–7 and the Gate 8 contract are complete on canonical main.
-**Scope:** Automatic recovery of Director control after an active Director lease expires, within one Aurora installation sharing the same authoritative durable mission/ownership state.
+**Status:** CONTRACT COMPLETE; ACCEPTANCE BLOCK 1 VERIFIED; CANDIDATE ELIGIBILITY CONTRACT COMPLETE; ACCEPTANCE BLOCK 2 CLOSED; ACCEPTANCE BLOCK 3 OPEN  
+**Canonical prerequisite:** Gates 1–7 and the Gate 8 contract are complete on canonical main.  
+**Scope:** Automatic recovery of Director control after an active Director lease expires, within one Aurora installation sharing the same authoritative durable mission/ownership state.  
 **Exclusions:** No distributed consensus, multi-machine membership discovery, provider/model failover, dashboard takeover controls, live-authorization changes, or worker lease redesign.
 
 ## 1. Objective
@@ -20,43 +20,33 @@ The protocol MUST NOT rely on process-local memory to decide ownership.
 ## 2. Required invariants
 
 ### G8-1 — Single authoritative owner
-
 At most one Director may hold an unexpired mission ownership record at a time.
 
 ### G8-2 — Existing fencing authority
-
 Automatic failover MUST use DirectorOwnershipStore acquisition and fencing. Gate 8 MUST NOT create a second ownership authority.
 
 ### G8-3 — Expiry-gated takeover
-
 Automatic takeover MUST NOT replace an unexpired owner. The existing lease-expiry rule remains the boundary unless a separately governed cooperative handoff is already in progress.
 
 ### G8-4 — Deterministic candidate eligibility
-
 The set of Director runtimes eligible to attempt takeover MUST come from an explicit, durable or otherwise authoritative eligibility source. A runtime MUST NOT self-declare arbitrary authority.
 
 ### G8-5 — No split brain
-
 A Director with an expired or fenced epoch MUST be unable to continue authoritative mission-control mutation after another Director acquires a higher epoch.
 
 ### G8-6 — Same mission and graph
-
 Failover MUST continue the existing mission and durable task graph. It MUST NOT create a replacement mission or re-plan solely because the previous Director disappeared.
 
 ### G8-7 — No duplicate execution
-
 Completed work MUST NOT be re-executed solely because failover occurred. Existing task-level leases remain authoritative for worker execution.
 
 ### G8-8 — Deterministic failure behavior
-
 If candidate eligibility, shared ownership state, or durable mission state is contradictory or unavailable, failover MUST stop mission-control mutation rather than guess.
 
 ### G8-9 — Traceability
-
 Automatic failover attempts, successful takeover, rejection, fencing, and recovery outcome MUST be attributable to mission identity, Director identity, fencing epoch, and a correlation identifier.
 
 ### G8-10 — Live authorization remains independent
-
 Automatic Director failover MUST NOT activate live external execution authorization. The existing explicit human authorization boundary remains authoritative.
 
 ## 3. Candidate protocol
@@ -86,13 +76,13 @@ Before runtime implementation, the acceptance design MUST make explicit:
 - how stale candidate records are detected;
 - what happens if no eligible candidate exists.
 
-Gate 8 does not prescribe a specific membership implementation. The authoritative eligibility source must be selected and separately validated before production activation.
+The Candidate Eligibility Authority contract is now complete and its deterministic acceptance is closed. The accepted authority is `DirectorEligibilityStore`, while stable runtime identity remains a runtime/deployment bootstrap invariant.
 
 ## 5. Acceptance scenarios
 
-The subsequent deterministic E2E phase MUST cover at least:
+The full deterministic E2E phase covers at least:
 
-1. A owns mission at epoch E1.
+1. A owns the mission at epoch E1.
 2. A stops renewing and its lease expires.
 3. Two eligible candidates B and C observe the same expired mission.
 4. Both attempt takeover against DirectorOwnershipStore.
@@ -121,9 +111,32 @@ Evidence:
 - PR runs 1991 and 1992 are green;
 - canonical post-merge run 1993 required a rerun of its pre-existing bubblewrap loopback test and rerun attempt 2 completed successfully.
 
-## 5B. Remaining acceptance requirement
+## 5B. Acceptance Block 2 evidence
 
-Acceptance Block 1 is verified. The candidate eligibility authority contract is merged in PR #113. Acceptance Block 2 is active: deterministic tests for eligible/ineligible filtering, revocation race, freshness expiry, unavailable/contradictory source, stable identity across restart, separation from ownership, and cooperative-handoff precedence.
+Candidate Eligibility Authority acceptance is closed on canonical main.
+
+Evidence:
+- PR #115 provided the initial authority implementation and its acceptance cases.
+- PR #116 corrected production wiring and preserved active-owner/cooperative-handoff boundaries.
+- PR #117 formally closed the acceptance documentation.
+- Canonical merge after PR #117: `d4b70b7932d50c33dfcbaa255dfd38a18827a091`.
+- Canonical CI #2042: `success`, with `test` and `e2e-network` both successful.
+
+The accepted boundary is:
+- eligibility filters contenders;
+- the runtime/deployment supplies stable Director identity;
+- DirectorOwnershipStore alone grants mission ownership and advances fencing;
+- cooperative handoff remains authoritative over automatic election;
+- eligibility does not activate live authorization.
+
+## 5C. Acceptance Block 3 — Full Automatic Failover E2E
+
+Block 3 now validates the complete Gate 8 lifecycle using the accepted eligibility authority.
+
+The canonical acceptance plan is:
+`docs/operations/INCREMENT_11_GATE_8_AUTOMATIC_FAILOVER_ACCEPTANCE_PLAN.md`
+
+Block 3 is limited to deterministic E2E acceptance and the minimum test-fixture/runtime wiring required to exercise the already accepted authorities. It does not authorize a new election algorithm or ownership authority.
 
 ## 6. Interaction with cooperative handoff
 
@@ -134,7 +147,6 @@ Automatic failover and cooperative handoff remain distinct state transitions and
 ## 7. Explicit non-goals
 
 This contract does NOT authorize:
-
 - distributed consensus protocols;
 - multi-machine membership discovery;
 - arbitrary self-election;
@@ -147,18 +159,8 @@ This contract does NOT authorize:
 
 ## 8. Phase boundary
 
-This phase authorizes only:
-- the Gate 8 contract;
-- deterministic acceptance-test design;
-- documentation of implementation gaps.
-
-The candidate eligibility contract is merged and Acceptance Block 2 is separately opened. Only implementation directly required to satisfy its deterministic acceptance cases is in scope; all non-goals in Section 7 remain prohibited.
+Block 3 authorizes only deterministic full-path acceptance of the already implemented Gate 8 authorities, plus the narrow test/runtime wiring required to prove that path. All non-goals remain prohibited.
 
 ## 9. Exit criteria
 
-The Gate 8 contract phase closes only when:
-
-- this contract is merged to canonical main;
-- candidate eligibility and race semantics are explicit and reviewable;
-- Acceptance Block 2 is separately scoped and its required cases are explicit;
-- no unrelated Aurora subsystem is modified.
+Gate 8 remains open until Block 3 passes deterministically, required CI is green on the PR, and canonical post-merge CI is green.

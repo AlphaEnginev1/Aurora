@@ -145,15 +145,25 @@ Verified by PR #112:
 - completed work is not repeated;
 - exactly one terminal outcome remains.
 
+### Candidate Eligibility Authority — CLOSED
+The authoritative eligibility contract and acceptance are closed on canonical main. The stable Director identity is a runtime/deployment bootstrap concern; DirectorEligibilityStore is authoritative for eligibility; DirectorOwnershipStore remains authoritative for ownership/fencing.
+
 Evidence:
-- PR #112 merged as c6f5d261ac39d0549f36d339ab6288ffb4a96913;
-- runs 1991 and 1992 were green;
-- canonical run 1993 failed on an unrelated existing bubblewrap loopback test, then failed job rerun attempt 2 completed green.
+- PR #115 and PR #116 merged;
+- PR #117 formally closed the Block 2 acceptance documentation;
+- canonical merge after PR #117 is `d4b70b7932d50c33dfcbaa255dfd38a18827a091`;
+- canonical CI #2042 is green.
 
-### Candidate Eligibility Authority — CONTRACT COMPLETE
-The authoritative eligibility contract is merged in PR #113. It requires stable identity, explicit eligibility/capabilities, readiness freshness, restart persistence, explicit ineligibility, fail-closed ambiguity, and strict separation from ownership.
+### Acceptance Block 3 — Automatic Failover Full E2E — OPEN
+Purpose:
+- connect the accepted eligibility authority to the existing expiry-race E2E;
+- prove eligible/ineligible/stale/ambiguous/unavailable candidate behavior in the full failover path;
+- prove exactly one epoch-advancing winner;
+- prove loser/predecessor fencing;
+- prove winner reconstruction, no duplicate completed work and one terminal outcome;
+- prove winner restart continuity and stale predecessor restart fencing.
 
-### Acceptance Block 2 — Candidate Eligibility — ACTIVE
-Implement deterministic coverage for the contract's eight required cases, then introduce only the minimal durable eligibility source and candidate gate necessary for those tests. Eligibility may filter candidates but may not grant ownership; `DirectorOwnershipStore` remains the only acquisition/fencing authority. Gate 8 remains incomplete until acceptance and canonical CI pass.
+Canonical plan:
+`docs/operations/INCREMENT_11_GATE_8_AUTOMATIC_FAILOVER_ACCEPTANCE_PLAN.md`
 
-No provider/model failover, distributed consensus, dashboard takeover, task-worker lease redesign, or live-authorization changes are part of this block.
+Only the minimum test/fixture/runtime wiring required to prove these behaviors is authorized. No new election algorithm or ownership authority is introduced.
