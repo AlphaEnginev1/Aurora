@@ -496,6 +496,7 @@ def build_director_runtime(*, inference_policy_path: str | Path, autonomy_policy
         bootstrap=bootstrap,
         db_path=runtime_root/"conversations.db",
         provider=service.planner.provider,
+        mission_runner=service.run_mission,
     )
 
     observability=ProductionObservability(runtime_root/"observability.jsonl")
