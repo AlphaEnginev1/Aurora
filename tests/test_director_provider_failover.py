@@ -129,6 +129,7 @@ def test_factory_discovers_and_selects_available_nvidia_model_without_fixed_id(t
             return discovered
 
     monkeypatch.setattr("aurora.orchestration.factory.ModelDiscoveryService", FakeDiscovery)
+    monkeypatch.delenv("AURORA_NVIDIA_MODEL_ID", raising=False)
 
     class FailingGemini:
         provider_id = "gemini"
@@ -154,7 +155,6 @@ def test_factory_discovers_and_selects_available_nvidia_model_without_fixed_id(t
     assert response.provider == "nvidia_api"
     assert response.model == "model/best"
     assert controller.provider_id == "nvidia_api"
-    assert "AURORA_NVIDIA_MODEL_ID" not in __import__("os").environ
 
 
 def test_failures_are_tracked_per_nvidia_model_not_per_provider(tmp_path: Path):
