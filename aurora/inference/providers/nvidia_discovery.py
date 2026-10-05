@@ -86,14 +86,18 @@ class NVIDIAModelDiscoveryProvider:
                 capabilities = _infer_capabilities(model_id)
             specialties = _string_tuple(row.get("specialties"))
             context_window = _positive_int(row.get("context_window"))
+            normalized_model_id = model_id.strip()
             model = ModelSpec(
-                id=model_id.strip(),
+                id=normalized_model_id,
                 provider=self.provider_id,
                 endpoint=self.base_url,
                 capabilities=capabilities,
                 context_window=context_window,
                 enabled=False,
                 specialties=specialties,
+                quality_score=_catalog_quality_score(normalized_model_id),
+                latency_score=_catalog_latency_score(normalized_model_id),
+                cost_score=_catalog_latency_score(normalized_model_id),
                 healthy=False,
                 available=False,
             )
@@ -155,6 +159,43 @@ def _infer_capabilities(model_id: str) -> tuple[str, ...]:
     if any(marker in normalized for marker in _NON_CONVERSATIONAL_MARKERS):
         return ()
     return ("chat", "reasoning")
+
+
+_QUALITY_HINT_MARKERS = (
+    "reason",
+    "think",
+    "instruct",
+    "chat",
+    "gpt",
+    "gemma",
+    "llama",
+    "mistral",
+    "qwen",
+    "kimi",
+    "glm",
+    "nemotron",
+    "deepseek",
+    "granite",
+    "phi",
+    "jamba",
+    "zamba",
+    "palmyra",
+    "yi-",
+)
+
+
+def _catalog_quality_score(model_id: str) -> float:
+    normalized = model_id.strip().lower()
+    if any(marker in normalized for marker in _QUALITY_HINT_MARKERS):
+        return 0.85
+    return 0.65
+
+
+def _catalog_latency_score(model_id: str) -> float:
+    normalized = model_id.strip().lower()
+    if any(marker in normalized for marker in ("flash", "nano", "mini", "small", "lightning")):
+        return 0.8
+    return 0.6
 
 
 def _positive_int(value: Any) -> int | None:
