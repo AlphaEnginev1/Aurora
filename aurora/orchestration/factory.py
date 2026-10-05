@@ -224,7 +224,17 @@ def _build_director_provider_failover(
                     router.model_registry,
                     model_candidate_store,
                 )
-                discovered = discovery.discover_and_stage("nvidia_api")
+                try:
+                    discovered = discovery.discover_and_stage("nvidia_api")
+                except Exception:
+                    # A transient catalog outage must not erase the failover
+                    # path. Reuse the last governed NVIDIA catalog snapshot,
+                    # then let real inference prove whether a model is usable.
+                    discovered = model_candidate_store.list(
+                        provider_id="nvidia_api",
+                        state="discovered",
+                        limit=100,
+                    )
                 if not discovered:
                     continue
 
