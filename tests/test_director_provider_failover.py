@@ -48,6 +48,49 @@ def _candidate(provider_id: str, provider: FakeProvider, model: str) -> Director
     )
 
 
+def test_factory_registers_operator_declared_nvidia_fallback_model(tmp_path: Path, monkeypatch):
+    from aurora.inference.models import ModelSpec
+    from aurora.inference.providers.registry import default_provider_registry
+    from aurora.inference.registry import ModelRegistry
+    from aurora.inference.router import ModelRouter
+    from aurora.orchestration.factory import _ensure_configured_nvidia_failover_model
+
+    settings = OperatorSettingsStore(tmp_path / "operator-settings.json")
+    settings.save({
+        "providers": {
+            "nvidia_api": {
+                "api_key": "nvidia-secret",
+                "base_url": "https://integrate.api.nvidia.com/v1",
+            }
+        }
+    })
+    provider_registry = default_provider_registry(nvidia_api_key="nvidia-secret")
+    registry = ModelRegistry.from_specs(
+        [ModelSpec(
+            "placeholder/nvidia",
+            "nvidia_api",
+            "https://integrate.api.nvidia.com/v1",
+            capabilities=("coding",),
+            enabled=False,
+        )],
+        provider_registry=provider_registry,
+    )
+    router = ModelRouter(
+        models=list(registry.models),
+        nvidia_api_key="nvidia-secret",
+        provider_registry=provider_registry,
+        model_registry=registry,
+    )
+    monkeypatch.setenv("AURORA_NVIDIA_MODEL_ID", "nvidia/real-fallback")
+
+    _ensure_configured_nvidia_failover_model(router, settings)
+
+    model = router.model_registry.resolve("nvidia/real-fallback")
+    assert model.provider == "nvidia_api"
+    assert model.enabled and model.healthy and model.available
+    assert "reasoning" in model.capabilities
+
+
 def test_gemini_failure_switches_to_alternative_and_persists_transition(tmp_path: Path):
     gemini = FakeProvider("gemini", [ProviderFailure("forced Gemini outage")])
     nvidia = FakeProvider("nvidia_api", ["alternative answer"])
