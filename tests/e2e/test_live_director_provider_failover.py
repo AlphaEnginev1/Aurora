@@ -10,10 +10,7 @@ from aurora.inference.registry import ModelRegistry
 from aurora.inference.router import ModelRouter
 from aurora.operator_settings import OperatorSettingsStore
 from aurora.orchestration.director_provider import DirectorModelResponse
-from aurora.orchestration.director_provider_failover import (
-    DirectorProviderFailoverController,
-    DirectorProviderFailoverStore,
-)
+from aurora.orchestration.director_provider_failover import DirectorProviderFailoverStore
 from aurora.orchestration.factory import _build_director_provider_failover
 from aurora.orchestration.gemini_provider import GeminiDirectorProvider
 
@@ -137,7 +134,7 @@ def test_live_gemini_to_dynamically_selected_nvidia_provider_failover(tmp_path):
     assert second.model
     assert controller.provider_id == "nvidia_api"
 
-    evidence = controller._store.list_recent(limit=50)
+    evidence = DirectorProviderFailoverStore(str(tmp_path / "tasks.db")).list_recent(limit=50)
     assert any(row["phase"] == "failure_detected" for row in evidence)
     assert any(
         row["phase"] == "succeeded" and row["to_provider"] == "nvidia_api"
