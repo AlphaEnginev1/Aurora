@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from aurora.inference.models import InferenceResponse
 from aurora.orchestration.director_provider import DirectorModelResponse
 from aurora.operator_settings import OperatorSettingsStore
 from aurora.orchestration.director_provider_failover import (
@@ -155,6 +156,86 @@ def test_factory_discovers_and_selects_available_nvidia_model_without_fixed_id(t
     assert response.provider == "nvidia_api"
     assert response.model == "model/best"
     assert controller.provider_id == "nvidia_api"
+
+
+def test_factory_continues_to_router_when_nvidia_discovery_is_unavailable(tmp_path: Path, monkeypatch):
+    from aurora.inference.models import ModelSpec
+    from aurora.inference.providers.registry import ProviderRegistry, ProviderSpec
+    from aurora.inference.registry import ModelRegistry
+    from aurora.inference.router import ModelRouter
+    from aurora.orchestration.factory import _build_director_provider_failover
+
+    class FakeRouterProvider:
+        provider_id = "nvidia_api"
+
+        def __init__(self, _spec):
+            pass
+
+        def generate(self, request, *, selected_model, execution_id):
+            return InferenceResponse(
+                model=selected_model,
+                provider="nvidia_api",
+                content="router fallback works",
+                request_id=request.request_id,
+                execution_id=execution_id,
+            )
+
+    provider_registry = ProviderRegistry((
+        ProviderSpec(
+            provider_id="nvidia_api",
+            name="NVIDIA NIM API",
+            capabilities=("chat", "reasoning"),
+            enabled=True,
+            factory=lambda spec: FakeRouterProvider(spec),
+        ),
+    ))
+    model_registry = ModelRegistry.from_specs(
+        [ModelSpec(
+            id="existing/nvidia-model",
+            provider="nvidia_api",
+            endpoint="https://integrate.api.nvidia.com/v1",
+            capabilities=("reasoning",),
+            enabled=True,
+            healthy=True,
+            available=True,
+        )],
+        provider_registry=provider_registry,
+    )
+    router = ModelRouter(
+        models=list(model_registry.models),
+        nvidia_api_key="nvidia-secret",
+        provider_registry=provider_registry,
+        model_registry=model_registry,
+    )
+
+    class FailingGemini:
+        provider_id = "gemini"
+
+        def generate(self, **_kwargs):
+            raise ProviderFailure("forced Gemini outage")
+
+    monkeypatch.setattr(
+        "aurora.orchestration.factory.ModelDiscoveryService.discover_and_stage",
+        lambda _self, _provider_id: (_ for _ in ()).throw(RuntimeError("catalog unavailable")),
+    )
+
+    settings = OperatorSettingsStore(tmp_path / "operator-settings.json")
+    settings.save({"providers": {"nvidia_api": {"api_key": "nvidia-secret"}}})
+    controller = _build_director_provider_failover(
+        settings_store=settings,
+        router=router,
+        active_provider=FailingGemini(),
+        db_path=tmp_path / "tasks.db",
+    )
+
+    response = controller.generate(
+        messages=[{"role": "user", "content": "continue"}],
+        model="gemini-3.7-flash",
+        role="director_conversation",
+    )
+
+    assert response.provider == "nvidia_api"
+    assert response.content == "router fallback works"
 
 
 def test_failures_are_tracked_per_nvidia_model_not_per_provider(tmp_path: Path):
