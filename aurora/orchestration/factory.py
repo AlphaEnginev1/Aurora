@@ -179,6 +179,66 @@ def _build_director_provider(
     )
 
 
+def _ensure_configured_nvidia_failover_model(
+    router: ModelRouter,
+    settings_store: OperatorSettingsStore,
+) -> None:
+    """Make the operator-declared NVIDIA fallback model eligible for runtime failover."""
+    key = settings_store.credential("nvidia_api") or os.getenv("NVIDIA_API_KEY", "")
+    model_id = os.getenv("AURORA_NVIDIA_MODEL_ID", "").strip()
+    if not key or not model_id:
+        return
+
+    settings = settings_store.load()
+    base_url = str(
+        settings.get("providers", {})
+        .get("nvidia_api", {})
+        .get("base_url", "https://integrate.api.nvidia.com/v1")
+    ).rstrip("/")
+    try:
+        existing = router.model_registry.resolve(model_id)
+    except Exception:
+        existing = None
+
+    if existing is None:
+        model = ModelSpec(
+            id=model_id,
+            provider="nvidia_api",
+            endpoint=base_url,
+            capabilities=("chat", "reasoning", "tool_use"),
+            context_window=131072,
+            enabled=True,
+            healthy=True,
+            available=True,
+        )
+        router.model_registry = type(router.model_registry).from_specs(
+            [*router.model_registry.models, model],
+            provider_registry=router.provider_registry,
+        )
+        router.models = list(router.model_registry.models)
+        return
+
+    capabilities = tuple(existing.capabilities)
+    if "reasoning" not in capabilities:
+        capabilities = (*capabilities, "reasoning")
+    updated = ModelSpec(
+        id=existing.id,
+        provider=existing.provider,
+        endpoint=base_url,
+        capabilities=capabilities or ("chat", "reasoning", "tool_use"),
+        context_window=existing.context_window or 131072,
+        enabled=True,
+        specialties=existing.specialties,
+        quality_score=existing.quality_score,
+        latency_score=existing.latency_score,
+        cost_score=existing.cost_score,
+        healthy=True,
+        available=True,
+    )
+    router.model_registry.replace(updated)
+    router.models = list(router.model_registry.models)
+
+
 def _build_director_provider_failover(
     *,
     settings_store: OperatorSettingsStore,
@@ -191,6 +251,8 @@ def _build_director_provider_failover(
     failover = director.get("failover", {}) if isinstance(director, dict) else {}
     if not bool(failover.get("enabled", True)):
         return active_provider
+
+    _ensure_configured_nvidia_failover_model(router, settings_store)
 
     order = failover.get("order", ["nvidia_api", "router"])
     if not isinstance(order, list):
