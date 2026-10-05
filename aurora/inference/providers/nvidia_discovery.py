@@ -140,6 +140,7 @@ def _string_tuple(value: Any) -> tuple[str, ...]:
 
 _NON_CONVERSATIONAL_MARKERS = (
     "embed",
+    "embedding",
     "guard",
     "safety",
     "detector",
@@ -150,15 +151,49 @@ _NON_CONVERSATIONAL_MARKERS = (
     "translate",
     "deplot",
     "diffusion",
+    "vision",
+    "visual",
+    "image",
+    "audio",
+    "speech",
+    "asr",
+    "tts",
+    "voice",
+    "video",
+    "rerank",
+    "ranker",
+    "bge-",
+)
+
+
+_CONVERSATIONAL_FAMILY_MARKERS = (
+    "gpt",
+    "llama",
+    "qwen",
+    "gemma",
+    "mistral",
+    "mixtral",
+    "kimi",
+    "glm",
+    "nemotron",
+    "deepseek",
+    "granite",
+    "phi",
+    "jamba",
+    "zamba",
+    "palmyra",
+    "yi-",
 )
 
 
 def _infer_capabilities(model_id: str) -> tuple[str, ...]:
-    """Conservatively classify catalog rows that omit capability metadata."""
+    """Infer only a high-confidence conversational capability from sparse catalog rows."""
     normalized = model_id.strip().lower()
     if any(marker in normalized for marker in _NON_CONVERSATIONAL_MARKERS):
         return ()
-    return ("chat", "reasoning")
+    if any(marker in normalized for marker in _CONVERSATIONAL_FAMILY_MARKERS):
+        return ("chat", "reasoning")
+    return ()
 
 
 _QUALITY_HINT_MARKERS = (
