@@ -199,6 +199,10 @@ class DirectorProviderFailoverController:
         activate: Callable[[DirectorProviderCandidate, DirectorProvider], None],
         event_sink: Callable[[Mapping[str, Any]], None] | None = None,
         context_provider: Callable[[], Mapping[str, Any] | None] | None = None,
+        candidate_resolver: Callable[
+            [list[dict[str, Any]], str | None, str],
+            tuple[DirectorProviderCandidate, ...],
+        ] | None = None,
     ) -> None:
         if not getattr(active_provider, "provider_id", "").strip():
             raise DirectorProviderFailoverError("active Director provider must expose provider_id")
@@ -208,8 +212,9 @@ class DirectorProviderFailoverController:
         self._activate = activate
         self._event_sink = event_sink
         self._context_provider = context_provider
+        self._candidate_resolver = candidate_resolver
         self._lock = RLock()
-        self._failed_provider_ids: set[str] = set()
+        self._failed_candidates: set[tuple[str, str]] = set()
 
     @property
     def provider_id(self) -> str:
@@ -270,12 +275,41 @@ class DirectorProviderFailoverController:
                     error=exc,
                 )
 
-                candidates = tuple(
+                candidates: list[DirectorProviderCandidate] = [
                     candidate
                     for candidate in self._candidates
                     if candidate.provider_id != getattr(active, "provider_id", "")
-                    and candidate.provider_id not in self._failed_provider_ids
-                )
+                    and self._candidate_key(candidate) not in self._failed_candidates
+                ]
+                if self._candidate_resolver is not None:
+                    try:
+                        dynamic_candidates = self._candidate_resolver(messages, model, role)
+                    except Exception as discovery_error:
+                        last_error = discovery_error
+                        self._record_and_emit(
+                            correlation_id=correlation_id,
+                            phase="candidate_discovery_failed",
+                            role=role,
+                            from_provider=getattr(active, "provider_id", "unknown"),
+                            from_model=model,
+                            to_provider=None,
+                            to_model=None,
+                            error=discovery_error,
+                        )
+                        dynamic_candidates = ()
+                    else:
+                        dynamic_candidates = tuple(dynamic_candidates or ())
+                    seen = {
+                        self._candidate_key(candidate)
+                        for candidate in candidates
+                    }
+                    candidates.extend(
+                        candidate
+                        for candidate in dynamic_candidates
+                        if candidate.provider_id != getattr(active, "provider_id", "")
+                        and self._candidate_key(candidate) not in self._failed_candidates
+                        and self._candidate_key(candidate) not in seen
+                    )
                 last_error: Exception = exc
                 for candidate in candidates:
                     attempt_id = f"director-provider-failover:{correlation_id}:{candidate.provider_id}"
@@ -334,7 +368,7 @@ class DirectorProviderFailoverController:
                         return response
                     except Exception as replacement_error:
                         last_error = replacement_error
-                        self._failed_provider_ids.add(candidate.provider_id)
+                        self._failed_candidates.add(self._candidate_key(candidate))
                         self._store.record(
                             transition_id=f"{attempt_id}:failed",
                             correlation_id=correlation_id,
@@ -384,6 +418,13 @@ class DirectorProviderFailoverController:
                 raise DirectorProviderFailoverError(
                     f"Director provider failover exhausted after {getattr(active, 'provider_id', 'unknown')} failed"
                 ) from last_error
+
+    @staticmethod
+    def _candidate_key(candidate: DirectorProviderCandidate) -> tuple[str, str]:
+        return (
+            candidate.provider_id,
+            str(candidate.model or "").strip(),
+        )
 
     def _correlation_id(self, provider: DirectorProvider) -> str:
         context = self._context_provider() if self._context_provider is not None else None

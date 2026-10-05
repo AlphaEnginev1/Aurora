@@ -48,47 +48,141 @@ def _candidate(provider_id: str, provider: FakeProvider, model: str) -> Director
     )
 
 
-def test_factory_registers_operator_declared_nvidia_fallback_model(tmp_path: Path, monkeypatch):
-    from aurora.inference.models import ModelSpec
-    from aurora.inference.providers.registry import default_provider_registry
+def test_factory_discovers_and_selects_available_nvidia_model_without_fixed_id(tmp_path: Path, monkeypatch):
+    from aurora.inference.discovery import DiscoveredModelCandidate, candidate_id
+    from aurora.inference.models import InferenceResponse, ModelSpec
+    from aurora.inference.providers.registry import ProviderRegistry, ProviderSpec
     from aurora.inference.registry import ModelRegistry
     from aurora.inference.router import ModelRouter
-    from aurora.orchestration.factory import _ensure_configured_nvidia_failover_model
+    from aurora.orchestration.factory import _build_director_provider_failover
 
-    settings = OperatorSettingsStore(tmp_path / "operator-settings.json")
-    settings.save({
-        "providers": {
-            "nvidia_api": {
-                "api_key": "nvidia-secret",
-                "base_url": "https://integrate.api.nvidia.com/v1",
-            }
-        }
-    })
-    provider_registry = default_provider_registry(nvidia_api_key="nvidia-secret")
-    registry = ModelRegistry.from_specs(
-        [ModelSpec(
-            "placeholder/nvidia",
-            "nvidia_api",
-            "https://integrate.api.nvidia.com/v1",
-            capabilities=("coding",),
-            enabled=False,
-        )],
-        provider_registry=provider_registry,
-    )
+    class FakeNvidiaInferenceProvider:
+        provider_id = "nvidia_api"
+
+        def __init__(self, _model):
+            pass
+
+        def generate(self, request, *, selected_model, execution_id):
+            return InferenceResponse(
+                model=selected_model,
+                provider="nvidia_api",
+                content="NVIDIA dynamic replacement",
+                request_id=request.request_id,
+                execution_id=execution_id,
+            )
+
+    def factory(model):
+        return FakeNvidiaInferenceProvider(model)
+
+    provider_registry = ProviderRegistry((
+        ProviderSpec(
+            provider_id="nvidia_api",
+            name="NVIDIA NIM API",
+            capabilities=("chat", "reasoning"),
+            enabled=True,
+            factory=factory,
+        ),
+    ))
+    model_registry = ModelRegistry([], provider_registry=provider_registry)
     router = ModelRouter(
-        models=list(registry.models),
+        models=[],
         nvidia_api_key="nvidia-secret",
         provider_registry=provider_registry,
-        model_registry=registry,
+        model_registry=model_registry,
     )
-    monkeypatch.setenv("AURORA_NVIDIA_MODEL_ID", "nvidia/real-fallback")
 
-    _ensure_configured_nvidia_failover_model(router, settings)
+    discovered = (
+        DiscoveredModelCandidate(
+            candidate_id=candidate_id("nvidia_api", "model/slow"),
+            provider_id="nvidia_api",
+            model=ModelSpec(
+                id="model/slow",
+                provider="nvidia_api",
+                endpoint="https://integrate.api.nvidia.com/v1",
+                capabilities=("reasoning",),
+                quality_score=0.2,
+            ),
+            metadata={},
+            discovered_at="2026-10-05T00:00:00+00:00",
+        ),
+        DiscoveredModelCandidate(
+            candidate_id=candidate_id("nvidia_api", "model/best"),
+            provider_id="nvidia_api",
+            model=ModelSpec(
+                id="model/best",
+                provider="nvidia_api",
+                endpoint="https://integrate.api.nvidia.com/v1",
+                capabilities=("reasoning",),
+                quality_score=0.9,
+            ),
+            metadata={},
+            discovered_at="2026-10-05T00:00:00+00:00",
+        ),
+    )
 
-    model = router.model_registry.resolve("nvidia/real-fallback")
-    assert model.provider == "nvidia_api"
-    assert model.enabled and model.healthy and model.available
-    assert "reasoning" in model.capabilities
+    class FakeDiscovery:
+        def __init__(self, *_args):
+            pass
+
+        def discover_and_stage(self, provider_id):
+            assert provider_id == "nvidia_api"
+            return discovered
+
+    monkeypatch.setattr("aurora.orchestration.factory.ModelDiscoveryService", FakeDiscovery)
+    monkeypatch.delenv("AURORA_NVIDIA_MODEL_ID", raising=False)
+
+    class FailingGemini:
+        provider_id = "gemini"
+
+        def generate(self, **_kwargs):
+            raise ProviderFailure("forced Gemini outage")
+
+    settings = OperatorSettingsStore(tmp_path / "operator-settings.json")
+    settings.save({"providers": {"nvidia_api": {"api_key": "nvidia-secret"}}})
+    controller = _build_director_provider_failover(
+        settings_store=settings,
+        router=router,
+        active_provider=FailingGemini(),
+        db_path=tmp_path / "tasks.db",
+    )
+
+    response = controller.generate(
+        messages=[{"role": "user", "content": "continue"}],
+        model="gemini-3.7-flash",
+        role="director_planner",
+    )
+
+    assert response.provider == "nvidia_api"
+    assert response.model == "model/best"
+    assert controller.provider_id == "nvidia_api"
+
+
+def test_failures_are_tracked_per_nvidia_model_not_per_provider(tmp_path: Path):
+    gemini = FakeProvider("gemini", [ProviderFailure("forced Gemini outage")])
+    first = FakeProvider("nvidia_api", [ProviderFailure("model A outage")])
+    second = FakeProvider("nvidia_api", ["model B works"])
+    store = DirectorProviderFailoverStore(str(tmp_path / "runtime.db"))
+    controller = DirectorProviderFailoverController(
+        active_provider=gemini,
+        candidates=(),
+        store=store,
+        activate=lambda _candidate, _provider: None,
+        candidate_resolver=lambda _messages, _model, _role: (
+            _candidate("nvidia_api", first, "nvidia/model-a"),
+            _candidate("nvidia_api", second, "nvidia/model-b"),
+        ),
+    )
+
+    response = controller.generate(
+        messages=[{"role": "user", "content": "continue"}],
+        model="gemini/test-model",
+        role="director_planner",
+    )
+
+    assert response.provider == "nvidia_api"
+    assert response.content == "model B works"
+    assert first.calls == 1
+    assert second.calls == 1
 
 
 def test_gemini_failure_switches_to_alternative_and_persists_transition(tmp_path: Path):
