@@ -82,6 +82,8 @@ class NVIDIAModelDiscoveryProvider:
                 continue
 
             capabilities = _string_tuple(row.get("capabilities"))
+            if not capabilities:
+                capabilities = _infer_capabilities(model_id)
             specialties = _string_tuple(row.get("specialties"))
             context_window = _positive_int(row.get("context_window"))
             model = ModelSpec(
@@ -130,6 +132,29 @@ def _string_tuple(value: Any) -> tuple[str, ...]:
             }
         )
     )
+
+
+_NON_CONVERSATIONAL_MARKERS = (
+    "embed",
+    "guard",
+    "safety",
+    "detector",
+    "parse",
+    "reward",
+    "calibration",
+    "clip",
+    "translate",
+    "deplot",
+    "diffusion",
+)
+
+
+def _infer_capabilities(model_id: str) -> tuple[str, ...]:
+    """Conservatively classify catalog rows that omit capability metadata."""
+    normalized = model_id.strip().lower()
+    if any(marker in normalized for marker in _NON_CONVERSATIONAL_MARKERS):
+        return ()
+    return ("chat", "reasoning")
 
 
 def _positive_int(value: Any) -> int | None:
