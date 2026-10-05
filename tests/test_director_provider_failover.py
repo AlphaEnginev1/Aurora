@@ -158,24 +158,25 @@ def test_factory_discovers_and_selects_available_nvidia_model_without_fixed_id(t
     assert controller.provider_id == "nvidia_api"
 
 
-def test_factory_continues_to_router_when_nvidia_discovery_is_unavailable(tmp_path: Path, monkeypatch):
-    from aurora.inference.models import ModelSpec
+def test_factory_uses_cached_nvidia_catalog_when_live_discovery_is_unavailable(tmp_path: Path, monkeypatch):
+    from aurora.inference.discovery import DiscoveredModelCandidate, ModelCandidateStore, candidate_id
+    from aurora.inference.models import InferenceResponse, ModelSpec
     from aurora.inference.providers.registry import ProviderRegistry, ProviderSpec
     from aurora.inference.registry import ModelRegistry
     from aurora.inference.router import ModelRouter
     from aurora.orchestration.factory import _build_director_provider_failover
 
-    class FakeRouterProvider:
+    class FakeNvidiaInferenceProvider:
         provider_id = "nvidia_api"
 
-        def __init__(self, _spec):
+        def __init__(self, _model):
             pass
 
         def generate(self, request, *, selected_model, execution_id):
             return InferenceResponse(
                 model=selected_model,
                 provider="nvidia_api",
-                content="router fallback works",
+                content="cached NVIDIA replacement",
                 request_id=request.request_id,
                 execution_id=execution_id,
             )
@@ -186,26 +187,35 @@ def test_factory_continues_to_router_when_nvidia_discovery_is_unavailable(tmp_pa
             name="NVIDIA NIM API",
             capabilities=("chat", "reasoning"),
             enabled=True,
-            factory=lambda spec: FakeRouterProvider(spec),
+            factory=lambda model: FakeNvidiaInferenceProvider(model),
         ),
     ))
-    model_registry = ModelRegistry.from_specs(
-        [ModelSpec(
-            id="existing/nvidia-model",
-            provider="nvidia_api",
-            endpoint="https://integrate.api.nvidia.com/v1",
-            capabilities=("reasoning",),
-            enabled=True,
-            healthy=True,
-            available=True,
-        )],
-        provider_registry=provider_registry,
-    )
+    model_registry = ModelRegistry([], provider_registry=provider_registry)
     router = ModelRouter(
-        models=list(model_registry.models),
+        models=[],
         nvidia_api_key="nvidia-secret",
         provider_registry=provider_registry,
         model_registry=model_registry,
+    )
+
+    cached = DiscoveredModelCandidate(
+        candidate_id=candidate_id("nvidia_api", "cached/model"),
+        provider_id="nvidia_api",
+        model=ModelSpec(
+            id="cached/model",
+            provider="nvidia_api",
+            endpoint="https://integrate.api.nvidia.com/v1",
+            capabilities=("reasoning",),
+        ),
+        metadata={},
+        discovered_at="2026-10-05T00:00:00+00:00",
+    )
+    cache = ModelCandidateStore(tmp_path / "model-candidates.db")
+    cache.upsert(cached)
+
+    monkeypatch.setattr(
+        "aurora.orchestration.factory.ModelDiscoveryService.discover_and_stage",
+        lambda _self, _provider_id: (_ for _ in ()).throw(RuntimeError("catalog unavailable")),
     )
 
     class FailingGemini:
@@ -213,11 +223,6 @@ def test_factory_continues_to_router_when_nvidia_discovery_is_unavailable(tmp_pa
 
         def generate(self, **_kwargs):
             raise ProviderFailure("forced Gemini outage")
-
-    monkeypatch.setattr(
-        "aurora.orchestration.factory.ModelDiscoveryService.discover_and_stage",
-        lambda _self, _provider_id: (_ for _ in ()).throw(RuntimeError("catalog unavailable")),
-    )
 
     settings = OperatorSettingsStore(tmp_path / "operator-settings.json")
     settings.save({"providers": {"nvidia_api": {"api_key": "nvidia-secret"}}})
@@ -235,7 +240,8 @@ def test_factory_continues_to_router_when_nvidia_discovery_is_unavailable(tmp_pa
     )
 
     assert response.provider == "nvidia_api"
-    assert response.content == "router fallback works"
+    assert response.model == "cached/model"
+    assert response.content == "cached NVIDIA replacement"
 
 
 def test_failures_are_tracked_per_nvidia_model_not_per_provider(tmp_path: Path):
