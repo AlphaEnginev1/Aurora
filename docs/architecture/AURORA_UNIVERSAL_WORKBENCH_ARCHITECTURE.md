@@ -1,8 +1,8 @@
 # Aurora Universal Workbench & Integration Plane
 
-**Status: ARCHITECTURE FROZEN — DESIGN BASELINE**  
+**Status: ARCHITECTURE — IMPLEMENTED AND VERIFIED**  
 **Canonical branch: `main`**  
-**Design branch: `architecture/universal-workbench-contract-v1`**
+**Design branch (historical): `architecture/universal-workbench-contract-v1`**
 
 ## 1. Purpose
 
@@ -10,9 +10,9 @@ Aurora is not considered a complete autonomous work system merely because its in
 
 The Director and every specialist agent must be able to perform the real work required by a mission without artificial capability bottlenecks caused by the agent's role.
 
-This document freezes the architectural contract for that requirement.
+This document records the implemented architectural contract for that requirement.
 
-**No implementation is authorized by this document.** Implementation must be opened as a separately scoped sequence and must preserve all previously closed acceptance boundaries.
+**Implementation status:** the Universal Workbench & Integration Plane is implemented on canonical `main` and has completed final Director-led end-to-end acceptance. The acceptance evidence is recorded in Section 22 and does not reopen previously closed acceptance boundaries.
 
 ## 2. Universal Work / Cowork principle
 
