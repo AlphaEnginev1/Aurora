@@ -13,10 +13,6 @@ on:
         required: false
         default: "https://generativelanguage.googleapis.com/v1beta"
         type: string
-      nvidia_model_id:
-        description: "NVIDIA served Director model ID"
-        required: true
-        type: string
       nvidia_endpoint:
         description: "NVIDIA-compatible /v1 endpoint"
         required: false
@@ -48,7 +44,6 @@ jobs:
           GEMINI_MODEL_ID: ${{ inputs.gemini_model_id }}
           GEMINI_API_ENDPOINT: ${{ inputs.gemini_endpoint }}
           NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
-          NVIDIA_MODEL_ID: ${{ inputs.nvidia_model_id }}
           NVIDIA_API_ENDPOINT: ${{ inputs.nvidia_endpoint }}
           AURORA_DIRECTOR_PROVIDER_FAILOVER_LIVE: "1"
           GEMINI_API_TIMEOUT: "120"
