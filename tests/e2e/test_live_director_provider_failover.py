@@ -5,7 +5,6 @@ import os
 import pytest
 
 from aurora.inference.discovery import ModelCandidateStore, ModelDiscoveryService
-from aurora.inference.models import ModelSpec
 from aurora.inference.providers.registry import default_provider_registry
 from aurora.inference.registry import ModelRegistry
 from aurora.inference.router import ModelRouter
