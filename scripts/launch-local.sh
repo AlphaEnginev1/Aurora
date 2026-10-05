@@ -16,9 +16,25 @@ for dep in bwrap slirp4netns nft ip; do command -v "$dep" >/dev/null || { echo "
 HOST_IP="$(ip -4 route get 1.1.1.1 | awk '/src/ {for (i=1;i<=NF;i++) if ($i=="src") {print $(i+1); exit}}')"
 [[ -n "$HOST_IP" ]] || { echo "Unable to determine WSL host IPv4" >&2; exit 1; }
 
-alive() { [[ -f "$1" ]] && kill -0 "$(cat "$1")" 2>/dev/null; }
+process_matches() {
+  local pid="$1"
+  local expected="$2"
+  [[ "$pid" =~ ^[0-9]+$ ]] || return 1
+  kill -0 "$pid" 2>/dev/null || return 1
+  [[ -r "/proc/$pid/cmdline" ]] || return 1
+  tr '\0' ' ' <"/proc/$pid/cmdline" | grep -Fq -- "$expected"
+}
 
-if ! alive "$PROXY_PID"; then
+alive() {
+  local pid_file="$1"
+  local expected="$2"
+  [[ -f "$pid_file" ]] || return 1
+  local pid
+  pid="$(cat "$pid_file" 2>/dev/null || true)"
+  process_matches "$pid" "$expected"
+}
+
+if ! alive "$PROXY_PID" "aurora.autonomy.egress_proxy_daemon"; then
   rm -f "$PROXY_PID"
   nohup "$VENV/bin/python" -m aurora.autonomy.egress_proxy_daemon --host "$HOST_IP" --port 3128 --network-policy "$ROOT/config/network-policy.json" >>"$PROXY_LOG" 2>&1 &
   echo $! > "$PROXY_PID"
@@ -47,9 +63,10 @@ then
   exit 1
 fi
 
-if alive "$AURORA_PID"; then
+if alive "$AURORA_PID" "aurora.orchestration.daemon"; then
   exit 0
 fi
+rm -f "$AURORA_PID"
 
 export AURORA_EGRESS_PROXY_HOST="$HOST_IP"
 export AURORA_EGRESS_PROXY_PORT=3128
@@ -69,6 +86,12 @@ done
 
 if command -v cmd.exe >/dev/null 2>&1; then
   cmd.exe /C start "" "http://127.0.0.1:8787" >/dev/null 2>&1 || true
+fi
+
+if ! curl -fsS --max-time 2 http://127.0.0.1:8787/ >/dev/null 2>&1; then
+  echo "Aurora dashboard did not become ready." >&2
+  tail -n 120 "$AURORA_LOG" >&2 || true
+  exit 1
 fi
 
 echo "Aurora dashboard: http://127.0.0.1:8787"
