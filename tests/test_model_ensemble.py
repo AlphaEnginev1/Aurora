@@ -15,10 +15,12 @@ def _router():
         "model/c": "different decision",
         "model/d": "resolved decision",
     }
+    captured = []
 
     def generate(request, *, capability=None, preferred_models=None):
         decision = router.route(request, capability=capability, preferred_models=preferred_models)
         model = decision.selected_model
+        captured.append(request)
         content = outputs[model]
         return InferenceResponse(
             model=model,
@@ -31,6 +33,7 @@ def _router():
         )
 
     router.generate = generate
+    router.captured_requests = captured
     return router
 
 
@@ -55,7 +58,8 @@ def test_critical_ensemble_reaches_consensus_and_persists(tmp_path: Path):
 
 
 def test_critical_ensemble_resolves_disagreement_with_unused_dynamic_model():
-    ensemble = ModelEnsemble(_router())
+    router = _router()
+    ensemble = ModelEnsemble(router)
 
     result = ensemble.run_critical_decision(
         InferenceRequest(messages=[{"role": "user", "content": "choose"}]),
@@ -70,7 +74,10 @@ def test_critical_ensemble_resolves_disagreement_with_unused_dynamic_model():
         "model/b",
         "model/c",
     )
-    assert "MODEL 1: model/a" in _captured_last_request(result)
+    resolver_request = router.captured_requests[-1]
+    assert resolver_request.model is None
+    assert resolver_request.metadata["ensemble_mode"] == "critical_resolver"
+    assert "MODEL 1: model/a" in resolver_request.messages[-1]["content"]
 
 
 def test_critical_ensemble_fails_closed_when_disagreement_has_no_unused_resolver():
@@ -104,10 +111,3 @@ def test_critical_ensemble_rejects_manual_model_selection():
         assert "dynamic model selection" in str(exc)
     else:
         raise AssertionError("manual model selection must be rejected")
-
-
-def _captured_last_request(result):
-    # The resolver selection is proven by the returned dynamic model. This helper
-    # keeps the assertion focused on the public result and avoids coupling tests
-    # to the internal provider request representation.
-    return "MODEL 1: model/a"
