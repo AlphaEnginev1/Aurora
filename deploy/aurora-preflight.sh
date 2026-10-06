@@ -60,6 +60,10 @@ if str(policy.get("cost_policy", "")).strip().lower() != "free_only":
     raise SystemExit("inference policy must enforce cost_policy=free_only")
 if str(free_policy.get("mode", "")).strip().lower() != "free_only":
     raise SystemExit("free-model policy must enforce mode=free_only")
+if str(free_policy.get("providers", {}).get("nvidia_api", {}).get("dynamic_catalog", "")).strip().lower() == "free_endpoint":
+    network_policy = json.loads((root / "config/network-policy.json").read_text(encoding="utf-8"))
+    if "build.nvidia.com" not in network_policy.get("allowed_hosts", []):
+        raise SystemExit("dynamic NVIDIA free catalog requires build.nvidia.com in allowed_hosts")
 models = policy.get("models", [])
 enabled_models = [
     model for model in models
