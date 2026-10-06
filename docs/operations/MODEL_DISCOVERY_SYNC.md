@@ -12,20 +12,20 @@ Discovery is not inference. It only reads a provider catalog and produces `Disco
 
 ## Staging
 
-Every discovered candidate is written to the durable `ModelCandidateStore` with:
+Every discovered candidate is written to the durable `ModelCandidateStore`; free NVIDIA candidates are later synchronized into the authoritative registry only after the free-catalog join.
 
 - state=`discovered`
 - enabled=false
 - healthy=false
 - available=false
 
-Therefore discovery can never silently put a new model into routing.
+Discovery alone does not route. `activate_free_discovered()` is the governed synchronization step for models explicitly authorized by the NVIDIA Free Endpoint catalog.
 
 Candidate metadata is kept separate from the active `ModelRegistry`.
 
 ## Promotion
 
-A candidate can only be promoted when an explicit `ModelPromotionValidation` reports all three gates:
+Explicit manual promotion still uses `ModelPromotionValidation`. The dynamic NVIDIA free-catalog path is a separate governed synchronization path that uses the provider catalog as its policy evidence.
 
 - policy verified
 - security verified
@@ -33,7 +33,7 @@ A candidate can only be promoted when an explicit `ModelPromotionValidation` rep
 
 The approved `ModelSpec` must also match the discovered model/provider identity and be enabled, healthy and available.
 
-Promotion uses `ModelRegistry.register()` and never overwrites an existing active model. A duplicate therefore requires an explicit configuration decision instead of an automatic replacement.
+Dynamic synchronization may replace the same model's runtime metadata when the authoritative free catalog is refreshed; unrelated provider models are not affected.
 
 ## Runtime integration
 
@@ -49,6 +49,6 @@ A successful inference is the runtime health evidence required for that candidat
 
 This block establishes provider-specific discovery and safe candidate synchronization.
 
-It does not invent model capabilities from model names, automatically promote unclassified models, or replace the existing learning/performance system.
+It does not treat the NVIDIA `/v1/models` listing alone as proof of free access; free eligibility comes from the official Build catalog. It does not replace the existing learning/performance system.
 
 Health probing, provider-specific capability enrichment, scheduled refresh and controlled autonomous discovery can build on this contract later without bypassing governance.

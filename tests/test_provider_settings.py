@@ -74,6 +74,7 @@ def test_nvidia_discovery_stages_candidates(tmp_path: Path):
         enabled=False,
         healthy=False,
         available=False,
+        pricing_tier="free",
     ))
     candidate_b = SimpleNamespace(model=ModelSpec(
         "nvidia/model-b",
@@ -82,6 +83,7 @@ def test_nvidia_discovery_stages_candidates(tmp_path: Path):
         enabled=False,
         healthy=False,
         available=False,
+        pricing_tier="free",
     ))
 
     class Discovery:

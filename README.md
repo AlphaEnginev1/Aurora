@@ -4,7 +4,7 @@ Autonomous multi-agent engineering system.
 
 ## Current status
 
-**IMPLEMENTATION COMPLETE — FREE-MODEL RESILIENCE CLOSURE IN PROGRESS**
+**IMPLEMENTATION COMPLETE — DYNAMIC NVIDIA FREE CATALOG AUDIT IN PROGRESS**
 
 Aurora has one authoritative engineering line:
 
@@ -68,4 +68,5 @@ The contract preserves least-privilege, approvals, sandboxing, credential isolat
 
 ## Current free-model resilience closure
 
-The canonical Aurora runtime is now **free-only**. The active Director path uses the free Gemini tier, and specialist inference/failover uses the dynamic NVIDIA NIM Free Endpoint catalog under `config/free-model-policy.json`. The runtime rejects paid or unclassified models before routing, and the dedicated LIVE gate in `docs/operations/LIVE_MULTI_PROVIDER_RESILIENCE.md` requires only Gemini and NVIDIA credentials.\n\n### NVIDIA models in the checked-in policy are only known-good seed metadata. At runtime Aurora discovers the live NVIDIA `/models` catalog, admits every model exposed through the configured free-endpoint policy, activates eligible candidates in the authoritative registry, and lets `ModelRouter` score/select among the complete discovered pool. The seed list is never a ceiling.
+The canonical Aurora runtime is now **free-only**. The active Director path uses the free Gemini tier, and specialist inference/failover uses the dynamic NVIDIA NIM Free Endpoint catalog under `config/free-model-policy.json`. The runtime rejects paid or unclassified models before routing, and the dedicated LIVE gate in `docs/operations/LIVE_MULTI_PROVIDER_RESILIENCE.md` requires only Gemini and NVIDIA credentials.\n\n### Dynamic NVIDIA model catalog
+The checked-in NVIDIA entries are only known-good seed metadata. At runtime Aurora joins the live NVIDIA `/v1/models` serving catalog with NVIDIA's official Build catalog labels, where `Free Endpoint` is the authoritative free-access signal. Every currently served NVIDIA Free Endpoint can therefore enter Aurora dynamically; the seed list is never a ceiling. Models are then routed according to the execution capability their provider adapter supports.

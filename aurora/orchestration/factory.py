@@ -247,8 +247,6 @@ def _build_director_provider_failover(
 
         credentials = {
             "nvidia_api": settings_store.credential("nvidia_api") or os.getenv("NVIDIA_API_KEY", ""),
-            "openai": settings_store.credential("openai") or os.getenv("OPENAI_API_KEY", ""),
-            "anthropic": settings_store.credential("anthropic") or os.getenv("ANTHROPIC_API_KEY", ""),
         }
 
         discovery = ModelDiscoveryService(
@@ -281,15 +279,14 @@ def _build_director_provider_failover(
                 # Governed last-known discovery remains a valid reserve snapshot.
                 discovered = model_candidate_store.list(
                     provider_id=provider_id,
-                    state="discovered",
-                    limit=100,
+                    limit=500,
                 )
             if not discovered:
                 continue
             provider_spec = router.provider_registry.resolve(provider_id)
             for item in discovered:
                 model = item.model
-                capabilities = tuple(model.capabilities) or tuple(provider_spec.capabilities)
+                capabilities = tuple(model.capabilities)
                 if "reasoning" not in capabilities:
                     continue
                 key = (model.provider, model.id)

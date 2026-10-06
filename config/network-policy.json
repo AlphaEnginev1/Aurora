@@ -1,6 +1,8 @@
 {
   "default": "deny",
-  "protocols": ["https"],
+  "protocols": [
+    "https"
+  ],
   "allowed_hosts": [
     "github.com",
     "api.github.com",
@@ -10,7 +12,8 @@
     "archive.ubuntu.com",
     "security.ubuntu.com",
     "integrate.api.nvidia.com",
-    "generativelanguage.googleapis.com"
+    "generativelanguage.googleapis.com",
+    "build.nvidia.com"
   ],
   "browser_isolation_required": true,
   "sandbox_network": "broker_only",

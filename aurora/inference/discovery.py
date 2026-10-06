@@ -427,6 +427,7 @@ def _row_to_candidate(row: sqlite3.Row) -> DiscoveredModelCandidate:
             cost_score=float(raw_model.get("cost_score", 0.5)),
             healthy=bool(raw_model.get("healthy", False)),
             available=bool(raw_model.get("available", False)),
+            pricing_tier=str(raw_model.get("pricing_tier", "unknown")),
         ),
         metadata=json.loads(row["metadata_json"]),
         discovered_at=str(row["discovered_at"]),
