@@ -4,7 +4,7 @@ Autonomous multi-agent engineering system.
 
 ## Current status
 
-**CONSOLIDATION COMPLETE — FINAL RECORD**
+**IMPLEMENTATION COMPLETE — LIVE RESILIENCE CLOSURE IN PROGRESS**
 
 Aurora has one authoritative engineering line:
 
@@ -19,8 +19,12 @@ Aurora has one authoritative engineering line:
 - CI 1398/1399: SUCCESS — Recovery Drills V1
 - CI 1414: SUCCESS — Controlled Live Authorization V1
 - consolidation issue: #50 (CLOSED)
+- PR #149: Critical Decision Model Ensemble — MERGED
+- PR #150: Multi-Agent Adversarial Review — MERGED
+- PR #151: Provider Availability & Multi-Provider Resilience — MERGED
+- current multi-provider LIVE acceptance: defined and ready for execution
 
-No new functionality was authorized during the consolidation gate; Increment 11 remains explicitly unapproved.
+`main` remains the single authoritative engineering line. Closed increments are not reopened.
 
 ## Source of truth
 
@@ -54,10 +58,14 @@ Historical branches and closed PRs are not alternate work queues. Increment 11 r
 
 ## Universal Work / Cowork architecture
 
-The next architectural direction is **frozen as a design baseline** (implementation not yet authorized):
+The Universal Workbench is **IMPLEMENTED AND VERIFIED** on canonical `main`.
 
 `docs/architecture/AURORA_UNIVERSAL_WORKBENCH_ARCHITECTURE.md`
 
-Aurora's target operating model is Universal Work / Cowork: the Director and every specialist agent can request the work capability required by the mission—local files/computer, documents and images, web/browser, research, GitHub, external connectors, code/tools and multimodal processing—through one governed Workbench. Roles specialize in responsibility and authority, not by creating artificial capability silos.
+The Director and every specialist agent can request the work capability required by the mission—local files/computer, documents and images, web/browser, research, GitHub, external connectors, code/tools and multimodal processing—through one governed Workbench. Final Director-led acceptance is recorded in `docs/architecture/AURORA_UNIVERSAL_WORKBENCH_ARCHITECTURE.md`.
 
 The contract preserves least-privilege, approvals, sandboxing, credential isolation, provenance, evidence and auditability. It also explicitly preserves all previously closed acceptance boundaries.
+
+## Current multi-provider resilience closure
+
+PR #151 is integrated. The implementation and deterministic coverage are green on canonical `main`. The remaining LIVE closure is defined in `docs/operations/LIVE_MULTI_PROVIDER_RESILIENCE.md` and validates real NVIDIA, OpenAI and Anthropic adapters, provider health, discovery/staging, dynamic reserve failover, critical-decision ensemble and Director adversarial review.
