@@ -94,8 +94,8 @@ def _validate(data: Mapping[str, Any]) -> None:
     if not isinstance(director, Mapping) or not isinstance(providers, Mapping):
         raise OperatorSettingsError("operator settings require director and providers objects")
     provider = str(director.get("provider", "")).strip().lower()
-    if provider not in {"gemini", "router", "nvidia_api"}:
-        raise OperatorSettingsError("director.provider must be gemini, router, or nvidia_api")
+    if provider not in {"gemini", "router", "nvidia_api", "openai", "anthropic"}:
+        raise OperatorSettingsError("director.provider must be gemini, router, nvidia_api, openai, or anthropic")
     if not str(director.get("model", "")).strip():
         raise OperatorSettingsError("director.model cannot be empty")
     if not str(director.get("endpoint", "")).strip().startswith("https://"):
