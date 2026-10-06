@@ -475,9 +475,7 @@ def _build_resolver_request(
     members: Sequence[EnsembleMemberResult],
     allowed_models: Sequence[str],
 ) -> InferenceRequest:
-    evidence = "
-
-".join(
+    evidence = "\n\n".join(
         f"MODEL {index}: {item.model}\nANSWER:\n{item.content}"
         for index, item in enumerate(members, start=1)
     )
