@@ -415,7 +415,7 @@ def test_successful_nvidia_failover_persists_and_reloads_after_restart(tmp_path:
     controller = DirectorProviderFailoverController(
         active_provider=gemini,
         candidates=(
-            _candidate("nvidia_api", nvidia, "nvidia/test-model"),
+            _candidate("nvidia_api", nvidia, "poolside/laguna-xs-2.1"),
         ),
         store=store,
         activate=activate,
