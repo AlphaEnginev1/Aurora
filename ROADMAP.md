@@ -205,7 +205,7 @@ Implemented boundary:
         -> critical-decision ensemble
         -> adversarial specialist review
 
-The remaining acceptance step is the dedicated LIVE gate against the real free Gemini tier and free NVIDIA NIM endpoints. Paid-provider credentials are neither required nor part of the canonical runtime.
+The remaining acceptance step is the dedicated LIVE gate against the real free Gemini tier and the current NVIDIA Free Endpoint catalog. The implementation dynamically discovers served models and joins them with the official NVIDIA catalog rather than using a fixed model allowlist. Paid-provider credentials are neither required nor part of the canonical runtime.
 
 Acceptance artifact:
 
