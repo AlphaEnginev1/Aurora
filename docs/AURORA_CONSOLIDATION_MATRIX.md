@@ -38,7 +38,7 @@ remains as an auditable snapshot of the gate work and is not a second implementa
 | Acquisition transactions / provenance / dependency closure | YES | YES | YES | YES | None identified in frozen queue |
 | Sandbox / deterministic workspaces | YES | YES | YES | YES | None identified in frozen queue |
 | Application network gateway / proxy / dataplane | YES | YES | YES | YES | None identified in frozen queue |
-| Inference Fabric / ModelRouter | YES | YES | YES | YES | None identified in frozen queue |
+| Inference Fabric / ModelRouter | YES | YES | YES | YES | None identified in frozen queue |\n| Provider Health / Availability Layer | YES | YES | YES | PENDING NEW LIVE GATE | LIVE multi-provider acceptance |\n| OpenAI provider + discovery adapter | YES | YES | YES | PENDING NEW LIVE GATE | LIVE provider contract |\n| Anthropic provider + discovery adapter | YES | YES | YES | PENDING NEW LIVE GATE | LIVE provider contract |\n| Dynamic multi-provider Director reserve pool | YES | YES | YES | PENDING NEW LIVE GATE | LIVE reserve/failover acceptance |\n| Controlled autonomous model-catalog refresh | YES | YES | YES | PENDING NEW LIVE GATE | LIVE discovery/refresh acceptance |\n| Critical Decision Model Ensemble | YES | YES | YES | PENDING NEW LIVE GATE | LIVE ensemble acceptance |\n| Multi-Agent Adversarial Review | YES | YES | YES | PENDING NEW LIVE GATE | LIVE adversarial-review acceptance |
 | NVIDIA provider | YES | YES | YES | YES | None identified in frozen queue |
 | Director provider abstraction / Gemini adapter | YES | YES | YES | YES | None identified in frozen queue |
 | Director 24/7 runtime | YES | YES | YES | N/A | None identified in frozen queue |
@@ -60,7 +60,7 @@ remains as an auditable snapshot of the gate work and is not a second implementa
 | Empirical decision knowledge promotion | YES | YES | YES | N/A | None identified |
 | Director policy evolution / canary / rollback | YES | YES | YES | N/A | None identified in frozen queue |
 | Active typed policy contract | YES | YES | YES | N/A | None identified |
-| Live provider workflows | YES (workflow code) | YES (workflow definition) | OPT-IN ONLY | **YES** | Dedicated provider gates verified; live activation remains separately authorized |
+| Live provider workflows | YES (workflow code) | YES (workflow definition) | OPT-IN ONLY | **YES** | Dedicated provider gates verified; new multi-provider gate pending execution |
 
 ### Meaning of the five columns
 
@@ -127,6 +127,47 @@ Increment 12 is externally verified on canonical `main`.
 - durable failover evidence with no credential leakage in workflow output: VERIFIED;
 - automatic switchback is not performed;
 - explicit live authorization remains a separate human-controlled boundary.
+
+## 3.2 Current multi-provider resilience closure
+
+PRs #149, #150 and #151 are integrated on canonical `main`.
+
+### PR #149 — Critical Decision Model Ensemble
+
+The critical-decision ensemble is implemented, tested, runtime-integrated and deterministically verified. It uses the existing `ModelRouter`, dynamically selects distinct eligible models, persists member evidence, supports a dynamically routed resolver and fails closed when the required evidence cannot be obtained.
+
+**LIVE status: PENDING NEW LIVE GATE.**
+
+### PR #150 — Multi-Agent Adversarial Review
+
+The Director now selects a governed multi-agent review panel and injects read-only independent findings into the existing Director review path. Findings are durable and advisory; the Director remains the final decision authority.
+
+**LIVE status: PENDING NEW LIVE GATE.**
+
+### PR #151 — Provider Availability & Multi-Provider Resilience
+
+The canonical implementation now includes:
+
+- durable provider/model availability and cooldown/probing;
+- health-aware routing and execution feedback;
+- OpenAI and Anthropic adapters plus model discovery;
+- dynamic reserve-pool construction using the existing provider failover controller;
+- rate-limited controlled model-catalog refresh;
+- deterministic multi-provider outage/fail-closed coverage.
+
+Automated CI is green on the merged canonical commit.
+
+**LIVE status: PENDING NEW LIVE GATE.**
+
+The dedicated acceptance workflow is:
+
+`.github/workflows/live-multi-provider-resilience.yml`
+
+The acceptance contract and evidence record are:
+
+`docs/operations/LIVE_MULTI_PROVIDER_RESILIENCE.md`
+
+This gate must complete successfully before these new capabilities are marked `LIVE VERIFICADO`. It does not alter the separate Controlled Live Authorization boundary.
 
 ## 4. Network enforcement
 
