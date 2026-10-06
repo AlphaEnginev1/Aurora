@@ -36,14 +36,23 @@ def test_blank_form_key_preserves_existing_secret(tmp_path: Path):
 
 
 def test_legacy_external_model_is_migrated_to_nvidia_default(tmp_path: Path):
-    store = OperatorSettingsStore(tmp_path / "operator-settings.json")
-    store.save({
-        "director": {
-            "provider": "router",
+    path = tmp_path / "operator-settings.json"
+    path.write_text(
+        """{
+          "director": {
+            "provider": "gemini",
             "model": "gemini-3.8-flash",
             "endpoint": "https://generativelanguage.googleapis.com/v1beta",
-        }
-    })
+            "failover": {"enabled": true, "order": ["gemini", "nvidia_api"]}
+          },
+          "providers": {
+            "gemini": {"enabled": true, "api_key": "legacy-secret"},
+            "nvidia_api": {"enabled": true, "api_key": "nvidia-secret", "base_url": "https://integrate.api.nvidia.com/v1"}
+          }
+        }""",
+        encoding="utf-8",
+    )
+    store = OperatorSettingsStore(path)
     loaded = store.load()
     assert loaded["director"]["provider"] == "router"
     assert loaded["director"]["model"] == "nvidia/nemotron-3-ultra-550b-a55b"
