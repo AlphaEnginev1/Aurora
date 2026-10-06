@@ -245,6 +245,7 @@ class ModelEnsemble:
             request,
             candidate_models=candidate_models,
             ensemble_id=ensemble_id,
+            capability=capability,
         )
         successful = tuple(item for item in members if item.success)
         if len(successful) < self.minimum_successful_models:
@@ -385,6 +386,7 @@ class ModelEnsemble:
         *,
         candidate_models: tuple[str, ...],
         ensemble_id: str,
+        capability: str,
     ) -> tuple[EnsembleMemberResult, ...]:
         results: dict[str, EnsembleMemberResult] = {}
         worker_count = min(self.concurrency, len(candidate_models))
@@ -395,6 +397,7 @@ class ModelEnsemble:
                     request,
                     model_id=model_id,
                     ensemble_id=ensemble_id,
+                    capability=capability,
                 ): model_id
                 for model_id in candidate_models
             }
@@ -409,6 +412,7 @@ class ModelEnsemble:
         *,
         model_id: str,
         ensemble_id: str,
+        capability: str,
     ) -> EnsembleMemberResult:
         metadata = dict(request.metadata or {})
         metadata.update(
@@ -429,7 +433,7 @@ class ModelEnsemble:
         try:
             response = self.router.generate(
                 member_request,
-                capability=str(metadata.get("capability", "reasoning")),
+                capability=capability,
             )
         except Exception as exc:
             return EnsembleMemberResult(
@@ -439,6 +443,16 @@ class ModelEnsemble:
                 content="",
                 success=False,
                 error=str(exc)[:4000],
+            )
+        if not response.content.strip():
+            return EnsembleMemberResult(
+                model=response.selected_model or response.model,
+                provider=response.provider,
+                execution_id=response.execution_id,
+                content="",
+                success=False,
+                error="model returned an empty response",
+                routing_score=response.routing_score,
             )
         return EnsembleMemberResult(
             model=response.selected_model or response.model,
