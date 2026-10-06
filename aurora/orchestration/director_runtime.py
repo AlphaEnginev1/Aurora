@@ -153,6 +153,8 @@ class DirectorRuntime:
         policy_proposal_store: DirectorDecisionPolicyProposalStore | None = None,
         policy_contract_store: DirectorDecisionPolicyContractStore | None = None,
         model_discovery: ModelDiscoveryService | None = None,
+        model_discovery_refresh_enabled: bool = True,
+        model_discovery_refresh_interval_seconds: float = 900.0,
         model_ensemble: ModelEnsemble | None = None,
         dashboard_gateway: DashboardGateway | None = None,
         conversation_service: DirectorConversationService | None = None,
@@ -192,7 +194,12 @@ class DirectorRuntime:
         self.max_review_rounds = max_review_rounds
         self.adversarial_review_enabled = adversarial_review_enabled
         self.adversarial_review_size = adversarial_review_size
+        if model_discovery_refresh_interval_seconds < 0:
+            raise DirectorRuntimeError("model_discovery_refresh_interval_seconds cannot be negative")
         self.model_discovery = model_discovery
+        self.model_discovery_refresh_enabled = bool(model_discovery_refresh_enabled)
+        self.model_discovery_refresh_interval_seconds = float(model_discovery_refresh_interval_seconds)
+        self._last_model_discovery_refresh_at = 0.0
         self.model_ensemble = model_ensemble
         self.dashboard_gateway = dashboard_gateway
         self.conversation_service = conversation_service
@@ -1087,12 +1094,33 @@ class DirectorRuntime:
         )
 
     def run_forever(self, stop_event: Event | None = None) -> None:
-        """Run continuously until the supplied stop event is set."""
+        """Run continuously with bounded autonomous model-catalog refresh."""
         stop = stop_event or Event()
         while not stop.is_set():
+            self._refresh_model_catalogs_if_due()
             cycle = self.run_once()
             if not cycle.did_work and self.idle_sleep_seconds:
                 self._sleep(self.idle_sleep_seconds)
+
+    def _refresh_model_catalogs_if_due(self) -> None:
+        if not self.model_discovery_refresh_enabled or self.model_discovery is None:
+            return
+        from time import monotonic
+        now = monotonic()
+        if self._last_model_discovery_refresh_at and (
+            now - self._last_model_discovery_refresh_at
+            < self.model_discovery_refresh_interval_seconds
+        ):
+            return
+        self._last_model_discovery_refresh_at = now
+        try:
+            self.model_discovery.refresh_all(
+                min_interval_seconds=self.model_discovery_refresh_interval_seconds
+            )
+        except Exception:
+            # Catalog refresh is advisory; the durable staged snapshot and
+            # existing failover path remain authoritative.
+            return
 
     def _worker_for(self, mission_id: str, slot: int = 0) -> TaskWorker:
         key = f"{mission_id}:{slot}"
