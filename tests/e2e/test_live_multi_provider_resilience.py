@@ -98,29 +98,36 @@ def _override_or_free(
     *,
     endpoint: str,
 ) -> ModelSpec:
+    discovered_free = {
+        item.model.id: item.model
+        for item in discovered
+        if item.model.pricing_tier == "free"
+    }
     override = os.getenv(env_name, "").strip()
     if override:
-        if not is_free_model(provider_id, override):
+        selected = discovered_free.get(override)
+        if selected is None:
             raise AssertionError(
-                f"{env_name} must reference a model explicitly authorized as free"
+                f"{env_name} must reference a model discovered as a current NVIDIA Free Endpoint"
             )
-        metadata = record_metadata(provider_id, override)
         return ModelSpec(
-            id=override,
+            id=selected.id,
             provider=provider_id,
             endpoint=endpoint,
-            capabilities=("chat", "reasoning", "tool_use", "agentic"),
-            context_window=metadata.get("context_window"),
-            specialties=tuple(metadata.get("specialties", ())),
-            quality_score=0.95,
-            latency_score=0.7,
+            capabilities=selected.capabilities,
+            context_window=selected.context_window,
+            specialties=selected.specialties,
+            quality_score=selected.quality_score,
+            latency_score=selected.latency_score,
             cost_score=1.0,
             pricing_tier="free",
             enabled=True,
         )
     candidates = _free_nvidia_candidates(discovered)
     if not candidates:
-        raise AssertionError("NVIDIA discovery returned no policy-authorized free model")
+        raise AssertionError(
+            "NVIDIA discovery returned no current free reasoning model"
+        )
     return candidates[0]
 
 
