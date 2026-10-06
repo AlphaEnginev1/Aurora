@@ -273,8 +273,6 @@ class DirectorProviderFailoverController:
                 self._record_health(active, model, exc)
                 if not _is_failoverable(exc):
                     raise
-                if self._health_store is not None and not isinstance(exc, Exception):
-                    pass
                 correlation_id = self._correlation_id(active)
                 self._record_and_emit(
                     correlation_id=correlation_id,
@@ -385,7 +383,15 @@ class DirectorProviderFailoverController:
                         return response
                     except Exception as replacement_error:
                         last_error = replacement_error
-                        self._record_health(replacement, candidate.model, replacement_error)
+                        if self._health_store is not None:
+                            try:
+                                self._health_store.record_failure(
+                                    candidate.provider_id,
+                                    candidate.model or candidate.provider_id,
+                                    replacement_error,
+                                )
+                            except Exception:
+                                pass
                         self._failed_candidates.add(self._candidate_key(candidate))
                         self._store.record(
                             transition_id=f"{attempt_id}:failed",
