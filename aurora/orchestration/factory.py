@@ -323,6 +323,10 @@ def _build_director_provider_failover(
             pool_specs,
             provider_registry=router.provider_registry,
         )
+        # Keep the execution router health-aware, but do not let historical
+        # cooldowns suppress the reserve catalog itself. The failover controller
+        # already excludes candidates that fail during this call; the normal
+        # router remains responsible for health-aware primary routing.
         pool_router = ModelRouter(
             models=list(pool_registry.models),
             nvidia_api_key=credentials["nvidia_api"],
@@ -333,13 +337,23 @@ def _build_director_provider_failover(
             health_store=router.health_store,
             cost_policy=getattr(router, "cost_policy", "all"),
         )
+        selection_router = ModelRouter(
+            models=list(pool_registry.models),
+            nvidia_api_key=credentials["nvidia_api"],
+            provider_registry=router.provider_registry,
+            model_registry=pool_registry,
+            context_gate=router.context_gate,
+            enforce_context=router.enforce_context,
+            health_store=None,
+            cost_policy=getattr(router, "cost_policy", "all"),
+        )
         selection_request = InferenceRequest(
             messages=messages,
             model=None,
             metadata={"role": role, "allowed_models": [model.id for model in pool_specs]},
         )
         try:
-            decision = pool_router.route(selection_request, capability="reasoning")
+            decision = selection_router.route(selection_request, capability="reasoning")
         except Exception:
             return ()
 
@@ -698,4 +712,3 @@ def build_director_runtime(*, inference_policy_path: str | Path, autonomy_policy
     runtime.bootstrap_state=bootstrap_state
     runtime.workbench=service.task_engine.orchestration._workbench
     return runtime
-
