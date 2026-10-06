@@ -38,8 +38,12 @@ class ModelRouter:
     context_gate: ContextGate | None = None
     enforce_context: bool = False
     health_store: ProviderHealthStore | None = None
+    cost_policy: str = "all"
 
     def __post_init__(self) -> None:
+        self.cost_policy = str(self.cost_policy or "all").strip().lower()
+        if self.cost_policy not in {"all", "free_only"}:
+            raise ModelRoutingError("cost_policy must be all or free_only")
         if self.provider_registry is None:
             self.provider_registry = default_provider_registry(
                 nvidia_api_key=self.nvidia_api_key
@@ -69,6 +73,7 @@ class ModelRouter:
             model
             for model in self._registered_models()
             if model.enabled and model.healthy and model.available
+            and (self.cost_policy != "free_only" or model.pricing_tier == "free")
         ]
         if self.health_store is None:
             return models
