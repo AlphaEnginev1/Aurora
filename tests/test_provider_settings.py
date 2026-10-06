@@ -110,7 +110,7 @@ def test_nvidia_selected_model_is_activated_without_editing_repo_policy(tmp_path
     state = service.save_and_apply({
         "director": {
             "provider": "nvidia_api",
-            "model": "nvidia/new-model",
+            "model": "google/gemma-4-31b-it",
             "endpoint": "https://integrate.api.nvidia.com/v1",
         },
     })
@@ -128,7 +128,7 @@ def test_local_nvidia_model_setting_can_be_restored_on_startup(tmp_path: Path):
     store.save({
         "director": {
             "provider": "nvidia_api",
-            "model": "nvidia/persisted-model",
+            "model": "poolside/laguna-xs-2.1",
             "endpoint": "https://integrate.api.nvidia.com/v1",
         },
         "providers": {"nvidia_api": {"api_key": "secret"}},
