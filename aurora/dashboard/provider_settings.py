@@ -168,7 +168,7 @@ class ProviderSettingsService:
             return {
                 "provider": provider_id,
                 "ok": True,
-                "models": models[:100],
+                "models": models,
                 "staged_count": len(models),
                 "stage_state": "discovered",
             }
