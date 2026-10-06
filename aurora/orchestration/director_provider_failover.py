@@ -15,7 +15,7 @@ from typing import Any, Callable, Mapping
 from .director_provider import DirectorModelResponse, DirectorProvider, DirectorToolSpec
 from aurora.inference.models import InferenceRequest
 from aurora.inference.router import ModelRouter
-from aurora.inference.provider_health import ProviderHealthStore
+from aurora.inference.provider_health import ProviderHealthStore, classify_failure
 
 
 class DirectorProviderFailoverError(RuntimeError):
@@ -291,6 +291,7 @@ class DirectorProviderFailoverController:
                     if candidate.provider_id != getattr(active, "provider_id", "")
                     and self._candidate_key(candidate) not in self._failed_candidates
                 ]
+                failed_providers: set[str] = set()
                 if self._candidate_resolver is not None:
                     try:
                         dynamic_candidates = self._candidate_resolver(messages, model, role)
@@ -317,11 +318,14 @@ class DirectorProviderFailoverController:
                         candidate
                         for candidate in dynamic_candidates
                         if candidate.provider_id != getattr(active, "provider_id", "")
+                        and candidate.provider_id not in failed_providers
                         and self._candidate_key(candidate) not in self._failed_candidates
                         and self._candidate_key(candidate) not in seen
                     )
                 last_error: Exception = exc
                 for candidate in candidates:
+                    if candidate.provider_id in failed_providers:
+                        continue
                     attempt_id = f"director-provider-failover:{correlation_id}:{candidate.provider_id}"
                     self._store.record(
                         transition_id=f"{attempt_id}:attempted",
@@ -383,6 +387,8 @@ class DirectorProviderFailoverController:
                         return response
                     except Exception as replacement_error:
                         last_error = replacement_error
+                        if classify_failure(replacement_error)[0] == "transient":
+                            failed_providers.add(candidate.provider_id)
                         if self._health_store is not None:
                             try:
                                 self._health_store.record_failure(
