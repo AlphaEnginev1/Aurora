@@ -154,7 +154,8 @@ def test_factory_discovers_and_selects_available_nvidia_model_without_fixed_id(t
     )
 
     assert response.provider == "nvidia_api"
-    assert response.model == "nvidia/nemotron-3-ultra-550b-a55b"
+    # The concrete model that failed in the routed primary attempt must not be retried.
+    assert response.model == "google/gemma-4-31b-it"
     assert controller.provider_id == "nvidia_api"
 
 
