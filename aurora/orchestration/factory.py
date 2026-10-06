@@ -670,6 +670,13 @@ def build_director_runtime(*, inference_policy_path: str | Path, autonomy_policy
         policy_proposal_store=policy_proposal_store,
         policy_contract_store=policy_contract_store,
         model_discovery=model_discovery,
+        model_discovery_refresh_enabled=(
+            os.getenv("AURORA_MODEL_DISCOVERY_REFRESH_ENABLED", "1").strip().lower()
+            not in {"0", "false", "no", "off"}
+        ),
+        model_discovery_refresh_interval_seconds=float(
+            os.getenv("AURORA_MODEL_DISCOVERY_REFRESH_SECONDS", "900")
+        ),
         model_ensemble=model_ensemble,
         dashboard_gateway=dashboard_gateway,
         conversation_service=conversation_service)
