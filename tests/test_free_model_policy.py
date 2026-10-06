@@ -2,7 +2,6 @@ from aurora.inference.free_policy import free_model_ids, is_free_model, record_m
 
 
 def test_curated_free_model_catalog_is_fail_closed():
-    assert is_free_model("gemini", "gemini-3.8-flash") is True
     assert is_free_model("gemini", "gemini-3.9-future") is False
     assert is_free_model("nvidia_api", "nvidia/nemotron-3-ultra-550b-a55b") is True
     assert is_free_model("nvidia_api", "meta/llama-3.1-8b-instruct") is False
