@@ -1,7 +1,7 @@
 """LIVE acceptance for Aurora's free-model inference fabric.
 
-The gate uses only the currently curated free Gemini tier and free NVIDIA
-NIM endpoints. It does not require paid OpenAI/Anthropic credentials.
+The gate uses the free Gemini tier and NVIDIA Free Endpoint catalog discovered
+from the official NVIDIA catalog. It does not require paid OpenAI/Anthropic credentials.
 """
 from __future__ import annotations
 
@@ -86,7 +86,7 @@ def _free_nvidia_candidates(discovered) -> list[ModelSpec]:
     by_id = {}
     for item in discovered:
         model = item.model
-        if is_free_model("nvidia_api", model.id):
+        if model.pricing_tier == "free":
             by_id[model.id] = model
     return [by_id[model_id] for model_id in sorted(by_id)]
 
@@ -142,8 +142,8 @@ def test_live_free_model_resilience_acceptance(tmp_path: Path):
             f"configured Gemini Director model is not authorized as free: {gemini_model}"
         )
 
-    # 1. Discover the live NVIDIA catalog and retain only models explicitly
-    # authorized by Aurora's free-model policy.
+    # 1. Discover the live NVIDIA catalog and retain only models authorized
+    # by the official NVIDIA Free Endpoint catalog or known-good policy seeds.
     provider_registry = default_provider_registry(
         nvidia_api_key=nvidia_key,
     )
