@@ -41,7 +41,7 @@ remains as an auditable snapshot of the gate work and is not a second implementa
 | Inference Fabric / ModelRouter | YES | YES | YES | YES | None identified in frozen queue |
 | Provider Health / Availability Layer | YES | YES | YES | PENDING NEW LIVE GATE | LIVE free-model resilience acceptance |
 | Free-only model policy / routing guard | YES | YES | YES | PENDING NEW LIVE GATE | LIVE free-model policy acceptance |
-| Curated free NVIDIA model pool | YES | YES | YES | PENDING NEW LIVE GATE | LIVE free-model inference acceptance |
+| Dynamic NVIDIA Free Endpoint catalog | YES | YES | YES | PENDING NEW LIVE GATE | LIVE dynamic-catalog inference acceptance |
 | Optional paid-provider adapters | YES | YES | NO | N/A | Intentionally excluded from canonical free-only runtime |
 | Dynamic free Director reserve pool | YES | YES | YES | PENDING NEW LIVE GATE | LIVE free reserve/failover acceptance |
 | Controlled autonomous model-catalog refresh | YES | YES | YES | PENDING NEW LIVE GATE | LIVE free discovery/refresh acceptance |
@@ -158,7 +158,7 @@ The canonical implementation now includes:
 
 - durable provider/model availability and cooldown/probing;
 - health-aware routing and execution feedback;
-- curated free-model policy and free-only routing enforcement;
+- free-only routing enforcement with a dynamic NVIDIA Free Endpoint catalog join;
 - dynamic free reserve-pool construction using the existing provider failover controller;
 - rate-limited controlled model-catalog refresh;
 - deterministic multi-provider outage/fail-closed coverage.
@@ -318,7 +318,7 @@ The frozen production-readiness queue 1–7 is **COMPLETE / VERIFIED** on canoni
 
 There is no remaining block in this queue. Historical branches and closed PRs must not be used as alternate implementation queues.
 
-The newer Increment 13 architecture is tracked separately from that frozen queue and is not considered LIVE VERIFIED until `.github/workflows/live-multi-provider-resilience.yml` completes successfully with the free-only contract.
+The newer Increment 13 architecture is tracked separately from that frozen queue. Its implementation is on `main`; it is not considered LIVE VERIFIED until `.github/workflows/live-multi-provider-resilience.yml` completes successfully against the current NVIDIA Free Endpoint catalog and the free-only contract.
 
 The Controlled Live Authorization gate is established, but **live execution is not active by default**. A human operator must explicitly provide a valid authorization artifact; no authorization record or provider credential is stored in the repository.
 
