@@ -279,16 +279,14 @@ class DirectorProviderFailoverController:
                     phase="failure_detected",
                     role=role,
                     from_provider=getattr(active, "provider_id", "unknown"),
-                    from_model=model,
+                    from_model=active_model_id or model,
                     to_provider=None,
                     to_model=None,
                     error=exc,
                 )
 
                 active_provider_id = str(getattr(active, "provider_id", "") or "")
-                active_model_id = str(
-                    model or getattr(active, "model", "") or ""
-                ).strip()
+                active_model_id = _failed_model_id(active, model, exc)
                 candidates: list[DirectorProviderCandidate] = [
                     candidate
                     for candidate in self._candidates
@@ -376,7 +374,7 @@ class DirectorProviderFailoverController:
                             phase="succeeded",
                             role=role,
                             from_provider=getattr(active, "provider_id", "unknown"),
-                            from_model=model,
+                            from_model=active_model_id or model,
                             to_provider=candidate.provider_id,
                             to_model=candidate.model,
                         )
@@ -386,7 +384,7 @@ class DirectorProviderFailoverController:
                                 "correlation_id": correlation_id,
                                 "role": role,
                                 "from_provider": getattr(active, "provider_id", "unknown"),
-                                "from_model": model,
+                                "from_model": active_model_id or model,
                                 **candidate.descriptor(),
                                 "response_provider": response.provider,
                                 "response_model": response.model,
@@ -438,7 +436,7 @@ class DirectorProviderFailoverController:
                     phase="exhausted",
                     role=role,
                     from_provider=getattr(active, "provider_id", "unknown"),
-                    from_model=model,
+                    from_model=active_model_id or model,
                     to_provider=None,
                     to_model=None,
                     error=last_error,
@@ -449,7 +447,7 @@ class DirectorProviderFailoverController:
                         "correlation_id": correlation_id,
                         "role": role,
                         "from_provider": getattr(active, "provider_id", "unknown"),
-                        "from_model": model,
+                        "from_model": active_model_id or model,
                         "error_type": type(last_error).__name__,
                         "error": str(last_error)[:1000],
                     }
@@ -540,6 +538,22 @@ class DirectorProviderFailoverController:
                 "error": str(error)[:1000],
             }
         )
+
+
+def _failed_model_id(
+    active: DirectorProvider,
+    requested_model: str | None,
+    error: Exception,
+) -> str:
+    """Resolve the concrete model that failed when routing selected it dynamically."""
+    requested = str(requested_model or getattr(active, "model", "") or "").strip()
+    if requested:
+        return requested
+    context = getattr(error, "context", None)
+    selected = str(getattr(context, "selected_model", "") or "").strip()
+    if selected:
+        return selected
+    return str(getattr(active, "model", "") or "").strip()
 
 
 def _is_failoverable(exc: Exception) -> bool:
