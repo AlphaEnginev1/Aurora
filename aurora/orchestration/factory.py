@@ -375,7 +375,7 @@ def _build_director_provider_failover(
                     or str(
                         director.get(
                             "endpoint",
-                            "https://generativelanguage.googleapis.com/v1beta",
+                            "https://integrate.api.nvidia.com/v1",
                         )
                     ),
                 }
