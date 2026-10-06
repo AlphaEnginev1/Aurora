@@ -71,12 +71,8 @@ from .task_worker import WorkerPolicy
 
 def build_orchestration_engine(policy_path: str | Path) -> OrchestrationEngine:
     nvidia_key = os.getenv("NVIDIA_API_KEY")
-    openai_key = os.getenv("OPENAI_API_KEY")
-    anthropic_key = os.getenv("ANTHROPIC_API_KEY")
     provider_registry = default_provider_registry(
         nvidia_api_key=nvidia_key,
-        openai_api_key=openai_key,
-        anthropic_api_key=anthropic_key,
     )
     model_registry = ModelRegistry.from_file(
         policy_path,
@@ -84,6 +80,8 @@ def build_orchestration_engine(policy_path: str | Path) -> OrchestrationEngine:
     )
     policy_data = json.loads(Path(policy_path).read_text(encoding="utf-8"))
     cost_policy = os.getenv("AURORA_INFERENCE_COST_POLICY", str(policy_data.get("cost_policy", "free_only"))).strip().lower()
+    if cost_policy != "free_only":
+        raise RuntimeError("Aurora canonical runtime requires cost_policy=free_only")
     runtime_root = Path(
         os.getenv("AURORA_WORKSPACE_ROOT", ".aurora-runtime")
     ).resolve()
@@ -415,8 +413,6 @@ def build_director_service(*, inference_policy_path: str | Path, autonomy_policy
     nvidia_key = settings_store.credential("nvidia_api") or os.getenv("NVIDIA_API_KEY")
     provider_registry = default_provider_registry(
         nvidia_api_key=nvidia_key,
-        openai_api_key=settings_store.credential("openai") or os.getenv("OPENAI_API_KEY"),
-        anthropic_api_key=settings_store.credential("anthropic") or os.getenv("ANTHROPIC_API_KEY"),
     )
     model_registry = ModelRegistry.from_file(
         inference_policy_path,
@@ -424,8 +420,8 @@ def build_director_service(*, inference_policy_path: str | Path, autonomy_policy
     )
     policy_data = json.loads(Path(inference_policy_path).read_text(encoding="utf-8"))
     cost_policy = os.getenv("AURORA_INFERENCE_COST_POLICY", str(policy_data.get("cost_policy", "free_only"))).strip().lower()
-    if cost_policy not in {"all", "free_only"}:
-        raise RuntimeError("AURORA_INFERENCE_COST_POLICY must be all or free_only")
+    if cost_policy != "free_only":
+        raise RuntimeError("Aurora canonical runtime requires cost_policy=free_only")
     inference_specs = list(model_registry.models)
     health_store = ProviderHealthStore(
         Path(workspace_root).resolve() / "tasks.db",
