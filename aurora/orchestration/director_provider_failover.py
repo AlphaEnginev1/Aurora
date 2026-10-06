@@ -291,9 +291,7 @@ class DirectorProviderFailoverController:
                     candidate
                     for candidate in self._candidates
                     if not (
-                        candidate.provider_id == active_provider_id
-                        and active_model_id
-                        and candidate.model == active_model_id
+                        active_model_id and candidate.model == active_model_id
                     )
                     and self._candidate_key(candidate) not in self._failed_candidates
                 ]
