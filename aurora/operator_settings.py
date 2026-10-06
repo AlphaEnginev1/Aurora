@@ -8,19 +8,18 @@ import json, os
 from pathlib import Path
 from threading import RLock
 from typing import Any, Mapping
+from aurora.inference.free_policy import is_free_model
 
 DEFAULT_SETTINGS: dict[str, Any] = {
     "director": {
         "provider": "gemini",
-        "model": "gemini-3.7-flash",
+        "model": "gemini-3.8-flash",
         "endpoint": "https://generativelanguage.googleapis.com/v1beta",
-        "failover": {"enabled": True, "order": ["nvidia_api", "openai", "anthropic", "router"]},
+        "failover": {"enabled": True, "order": ["nvidia_api", "router"]},
     },
     "providers": {
         "gemini": {"enabled": True, "api_key": ""},
         "nvidia_api": {"enabled": True, "api_key": "", "base_url": "https://integrate.api.nvidia.com/v1"},
-        "openai": {"enabled": True, "api_key": "", "base_url": "https://api.openai.com/v1"},
-        "anthropic": {"enabled": True, "api_key": "", "base_url": "https://api.anthropic.com/v1"},
     },
 }
 
@@ -51,7 +50,8 @@ class OperatorSettingsStore:
     def public(self) -> dict[str, Any]:
         data = self.load()
         providers: dict[str, Any] = {}
-        for provider_id, provider in data["providers"].items():
+        for provider_id in ("gemini", "nvidia_api"):
+            provider = data["providers"].get(provider_id, {})
             item = dict(provider)
             key = str(item.pop("api_key", "") or "")
             item["api_key_present"] = bool(key.strip())
@@ -67,7 +67,7 @@ class OperatorSettingsStore:
         next_data = _merge(current, payload)
         incoming_providers = payload.get("providers", {})
         if isinstance(incoming_providers, Mapping):
-            for provider_id in ("gemini", "nvidia_api", "openai", "anthropic"):
+            for provider_id in ("gemini", "nvidia_api"):
                 incoming = incoming_providers.get(provider_id, {})
                 if isinstance(incoming, Mapping) and "api_key" in incoming:
                     value = str(incoming.get("api_key") or "")
@@ -94,8 +94,8 @@ def _validate(data: Mapping[str, Any]) -> None:
     if not isinstance(director, Mapping) or not isinstance(providers, Mapping):
         raise OperatorSettingsError("operator settings require director and providers objects")
     provider = str(director.get("provider", "")).strip().lower()
-    if provider not in {"gemini", "router", "nvidia_api", "openai", "anthropic"}:
-        raise OperatorSettingsError("director.provider must be gemini, router, nvidia_api, openai, or anthropic")
+    if provider not in {"gemini", "router", "nvidia_api"}:
+        raise OperatorSettingsError("director.provider must be gemini, router, or nvidia_api")
     if not str(director.get("model", "")).strip():
         raise OperatorSettingsError("director.model cannot be empty")
     if not str(director.get("endpoint", "")).strip().startswith("https://"):
@@ -108,7 +108,7 @@ def _validate(data: Mapping[str, Any]) -> None:
     order = failover.get("order", [])
     if not isinstance(order, list) or not all(isinstance(item, str) for item in order):
         raise OperatorSettingsError("director.failover.order must be a string array")
-    allowed_failover = {"router", "nvidia_api", "openai", "anthropic"}
+    allowed_failover = {"router", "nvidia_api"}
     normalized_order = [item.strip().lower() for item in order]
     if any(item not in allowed_failover for item in normalized_order):
         raise OperatorSettingsError("director.failover.order contains an unsupported provider")
@@ -118,6 +118,12 @@ def _validate(data: Mapping[str, Any]) -> None:
         provider_data = providers.get(provider_id)
         if not isinstance(provider_data, Mapping):
             raise OperatorSettingsError(f"provider configuration missing: {provider_id}")
+        if bool(director.get("free_only", True)) and provider_id in {"gemini", "nvidia_api"}:
+            model_id = str(director.get("model", "")).strip()
+            if not is_free_model(provider_id, model_id):
+                raise OperatorSettingsError(
+                    f"free_only policy rejects non-free Director model: {provider_id}/{model_id}"
+                )
         if provider_id in {"nvidia_api", "openai", "anthropic"} and not str(provider_data.get("base_url", "")).strip().startswith("https://"):
             raise OperatorSettingsError(f"{provider_id}.base_url must use HTTPS")
 
