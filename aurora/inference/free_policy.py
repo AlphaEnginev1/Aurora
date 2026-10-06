@@ -1,8 +1,8 @@
 """Central free-model policy used by Aurora's runtime routing and discovery.
 
-The policy is deliberately fail-closed: a model is considered free only when it is
-explicitly present in the curated policy with tier="free". Provider discovery can
-stage unknown models, but unknown/paid models can never enter a free-only route.
+The policy is deliberately fail-closed. Static providers require an explicit free record.
+NVIDIA may additionally authorize models discovered from its live Free Endpoint catalog;
+the checked-in NVIDIA entries are seed metadata only and never form an allowlist ceiling.
 """
 from __future__ import annotations
 
@@ -52,6 +52,23 @@ def model_record(provider_id: str, model_id: str, path: str | Path | None = None
     return record if isinstance(record, Mapping) else None
 
 
+def dynamic_catalog_mode(provider_id: str, path: str | Path | None = None) -> str | None:
+    data = load_free_model_policy(path)
+    provider = data["providers"].get(str(provider_id).strip().lower(), {})
+    if not isinstance(provider, Mapping):
+        return None
+    mode = provider.get("dynamic_catalog")
+    return str(mode).strip().lower() if isinstance(mode, str) and mode.strip() else None
+
+
+def is_discovered_free_model(provider_id: str, model_id: str, *, discovered_free_endpoint: bool = False, path: str | Path | None = None) -> bool:
+    if is_free_model(provider_id, model_id, path):
+        return True
+    return (str(provider_id).strip().lower() == "nvidia_api"
+            and dynamic_catalog_mode(provider_id, path) == "free_endpoint"
+            and discovered_free_endpoint)
+
+
 def is_free_model(provider_id: str, model_id: str, path: str | Path | None = None) -> bool:
     record = model_record(provider_id, model_id, path)
     return bool(record and str(record.get("tier", "")).strip().lower() == "free")
@@ -85,7 +102,9 @@ def record_metadata(provider_id: str, model_id: str, path: str | Path | None = N
 __all__ = [
     "DEFAULT_FREE_MODEL_POLICY",
     "FreeModelPolicyError",
+    "dynamic_catalog_mode",
     "free_model_ids",
+    "is_discovered_free_model",
     "is_free_model",
     "load_free_model_policy",
     "model_record",
