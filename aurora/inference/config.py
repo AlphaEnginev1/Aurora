@@ -14,6 +14,9 @@ def load_model_specs(path: str | Path) -> list[ModelSpec]:
         data = json.loads(source.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise InferenceConfigError(f"Unable to load inference policy: {source}") from exc
+    cost_policy = str(data.get("cost_policy", "all")).strip().lower()
+    if cost_policy not in {"all", "free_only"}:
+        raise InferenceConfigError("inference policy cost_policy must be all or free_only")
     models = data.get("models")
     if not isinstance(models, list):
         raise InferenceConfigError("inference policy 'models' must be a list")
@@ -37,6 +40,8 @@ def load_model_specs(path: str | Path) -> list[ModelSpec]:
         pricing_tier = str(item.get("pricing_tier", "unknown")).strip().lower()
         if pricing_tier not in {"free", "paid", "unknown"}:
             raise InferenceConfigError(f"invalid pricing_tier for {item.get('id')!r}")
+        if cost_policy == "free_only" and pricing_tier != "free":
+            raise InferenceConfigError(f"free_only policy requires enabled models to be explicitly free: {item.get("id")!r}")
         result.append(ModelSpec(
             id=item["id"], provider=item["provider"], endpoint=item["endpoint"],
             capabilities=tuple(caps), context_window=item.get("context_window"),
