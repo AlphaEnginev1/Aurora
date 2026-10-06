@@ -81,8 +81,11 @@ def build_orchestration_engine(policy_path: str | Path) -> OrchestrationEngine:
         policy_path,
         provider_registry=provider_registry,
     )
+    runtime_root = Path(
+        os.getenv("AURORA_WORKSPACE_ROOT", ".aurora-runtime")
+    ).resolve()
     health_store = ProviderHealthStore(
-        Path(policy_path).resolve().parent / "provider-health.db",
+        runtime_root / "provider-health.db",
         failure_threshold=int(os.getenv("AURORA_PROVIDER_HEALTH_FAILURE_THRESHOLD", "2")),
         base_cooldown_seconds=float(os.getenv("AURORA_PROVIDER_HEALTH_BASE_COOLDOWN_SECONDS", "15")),
         max_cooldown_seconds=float(os.getenv("AURORA_PROVIDER_HEALTH_MAX_COOLDOWN_SECONDS", "300")),
