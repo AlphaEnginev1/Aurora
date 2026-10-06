@@ -39,7 +39,7 @@ Promotion uses `ModelRegistry.register()` and never overwrites an existing activ
 
 The production Director runtime exposes `ModelDiscoveryService` and its durable candidate store. Startup still does not perform external discovery, so boot remains deterministic.
 
-When the Director's active provider fails and NVIDIA is next in the configured failover order, Aurora performs governed NVIDIA catalog discovery at the point of need. Discovered models remain staged in `ModelCandidateStore`; they are not promoted into the global `ModelRegistry` just because they were discovered.
+When the Director's active provider fails and NVIDIA is next in the configured failover order, Aurora performs governed NVIDIA catalog discovery at the point of need. Discovered models remain staged in `ModelCandidateStore` and, when the NVIDIA free-endpoint policy authorizes them, automatically synchronized into the authoritative `ModelRegistry`. Paid or unknown models remain excluded.
 
 For the failover attempt, Aurora builds an ephemeral candidate pool from the discovered catalog. Explicit model-level capabilities are honored. When NVIDIA provides no model-level capability classification, the NVIDIA provider contract supplies the provider-level `reasoning` capability. The existing `ModelRouter` scores the eligible pool, the best candidate is attempted first, and subsequent NVIDIA models remain available as additional fallback candidates when an earlier model fails.
 
