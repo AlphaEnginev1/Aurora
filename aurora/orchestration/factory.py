@@ -196,7 +196,7 @@ def _build_director_provider_failover(
     if not bool(failover.get("enabled", True)):
         return active_provider
 
-    order = failover.get("order", ["nvidia_api", "router"])
+    order = failover.get("order", ["nvidia_api", "openai", "anthropic", "router"])
     if not isinstance(order, list):
         raise RuntimeError("director.failover.order must be a list")
     normalized_order = tuple(str(item).strip().lower() for item in order)
@@ -212,136 +212,125 @@ def _build_director_provider_failover(
         requested_model: str | None,
         role: str,
     ) -> tuple[DirectorProviderCandidate, ...]:
-        candidates: list[DirectorProviderCandidate] = []
         active_id = str(getattr(active_provider, "provider_id", "") or "")
+        pool_specs: list[ModelSpec] = []
+        seen_models: set[tuple[str, str]] = set()
+
+        credentials = {
+            "nvidia_api": settings_store.credential("nvidia_api") or os.getenv("NVIDIA_API_KEY", ""),
+            "openai": settings_store.credential("openai") or os.getenv("OPENAI_API_KEY", ""),
+            "anthropic": settings_store.credential("anthropic") or os.getenv("ANTHROPIC_API_KEY", ""),
+        }
+
+        discovery = ModelDiscoveryService(
+            router.provider_registry,
+            router.model_registry,
+            model_candidate_store,
+        )
 
         for provider_id in normalized_order:
-            if provider_id == "nvidia_api":
-                key = settings_store.credential("nvidia_api") or os.getenv(
-                    "NVIDIA_API_KEY", ""
+            if provider_id == "router":
+                continue
+            if provider_id == active_id:
+                continue
+            if provider_id not in credentials or not credentials[provider_id]:
+                continue
+            try:
+                discovered = discovery.discover_and_stage(provider_id)
+            except Exception:
+                # Governed last-known discovery remains a valid reserve snapshot.
+                discovered = model_candidate_store.list(
+                    provider_id=provider_id,
+                    state="discovered",
+                    limit=100,
                 )
-                if active_id == "nvidia_api" or not key:
+            if not discovered:
+                continue
+            provider_spec = router.provider_registry.resolve(provider_id)
+            for item in discovered:
+                model = item.model
+                capabilities = tuple(model.capabilities) or tuple(provider_spec.capabilities)
+                if "reasoning" not in capabilities:
                     continue
-
-                discovery = ModelDiscoveryService(
-                    router.provider_registry,
-                    router.model_registry,
-                    model_candidate_store,
-                )
-                try:
-                    discovered = discovery.discover_and_stage("nvidia_api")
-                except Exception:
-                    # A transient catalog outage must not erase the failover
-                    # path. Reuse the last governed NVIDIA catalog snapshot,
-                    # then let real inference prove whether a model is usable.
-                    discovered = model_candidate_store.list(
-                        provider_id="nvidia_api",
-                        state="discovered",
-                        limit=100,
-                    )
-                if not discovered:
+                key = (model.provider, model.id)
+                if key in seen_models:
                     continue
-
-                provider_spec = router.provider_registry.resolve("nvidia_api")
-                pool_specs: list[ModelSpec] = []
-                for item in discovered:
-                    model = item.model
-                    capabilities = tuple(model.capabilities)
-                    if not capabilities:
-                        capabilities = tuple(provider_spec.capabilities)
-                    if "reasoning" not in capabilities:
-                        continue
-                    pool_specs.append(
-                        ModelSpec(
-                            id=model.id,
-                            provider=model.provider,
-                            endpoint=model.endpoint,
-                            capabilities=capabilities,
-                            context_window=model.context_window,
-                            enabled=True,
-                            specialties=model.specialties,
-                            quality_score=model.quality_score,
-                            latency_score=model.latency_score,
-                            cost_score=model.cost_score,
-                            healthy=True,
-                            available=True,
-                        )
-                    )
-
-                if not pool_specs:
-                    continue
-
-                pool_registry = ModelRegistry.from_specs(
-                    pool_specs,
-                    provider_registry=router.provider_registry,
-                )
-                pool_router = ModelRouter(
-                    models=list(pool_registry.models),
-                    nvidia_api_key=key,
-                    provider_registry=router.provider_registry,
-                    model_registry=pool_registry,
-                    context_gate=router.context_gate,
-                    enforce_context=router.enforce_context,
-                )
-                selection_request = InferenceRequest(
-                    messages=messages,
-                    model=None,
-                    metadata={"role": role},
-                )
-                try:
-                    decision = pool_router.route(
-                        selection_request,
-                        capability="reasoning",
-                    )
-                except Exception:
-                    continue
-
-                selected_ids = tuple(
-                    model_id for model_id, _score in decision.candidates
-                )
-                by_id = {
-                    model.id: model
-                    for model in pool_specs
-                }
-                for model_id in selected_ids:
-                    selected = by_id.get(model_id)
-                    if selected is None:
-                        continue
-                    candidates.append(
-                        DirectorProviderCandidate(
-                            provider_id="nvidia_api",
-                            model=selected.id,
-                            endpoint=selected.endpoint,
-                            factory=lambda r=pool_router, m=selected.id: BoundInferenceDirectorProvider(
-                                r,
-                                provider_id="nvidia_api",
-                                model=m,
-                            ),
-                        )
-                    )
-
-            elif provider_id == "router":
-                if active_id in {"router", "inference_router"}:
-                    continue
-                has_router_reasoning_model = any(
-                    "reasoning" in model.capabilities
-                    for model in router.available()
-                )
-                if not has_router_reasoning_model:
-                    continue
-                candidates.append(
-                    DirectorProviderCandidate(
-                        provider_id="router",
-                        model=None,
-                        endpoint=None,
-                        factory=lambda r=router: BoundInferenceDirectorProvider(
-                            r,
-                            provider_id="router",
-                            model=None,
-                        ),
+                seen_models.add(key)
+                pool_specs.append(
+                    ModelSpec(
+                        id=model.id,
+                        provider=model.provider,
+                        endpoint=model.endpoint,
+                        capabilities=capabilities,
+                        context_window=model.context_window,
+                        enabled=True,
+                        specialties=model.specialties,
+                        quality_score=model.quality_score,
+                        latency_score=model.latency_score,
+                        cost_score=model.cost_score,
+                        healthy=True,
+                        available=True,
                     )
                 )
 
+        # Existing configured models are still part of the reserve pool; no
+        # new model source supersedes or mutates the authoritative registry.
+        if "router" in normalized_order:
+            for model in router.available():
+                if active_id == model.provider:
+                    continue
+                if "reasoning" not in model.capabilities:
+                    continue
+                key = (model.provider, model.id)
+                if key in seen_models:
+                    continue
+                seen_models.add(key)
+                pool_specs.append(model)
+
+        if not pool_specs:
+            return ()
+
+        pool_registry = ModelRegistry.from_specs(
+            pool_specs,
+            provider_registry=router.provider_registry,
+        )
+        pool_router = ModelRouter(
+            models=list(pool_registry.models),
+            nvidia_api_key=credentials["nvidia_api"],
+            provider_registry=router.provider_registry,
+            model_registry=pool_registry,
+            context_gate=router.context_gate,
+            enforce_context=router.enforce_context,
+            health_store=router.health_store,
+        )
+        selection_request = InferenceRequest(
+            messages=messages,
+            model=None,
+            metadata={"role": role, "allowed_models": [model.id for model in pool_specs]},
+        )
+        try:
+            decision = pool_router.route(selection_request, capability="reasoning")
+        except Exception:
+            return ()
+
+        by_id = {model.id: model for model in pool_specs}
+        candidates: list[DirectorProviderCandidate] = []
+        for model_id, _score in decision.candidates:
+            selected = by_id.get(model_id)
+            if selected is None:
+                continue
+            candidates.append(
+                DirectorProviderCandidate(
+                    provider_id=selected.provider,
+                    model=selected.id,
+                    endpoint=selected.endpoint,
+                    factory=lambda r=pool_router, m=selected: BoundInferenceDirectorProvider(
+                        r,
+                        provider_id=m.provider,
+                        model=m.id,
+                    ),
+                )
+            )
         return tuple(candidates)
 
     def activate(candidate: DirectorProviderCandidate, _provider) -> None:
