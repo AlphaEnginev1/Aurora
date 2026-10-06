@@ -1,6 +1,6 @@
 # Aurora Consolidation Matrix
 
-**Consolidation status: COMPLETE — FINAL RECORD**
+**Consolidation status: COMPLETE — RECONCILED WITH CURRENT MAIN**
 
 This document is the authoritative implementation/status inventory produced by the consolidation gate.
 It separates implementation existence, automated testing, runtime wiring, live-provider verification, and
@@ -38,7 +38,14 @@ remains as an auditable snapshot of the gate work and is not a second implementa
 | Acquisition transactions / provenance / dependency closure | YES | YES | YES | YES | None identified in frozen queue |
 | Sandbox / deterministic workspaces | YES | YES | YES | YES | None identified in frozen queue |
 | Application network gateway / proxy / dataplane | YES | YES | YES | YES | None identified in frozen queue |
-| Inference Fabric / ModelRouter | YES | YES | YES | YES | None identified in frozen queue |\n| Provider Health / Availability Layer | YES | YES | YES | PENDING NEW LIVE GATE | LIVE multi-provider acceptance |\n| OpenAI provider + discovery adapter | YES | YES | YES | PENDING NEW LIVE GATE | LIVE provider contract |\n| Anthropic provider + discovery adapter | YES | YES | YES | PENDING NEW LIVE GATE | LIVE provider contract |\n| Dynamic multi-provider Director reserve pool | YES | YES | YES | PENDING NEW LIVE GATE | LIVE reserve/failover acceptance |\n| Controlled autonomous model-catalog refresh | YES | YES | YES | PENDING NEW LIVE GATE | LIVE discovery/refresh acceptance |\n| Critical Decision Model Ensemble | YES | YES | YES | PENDING NEW LIVE GATE | LIVE ensemble acceptance |\n| Multi-Agent Adversarial Review | YES | YES | YES | PENDING NEW LIVE GATE | LIVE adversarial-review acceptance |
+| Inference Fabric / ModelRouter | YES | YES | YES | YES | None identified in frozen queue |
+| Provider Health / Availability Layer | YES | YES | YES | PENDING NEW LIVE GATE | LIVE multi-provider acceptance |
+| OpenAI provider + discovery adapter | YES | YES | YES | PENDING NEW LIVE GATE | LIVE provider contract |
+| Anthropic provider + discovery adapter | YES | YES | YES | PENDING NEW LIVE GATE | LIVE provider contract |
+| Dynamic multi-provider Director reserve pool | YES | YES | YES | PENDING NEW LIVE GATE | LIVE reserve/failover acceptance |
+| Controlled autonomous model-catalog refresh | YES | YES | YES | PENDING NEW LIVE GATE | LIVE discovery/refresh acceptance |
+| Critical Decision Model Ensemble | YES | YES | YES | PENDING NEW LIVE GATE | LIVE ensemble acceptance |
+| Multi-Agent Adversarial Review | YES | YES | YES | PENDING NEW LIVE GATE | LIVE adversarial-review acceptance |
 | NVIDIA provider | YES | YES | YES | YES | None identified in frozen queue |
 | Director provider abstraction / Gemini adapter | YES | YES | YES | YES | None identified in frozen queue |
 | Director 24/7 runtime | YES | YES | YES | N/A | None identified in frozen queue |
@@ -179,7 +186,7 @@ Production observability and controlled recovery drills are both verified. The i
 
 ## 6. Historical branch classification
 
-At consolidation time the repository contains **58 branch refs**:
+At consolidation time the repository contained **58 branch refs**. This historical count is intentionally frozen; later feature branches are not part of the consolidation inventory.
 
 - 1 canonical branch: `main`;
 - 1 consolidation evidence branch: `runtime/consolidation-gate`;
@@ -310,6 +317,7 @@ The frozen production-readiness queue 1–7 is **COMPLETE / VERIFIED** on canoni
 
 There is no remaining block in this queue. Historical branches and closed PRs must not be used as alternate implementation queues.
 
+The newer Increment 13 architecture is tracked separately from that frozen queue and is not considered LIVE VERIFIED until `.github/workflows/live-multi-provider-resilience.yml` completes successfully.
+
 The Controlled Live Authorization gate is established, but **live execution is not active by default**. A human operator must explicitly provide a valid authorization artifact; no authorization record or provider credential is stored in the repository.
 
-**Increment 11 remains not authorized by this document.**
