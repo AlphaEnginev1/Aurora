@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Sequence
 
-from aurora.organization import AgentSelector, AgentTeam, DynamicAgentTeamSelector, TeamReconfiguration, reconfigure_team
+from aurora.organization import AgentSelector, AgentTeam, DynamicAgentTeamSelector, TeamMember, TeamReconfiguration, reconfigure_team
 from aurora.skills.acquisition import SkillAcquisitionRuntime
 from .task_engine import DelegatedTask, TaskEngine, TaskEngineError
 
@@ -55,7 +55,7 @@ class TeamCoordinator:
         current_roles: Sequence[str] = (),
         min_reviewers: int = 2,
         max_reviewers: int = 3,
-    ) -> tuple:
+    ) -> tuple[TeamMember, ...]:
         """Select distinct authorized specialists for an independent review panel.
 
         Selection reuses the existing AgentSelector and organization registry. The
@@ -102,8 +102,6 @@ class TeamCoordinator:
             raise TeamCoordinatorError(
                 "adversarial review requires at least two distinct authorized specialists"
             )
-
-        from aurora.organization.agent_team import TeamMember
 
         scores = dict(ranked)
         return tuple(
