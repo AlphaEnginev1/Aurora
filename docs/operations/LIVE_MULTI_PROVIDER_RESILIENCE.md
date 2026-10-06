@@ -12,7 +12,7 @@ The gate exercises the canonical implementation using only free-model access:
 1. Gemini free tier as the current Director primary.
 2. NVIDIA NIM free endpoints for the autonomous specialist/reserve pool.
 3. Durable `ProviderHealthStore` success/failure state.
-4. Current NVIDIA catalog discovery with a fail-closed free-model allowlist.
+4. Current NVIDIA `/v1/models` discovery joined with the official Build `Free Endpoint` catalog; paid/unknown models fail closed.
 5. Dynamic Director reserve-pool construction.
 6. Real Gemini → NVIDIA Director failover under a controlled primary failure.
 7. Critical-decision `ModelEnsemble` across distinct free NVIDIA models.
