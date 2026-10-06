@@ -29,7 +29,7 @@ class GeminiDirectorError(RuntimeError):
 @dataclass(frozen=True)
 class GeminiDirectorConfig:
     api_key: str
-    model: str = "gemini-3.7-flash"
+    model: str = "gemini-3.8-flash"
     endpoint: str = "https://generativelanguage.googleapis.com/v1beta"
     timeout_seconds: float = 30.0
     max_retries: int = 2
@@ -52,7 +52,7 @@ class GeminiDirectorProvider:
     ) -> None:
         self.config = config or GeminiDirectorConfig(
             api_key=api_key or os.getenv("GEMINI_API_KEY", ""),
-            model=model or os.getenv("GEMINI_MODEL_ID", "gemini-3.7-flash"),
+            model=model or os.getenv("GEMINI_MODEL_ID", "gemini-3.8-flash"),
             endpoint=endpoint or os.getenv(
                 "GEMINI_API_ENDPOINT",
                 "https://generativelanguage.googleapis.com/v1beta",
