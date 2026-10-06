@@ -12,7 +12,7 @@ Dashboard HTTP boundary
   |
   +--> DirectorConversationService --> Director
   |                                  |
-  |                                  +--> Gemini (AURORA_DIRECTOR_PROVIDER=gemini)
+  |                                  +--> NVIDIA NIM (AURORA_DIRECTOR_PROVIDER=router)
   |
   +--> read-only DashboardGateway
                                        |
@@ -21,7 +21,7 @@ Dashboard HTTP boundary
                                        +--> durable Task/Event stores
 \`\`\`
 
-The browser never receives provider credentials and never calls Gemini/NVIDIA directly.
+The browser never receives provider credentials and never calls NVIDIA directly.
 
 ## Host installation
 
@@ -35,7 +35,7 @@ The reference host layout is \`/opt/aurora\` with service account \`aurora\`. A 
 5. Set \`AURORA_CANONICAL_COMMIT\` to the exact \`main\` SHA deployed on the host.
 6. Configure the real governed egress proxy. Aurora must not run with direct egress.
 7. Enable at least one real NVIDIA model in the deployed inference policy.
-8. For the selected Director architecture, set \`AURORA_DIRECTOR_PROVIDER=gemini\` and supply the Gemini model/credential.
+8. For the selected Director architecture, set `AURORA_DIRECTOR_PROVIDER=router` and supply only `NVIDIA_API_KEY`.
 9. Keep the service command without \`--live\` unless the operator has separately created and validated the explicit live authorization record.
 
 ## Persistent service
@@ -62,7 +62,7 @@ The preflight fails closed unless:
 - all required config files and the canonical portrait asset exist;
 - an enabled inference model exists;
 - NVIDIA credentials are present;
-- Gemini credentials/model are present when Gemini is the Director provider;
+- Only the NVIDIA credential is required for the active Director runtime;
 - the egress proxy is reachable;
 - the runtime directory is writable;
 - the dashboard is loopback or has a transport token;
@@ -100,7 +100,7 @@ Run on the deployed checkout:
   tests/test_production_deployment_contract.py
 \`\`\`
 
-The physical microphone/browser interaction is not claimed by these tests; browser voice behavior is contract-tested and mocked at the CI boundary. The dedicated LIVE-GEMINI, LIVE-NVIDIA, and LIVE-RESEARCH-DISCOVERY gates remain the authoritative live-provider evidence.
+The physical microphone/browser interaction is not claimed by these tests; browser voice behavior is contract-tested and mocked at the CI boundary. The active live-provider evidence is the NVIDIA-only Free Model Gate plus the independently verified research/network/observability/recovery gates.
 
 ## Live operation
 

@@ -470,25 +470,28 @@
     state.settings = data;
     const director = safeObject(data.director);
     const providers = safeObject(data.providers);
-    $("director-provider").value = String(director.provider || "gemini");
+    $("director-provider").value = String(director.provider || "router");
     $("director-model").value = String(director.model || "");
-    $("director-endpoint").value = String(director.endpoint || "");
+    $("director-endpoint").value = String(director.endpoint || "https://integrate.api.nvidia.com/v1");
     $("nvidia-endpoint").value = String(
       safeObject(providers.nvidia_api).base_url || "https://integrate.api.nvidia.com/v1"
     );
 
-    const geminiPresent = !!safeObject(providers.gemini).api_key_present;
     const nvidiaPresent = !!safeObject(providers.nvidia_api).api_key_present;
-    $("gemini-status").textContent = geminiPresent ? "CONNECTED" : "NOT CONNECTED";
     $("nvidia-status").textContent = nvidiaPresent ? "CONNECTED" : "NOT CONNECTED";
     $("settings-state").innerHTML =
       '<span class="signal-dot"></span> ' +
       esc(String(data.runtime && data.runtime.director_provider || director.provider || "unknown").toUpperCase());
     $("nvidia-models").innerHTML = "";
-    showSettingsMessage(geminiPresent || nvidiaPresent ? "Provider configuration loaded." : "Enter your provider keys here; no terminal is needed.", false);
+    showSettingsMessage(
+      nvidiaPresent
+        ? "NVIDIA-only provider configuration loaded."
+        : "Enter the NVIDIA API key. Aurora discovers the available free NVIDIA models dynamically.",
+      false
+    );
   }
 
-  async function loadSettings() {
+async function loadSettings() {
     const response = await fetch(state.apiBase + "/settings", { headers: { Accept: "application/json" } });
     if (!response.ok) throw new Error("settings " + response.status);
     renderSettings(await response.json());
@@ -507,14 +510,12 @@
         }
       }
     };
-    const geminiKey = $("gemini-key").value.trim();
     const nvidiaKey = $("nvidia-key").value.trim();
-    if (geminiKey) payload.providers.gemini = { api_key: geminiKey };
     if (nvidiaKey) payload.providers.nvidia_api.api_key = nvidiaKey;
 
     const button = $("settings-save");
     button.disabled = true;
-    showSettingsMessage("Saving and applying provider configuration…", false);
+    showSettingsMessage("Saving and applying NVIDIA-only configuration…", false);
     try {
       const response = await fetch(state.apiBase + "/settings", {
         method: "POST",
@@ -523,10 +524,9 @@
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data && data.error ? data.error : "settings " + response.status);
-      $("gemini-key").value = "";
       $("nvidia-key").value = "";
       renderSettings(data);
-      showSettingsMessage("Configuration saved and applied. Aurora is ready to use the selected Director.", false);
+      showSettingsMessage("NVIDIA-only configuration saved and applied.", false);
     } catch (error) {
       showSettingsMessage(error.message, true);
     } finally {
@@ -534,39 +534,37 @@
     }
   }
 
-  async function testProvider(provider) {
-    showSettingsMessage("Testing " + provider.toUpperCase() + "…", false);
+async function testProvider(provider) {
+    if (provider !== "nvidia_api") {
+      showSettingsMessage("Aurora uses NVIDIA only.", true);
+      return;
+    }
+    showSettingsMessage("Testing NVIDIA…", false);
     const response = await fetch(state.apiBase + "/settings/test", {
       method: "POST",
       headers: { Accept: "application/json", "Content-Type": "application/json" },
-      body: JSON.stringify({ provider: provider })
+      body: JSON.stringify({ provider: "nvidia_api" })
     });
     const data = await response.json();
-    if (!response.ok) throw new Error(data && data.error ? data.error : "provider test failed");
-    if (provider === "nvidia_api") {
-      const models = safeArray(data.models);
-      $("nvidia-models").innerHTML = models.length
-        ? '<div class="settings-model-title">DISCOVERED MODELS</div>' +
-          models.map(function (model) {
-            return '<button type="button" class="settings-model" data-model="' + esc(model) + '">' + esc(model) + '</button>';
-          }).join("")
-        : '<div class="empty-state">No model IDs returned by NVIDIA.</div>';
-      document.querySelectorAll(".settings-model").forEach(function (button) {
-        button.addEventListener("click", function () {
-          $("director-model").value = button.getAttribute("data-model") || "";
-          $("director-provider").value = "nvidia_api";
-        });
+    if (!response.ok) throw new Error(data && data.error ? data.error : "NVIDIA provider test failed");
+
+    const models = safeArray(data.models);
+    $("nvidia-models").innerHTML = models.length
+      ? '<div class="settings-model-title">DISCOVERED FREE NVIDIA MODELS</div>' +
+        models.map(function (model) {
+          return '<button type="button" class="settings-model" data-model="' + esc(model) + '">' + esc(model) + '</button>';
+        }).join("")
+      : '<div class="empty-state">No free NVIDIA model IDs returned.</div>';
+    document.querySelectorAll(".settings-model").forEach(function (button) {
+      button.addEventListener("click", function () {
+        $("director-model").value = button.getAttribute("data-model") || "";
+        $("director-provider").value = "nvidia_api";
       });
-    }
-    if (provider === "nvidia_api") {
-      const count = Number(data.staged_count || 0);
-      showSettingsMessage(
-        provider.toUpperCase() + " connection verified · " + count + " model(s) discovered and staged for governance.",
-        false
-      );
-    } else {
-      showSettingsMessage(provider.toUpperCase() + " connection verified.", false);
-    }
+    });
+    showSettingsMessage(
+      "NVIDIA connection verified · " + Number(data.staged_count || 0) + " free model(s) discovered and staged.",
+      false
+    );
   }
 
   async function uploadAurora(files) {
@@ -668,9 +666,6 @@
     });
     $("settings-reload").addEventListener("click", function () {
       loadSettings().catch(function (error) { showSettingsMessage(error.message, true); });
-    });
-    $("gemini-test").addEventListener("click", function () {
-      testProvider("gemini").catch(function (error) { showSettingsMessage(error.message, true); });
     });
     $("nvidia-test").addEventListener("click", function () {
       testProvider("nvidia_api").catch(function (error) { showSettingsMessage(error.message, true); });

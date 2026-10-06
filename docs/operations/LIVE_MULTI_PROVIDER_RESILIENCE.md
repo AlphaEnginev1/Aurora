@@ -1,70 +1,17 @@
-# Live Free-Model Resilience Gate
+# NVIDIA-only free-model resilience
 
-**Status:** GATE DEFINED — AWAITING LIVE EXECUTION  
-**Canonical implementation:** `main`
+Aurora's active inference architecture has one external provider: NVIDIA NIM.
 
-This gate closes the LIVE evidence gap for the current inference-resilience architecture without introducing paid provider dependencies. It does not reopen Increment 11, Increment 12 or the frozen production-readiness queue.
+## Runtime contract
 
-## Scope
+The Director uses the provider-neutral Aurora router. The router and failover controller may select any eligible NVIDIA Free Endpoint model discovered from the live NVIDIA catalog. The checked-in NVIDIA models are seed metadata only; they are never a hard ceiling.
 
-The gate exercises the canonical implementation using only free-model access:
+When an NVIDIA model fails, health is tracked at `provider_id + model_id` granularity. Aurora can therefore continue to another NVIDIA model from the same provider. When no eligible NVIDIA model remains, the runtime fails closed and preserves the failure evidence.
 
-1. Gemini free tier as the current Director primary.
-2. NVIDIA NIM free endpoints for the autonomous specialist/reserve pool.
-3. Durable `ProviderHealthStore` success/failure state.
-4. Current NVIDIA `/v1/models` discovery joined with the official Build `Free Endpoint` catalog; paid/unknown models fail closed.
-5. Dynamic Director reserve-pool construction.
-6. Real Gemini → NVIDIA Director failover under a controlled primary failure.
-7. Critical-decision `ModelEnsemble` across distinct free NVIDIA models.
-8. `DirectorRuntime` multi-agent adversarial review across the same free-only router.
-9. Durable failover, health, decision and review evidence.
+Gemini, OpenAI and Anthropic are not part of the active provider registry, Director settings, dashboard settings, or LIVE credential contract.
 
-The test never requires OpenAI or Anthropic credentials and the workflow explicitly rejects those variables.
+## LIVE acceptance
 
-## Free-model policy
+The workflow `.github/workflows/live-multi-provider-resilience.yml` is now the NVIDIA-only LIVE gate. It requires only `NVIDIA_API_KEY`, performs dynamic Free Endpoint discovery, and executes a real reasoning request against NVIDIA.
 
-The checked-in `config/free-model-policy.json` defines `free_only` and seed metadata. For NVIDIA, the authoritative free-access signal is the current official Build catalog `Free Endpoint` label joined with the models actually served by the configured `/v1/models` endpoint.
-
-The listed NVIDIA IDs are known-good seed metadata and are not a closed allowlist. The LIVE acceptance must validate that the runtime can discover and route current NVIDIA Free Endpoint models beyond the seed set.
-
-- Gemini: `gemini-3.8-flash`, `gemini-3.7-flash`
-- NVIDIA NIM: `nvidia/nemotron-3-ultra-550b-a55b`
-- NVIDIA NIM: `nvidia/nemotron-3-super-120b-a12b`
-- NVIDIA NIM: `z-ai/glm-5-3`
-- NVIDIA NIM: `z-ai/glm-5-3-flash`
-- NVIDIA NIM: `deepseek-ai/deepseek-v4.1-flash`
-- NVIDIA NIM: `google/gemma-4-31b-it`
-- NVIDIA NIM: `poolside/laguna-xs-2.1`
-
-Google currently documents Gemini 3.8 Flash as Free Tier. NVIDIA currently exposes the listed NIM model pages with Free Endpoint availability. The runtime fails closed on paid/unknown models and may activate models discovered from the authoritative Free Endpoint catalog.
-
-## GitHub environment
-
-Environment: `multi-provider-live`
-
-Required secrets:
-- `GEMINI_API_KEY`
-- `NVIDIA_API_KEY`
-
-No OpenAI or Anthropic secrets are required or used.
-
-Workflow inputs may override the Gemini model. An NVIDIA override is accepted only when it is present in the current discovered Free Endpoint catalog.
-
-## Acceptance
-
-A green run is the LIVE acceptance evidence for the current free-model resilience implementation.
-
-The gate fails closed when:
-- credentials are missing;
-- the configured Director model is not policy-authorized as free;
-- fewer than three distinct free NVIDIA reasoning candidates are discovered;
-- a real free-model inference fails;
-- the Director failover does not reach NVIDIA;
-- the critical-decision ensemble lacks sufficient successful independent members;
-- adversarial reviewers cannot execute through the free-only router.
-
-The gate does not authorize production execution. Controlled Live Authorization remains the activation boundary.
-
-## Evidence already closed
-
-LIVE-RESEARCH-DISCOVERY, LIVE-NVIDIA, LIVE-GEMINI, Increment 12 provider failover, Universal Workbench acceptance, production observability and recovery remain independently verified.
+Historical Gemini and multi-vendor acceptance records remain archived as evidence of previous architecture states; they are not active runtime dependencies.

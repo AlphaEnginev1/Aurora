@@ -132,24 +132,24 @@ def test_factory_discovers_and_selects_available_nvidia_model_without_fixed_id(t
     monkeypatch.setattr("aurora.orchestration.factory.ModelDiscoveryService", FakeDiscovery)
     monkeypatch.delenv("AURORA_NVIDIA_MODEL_ID", raising=False)
 
-    class FailingGemini:
-        provider_id = "gemini"
+    class FailingRouter:
+        provider_id = "inference_router"
 
         def generate(self, **_kwargs):
-            raise ProviderFailure("forced Gemini outage")
+            raise ProviderFailure("forced router outage")
 
     settings = OperatorSettingsStore(tmp_path / "operator-settings.json")
     settings.save({"providers": {"nvidia_api": {"api_key": "nvidia-secret"}}})
     controller = _build_director_provider_failover(
         settings_store=settings,
         router=router,
-        active_provider=FailingGemini(),
+        active_provider=FailingRouter(),
         db_path=tmp_path / "tasks.db",
     )
 
     response = controller.generate(
         messages=[{"role": "user", "content": "continue"}],
-        model="gemini-3.7-flash",
+        model="nvidia/nemotron-3-ultra-550b-a55b",
         role="director_planner",
     )
 
@@ -218,24 +218,24 @@ def test_factory_uses_cached_nvidia_catalog_when_live_discovery_is_unavailable(t
         lambda _self, _provider_id: (_ for _ in ()).throw(RuntimeError("catalog unavailable")),
     )
 
-    class FailingGemini:
-        provider_id = "gemini"
+    class FailingRouter:
+        provider_id = "inference_router"
 
         def generate(self, **_kwargs):
-            raise ProviderFailure("forced Gemini outage")
+            raise ProviderFailure("forced router outage")
 
     settings = OperatorSettingsStore(tmp_path / "operator-settings.json")
     settings.save({"providers": {"nvidia_api": {"api_key": "nvidia-secret"}}})
     controller = _build_director_provider_failover(
         settings_store=settings,
         router=router,
-        active_provider=FailingGemini(),
+        active_provider=FailingRouter(),
         db_path=tmp_path / "tasks.db",
     )
 
     response = controller.generate(
         messages=[{"role": "user", "content": "continue"}],
-        model="gemini-3.7-flash",
+        model="nvidia/nemotron-3-ultra-550b-a55b",
         role="director_conversation",
     )
 
@@ -245,12 +245,12 @@ def test_factory_uses_cached_nvidia_catalog_when_live_discovery_is_unavailable(t
 
 
 def test_failures_are_tracked_per_nvidia_model_not_per_provider(tmp_path: Path):
-    gemini = FakeProvider("gemini", [ProviderFailure("forced Gemini outage")])
+    router = FakeProvider("inference_router", [ProviderFailure("forced router outage")])
     first = FakeProvider("nvidia_api", [ProviderFailure("model A outage")])
     second = FakeProvider("nvidia_api", ["model B works"])
     store = DirectorProviderFailoverStore(str(tmp_path / "runtime.db"))
     controller = DirectorProviderFailoverController(
-        active_provider=gemini,
+        active_provider=router,
         candidates=(),
         store=store,
         activate=lambda _candidate, _provider: None,
@@ -262,7 +262,7 @@ def test_failures_are_tracked_per_nvidia_model_not_per_provider(tmp_path: Path):
 
     response = controller.generate(
         messages=[{"role": "user", "content": "continue"}],
-        model="gemini/test-model",
+        model="router/test-model",
         role="director_planner",
     )
 
@@ -272,13 +272,55 @@ def test_failures_are_tracked_per_nvidia_model_not_per_provider(tmp_path: Path):
     assert second.calls == 1
 
 
-def test_gemini_failure_switches_to_alternative_and_persists_transition(tmp_path: Path):
-    gemini = FakeProvider("gemini", [ProviderFailure("forced Gemini outage")])
+def test_transient_failure_of_one_same_provider_model_continues_to_next_model(tmp_path: Path):
+    router = FakeProvider("inference_router", [ProviderFailure("forced router outage")])
+
+    from aurora.inference.errors import ProviderTimeoutError, ProviderErrorContext
+
+    timeout_error = ProviderTimeoutError(
+        "model A timed out",
+        context=ProviderErrorContext(
+            provider="nvidia_api",
+            request_id="request-a",
+            execution_id="execution-a",
+            requested_model=None,
+            selected_model="nvidia/model-a",
+            provider_model="nvidia/model-a",
+        ),
+    )
+    first = FakeProvider("nvidia_api", [timeout_error])
+    second = FakeProvider("nvidia_api", ["model B works"])
+    store = DirectorProviderFailoverStore(str(tmp_path / "runtime.db"))
+    controller = DirectorProviderFailoverController(
+        active_provider=router,
+        candidates=(),
+        store=store,
+        activate=lambda _candidate, _provider: None,
+        candidate_resolver=lambda _messages, _model, _role: (
+            _candidate("nvidia_api", first, "nvidia/model-a"),
+            _candidate("nvidia_api", second, "nvidia/model-b"),
+        ),
+    )
+
+    response = controller.generate(
+        messages=[{"role": "user", "content": "continue"}],
+        model="router/test-model",
+        role="director_conversation",
+    )
+
+    assert response.provider == "nvidia_api"
+    assert response.content == "model B works"
+    assert first.calls == 1
+    assert second.calls == 1
+
+
+def test_router_failure_switches_to_alternative_and_persists_transition(tmp_path: Path):
+    router = FakeProvider("inference_router", [ProviderFailure("forced router outage")])
     nvidia = FakeProvider("nvidia_api", ["alternative answer"])
     store = DirectorProviderFailoverStore(str(tmp_path / "runtime.db"))
     activated = []
     controller = DirectorProviderFailoverController(
-        active_provider=gemini,
+        active_provider=router,
         candidates=(_candidate("nvidia_api", nvidia, "poolside/laguna-xs-2.1"),),
         store=store,
         activate=lambda candidate, provider: activated.append((candidate, provider)),
@@ -286,7 +328,7 @@ def test_gemini_failure_switches_to_alternative_and_persists_transition(tmp_path
 
     response = controller.generate(
         messages=[{"role": "user", "content": "continue"}],
-        model="gemini/test-model",
+        model="router/test-model",
         role="director_planner",
     )
 
@@ -301,13 +343,13 @@ def test_gemini_failure_switches_to_alternative_and_persists_transition(tmp_path
 
 
 def test_all_candidates_fail_closed_without_activation(tmp_path: Path):
-    gemini = FakeProvider("gemini", [ProviderFailure("forced Gemini outage")])
+    router = FakeProvider("inference_router", [ProviderFailure("forced router outage")])
     nvidia = FakeProvider("nvidia_api", [ProviderFailure("NVIDIA outage")])
     router = FakeProvider("inference_router", [ProviderFailure("router outage")])
     store = DirectorProviderFailoverStore(str(tmp_path / "runtime.db"))
     activated = []
     controller = DirectorProviderFailoverController(
-        active_provider=gemini,
+        active_provider=router,
         candidates=(
             _candidate("nvidia_api", nvidia, "poolside/laguna-xs-2.1"),
             _candidate("inference_router", router, "router-model"),
@@ -319,12 +361,12 @@ def test_all_candidates_fail_closed_without_activation(tmp_path: Path):
     with pytest.raises(DirectorProviderFailoverError):
         controller.generate(
             messages=[{"role": "user", "content": "continue"}],
-            model="gemini/test-model",
+            model="router/test-model",
             role="director_reviewer",
         )
 
     assert activated == []
-    assert controller.provider_id == "gemini"
+    assert controller.provider_id == "inference_router"
     assert any(row["phase"] == "exhausted" for row in store.list_recent(limit=20))
 
 
@@ -332,11 +374,11 @@ def test_non_failoverable_provider_error_is_not_masked(tmp_path: Path):
     class ClientError(RuntimeError):
         failoverable = False
 
-    gemini = FakeProvider("gemini", [ClientError("invalid request")])
+    router = FakeProvider("inference_router", [ClientError("invalid request")])
     nvidia = FakeProvider("nvidia_api", ["should not run"])
     store = DirectorProviderFailoverStore(str(tmp_path / "runtime.db"))
     controller = DirectorProviderFailoverController(
-        active_provider=gemini,
+        active_provider=router,
         candidates=(_candidate("nvidia_api", nvidia, "nvidia/test-model"),),
         store=store,
         activate=lambda _candidate, _provider: None,
@@ -345,7 +387,7 @@ def test_non_failoverable_provider_error_is_not_masked(tmp_path: Path):
     with pytest.raises(ClientError):
         controller.generate(
             messages=[{"role": "user", "content": "invalid"}],
-            model="gemini/test-model",
+            model="router/test-model",
             role="director_planner",
         )
 
@@ -353,12 +395,12 @@ def test_non_failoverable_provider_error_is_not_masked(tmp_path: Path):
 
 
 def test_candidate_is_not_active_until_success(tmp_path: Path):
-    gemini = FakeProvider("gemini", [ProviderFailure("forced")])
+    router = FakeProvider("inference_router", [ProviderFailure("forced")])
     nvidia = FakeProvider("nvidia_api", [ProviderFailure("still down")])
     store = DirectorProviderFailoverStore(str(tmp_path / "runtime.db"))
     activated = []
     controller = DirectorProviderFailoverController(
-        active_provider=gemini,
+        active_provider=router,
         candidates=(_candidate("nvidia_api", nvidia, "nvidia/test-model"),),
         store=store,
         activate=lambda candidate, provider: activated.append(candidate.provider_id),
@@ -367,12 +409,12 @@ def test_candidate_is_not_active_until_success(tmp_path: Path):
     with pytest.raises(DirectorProviderFailoverError):
         controller.generate(
             messages=[{"role": "user", "content": "first"}],
-            model="gemini/test-model",
+            model="router/test-model",
             role="director_reviewer",
         )
 
     assert activated == []
-    assert controller.provider_id == "gemini"
+    assert controller.provider_id == "inference_router"
 
 
 def test_successful_nvidia_failover_persists_and_reloads_after_restart(tmp_path: Path):
@@ -380,13 +422,12 @@ def test_successful_nvidia_failover_persists_and_reloads_after_restart(tmp_path:
     settings.save(
         {
             "director": {
-                "provider": "gemini",
-                "model": "gemini-3.7-flash",
+                "provider": "router",
+                "model": "nvidia/nemotron-3-ultra-550b-a55b",
                 "endpoint": "https://generativelanguage.googleapis.com/v1beta",
                 "failover": {"enabled": True, "order": ["nvidia_api", "router"]},
             },
             "providers": {
-                "gemini": {"api_key": "gemini-secret"},
                 "nvidia_api": {
                     "api_key": "nvidia-secret",
                     "base_url": "https://integrate.api.nvidia.com/v1",
@@ -394,7 +435,7 @@ def test_successful_nvidia_failover_persists_and_reloads_after_restart(tmp_path:
             },
         }
     )
-    gemini = FakeProvider("gemini", [ProviderFailure("forced outage")])
+    router = FakeProvider("inference_router", [ProviderFailure("forced outage")])
     nvidia = FakeProvider("nvidia_api", ["replacement"])
     store = DirectorProviderFailoverStore(str(tmp_path / "runtime.db"))
 
@@ -413,7 +454,7 @@ def test_successful_nvidia_failover_persists_and_reloads_after_restart(tmp_path:
         activated.append(candidate.provider_id)
 
     controller = DirectorProviderFailoverController(
-        active_provider=gemini,
+        active_provider=router,
         candidates=(
             _candidate("nvidia_api", nvidia, "poolside/laguna-xs-2.1"),
         ),
@@ -422,7 +463,7 @@ def test_successful_nvidia_failover_persists_and_reloads_after_restart(tmp_path:
     )
     response = controller.generate(
         messages=[{"role": "user", "content": "continue"}],
-        model="gemini-3.7-flash",
+        model="nvidia/nemotron-3-ultra-550b-a55b",
         role="director_planner",
     )
 

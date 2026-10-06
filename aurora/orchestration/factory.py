@@ -39,7 +39,6 @@ from aurora.skills.discovery import SkillDiscoveryService
 from aurora.operator_settings import OperatorSettingsStore, settings_path
 from .director import DirectorPlanner, DirectorService
 from .director_provider import InferenceDirectorProvider
-from .gemini_provider import GeminiDirectorProvider
 from .director_provider_failover import (
     BoundInferenceDirectorProvider,
     DirectorProviderCandidate,
@@ -165,49 +164,37 @@ def _build_director_provider(
         "AURORA_DIRECTOR_PROVIDER",
         str(configured.get("provider", "router")),
     ).strip().lower()
-    if director_provider_id == "gemini":
-        key = (
-            (settings_store.credential("gemini") if settings_store is not None else "")
-            or os.getenv("GEMINI_API_KEY", "")
-        )
-        if not key and settings_store is not None:
-            return None
-        selected_gemini_model = os.getenv("GEMINI_MODEL_ID") or str(configured.get("model", "gemini-3.8-flash"))
-        if router is not None and getattr(router, "cost_policy", "all") == "free_only" and not is_free_model("gemini", selected_gemini_model):
-            raise RuntimeError("free_only inference policy rejects Gemini model: " + selected_gemini_model)
-        return GeminiDirectorProvider(
-            api_key=key,
-            model=selected_gemini_model,
-            endpoint=os.getenv("GEMINI_API_ENDPOINT") or str(
-                configured.get("endpoint", "https://generativelanguage.googleapis.com/v1beta")
-            ),
-        )
-    if director_provider_id in {"nvidia_api", "openai", "anthropic"}:
-        if router is not None and getattr(router, "cost_policy", "all") == "free_only" and director_provider_id != "nvidia_api":
-            raise RuntimeError("free_only inference policy forbids paid Director provider: " + director_provider_id)
-        credential_map = {
-            "nvidia_api": (settings_store.credential("nvidia_api") if settings_store is not None else "") or os.getenv("NVIDIA_API_KEY", ""),
-            "openai": (settings_store.credential("openai") if settings_store is not None else "") or os.getenv("OPENAI_API_KEY", ""),
-            "anthropic": (settings_store.credential("anthropic") if settings_store is not None else "") or os.getenv("ANTHROPIC_API_KEY", ""),
-        }
+
+    if director_provider_id in {"router", "inference_fabric", ""}:
+        return None
+
+    if director_provider_id == "nvidia_api":
         model = str(configured.get("model", "")).strip()
-        if router is not None and getattr(router, "cost_policy", "all") == "free_only" and director_provider_id == "nvidia_api" and not is_free_model("nvidia_api", model):
-            raise RuntimeError("free_only inference policy rejects NVIDIA model: " + model)
-        if not credential_map[director_provider_id] or router is None or not model:
+        if not model:
+            return None
+        if router is not None and getattr(router, "cost_policy", "all") == "free_only" and not is_free_model("nvidia_api", model):
+            # Dynamically discovered NVIDIA Free Endpoint models are admitted by the
+            # discovery/activation path; static models must still pass the free policy.
+            if not (router.model_registry and any(
+                item.id == model and item.provider == "nvidia_api" and item.pricing_tier == "free"
+                for item in router.model_registry.models
+            )):
+                raise RuntimeError("free_only inference policy rejects NVIDIA model: " + model)
+        if settings_store is None:
+            key = os.getenv("NVIDIA_API_KEY", "")
+        else:
+            key = settings_store.credential("nvidia_api") or os.getenv("NVIDIA_API_KEY", "")
+        if not key or router is None:
             return None
         return BoundInferenceDirectorProvider(
             router,
-            provider_id=director_provider_id,
+            provider_id="nvidia_api",
             model=model,
         )
-    if director_provider_id in {"router", "inference_fabric", ""}:
-        return None
-    raise RuntimeError(
-        "unsupported AURORA_DIRECTOR_PROVIDER: "
-        + director_provider_id
-        + "; expected gemini, nvidia_api, openai, anthropic, or router"
-    )
 
+    # Legacy/external provider values are deliberately ignored. Aurora always
+    # falls back to its internal router, whose only external provider is NVIDIA.
+    return None
 
 def _build_director_provider_failover(
     *,
@@ -223,12 +210,10 @@ def _build_director_provider_failover(
     if not bool(failover.get("enabled", True)):
         return active_provider
 
-    order = failover.get("order", ["nvidia_api", "router"])
+    order = failover.get("order", ["nvidia_api"])
     if not isinstance(order, list):
         raise RuntimeError("director.failover.order must be a list")
-    normalized_order = tuple(str(item).strip().lower() for item in order)
-    if getattr(router, "cost_policy", "all") == "free_only":
-        normalized_order = tuple(item for item in normalized_order if item in {"nvidia_api", "router"})
+    normalized_order = tuple(str(item).strip().lower() for item in order if str(item).strip().lower() == "nvidia_api")
 
     model_candidate_store = ModelCandidateStore(
         Path(db_path).resolve().parent / "model-candidates.db"
@@ -242,6 +227,9 @@ def _build_director_provider_failover(
         role: str,
     ) -> tuple[DirectorProviderCandidate, ...]:
         active_id = str(getattr(active_provider, "provider_id", "") or "")
+        active_model_id = str(
+            getattr(active_provider, "model", "") or requested_model or ""
+        ).strip()
         pool_specs: list[ModelSpec] = []
         seen_models: set[tuple[str, str]] = set()
 
@@ -256,12 +244,11 @@ def _build_director_provider_failover(
         )
 
         for provider_id in normalized_order:
-            if provider_id == "router":
+            if provider_id != "nvidia_api":
                 continue
-            if getattr(router, "cost_policy", "all") == "free_only" and provider_id != "nvidia_api":
-                continue
-            if provider_id == active_id:
-                continue
+            if provider_id == active_id and active_model_id:
+                # Keep every other NVIDIA model eligible when the active model fails.
+                pass
             if provider_id not in credentials or not credentials[provider_id]:
                 continue
             refresh_interval = float(
@@ -290,7 +277,10 @@ def _build_director_provider_failover(
                 if "reasoning" not in capabilities:
                     continue
                 key = (model.provider, model.id)
-                if key in seen_models:
+                if (
+                    key == (active_id, active_model_id)
+                    or key in seen_models
+                ):
                     continue
                 seen_models.add(key)
                 pool_specs.append(
@@ -311,19 +301,20 @@ def _build_director_provider_failover(
                     )
                 )
 
-        # Existing configured models are still part of the reserve pool; no
-        # new model source supersedes or mutates the authoritative registry.
-        if "router" in normalized_order:
-            for model in router.available():
-                if active_id == model.provider:
-                    continue
-                if "reasoning" not in model.capabilities:
-                    continue
-                key = (model.provider, model.id)
-                if key in seen_models:
-                    continue
-                seen_models.add(key)
-                pool_specs.append(model)
+        # Existing configured NVIDIA models remain reserve candidates; discovery is
+        # still the preferred source and never creates a hard seven-model ceiling.
+        for model in router.available():
+            if model.provider != "nvidia_api":
+                continue
+            if active_id == model.provider and active_model_id == model.id:
+                continue
+            if "reasoning" not in model.capabilities:
+                continue
+            key = (model.provider, model.id)
+            if key in seen_models:
+                continue
+            seen_models.add(key)
+            pool_specs.append(model)
 
         if not pool_specs:
             return ()
@@ -382,7 +373,7 @@ def _build_director_provider_failover(
                     or str(
                         director.get(
                             "endpoint",
-                            "https://generativelanguage.googleapis.com/v1beta",
+                            "https://integrate.api.nvidia.com/v1",
                         )
                     ),
                 }

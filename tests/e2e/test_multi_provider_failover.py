@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-
 import pytest
 
 from aurora.inference.errors import ProviderHTTPError, ProviderErrorContext
@@ -27,7 +26,7 @@ class FakeProvider:
             raise self.result
         return DirectorModelResponse(
             content=str(self.result),
-            model=model or f"{self.provider_id}-model",
+            model=model or "model",
             provider=self.provider_id,
             request_id=f"request-{self.calls}",
             execution_id=f"execution-{self.calls}",
@@ -44,64 +43,48 @@ def _candidate(provider: FakeProvider, model: str) -> DirectorProviderCandidate:
     )
 
 
-def test_multiple_provider_outage_continues_to_next_provider(tmp_path: Path):
-    ctx = ProviderErrorContext("gemini", "req", "exec", selected_model="gemini-model")
-    gemini = FakeProvider("gemini", ProviderHTTPError("503", context=ctx, status_code=503))
+def test_nvidia_model_outage_continues_to_next_model(tmp_path: Path):
+    ctx = ProviderErrorContext("nvidia_api", "req", "exec", selected_model="nvidia/model-a")
+    active = FakeProvider("inference_router", ProviderHTTPError("503", context=ctx, status_code=503))
     nvidia_a = FakeProvider("nvidia_api", ProviderHTTPError("503", context=ctx, status_code=503))
-    nvidia_b = FakeProvider("nvidia_api", "must-not-run")
-    openai = FakeProvider("openai", ProviderHTTPError("429", context=ctx, status_code=429))
-    anthropic = FakeProvider("anthropic", "continuation")
-
-    health = ProviderHealthStore(tmp_path / "tasks.db", failure_threshold=1)
+    nvidia_b = FakeProvider("nvidia_api", "nvidia reserve continuation")
+    health = ProviderHealthStore(tmp_path / "health.db", failure_threshold=1)
     controller = DirectorProviderFailoverController(
-        active_provider=gemini,
-        candidates=(
-            _candidate(nvidia_a, "nvidia/model-a"),
-            _candidate(nvidia_b, "nvidia/model-b"),
-            _candidate(openai, "gpt/model-a"),
-            _candidate(anthropic, "claude/model-a"),
-        ),
-        store=DirectorProviderFailoverStore(str(tmp_path / "tasks.db")),
+        active_provider=active,
+        candidates=(_candidate(nvidia_a, "nvidia/model-a"), _candidate(nvidia_b, "nvidia/model-b")),
+        store=DirectorProviderFailoverStore(str(tmp_path / "transitions.db")),
         activate=lambda _candidate, _provider: None,
         health_store=health,
     )
-
     result = controller.generate(
         messages=[{"role": "user", "content": "continue mission"}],
-        model="gemini-model",
+        model=None,
         role="director_planner",
     )
-
-    assert result.provider == "anthropic"
+    assert result.provider == "nvidia_api"
+    assert result.content == "nvidia reserve continuation"
     assert nvidia_a.calls == 1
-    assert nvidia_b.calls == 0
-    assert openai.calls == 1
-    assert anthropic.calls == 1
-    assert health.snapshot("gemini", "gemini-model").state == "cooldown"
+    assert nvidia_b.calls == 1
     assert health.snapshot("nvidia_api", "nvidia/model-a").state == "cooldown"
-    assert health.snapshot("openai", "gpt/model-a").state == "cooldown"
 
 
-def test_multiple_provider_outage_fails_closed_when_all_are_down(tmp_path: Path):
-    ctx = ProviderErrorContext("test", "req", "exec")
-    providers = [
+def test_nvidia_all_reserve_models_fail_closed(tmp_path: Path):
+    ctx = ProviderErrorContext("nvidia_api", "req", "exec")
+    models = [
         FakeProvider("nvidia_api", ProviderHTTPError("503", context=ctx, status_code=503)),
-        FakeProvider("openai", ProviderHTTPError("503", context=ctx, status_code=503)),
-        FakeProvider("anthropic", ProviderHTTPError("503", context=ctx, status_code=503)),
+        FakeProvider("nvidia_api", ProviderHTTPError("503", context=ctx, status_code=503)),
     ]
-    health = ProviderHealthStore(tmp_path / "health.db", failure_threshold=1)
     controller = DirectorProviderFailoverController(
-        active_provider=FakeProvider("gemini", ProviderHTTPError("503", context=ctx, status_code=503)),
-        candidates=tuple(_candidate(item, f"{item.provider_id}/model") for item in providers),
+        active_provider=FakeProvider("inference_router", ProviderHTTPError("503", context=ctx, status_code=503)),
+        candidates=tuple(_candidate(item, f"nvidia/model-{idx}") for idx, item in enumerate(models)),
         store=DirectorProviderFailoverStore(str(tmp_path / "transitions.db")),
-        activate=lambda *_args: pytest.fail("failed provider must never activate"),
-        health_store=health,
+        activate=lambda *_args: pytest.fail("failed NVIDIA model must never activate"),
+        health_store=ProviderHealthStore(tmp_path / "health.db", failure_threshold=1),
     )
-
     with pytest.raises(DirectorProviderFailoverError):
         controller.generate(
             messages=[{"role": "user", "content": "continue mission"}],
-            model="gemini-model",
+            model=None,
             role="director_planner",
         )
-    assert all(item.calls == 1 for item in providers)
+    assert [item.calls for item in models] == [1, 1]

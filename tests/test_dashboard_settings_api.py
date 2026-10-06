@@ -11,12 +11,11 @@ ROOT = Path(__file__).parents[1] / "aurora" / "dashboard" / "ui"
 class SettingsStub:
     def public(self):
         return {
-            "director": {"provider": "gemini", "model": "gemini-3.7-flash", "endpoint": "https://example.invalid"},
+            "director": {"provider": "router", "model": "nvidia/nemotron-3-ultra-550b-a55b", "endpoint": "https://example.invalid"},
             "providers": {
-                "gemini": {"enabled": True, "api_key_present": True},
                 "nvidia_api": {"enabled": True, "api_key_present": False, "base_url": "https://example.invalid"},
             },
-            "runtime": {"director_provider": "gemini"},
+            "runtime": {"director_provider": "inference_router"},
         }
 
     def save_and_apply(self, payload):
@@ -52,33 +51,31 @@ def test_dashboard_settings_http_contract():
         with urlopen(base + "/api/dashboard/settings", timeout=5) as response:
             data = json.loads(response.read().decode("utf-8"))
         assert response.status == 200
-        assert data["runtime"]["director_provider"] == "gemini"
-        assert data["providers"]["gemini"]["api_key_present"] is True
+        assert data["runtime"]["director_provider"] == "inference_router"
         encoded = json.dumps(data)
-        assert "gemini-secret" not in encoded
         assert "nvidia-secret" not in encoded
 
         request = Request(
             base + "/api/dashboard/settings",
-            data=json.dumps({"director": {"provider": "gemini"}}).encode("utf-8"),
+            data=json.dumps({"director": {"provider": "router"}}).encode("utf-8"),
             headers={"Content-Type": "application/json"},
             method="POST",
         )
         with urlopen(request, timeout=5) as response:
             saved = json.loads(response.read().decode("utf-8"))
         assert response.status == 200
-        assert saved["runtime"]["director_provider"] == "gemini"
+        assert saved["runtime"]["director_provider"] == "inference_router"
 
         request = Request(
             base + "/api/dashboard/settings/test",
-            data=b'{"provider":"gemini"}',
+            data=b'{"provider":"nvidia_api"}',
             headers={"Content-Type": "application/json"},
             method="POST",
         )
         with urlopen(request, timeout=5) as response:
             tested = json.loads(response.read().decode("utf-8"))
         assert response.status == 200
-        assert tested == {"ok": True, "provider": "gemini"}
+        assert tested == {"ok": True, "provider": "nvidia_api"}
     finally:
         server.shutdown()
         server.server_close()

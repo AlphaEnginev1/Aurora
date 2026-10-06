@@ -2,33 +2,8 @@
   "version": 2,
   "mode": "free_only",
   "reviewed_at": "2026-10-06",
-  "description": "Free-only policy. NVIDIA uses its live Free Endpoint catalog as the authoritative eligibility source; checked-in NVIDIA models are seed metadata only and never a ceiling.",
+  "description": "NVIDIA-only free policy. NVIDIA's live Free Endpoint catalog is the authoritative eligibility source; checked-in NVIDIA models are seed metadata only and never a ceiling.",
   "providers": {
-    "gemini": {
-      "models": {
-        "gemini-3.8-flash": {
-          "tier": "free",
-          "rank": 1,
-          "specialties": [
-            "director",
-            "agentic",
-            "coding",
-            "reasoning",
-            "long_horizon"
-          ]
-        },
-        "gemini-3.7-flash": {
-          "tier": "free",
-          "rank": 2,
-          "specialties": [
-            "director",
-            "agentic",
-            "coding",
-            "reasoning"
-          ]
-        }
-      }
-    },
     "nvidia_api": {
       "models": {
         "nvidia/nemotron-3-ultra-550b-a55b": {
