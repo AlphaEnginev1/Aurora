@@ -387,7 +387,12 @@ class DirectorProviderFailoverController:
                         return response
                     except Exception as replacement_error:
                         last_error = replacement_error
-                        if classify_failure(replacement_error)[0] == "transient":
+                        category, _ = classify_failure(replacement_error)
+                        # Health is tracked at provider+model granularity. A transient
+                        # failure on one model must not discard other eligible models
+                        # exposed by the same provider; the next reserve model may still
+                        # be healthy and is the correct continuation path.
+                        if category == "configuration":
                             failed_providers.add(candidate.provider_id)
                         if self._health_store is not None:
                             try:
