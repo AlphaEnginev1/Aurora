@@ -1115,8 +1115,10 @@ class DirectorRuntime:
         self._last_model_discovery_refresh_at = now
         try:
             self.model_discovery.refresh_all(
+                provider_ids=("nvidia_api",),
                 min_interval_seconds=self.model_discovery_refresh_interval_seconds
             )
+            self.model_discovery.activate_free_discovered(provider_id="nvidia_api")
         except Exception:
             # Catalog refresh is advisory; the durable staged snapshot and
             # existing failover path remain authoritative.
