@@ -1,8 +1,7 @@
-"""LIVE acceptance for Aurora's current multi-provider resilience layer.
+"""LIVE acceptance for Aurora's free-model inference fabric.
 
-The gate is opt-in and fails closed. It exercises real NVIDIA, OpenAI and
-Anthropic providers through the existing Aurora routing, discovery, failover,
-critical-ensemble and adversarial-review components.
+The gate uses only the currently curated free Gemini tier and free NVIDIA
+NIM endpoints. It does not require paid OpenAI/Anthropic credentials.
 """
 from __future__ import annotations
 
@@ -14,19 +13,14 @@ import pytest
 
 from aurora.inference.discovery import ModelCandidateStore, ModelDiscoveryService
 from aurora.inference.ensemble import ModelEnsemble, ModelEnsembleStore
+from aurora.inference.free_policy import is_free_model, record_metadata
 from aurora.inference.models import InferenceRequest, ModelSpec
 from aurora.inference.provider_health import ProviderHealthStore
-from aurora.inference.providers.openai_api import OpenAIAPIProvider
 from aurora.inference.providers.registry import default_provider_registry
 from aurora.inference.registry import ModelRegistry
 from aurora.inference.router import ModelRouter
 from aurora.operator_settings import OperatorSettingsStore
-from aurora.organization import (
-    AgentSelector,
-    AgentSpec,
-    DepartmentSpec,
-    OrganizationRegistry,
-)
+from aurora.organization import AgentSelector, AgentSpec, DepartmentSpec, OrganizationRegistry
 from aurora.orchestration.director import DirectorPlan
 from aurora.orchestration.director_provider_failover import DirectorProviderFailoverStore
 from aurora.orchestration.director_runtime import DirectorRuntime
@@ -34,6 +28,7 @@ from aurora.orchestration.durable_director import DurableDirectorService
 from aurora.orchestration.engine import OrchestrationEngine
 from aurora.orchestration.event_bus import DurableEventBus
 from aurora.orchestration.factory import _build_director_provider_failover
+from aurora.orchestration.gemini_provider import GeminiDirectorProvider
 from aurora.orchestration.task_engine import DelegatedTask, TaskEngine, TaskStatus
 from aurora.orchestration.task_store import DurableTaskStore
 from aurora.orchestration.team_runtime import TeamCoordinator
@@ -44,7 +39,7 @@ LIVE_FLAG = "AURORA_MULTI_PROVIDER_LIVE"
 def _required(name: str) -> str:
     value = os.getenv(name, "").strip()
     if not value:
-        raise AssertionError(f"live multi-provider gate requires {name}")
+        raise AssertionError(f"live free-model gate requires {name}")
     return value
 
 
@@ -52,7 +47,7 @@ def _required(name: str) -> str:
 class OneShotPrimary:
     provider: object
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         self.calls = 0
         self.provider_id = str(getattr(self.provider, "provider_id", ""))
 
@@ -87,61 +82,70 @@ class LivePlanner:
         )
 
 
-def _choose_candidate(
+def _free_nvidia_candidates(discovered) -> list[ModelSpec]:
+    by_id = {}
+    for item in discovered:
+        model = item.model
+        if is_free_model("nvidia_api", model.id):
+            by_id[model.id] = model
+    return [by_id[model_id] for model_id in sorted(by_id)]
+
+
+def _override_or_free(
     provider_id: str,
     env_name: str,
     discovered,
     *,
     endpoint: str,
-    exclude_markers: tuple[str, ...] = (),
 ) -> ModelSpec:
     override = os.getenv(env_name, "").strip()
     if override:
+        if not is_free_model(provider_id, override):
+            raise AssertionError(
+                f"{env_name} must reference a model explicitly authorized as free"
+            )
+        metadata = record_metadata(provider_id, override)
         return ModelSpec(
-            override,
-            provider_id,
-            endpoint,
-            ("chat", "reasoning"),
+            id=override,
+            provider=provider_id,
+            endpoint=endpoint,
+            capabilities=("chat", "reasoning", "tool_use", "agentic"),
+            context_window=metadata.get("context_window"),
+            specialties=tuple(metadata.get("specialties", ())),
+            quality_score=0.95,
+            latency_score=0.7,
+            cost_score=1.0,
+            pricing_tier="free",
             enabled=True,
         )
-
-    for item in sorted(
-        discovered,
-        key=lambda candidate: (
-            -float(candidate.model.quality_score),
-            candidate.model.id,
-        ),
-    ):
-        model_id = item.model.id.lower()
-        if "reasoning" not in item.model.capabilities:
-            continue
-        if any(marker in model_id for marker in exclude_markers):
-            continue
-        return item.model
-    raise AssertionError(
-        f"no executable reasoning candidate discovered for {provider_id}"
-    )
+    candidates = _free_nvidia_candidates(discovered)
+    if not candidates:
+        raise AssertionError("NVIDIA discovery returned no policy-authorized free model")
+    return candidates[0]
 
 
 @pytest.mark.live
-def test_live_multi_provider_resilience_acceptance(tmp_path: Path):
+def test_live_free_model_resilience_acceptance(tmp_path: Path):
     if os.getenv(LIVE_FLAG) != "1":
-        pytest.skip("live multi-provider resilience gate is opt-in")
+        pytest.skip("live free-model resilience gate is opt-in")
 
+    gemini_key = _required("GEMINI_API_KEY")
     nvidia_key = _required("NVIDIA_API_KEY")
-    openai_key = _required("OPENAI_API_KEY")
-    anthropic_key = _required("ANTHROPIC_API_KEY")
     nvidia_endpoint = os.getenv(
         "NVIDIA_API_ENDPOINT",
         "https://integrate.api.nvidia.com/v1",
     ).rstrip("/")
+    gemini_model = os.getenv("GEMINI_MODEL_ID", "gemini-3.8-flash").strip()
 
-    # 1. Discover the current provider catalogs first. Model IDs are optional
-    # workflow overrides; otherwise Aurora selects a currently served candidate.
+    if not is_free_model("gemini", gemini_model):
+        raise AssertionError(
+            f"configured Gemini Director model is not authorized as free: {gemini_model}"
+        )
+
+    # 1. Discover the live NVIDIA catalog and retain only models explicitly
+    # authorized by Aurora's free-model policy.
     provider_registry = default_provider_registry(
         nvidia_api_key=nvidia_key,
-        openai_api_key=openai_key,
-        anthropic_api_key=anthropic_key,
     )
     discovery_store = ModelCandidateStore(tmp_path / "model-candidates.db")
     discovery_registry = ModelRegistry.from_specs(
@@ -154,41 +158,35 @@ def test_live_multi_provider_resilience_acceptance(tmp_path: Path):
         discovery_store,
     )
     refreshed = discovery.refresh_all(
-        provider_ids=("nvidia_api", "openai", "anthropic"),
+        provider_ids=("nvidia_api",),
         min_interval_seconds=0,
         force=True,
     )
-    for provider_id in ("nvidia_api", "openai", "anthropic"):
-        assert refreshed.get(provider_id)
-        assert discovery_store.list(
-            provider_id=provider_id,
-            state="discovered",
-            limit=5,
-        )
+    discovered = refreshed.get("nvidia_api", ())
+    assert discovered
+    free_candidates = _free_nvidia_candidates(discovered)
+    assert len(free_candidates) >= 3, (
+        "LIVE acceptance requires at least three currently discovered free NVIDIA "
+        "reasoning candidates for ensemble/reviewer independence"
+    )
 
-    nvidia_spec = _choose_candidate(
+    nvidia_primary = _override_or_free(
         "nvidia_api",
         "NVIDIA_MODEL_ID",
-        refreshed["nvidia_api"],
+        discovered,
         endpoint=nvidia_endpoint,
-        exclude_markers=("embedding", "embed", "guard", "safety", "rerank", "ranker"),
     )
-    openai_spec = _choose_candidate(
-        "openai",
-        "OPENAI_MODEL_ID",
-        refreshed["openai"],
-        endpoint="https://api.openai.com/v1",
-        exclude_markers=("embedding", "moderation", "whisper", "tts", "dall-e", "search"),
-    )
-    anthropic_spec = _choose_candidate(
-        "anthropic",
-        "ANTHROPIC_MODEL_ID",
-        refreshed["anthropic"],
-        endpoint="https://api.anthropic.com/v1",
-    )
+    selected_models = [nvidia_primary]
+    for model in free_candidates:
+        if model.id not in {item.id for item in selected_models}:
+            selected_models.append(model)
+        if len(selected_models) == 3:
+            break
+    assert len(selected_models) == 3
+    assert all(item.pricing_tier == "free" for item in selected_models)
 
     model_registry = ModelRegistry.from_specs(
-        [nvidia_spec, openai_spec, anthropic_spec],
+        selected_models,
         provider_registry=provider_registry,
     )
     health = ProviderHealthStore(
@@ -203,52 +201,46 @@ def test_live_multi_provider_resilience_acceptance(tmp_path: Path):
         provider_registry=provider_registry,
         model_registry=model_registry,
         health_store=health,
+        cost_policy="free_only",
     )
+    assert all(model.pricing_tier == "free" for model in router.available())
+    assert {model.id for model in router.available()} == {
+        model.id for model in selected_models
+    }
 
-    # 2. Real provider adapters plus durable health feedback.
-    for spec in (nvidia_spec, openai_spec, anthropic_spec):
+    # 2. Real NVIDIA inference through multiple free models establishes durable health.
+    for spec in selected_models:
         response = router.generate(
             InferenceRequest(
-                messages=[
-                    {
-                        "role": "user",
-                        "content": "Return exactly LIVE_OK.",
-                    }
-                ],
+                messages=[{"role": "user", "content": "Return exactly LIVE_OK."}],
                 model=spec.id,
                 max_tokens=16,
             ),
             capability="reasoning",
         )
         assert response.content.strip()
-        assert response.provider == spec.provider
+        assert response.provider == "nvidia_api"
         assert response.model == spec.id
-        snapshot = health.snapshot(spec.provider, spec.id)
+        snapshot = health.snapshot("nvidia_api", spec.id)
         assert snapshot.state == "healthy"
         assert snapshot.success_count >= 1
 
-    # 3. Dynamic reserve pool plus a real cross-provider replacement.
+    # 3. Real Gemini Director followed by a controlled primary failure and a
+    # real NVIDIA free-model replacement, preserving the same failover controller.
     settings = OperatorSettingsStore(tmp_path / "operator-settings.json")
     settings.save(
         {
             "director": {
-                "provider": "openai",
-                "model": openai_spec.id,
-                "endpoint": "https://api.openai.com/v1",
+                "provider": "gemini",
+                "model": gemini_model,
+                "endpoint": "https://generativelanguage.googleapis.com/v1beta",
                 "failover": {
                     "enabled": True,
-                    "order": ["anthropic", "nvidia_api", "router"],
+                    "order": ["nvidia_api", "router"],
                 },
             },
             "providers": {
-                "openai": {
-                    "api_key": openai_key,
-                    "base_url": "https://api.openai.com/v1",
-                },
-                "anthropic": {
-                    "api_key": anthropic_key,
-                    "base_url": "https://api.anthropic.com/v1",
-                },
+                "gemini": {"api_key": gemini_key},
                 "nvidia_api": {
                     "api_key": nvidia_key,
                     "base_url": nvidia_endpoint,
@@ -257,10 +249,10 @@ def test_live_multi_provider_resilience_acceptance(tmp_path: Path):
         }
     )
     primary = OneShotPrimary(
-        OpenAIAPIProvider(
-            openai_spec,
-            api_key=openai_key,
-            timeout=90,
+        GeminiDirectorProvider(
+            api_key=gemini_key,
+            model=gemini_model,
+            endpoint="https://generativelanguage.googleapis.com/v1beta",
         )
     )
     controller = _build_director_provider_failover(
@@ -272,32 +264,29 @@ def test_live_multi_provider_resilience_acceptance(tmp_path: Path):
     )
     first = controller.generate(
         messages=[{"role": "user", "content": "Return PRIMARY_OK."}],
-        model=openai_spec.id,
+        model=gemini_model,
         role="director_planner",
     )
     second = controller.generate(
         messages=[{"role": "user", "content": "Return REPLACEMENT_OK."}],
-        model=openai_spec.id,
+        model=gemini_model,
         role="director_planner",
     )
-    assert first.provider == "openai"
+    assert first.provider == "gemini"
     assert first.content.strip()
-    assert second.provider in {"anthropic", "nvidia_api"}
-    assert second.provider != "openai"
+    assert second.provider == "nvidia_api"
+    assert second.provider != "gemini"
     assert second.content.strip()
-    assert controller.provider_id == second.provider
+    assert controller.provider_id == "nvidia_api"
 
-    evidence = DirectorProviderFailoverStore(
-        str(tmp_path / "failover.db")
-    ).list_recent(limit=50)
+    evidence = DirectorProviderFailoverStore(str(tmp_path / "failover.db")).list_recent(limit=50)
     assert any(item["phase"] == "failure_detected" for item in evidence)
     assert any(
-        item["phase"] == "succeeded"
-        and item["to_provider"] == second.provider
+        item["phase"] == "succeeded" and item["to_provider"] == "nvidia_api"
         for item in evidence
     )
 
-    # 4. Critical-decision ensemble through the same ModelRouter.
+    # 4. Critical decisions use only free NVIDIA models through the same router.
     ensemble = ModelEnsemble(
         router,
         store=ModelEnsembleStore(tmp_path / "ensemble.db"),
@@ -309,10 +298,7 @@ def test_live_multi_provider_resilience_acceptance(tmp_path: Path):
         InferenceRequest(
             messages=[
                 {"role": "system", "content": "Reply exactly APPROVE."},
-                {
-                    "role": "user",
-                    "content": "For this controlled acceptance, reply exactly APPROVE.",
-                },
+                {"role": "user", "content": "For this controlled acceptance, reply exactly APPROVE."},
             ],
             max_tokens=16,
         ),
@@ -320,47 +306,30 @@ def test_live_multi_provider_resilience_acceptance(tmp_path: Path):
         ensemble_size=3,
         resolve_disagreement=True,
     )
-    successful_members = [
-        item for item in ensemble_result.members if item.success
-    ]
+    successful_members = [item for item in ensemble_result.members if item.success]
     assert len(successful_members) >= 2
     assert ensemble_result.status in {"consensus", "resolved"}
     assert ensemble_result.decision
+    assert all(item.model in {model.id for model in selected_models} for item in successful_members)
 
-    # 5. DirectorRuntime adversarial review with two governed specialists.
+    # 5. DirectorRuntime adversarial review also runs through the free-only router.
     organization = OrganizationRegistry(
         agents={
             "researcher": AgentSpec(
-                "researcher",
-                "researcher",
-                "research",
-                "independent evidence reviewer",
-                frozenset(),
-                (),
+                "researcher", "researcher", "research",
+                "independent evidence reviewer", frozenset(), (),
             ),
             "verifier": AgentSpec(
-                "verifier",
-                "verifier",
-                "verification",
-                "independent contradiction reviewer",
-                frozenset(),
-                (),
+                "verifier", "verifier", "verification",
+                "independent contradiction reviewer", frozenset(), (),
             ),
         },
         departments={
             "research": DepartmentSpec(
-                "research",
-                "research",
-                ("researcher",),
-                (),
-                frozenset(),
+                "research", "research", ("researcher",), (), frozenset(),
             ),
             "verification": DepartmentSpec(
-                "verification",
-                "verification",
-                ("verifier",),
-                (),
-                frozenset(),
+                "verification", "verification", ("verifier",), (), frozenset(),
             ),
         },
     )
@@ -386,30 +355,24 @@ def test_live_multi_provider_resilience_acceptance(tmp_path: Path):
         director=durable,
         store=store,
         event_bus=event_bus,
-        worker_id="live-adversarial-review",
-        event_consumer_id="live-adversarial-review-events",
+        worker_id="live-free-adversarial-review",
+        event_consumer_id="live-free-adversarial-review-events",
         worker_concurrency=1,
         max_review_rounds=1,
         adversarial_review_enabled=True,
         adversarial_review_size=2,
     )
     submission = runtime.submit_mission(
-        objective=(
-            "Review this acceptance mission for missing evidence "
-            "and contradictions."
-        ),
+        objective="Review this free-model acceptance mission for contradictions."
     )
     review = runtime._run_adversarial_review(
         mission_id=submission.mission_id,
         round_number=1,
         objective=submission.plan.objective,
     )
-    successful_reviewers = [
-        item for item in review.reviewers if item.error is None
-    ]
+    successful_reviewers = [item for item in review.reviewers if item.error is None]
     assert len(successful_reviewers) >= 2
-    assert review.status in {"accepted", "challenged", "blocked"}
-    assert all(item.model for item in successful_reviewers)
+    assert all(item.model in {model.id for model in selected_models} for item in successful_reviewers)
     assert store.mission_status(submission.mission_id) in {
         TaskStatus.PENDING,
         TaskStatus.RUNNING,
