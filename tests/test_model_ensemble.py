@@ -4,8 +4,18 @@ from aurora.inference import InferenceRequest, InferenceResponse, ModelEnsemble,
 
 
 def _router():
+    scores = {"a": 0.9, "b": 0.8, "c": 0.7, "d": 0.6}
     models = [
-        ModelSpec(f"model/{name}", "fake", "https://example.invalid", capabilities=("reasoning",), enabled=True, healthy=True, available=True)
+        ModelSpec(
+            f"model/{name}",
+            "fake",
+            "https://example.invalid",
+            capabilities=("reasoning",),
+            enabled=True,
+            healthy=True,
+            available=True,
+            quality_score=scores[name],
+        )
         for name in ("a", "b", "c", "d")
     ]
     router = ModelRouter(models)
