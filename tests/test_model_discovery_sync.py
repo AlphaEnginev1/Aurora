@@ -260,6 +260,7 @@ def test_nvidia_discovery_parses_openai_compatible_catalog(monkeypatch):
                             "owned_by": "meta",
                             "capabilities": ["chat", "reasoning"],
                             "context_window": 32768,
+                            "free_endpoint": true,
                         },
                         {"id": "", "object": "model"},
                         {"object": "model"},
@@ -289,6 +290,7 @@ def test_nvidia_discovery_parses_openai_compatible_catalog(monkeypatch):
     assert candidates[0].model.id == "meta/example-model"
     assert candidates[0].model.enabled is False
     assert candidates[0].model.context_window == 32768
+    assert candidates[0].model.pricing_tier == "free"
     assert candidates[0].metadata["owned_by"] == "meta"
     assert candidates[0].candidate_id == candidate_id(
         "nvidia_api", "meta/example-model"
