@@ -41,7 +41,7 @@ def load_model_specs(path: str | Path) -> list[ModelSpec]:
         if pricing_tier not in {"free", "paid", "unknown"}:
             raise InferenceConfigError(f"invalid pricing_tier for {item.get('id')!r}")
         if cost_policy == "free_only" and pricing_tier != "free":
-            raise InferenceConfigError(f"free_only policy requires enabled models to be explicitly free: {item.get("id")!r}")
+            raise InferenceConfigError(f"free_only policy requires enabled models to be explicitly free: {item.get('id')!r}")
         result.append(ModelSpec(
             id=item["id"], provider=item["provider"], endpoint=item["endpoint"],
             capabilities=tuple(caps), context_window=item.get("context_window"),
