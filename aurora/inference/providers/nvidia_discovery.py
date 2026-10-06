@@ -12,7 +12,7 @@ from urllib.request import Request, urlopen
 
 from ..discovery import DiscoveredModelCandidate, candidate_id
 from ..models import ModelSpec
-from ..free_policy import is_discovered_free_model, record_metadata
+from ..free_policy import dynamic_catalog_mode, is_discovered_free_model, record_metadata
 
 
 class NVIDIAModelDiscoveryError(RuntimeError):
@@ -96,7 +96,8 @@ class NVIDIAModelDiscoveryProvider:
             if context_window is None:
                 context_window = _positive_int(free_metadata.get("context_window"))
             catalog_free_endpoint = bool(
-                row.get("free_endpoint")
+                dynamic_catalog_mode(self.provider_id) == "free_endpoint"
+                or row.get("free_endpoint")
                 or str(row.get("access_tier", "")).strip().lower() == "free"
                 or str(row.get("pricing_tier", "")).strip().lower() == "free"
                 or str(row.get("tier", "")).strip().lower() == "free"
