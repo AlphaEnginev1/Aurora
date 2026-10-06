@@ -53,7 +53,7 @@ The ordered production-readiness blocks 1–7 are verified on canonical `main`:
 
 Block 7 provides the explicit live-operation authorization boundary. It does not grant live access automatically: Aurora remains fail-closed until a human operator supplies a valid, scoped, non-expired authorization record matching the verified canonical commit and prerequisites.
 
-Historical branches and closed PRs are not alternate work queues. Increment 11 remains explicitly unapproved by the consolidation record.
+Historical branches and closed PRs are not alternate work queues. Increment 11 and Increment 12 are closed and are not reopened by the current resilience work.
 
 
 ## Universal Work / Cowork architecture
