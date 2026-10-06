@@ -340,7 +340,7 @@ def test_nvidia_discovery_conservatively_excludes_non_conversational_catalog_mod
     assert by_id["nvidia/nemotron-3-embed-1b"].capabilities == ()
     assert by_id["nvidia/cosmos-vision-1"].capabilities == ()
     assert by_id["nvidia/some-unknown-model"].capabilities == ()
-    assert by_id["nvidia/some-unknown-model"].pricing_tier == "free"
+    assert by_id["nvidia/some-unknown-model"].pricing_tier == "unknown"
 
 
 def test_candidate_id_is_deterministic():
