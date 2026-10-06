@@ -29,7 +29,7 @@ Required secrets:
 - `OPENAI_API_KEY`
 - `ANTHROPIC_API_KEY`
 
-Workflow inputs provide the currently served model IDs because provider catalogs change.
+Workflow inputs may override model IDs. When they are omitted, the gate discovers current provider catalogs and selects eligible reasoning candidates dynamically.
 
 ## Acceptance
 
