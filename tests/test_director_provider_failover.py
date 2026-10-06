@@ -309,7 +309,7 @@ def test_all_candidates_fail_closed_without_activation(tmp_path: Path):
     controller = DirectorProviderFailoverController(
         active_provider=gemini,
         candidates=(
-            _candidate("nvidia_api", nvidia, "nvidia/test-model"),
+            _candidate("nvidia_api", nvidia, "poolside/laguna-xs-2.1"),
             _candidate("inference_router", router, "router-model"),
         ),
         store=store,
