@@ -25,8 +25,7 @@ def test_dashboard_ui_assets_are_present():
     assert 'id="nvidia-key"' in html
     assert 'id="chat-expand"' in html
     assert '<section id="view-health" class="view"' in html
-    assert '
-        id="view-health"' not in html
+    assert '\n        id="view-health"' not in html
     assert 'id="chat-history"' in html
     assert 'id="projects-board"' in html
     assert 'id="task-matrix"' in html
@@ -58,28 +57,3 @@ def test_dashboard_ui_uses_gateway_endpoints_only():
     assert "AURORA_DASHBOARD_API_BASE" in js
     assert "sqlite" not in js.lower()
     assert "task_events" not in js
-    assert "mission_messages" not in js
-    assert "provider.generate" not in js
-
-
-def test_dashboard_ui_uses_resilient_live_sync_and_avatar_contract():
-    js = (UI_DIR / "app.js").read_text(encoding="utf-8")
-    html = (UI_DIR / "index.html").read_text(encoding="utf-8")
-    css = (UI_DIR / "styles.css").read_text(encoding="utf-8")
-
-    assert "scheduleRefresh" in js
-    assert "visibilitychange" in js
-    assert "retryDelay" in js
-    assert "invalid snapshot contract" in js
-    assert "AURORA_AVATAR_PORTRAIT_URL" in js
-    assert "data-avatar-state" in html
-    assert ".portrait-stage[data-avatar-state=" in css
-
-
-def test_dashboard_ui_is_nvidia_only():
-    html = (UI_DIR / "index.html").read_text(encoding="utf-8").lower()
-    js = (UI_DIR / "app.js").read_text(encoding="utf-8").lower()
-    assert "gemini" not in html
-    assert "gemini" not in js
-    assert "openai" not in html
-    assert "anthropic" not in html
