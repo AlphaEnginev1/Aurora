@@ -174,9 +174,12 @@ def _build_director_provider(
         )
         if not key and settings_store is not None:
             return None
+        selected_gemini_model = os.getenv("GEMINI_MODEL_ID") or str(configured.get("model", "gemini-3.8-flash"))
+        if router is not None and getattr(router, "cost_policy", "all") == "free_only" and not is_free_model("gemini", selected_gemini_model):
+            raise RuntimeError("free_only inference policy rejects Gemini model: " + selected_gemini_model)
         return GeminiDirectorProvider(
             api_key=key,
-            model=os.getenv("GEMINI_MODEL_ID") or str(configured.get("model", "gemini-3.8-flash")),
+            model=selected_gemini_model,
             endpoint=os.getenv("GEMINI_API_ENDPOINT") or str(
                 configured.get("endpoint", "https://generativelanguage.googleapis.com/v1beta")
             ),
@@ -190,6 +193,8 @@ def _build_director_provider(
             "anthropic": (settings_store.credential("anthropic") if settings_store is not None else "") or os.getenv("ANTHROPIC_API_KEY", ""),
         }
         model = str(configured.get("model", "")).strip()
+        if router is not None and getattr(router, "cost_policy", "all") == "free_only" and director_provider_id == "nvidia_api" and not is_free_model("nvidia_api", model):
+            raise RuntimeError("free_only inference policy rejects NVIDIA model: " + model)
         if not credential_map[director_provider_id] or router is None or not model:
             return None
         return BoundInferenceDirectorProvider(
