@@ -285,13 +285,20 @@ class DirectorProviderFailoverController:
                     error=exc,
                 )
 
+                active_provider_id = str(getattr(active, "provider_id", "") or "")
+                active_model_id = str(
+                    model or getattr(active, "model", "") or ""
+                ).strip()
                 candidates: list[DirectorProviderCandidate] = [
                     candidate
                     for candidate in self._candidates
-                    if candidate.provider_id != getattr(active, "provider_id", "")
+                    if not (
+                        candidate.provider_id == active_provider_id
+                        and active_model_id
+                        and candidate.model == active_model_id
+                    )
                     and self._candidate_key(candidate) not in self._failed_candidates
                 ]
-                failed_providers: set[str] = set()
                 if self._candidate_resolver is not None:
                     try:
                         dynamic_candidates = self._candidate_resolver(messages, model, role)
@@ -317,15 +324,16 @@ class DirectorProviderFailoverController:
                     candidates.extend(
                         candidate
                         for candidate in dynamic_candidates
-                        if candidate.provider_id != getattr(active, "provider_id", "")
-                        and candidate.provider_id not in failed_providers
+                        if not (
+                            candidate.provider_id == active_provider_id
+                            and active_model_id
+                            and candidate.model == active_model_id
+                        )
                         and self._candidate_key(candidate) not in self._failed_candidates
                         and self._candidate_key(candidate) not in seen
                     )
                 last_error: Exception = exc
                 for candidate in candidates:
-                    if candidate.provider_id in failed_providers:
-                        continue
                     attempt_id = f"director-provider-failover:{correlation_id}:{candidate.provider_id}"
                     self._store.record(
                         transition_id=f"{attempt_id}:attempted",
@@ -387,13 +395,9 @@ class DirectorProviderFailoverController:
                         return response
                     except Exception as replacement_error:
                         last_error = replacement_error
-                        category, _ = classify_failure(replacement_error)
-                        # Health is tracked at provider+model granularity. A transient
-                        # failure on one model must not discard other eligible models
-                        # exposed by the same provider; the next reserve model may still
-                        # be healthy and is the correct continuation path.
-                        if category == "configuration":
-                            failed_providers.add(candidate.provider_id)
+                        # Health is tracked at provider+model granularity. Never suppress
+                        # the whole NVIDIA provider because one model failed; continue through
+                        # the remaining dynamically discovered reserve models.
                         if self._health_store is not None:
                             try:
                                 self._health_store.record_failure(

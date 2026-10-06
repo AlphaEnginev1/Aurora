@@ -15,10 +15,10 @@ def test_production_service_is_persistent_but_not_live_by_default():
     assert "ExecStartPre=/bin/bash /opt/aurora/deploy/aurora-preflight.sh" in service
 
 
-def test_environment_template_has_no_real_credentials_and_selects_gemini_director():
+def test_environment_template_has_no_real_credentials_and_selects_nvidia_router():
     env = (DEPLOY / "aurora.env.example").read_text(encoding="utf-8")
-    assert "AURORA_DIRECTOR_PROVIDER=gemini" in env
-    assert "GEMINI_API_KEY=" in env
+    assert "AURORA_DIRECTOR_PROVIDER=router" in env
+    assert "GEMINI_API_KEY=" not in env
     assert "NVIDIA_API_KEY=" in env
     assert "AURORA_EGRESS_PROXY_HOST=" in env
     assert "AURORA_CANONICAL_COMMIT=" in env
@@ -34,7 +34,6 @@ def test_preflight_is_fail_closed_for_runtime_prerequisites():
         "AURORA_CANONICAL_COMMIT",
         "NVIDIA_API_KEY",
         "AURORA_DIRECTOR_PROVIDER",
-        "GEMINI_API_KEY",
         "aurora-central-avatar.jpg",
         "socket.create_connection",
     ):

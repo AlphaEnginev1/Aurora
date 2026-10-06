@@ -4,7 +4,7 @@ Autonomous multi-agent engineering system.
 
 ## Current status
 
-**IMPLEMENTATION COMPLETE — DYNAMIC NVIDIA FREE CATALOG AUDIT IN PROGRESS**
+**IMPLEMENTATION COMPLETE — NVIDIA-ONLY FREE MODEL RUNTIME**
 
 Aurora has one authoritative engineering line:
 
@@ -22,7 +22,7 @@ Aurora has one authoritative engineering line:
 - PR #149: Critical Decision Model Ensemble — MERGED
 - PR #150: Multi-Agent Adversarial Review — MERGED
 - PR #151: Provider Availability & Multi-Provider Resilience — MERGED
-- current multi-provider LIVE acceptance: defined and ready for execution
+- current NVIDIA-only LIVE acceptance: defined and ready for execution
 
 `main` remains the single authoritative engineering line. Closed increments are not reopened.
 
@@ -68,5 +68,7 @@ The contract preserves least-privilege, approvals, sandboxing, credential isolat
 
 ## Current free-model resilience closure
 
-The canonical Aurora runtime is now **free-only**. The active Director path uses the free Gemini tier, and specialist inference/failover uses the dynamic NVIDIA NIM Free Endpoint catalog under `config/free-model-policy.json`. The runtime rejects paid or unclassified models before routing, and the dedicated LIVE gate in `docs/operations/LIVE_MULTI_PROVIDER_RESILIENCE.md` requires only Gemini and NVIDIA credentials.\n\n### Dynamic NVIDIA model catalog
+The canonical Aurora runtime is now **NVIDIA-only and free-only**. The Director runs through Aurora's provider-neutral inference router, whose only external provider is NVIDIA NIM. Director failover stays inside the NVIDIA Free Endpoint catalog: when one NVIDIA model fails, Aurora can continue to another eligible NVIDIA model without switching vendors. Gemini, OpenAI and Anthropic are not runtime providers, not dashboard options and not credential dependencies.
+
+### Dynamic NVIDIA model catalog
 The checked-in NVIDIA entries are only known-good seed metadata. At runtime Aurora joins the live NVIDIA `/v1/models` serving catalog with NVIDIA's official Build catalog labels, where `Free Endpoint` is the authoritative free-access signal. Every currently served NVIDIA Free Endpoint can therefore enter Aurora dynamically; the seed list is never a ceiling. Models are then routed according to the execution capability their provider adapter supports.

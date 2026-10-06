@@ -1,17 +1,23 @@
-"""Dashboard-facing provider settings with runtime reconfiguration."""
+"""Dashboard provider settings for the NVIDIA-only Aurora runtime."""
+
 from __future__ import annotations
-import json, urllib.error, urllib.request
+
+import json
+import urllib.error
+import urllib.request
 from typing import Any, Mapping
+
 from aurora.inference.models import ModelSpec
 from aurora.inference.free_policy import is_free_model
 from aurora.inference.providers.registry import default_provider_registry
 from aurora.inference.discovery import ModelDiscoveryError
 from aurora.operator_settings import OperatorSettingsError, OperatorSettingsStore
 from aurora.orchestration.director_provider import InferenceDirectorProvider
-from aurora.orchestration.gemini_provider import GeminiDirectorProvider
+
 
 class DashboardProviderSettingsError(RuntimeError):
-    """Raised when provider settings cannot be applied or tested."""
+    """Raised when NVIDIA provider settings cannot be applied or tested."""
+
 
 class ProviderSettingsService:
     def __init__(self, store: OperatorSettingsStore, runtime) -> None:
@@ -30,16 +36,16 @@ class ProviderSettingsService:
             router = self.runtime.director.planner.router
             nvidia_key = self.store.credential("nvidia_api")
             router.nvidia_api_key = nvidia_key or None
-            router.provider_registry = default_provider_registry(
-                nvidia_api_key=nvidia_key or None,
-            )
+            router.provider_registry = default_provider_registry(nvidia_api_key=nvidia_key or None)
 
             selected_model = str(settings["director"].get("model", "")).strip()
-            if (
-                nvidia_key
-                and str(settings["director"].get("provider", "")).strip().lower() == "nvidia_api"
-                and selected_model
-            ):
+            provider_id = str(settings["director"].get("provider", "")).strip().lower()
+            if provider_id not in {"router", "nvidia_api"}:
+                raise DashboardProviderSettingsError(
+                    "Aurora supports only the NVIDIA inference fabric"
+                )
+
+            if nvidia_key and selected_model:
                 existing = next(
                     (item for item in router.model_registry.models if item.id == selected_model),
                     None,
@@ -63,7 +69,7 @@ class ProviderSettingsService:
                 if existing is None:
                     if not is_free_model("nvidia_api", selected_model):
                         raise DashboardProviderSettingsError(
-                            "free_only policy requires a currently discovered or explicitly seeded free NVIDIA model"
+                            "selected model is not a currently discovered or explicitly seeded free NVIDIA model"
                         )
                     existing = ModelSpec(
                         id=selected_model,
@@ -98,29 +104,7 @@ class ProviderSettingsService:
                     router.model_registry.replace(updated)
                     router.models = list(router.model_registry.models)
 
-            director = settings["director"]
-            provider_id = str(director.get("provider", "")).strip().lower()
-            if provider_id in {"router", "nvidia_api"}:
-                provider = InferenceDirectorProvider(router)
-            elif provider_id in {"openai", "anthropic"}:
-                if getattr(router, "cost_policy", "all") == "free_only":
-                    raise DashboardProviderSettingsError(f"{provider_id} is disabled by Aurora free_only policy")
-                key = self.store.credential(provider_id)
-                if not key:
-                    raise DashboardProviderSettingsError(
-                        f"{provider_id} API key is required before selecting it as Director"
-                    )
-                from aurora.orchestration.director_provider_failover import BoundInferenceDirectorProvider
-                provider = BoundInferenceDirectorProvider(
-                    router, provider_id=provider_id, model=str(director["model"])
-                )
-            elif provider_id == "gemini":
-                api_key = self.store.credential("gemini")
-                if not api_key:
-                    raise DashboardProviderSettingsError("Gemini API key is required before selecting Gemini as Director")
-                provider = GeminiDirectorProvider(api_key=api_key, model=str(director["model"]), endpoint=str(director["endpoint"]))
-            else:
-                raise DashboardProviderSettingsError(f"unsupported Director provider: {provider_id}")
+            provider = InferenceDirectorProvider(router)
             active = self.runtime.director.planner.provider
             if hasattr(active, "set_active_provider"):
                 active.set_active_provider(provider)
@@ -137,44 +121,37 @@ class ProviderSettingsService:
 
     def test_provider(self, provider_id: str) -> dict[str, Any]:
         provider_id = str(provider_id).strip().lower()
+        if provider_id != "nvidia_api":
+            raise DashboardProviderSettingsError(
+                "Aurora provider test supports only nvidia_api"
+            )
         settings = self.store.load()
-        if provider_id == "gemini":
-            key = self.store.credential("gemini")
-            if not key:
-                raise DashboardProviderSettingsError("Gemini API key is not configured")
-            model = str(settings["director"]["model"]).strip()
-            endpoint = str(settings["director"]["endpoint"]).rstrip("/")
-            request = urllib.request.Request(f"{endpoint}/models/{model}", headers={"x-goog-api-key": key, "Accept": "application/json"}, method="GET")
-            with _urlopen(request) as response:
-                json.loads(response.read().decode("utf-8"))
-            return {"provider":"gemini","ok":True,"model":model}
-        if provider_id in {"nvidia_api"}:
-            key = self.store.credential(provider_id)
-            if not key:
-                raise DashboardProviderSettingsError(f"{provider_id} API key is not configured")
-            discovery = getattr(self.runtime, "model_discovery", None)
-            if discovery is None:
-                raise DashboardProviderSettingsError("model discovery is not available in the current runtime")
-            try:
-                candidates = tuple(discovery.discover_and_stage(provider_id))
-            except ModelDiscoveryError as exc:
-                raise DashboardProviderSettingsError(str(exc)) from exc
-            models = [
-                candidate.model.id
-                for candidate in candidates
-                if getattr(candidate, "model", None) is not None
-                and getattr(candidate.model, "pricing_tier", "unknown") == "free"
-            ]
-            return {
-                "provider": provider_id,
-                "ok": True,
-                "models": models,
-                "staged_count": len(models),
-                "stage_state": "discovered",
-            }
-        raise DashboardProviderSettingsError(
-            "provider test supports gemini or nvidia_api"
-        )
+        key = self.store.credential("nvidia_api")
+        if not key:
+            raise DashboardProviderSettingsError("NVIDIA API key is not configured")
+        discovery = getattr(self.runtime, "model_discovery", None)
+        if discovery is None:
+            raise DashboardProviderSettingsError(
+                "model discovery is not available in the current runtime"
+            )
+        try:
+            candidates = tuple(discovery.discover_and_stage("nvidia_api"))
+        except ModelDiscoveryError as exc:
+            raise DashboardProviderSettingsError(str(exc)) from exc
+        models = [
+            candidate.model.id
+            for candidate in candidates
+            if getattr(candidate, "model", None) is not None
+            and getattr(candidate.model, "pricing_tier", "unknown") == "free"
+        ]
+        return {
+            "provider": "nvidia_api",
+            "ok": True,
+            "models": models,
+            "staged_count": len(models),
+            "stage_state": "discovered",
+        }
+
 
 def _urlopen(request: urllib.request.Request):
     try:
@@ -184,4 +161,5 @@ def _urlopen(request: urllib.request.Request):
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
         raise DashboardProviderSettingsError(f"provider connection failed: {exc}") from None
 
-__all__ = ["DashboardProviderSettingsError","ProviderSettingsService"]
+
+__all__ = ["DashboardProviderSettingsError", "ProviderSettingsService"]

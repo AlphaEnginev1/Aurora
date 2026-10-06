@@ -86,16 +86,11 @@ if not os.getenv("NVIDIA_API_KEY", "").strip():
     raise SystemExit("NVIDIA_API_KEY is required for the configured inference fabric")
 
 director = os.getenv("AURORA_DIRECTOR_PROVIDER", "router").strip().lower()
-if director == "gemini":
-    gemini_model = os.getenv("GEMINI_MODEL_ID", "").strip()
-    if not gemini_model:
-        gemini_model = "gemini-3.8-flash"
-    if gemini_model not in free_provider_models.get("gemini", {}):
-        raise SystemExit("configured Gemini Director model is absent from free-model allowlist: " + gemini_model)
-    if not os.getenv("GEMINI_API_KEY", "").strip():
-        raise SystemExit("GEMINI_API_KEY is required when AURORA_DIRECTOR_PROVIDER=gemini")
-    if not os.getenv("GEMINI_MODEL_ID", "").strip():
-        raise SystemExit("GEMINI_MODEL_ID is required when AURORA_DIRECTOR_PROVIDER=gemini")
+if director == "nvidia_api":
+    nvidia_model = os.getenv("NVIDIA_MODEL_ID", "").strip()
+    if nvidia_model and nvidia_model not in free_provider_models.get("nvidia_api", {}):
+        if nvidia_model not in {str(item.get("id", "")) for item in enabled_models if str(item.get("provider", "")) == "nvidia_api"}:
+            raise SystemExit("configured NVIDIA Director model is absent from free-model catalog: " + nvidia_model)
 elif director not in {"router", "inference_fabric", ""}:
     raise SystemExit("unsupported AURORA_DIRECTOR_PROVIDER: " + director)
 

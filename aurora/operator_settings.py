@@ -1,33 +1,41 @@
-"""Local operator settings and credential storage for Aurora.
+"""Local NVIDIA-only operator settings and credential storage for Aurora."""
 
-The file is intentionally kept inside the ignored .aurora-runtime directory.
-API secrets never belong in the repository, dashboard HTML, or ordinary logs.
-"""
 from __future__ import annotations
-import json, os
+
+import json
+import os
 from pathlib import Path
 from threading import RLock
 from typing import Any, Mapping
-from aurora.inference.free_policy import is_free_model
+
+
+NVIDIA_ENDPOINT = "https://integrate.api.nvidia.com/v1"
+DEFAULT_NVIDIA_MODEL = "nvidia/nemotron-3-ultra-550b-a55b"
 
 DEFAULT_SETTINGS: dict[str, Any] = {
     "director": {
-        "provider": "gemini",
-        "model": "gemini-3.8-flash",
-        "endpoint": "https://generativelanguage.googleapis.com/v1beta",
-        "failover": {"enabled": True, "order": ["nvidia_api", "router"]},
+        "provider": "router",
+        "model": DEFAULT_NVIDIA_MODEL,
+        "endpoint": NVIDIA_ENDPOINT,
+        "failover": {"enabled": True, "order": ["nvidia_api"]},
     },
     "providers": {
-        "gemini": {"enabled": True, "api_key": ""},
-        "nvidia_api": {"enabled": True, "api_key": "", "base_url": "https://integrate.api.nvidia.com/v1"},
+        "nvidia_api": {
+            "enabled": True,
+            "api_key": "",
+            "base_url": NVIDIA_ENDPOINT,
+        }
     },
 }
+
 
 class OperatorSettingsError(RuntimeError):
     """Raised when local operator settings are invalid or cannot be saved."""
 
+
 class OperatorSettingsStore:
-    """Persist provider configuration outside source control with strict permissions."""
+    """Persist only NVIDIA runtime configuration outside source control."""
+
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
         self._lock = RLock()
@@ -35,44 +43,49 @@ class OperatorSettingsStore:
 
     def load(self) -> dict[str, Any]:
         with self._lock:
-            return _merge(DEFAULT_SETTINGS, self._read())
+            return _normalize(_merge(DEFAULT_SETTINGS, self._read()))
 
     def save(self, payload: Mapping[str, Any]) -> dict[str, Any]:
         if not isinstance(payload, Mapping):
             raise OperatorSettingsError("operator settings must be an object")
         with self._lock:
-            merged = _merge(self.load(), payload)
+            merged = _normalize(_merge(self.load(), payload))
             _validate(merged)
-            self.path.write_text(json.dumps(merged, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+            self.path.write_text(
+                json.dumps(merged, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
             _chmod_private(self.path)
             return merged
 
     def public(self) -> dict[str, Any]:
         data = self.load()
-        providers: dict[str, Any] = {}
-        for provider_id in ("gemini", "nvidia_api"):
-            provider = data["providers"].get(provider_id, {})
-            item = dict(provider)
-            key = str(item.pop("api_key", "") or "")
-            item["api_key_present"] = bool(key.strip())
-            providers[provider_id] = item
-        return {"director": dict(data["director"]), "providers": providers}
+        provider = dict(data["providers"]["nvidia_api"])
+        key = str(provider.pop("api_key", "") or "")
+        provider["api_key_present"] = bool(key.strip())
+        return {
+            "director": dict(data["director"]),
+            "providers": {"nvidia_api": provider},
+        }
 
     def credential(self, provider_id: str) -> str:
-        provider = self.load()["providers"].get(provider_id)
-        return str(provider.get("api_key", "") or "").strip() if isinstance(provider, Mapping) else ""
+        if str(provider_id).strip().lower() != "nvidia_api":
+            return ""
+        provider = self.load()["providers"].get("nvidia_api", {})
+        return str(provider.get("api_key", "") or "").strip()
 
     def update_from_form(self, payload: Mapping[str, Any]) -> dict[str, Any]:
         current = self.load()
         next_data = _merge(current, payload)
-        incoming_providers = payload.get("providers", {})
-        if isinstance(incoming_providers, Mapping):
-            for provider_id in ("gemini", "nvidia_api"):
-                incoming = incoming_providers.get(provider_id, {})
-                if isinstance(incoming, Mapping) and "api_key" in incoming:
-                    value = str(incoming.get("api_key") or "")
-                    if not value.strip():
-                        next_data["providers"][provider_id]["api_key"] = current["providers"][provider_id].get("api_key", "")
+        incoming = payload.get("providers", {}) if isinstance(payload, Mapping) else {}
+        if isinstance(incoming, Mapping):
+            nvidia = incoming.get("nvidia_api", {})
+            if isinstance(nvidia, Mapping) and "api_key" in nvidia:
+                value = str(nvidia.get("api_key") or "")
+                if not value.strip():
+                    next_data["providers"]["nvidia_api"]["api_key"] = (
+                        current["providers"]["nvidia_api"].get("api_key", "")
+                    )
         return self.save(next_data)
 
     def _read(self) -> dict[str, Any]:
@@ -86,16 +99,50 @@ class OperatorSettingsStore:
             raise OperatorSettingsError("operator settings file must contain an object")
         return raw
 
+
 def settings_path(workspace_root: str | Path) -> Path:
     return Path(workspace_root).resolve() / "operator-settings.json"
 
+
+def _normalize(data: Mapping[str, Any]) -> dict[str, Any]:
+    result = _merge(DEFAULT_SETTINGS, data)
+    director = result["director"]
+    provider = str(director.get("provider", "router")).strip().lower()
+    if provider not in {"router", "nvidia_api"}:
+        provider = "router"
+    director["provider"] = provider
+    director["endpoint"] = NVIDIA_ENDPOINT
+    model = str(director.get("model", "")).strip()
+    if not model or provider not in {"router", "nvidia_api"}:
+        director["model"] = DEFAULT_NVIDIA_MODEL
+    failover = director.get("failover", {})
+    if not isinstance(failover, Mapping):
+        failover = {}
+    director["failover"] = {
+        "enabled": bool(failover.get("enabled", True)),
+        "order": ["nvidia_api"],
+    }
+    nvidia = result.get("providers", {}).get("nvidia_api", {})
+    if not isinstance(nvidia, Mapping):
+        nvidia = {}
+    result["providers"] = {
+        "nvidia_api": {
+            "enabled": bool(nvidia.get("enabled", True)),
+            "api_key": str(nvidia.get("api_key", "") or ""),
+            "base_url": str(nvidia.get("base_url", NVIDIA_ENDPOINT) or NVIDIA_ENDPOINT).rstrip("/"),
+        }
+    }
+    return result
+
+
 def _validate(data: Mapping[str, Any]) -> None:
-    director, providers = data.get("director"), data.get("providers")
+    director = data.get("director")
+    providers = data.get("providers")
     if not isinstance(director, Mapping) or not isinstance(providers, Mapping):
         raise OperatorSettingsError("operator settings require director and providers objects")
     provider = str(director.get("provider", "")).strip().lower()
-    if provider not in {"gemini", "router", "nvidia_api"}:
-        raise OperatorSettingsError("director.provider must be gemini, router, or nvidia_api")
+    if provider not in {"router", "nvidia_api"}:
+        raise OperatorSettingsError("director.provider must be router or nvidia_api")
     if not str(director.get("model", "")).strip():
         raise OperatorSettingsError("director.model cannot be empty")
     if not str(director.get("endpoint", "")).strip().startswith("https://"):
@@ -103,29 +150,17 @@ def _validate(data: Mapping[str, Any]) -> None:
     failover = director.get("failover", {})
     if not isinstance(failover, Mapping):
         raise OperatorSettingsError("director.failover must be an object")
-    if not isinstance(failover.get("enabled", True), bool):
+    if failover.get("enabled", True) is not True and failover.get("enabled", True) is not False:
         raise OperatorSettingsError("director.failover.enabled must be boolean")
     order = failover.get("order", [])
-    if not isinstance(order, list) or not all(isinstance(item, str) for item in order):
-        raise OperatorSettingsError("director.failover.order must be a string array")
-    allowed_failover = {"router", "nvidia_api"}
-    normalized_order = [item.strip().lower() for item in order]
-    if any(item not in allowed_failover for item in normalized_order):
-        raise OperatorSettingsError("director.failover.order contains an unsupported provider")
-    if len(set(normalized_order)) != len(normalized_order):
-        raise OperatorSettingsError("director.failover.order must not contain duplicates")
-    for provider_id in ("gemini", "nvidia_api"):
-        provider_data = providers.get(provider_id)
-        if not isinstance(provider_data, Mapping):
-            raise OperatorSettingsError(f"provider configuration missing: {provider_id}")
-        if bool(director.get("free_only", True)) and provider == provider_id and provider_id in {"gemini", "nvidia_api"}:
-            model_id = str(director.get("model", "")).strip()
-            if not is_free_model(provider_id, model_id):
-                raise OperatorSettingsError(
-                    f"free_only policy rejects non-free Director model: {provider_id}/{model_id}"
-                )
-        if provider_id in {"nvidia_api", "openai", "anthropic"} and not str(provider_data.get("base_url", "")).strip().startswith("https://"):
-            raise OperatorSettingsError(f"{provider_id}.base_url must use HTTPS")
+    if order != ["nvidia_api"]:
+        raise OperatorSettingsError("director.failover.order must be exactly ['nvidia_api']")
+    nvidia = providers.get("nvidia_api")
+    if not isinstance(nvidia, Mapping):
+        raise OperatorSettingsError("provider configuration missing: nvidia_api")
+    if not str(nvidia.get("base_url", "")).strip().startswith("https://"):
+        raise OperatorSettingsError("nvidia_api.base_url must use HTTPS")
+
 
 def _merge(base: Mapping[str, Any], overlay: Mapping[str, Any]) -> dict[str, Any]:
     result = {str(k): _deepcopy(v) for k, v in base.items()}
@@ -136,6 +171,7 @@ def _merge(base: Mapping[str, Any], overlay: Mapping[str, Any]) -> dict[str, Any
             result[key] = _deepcopy(value)
     return result
 
+
 def _deepcopy(value: Any) -> Any:
     if isinstance(value, Mapping):
         return {str(k): _deepcopy(v) for k, v in value.items()}
@@ -143,10 +179,19 @@ def _deepcopy(value: Any) -> Any:
         return [_deepcopy(v) for v in value]
     return value
 
+
 def _chmod_private(path: Path) -> None:
     try:
         os.chmod(path, 0o600)
     except OSError as exc:
         raise OperatorSettingsError(f"unable to restrict permissions on {path}") from exc
 
-__all__ = ["DEFAULT_SETTINGS","OperatorSettingsError","OperatorSettingsStore","settings_path"]
+
+__all__ = [
+    "DEFAULT_NVIDIA_MODEL",
+    "DEFAULT_SETTINGS",
+    "NVIDIA_ENDPOINT",
+    "OperatorSettingsError",
+    "OperatorSettingsStore",
+    "settings_path",
+]

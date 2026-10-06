@@ -7,7 +7,7 @@ from tests.test_director_conversation import _service as base_service
 
 
 class ToolProvider:
-    provider_id = "gemini"
+    provider_id = "nvidia_api"
 
     def __init__(self):
         self.calls = []
@@ -17,7 +17,7 @@ class ToolProvider:
         if role == "director_conversation":
             return DirectorModelResponse(
                 content="",
-                model=model or "gemini-3.7-flash",
+                model=model or "nvidia/nemotron-3-ultra-550b-a55b",
                 provider="gemini",
                 request_id="request-1",
                 execution_id="execution-1",
@@ -32,7 +32,7 @@ class ToolProvider:
         assert role == "director_conversation_result"
         return DirectorModelResponse(
             content="He inspeccionado el proyecto y la ejecución ha terminado correctamente.",
-            model=model or "gemini-3.7-flash",
+            model=model or "nvidia/nemotron-3-ultra-550b-a55b",
             provider="gemini",
             request_id="request-2",
             execution_id="execution-2",
@@ -100,7 +100,7 @@ def test_conversation_can_use_shared_workbench_directly(tmp_path: Path):
         if role == "director_conversation":
             return DirectorModelResponse(
                 content="",
-                model=model or "gemini-3.7-flash",
+                model=model or "nvidia/nemotron-3-ultra-550b-a55b",
                 provider="gemini",
                 request_id="request-wb-1",
                 execution_id="execution-wb-1",
@@ -121,7 +121,7 @@ def test_conversation_can_use_shared_workbench_directly(tmp_path: Path):
         assert "authoritative file evidence" in last[0]["text"]
         return DirectorModelResponse(
             content="He comprobado la evidencia directamente con el Workbench.",
-            model=model or "gemini-3.7-flash",
+            model=model or "nvidia/nemotron-3-ultra-550b-a55b",
             provider="gemini",
             request_id="request-wb-2",
             execution_id="execution-wb-2",

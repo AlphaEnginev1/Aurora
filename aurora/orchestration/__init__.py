@@ -17,7 +17,6 @@ from .director_provider import (
     DirectorToolSpec,
     InferenceDirectorProvider,
 )
-from .gemini_provider import GeminiDirectorConfig, GeminiDirectorError, GeminiDirectorProvider
 from .director_provider_failover import (
     BoundInferenceDirectorProvider,
     DirectorProviderCandidate,
@@ -115,9 +114,6 @@ __all__ = [
     "InferenceDirectorProvider",
     "DirectorToolCall",
     "DirectorToolSpec",
-    "GeminiDirectorConfig",
-    "GeminiDirectorError",
-    "GeminiDirectorProvider",
     "BoundInferenceDirectorProvider",
     "DirectorProviderCandidate",
     "DirectorProviderFailoverController",

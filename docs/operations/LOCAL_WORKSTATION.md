@@ -28,9 +28,9 @@ If Aurora is already running, a second launcher invocation does not start a dupl
 
 Open **SETUP** in the right rail.
 
-Enter the Gemini and NVIDIA API keys there. Keys are stored only in the ignored `.aurora-runtime/operator-settings.json` file with mode 0600 on Linux. The dashboard receives only redacted provider state and never renders saved secrets.
+Enter only the NVIDIA API key. It is stored in the ignored `.aurora-runtime/operator-settings.json` file with mode 0600 on Linux. The dashboard receives only redacted provider state and never renders the saved secret.
 
-Gemini can be selected as the Director. NVIDIA provides the inference fabric; the NVIDIA test action queries the account's model catalog so a model can be selected without editing source-controlled policy files.
+Aurora uses the NVIDIA inference fabric exclusively. The NVIDIA test action queries the account's current Free Endpoint catalog so models can be selected without editing source-controlled policy files.
 
 ## Stopping Aurora
 

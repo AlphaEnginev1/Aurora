@@ -39,24 +39,13 @@ def router(tmp_path: Path):
     )
 
 
-def test_gemini_setting_switches_runtime_provider(tmp_path: Path):
+def test_external_provider_setting_is_sanitized_to_nvidia_router(tmp_path: Path):
     runtime = Runtime(router(tmp_path))
     store = OperatorSettingsStore(tmp_path / "operator-settings.json")
     service = ProviderSettingsService(store, runtime)
-
-    state = service.save_and_apply({
-        "director": {
-            "provider": "gemini",
-            "model": "gemini-3.7-flash",
-            "endpoint": "https://generativelanguage.googleapis.com/v1beta",
-        },
-        "providers": {"gemini": {"api_key": "secret"}},
-    })
-
-    assert state["runtime"]["director_provider"] == "gemini"
-    assert runtime.director.planner.provider.provider_id == "gemini"
-    assert runtime.director.planner.router.nvidia_api_key is None
-
+    state = service.save_and_apply({"director": {"provider": "gemini", "model": "gemini-3.7-flash"}})
+    assert state["director"]["provider"] == "router"
+    assert state["providers"].keys() == {"nvidia_api"}
 
 def test_nvidia_discovery_stages_candidates(tmp_path: Path):
     from types import SimpleNamespace

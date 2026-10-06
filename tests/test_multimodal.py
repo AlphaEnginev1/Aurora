@@ -1,11 +1,8 @@
-import json
-
 import pytest
 
 from aurora.inference.models import InferenceRequest, ModelSpec
 from aurora.inference.multimodal import MultimodalContentError, message_modalities, openai_messages, parse_content
 from aurora.inference.router import ModelRouter, ModelRoutingError
-from aurora.orchestration.gemini_provider import GeminiDirectorConfig, GeminiDirectorProvider
 
 
 def test_parse_content_and_detect_modalities():
@@ -75,39 +72,3 @@ def test_openai_translation_preserves_image_as_data_url():
     assert translated[0]["content"][1]["type"] == "image_url"
     assert translated[0]["content"][1]["image_url"]["url"] == "data:image/png;base64,ZmFrZQ=="
 
-
-def test_gemini_translation_preserves_inline_image(monkeypatch):
-    captured = {}
-
-    class Response:
-        def __enter__(self): return self
-        def __exit__(self, *args): return False
-        def read(self):
-            return json.dumps({"candidates": [{"content": {"parts": [{"text": "ok"}]}}]}).encode()
-
-    def fake_urlopen(request, timeout):
-        captured["request"] = request
-        return Response()
-
-    monkeypatch.setattr(
-        "aurora.orchestration.gemini_provider.urlopen",
-        fake_urlopen,
-    )
-    provider = GeminiDirectorProvider(
-        GeminiDirectorConfig(api_key="test-key", model="gemini-3.7-flash")
-    )
-    provider.generate(
-        messages=[{
-            "role": "user",
-            "content": [
-                {"modality": "text", "text": "Inspect"},
-                {"modality": "image", "mime_type": "image/png", "data": "ZmFrZQ=="},
-            ],
-        }],
-        model=None,
-        role="director_planner",
-    )
-    body = json.loads(captured["request"].data)
-    parts = body["contents"][0]["parts"]
-    assert parts[0] == {"text": "Inspect"}
-    assert parts[1] == {"inlineData": {"mimeType": "image/png", "data": "ZmFrZQ=="}}

@@ -3,25 +3,38 @@ import pytest
 from aurora.orchestration import factory
 
 
-def test_default_director_provider_is_router(monkeypatch):
+def test_default_director_provider_is_nvidia_router(monkeypatch):
     monkeypatch.delenv("AURORA_DIRECTOR_PROVIDER", raising=False)
     assert factory._build_director_provider() is None
 
 
-def test_gemini_can_be_selected_as_director_provider(monkeypatch):
-    class FakeGeminiProvider:
-        provider_id = "gemini"
+def test_nvidia_can_be_selected_as_director_provider(monkeypatch):
+    class FakeRouter:
+        cost_policy = "free_only"
+        model_registry = type("MR", (), {"models": ()})()
 
-        def __init__(self, **kwargs):
-            self.config = kwargs
+    class FakeBound:
+        provider_id = "nvidia_api"
+        def __init__(self, *args, **kwargs):
+            self.args = args
+            self.kwargs = kwargs
 
-    monkeypatch.setenv("AURORA_DIRECTOR_PROVIDER", "gemini")
-    monkeypatch.setattr(factory, "GeminiDirectorProvider", FakeGeminiProvider)
-    provider = factory._build_director_provider()
-    assert provider.provider_id == "gemini"
+    monkeypatch.setenv("AURORA_DIRECTOR_PROVIDER", "nvidia_api")
+    monkeypatch.setattr(factory, "BoundInferenceDirectorProvider", FakeBound)
+
+    class Settings:
+        def load(self):
+            return {"director": {"provider": "nvidia_api", "model": "nvidia/nemotron-3-ultra-550b-a55b"}}
+        def credential(self, provider_id):
+            return "secret" if provider_id == "nvidia_api" else ""
+
+    provider = factory._build_director_provider(Settings(), router=FakeRouter())
+    assert provider.provider_id == "nvidia_api"
+    assert provider.kwargs["model"] == "nvidia/nemotron-3-ultra-550b-a55b"
 
 
-def test_unknown_director_provider_fails_closed(monkeypatch):
-    monkeypatch.setenv("AURORA_DIRECTOR_PROVIDER", "unknown")
-    with pytest.raises(RuntimeError, match="unsupported AURORA_DIRECTOR_PROVIDER"):
-        factory._build_director_provider()
+def test_non_nvidia_director_provider_is_rejected(monkeypatch):
+    for external in ("gemini", "openai", "anthropic"):
+        monkeypatch.setenv("AURORA_DIRECTOR_PROVIDER", external)
+        with pytest.raises(RuntimeError, match="expected router or nvidia_api"):
+            factory._build_director_provider()

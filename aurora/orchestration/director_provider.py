@@ -41,7 +41,7 @@ class DirectorModelResponse:
 
 
 class DirectorProvider(Protocol):
-    """Provider contract independent of Gemini, NVIDIA, or any vendor."""
+    """Provider contract independent of any vendor."""
 
     provider_id: str
 

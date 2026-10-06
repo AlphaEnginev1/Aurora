@@ -9,43 +9,29 @@ def test_operator_settings_round_trip_redacts_credentials(tmp_path: Path):
     store = OperatorSettingsStore(path)
     store.save({
         "director": {
-            "provider": "gemini",
-            "model": "gemini-3.7-flash",
-            "endpoint": "https://generativelanguage.googleapis.com/v1beta",
+            "provider": "router",
+            "model": "nvidia/nemotron-3-ultra-550b-a55b",
+            "endpoint": "https://integrate.api.nvidia.com/v1",
         },
         "providers": {
-            "gemini": {"api_key": "gemini-secret"},
             "nvidia_api": {"api_key": "nvidia-secret"},
+            "gemini": {"api_key": "ignored"},
+            "openai": {"api_key": "ignored"},
+            "anthropic": {"api_key": "ignored"},
         },
     })
-
     raw = store.load()
     public = store.public()
-
-    assert raw["providers"]["gemini"]["api_key"] == "gemini-secret"
+    assert set(raw["providers"]) == {"nvidia_api"}
     assert raw["providers"]["nvidia_api"]["api_key"] == "nvidia-secret"
-    assert public["providers"]["gemini"]["api_key_present"] is True
+    assert raw["director"]["provider"] == "router"
     assert public["providers"]["nvidia_api"]["api_key_present"] is True
-    assert "gemini-secret" not in str(public)
     assert "nvidia-secret" not in str(public)
-    assert "api_key" not in public["providers"]["gemini"]
-    assert "api_key" not in public["providers"]["nvidia_api"]
     assert os.stat(path).st_mode & 0o777 == 0o600
 
 
 def test_blank_form_key_preserves_existing_secret(tmp_path: Path):
     store = OperatorSettingsStore(tmp_path / "operator-settings.json")
-    store.save({
-        "providers": {
-            "gemini": {"api_key": "existing"},
-            "nvidia_api": {"api_key": "existing-nvidia"},
-        }
-    })
-    store.update_from_form({
-        "providers": {
-            "gemini": {"api_key": ""},
-            "nvidia_api": {"api_key": ""},
-        }
-    })
-    assert store.credential("gemini") == "existing"
+    store.save({"providers": {"nvidia_api": {"api_key": "existing-nvidia"}}})
+    store.update_from_form({"providers": {"nvidia_api": {"api_key": ""}}})
     assert store.credential("nvidia_api") == "existing-nvidia"

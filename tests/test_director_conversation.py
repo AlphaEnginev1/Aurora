@@ -256,31 +256,27 @@ def test_failed_provider_is_persisted_without_exposing_credentials(tmp_path):
     assert failed[-1].state == "failed"
     assert failed[-1].error_code == "runtimeerror"
 
-def test_gemini_style_provider_response_contract(tmp_path):
+def test_nvidia_style_provider_response_contract(tmp_path):
     service, _ = _service(tmp_path)
 
-    class GeminiStyleProvider:
-        provider_id = "gemini"
+    class NVIDIAStyleProvider:
+        provider_id = "nvidia_api"
 
         def generate(self, *, messages, model, role, tools=()):
             return DirectorModelResponse(
-                content="Respuesta Gemini.",
-                model=model or "gemini-3.7-flash",
-                provider="gemini",
-                request_id="request-gemini",
-                execution_id="execution-gemini",
+                content="Respuesta NVIDIA.",
+                model=model or "nvidia/nemotron-3-ultra-550b-a55b",
+                provider="nvidia_api",
+                request_id="request-nvidia",
+                execution_id="execution-nvidia",
                 tool_calls=(),
             )
 
-    service.set_provider(GeminiStyleProvider())
+    service.set_provider(NVIDIAStyleProvider())
     session = service.create_session()
+    response = service.send_message(session_id=session.session_id, user_input="Hola Aurora")
 
-    response = service.send_message(
-        session_id=session.session_id,
-        user_input="Hola Aurora",
-    )
-
-    assert response.response_text == "Respuesta Gemini."
-    assert response.provider == "gemini"
-    assert response.model == "gemini-3.7-flash"
-    assert response.execution_id == "execution-gemini"
+    assert response.response_text == "Respuesta NVIDIA."
+    assert response.provider == "nvidia_api"
+    assert response.model == "nvidia/nemotron-3-ultra-550b-a55b"
+    assert response.execution_id == "execution-nvidia"

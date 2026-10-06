@@ -21,7 +21,7 @@ def test_dashboard_ui_assets_are_present():
     assert 'data-nav-target="health"' in html
     assert 'data-nav-target="settings"' in html
     assert 'id="director-provider"' in html
-    assert 'id="gemini-key"' in html
+    assert 'id="gemini-key"' not in html
     assert 'id="nvidia-key"' in html
     assert 'id="chat-expand"' in html
     assert 'id="chat-history"' in html
@@ -71,3 +71,12 @@ def test_dashboard_ui_uses_resilient_live_sync_and_avatar_contract():
     assert "AURORA_AVATAR_PORTRAIT_URL" in js
     assert "data-avatar-state" in html
     assert ".portrait-stage[data-avatar-state=" in css
+
+
+def test_dashboard_ui_is_nvidia_only():
+    html = (UI_DIR / "index.html").read_text(encoding="utf-8").lower()
+    js = (UI_DIR / "app.js").read_text(encoding="utf-8").lower()
+    assert "gemini" not in html
+    assert "gemini" not in js
+    assert "openai" not in html
+    assert "anthropic" not in html

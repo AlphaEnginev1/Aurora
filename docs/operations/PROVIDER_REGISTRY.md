@@ -26,7 +26,7 @@ Provider Registry: how that provider is resolved and instantiated.
 
 `nvidia_api` is the current built-in provider registration. Its adapter is imported lazily so registry initialization does not introduce import cycles.
 
-Future providers such as Gemini, Claude or local inference can be registered under their provider IDs without adding vendor-specific branches to `ModelRouter`.
+Aurora currently registers exactly one external provider: `nvidia_api`. Other vendor adapters are intentionally absent from the runtime registry so they cannot be selected accidentally. Expanding the provider set is an explicit architecture change, not an implicit fallback.
 
 ## Boundary
 
