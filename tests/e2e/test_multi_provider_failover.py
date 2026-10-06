@@ -48,7 +48,7 @@ def test_multiple_provider_outage_continues_to_next_provider(tmp_path: Path):
     ctx = ProviderErrorContext("gemini", "req", "exec", selected_model="gemini-model")
     gemini = FakeProvider("gemini", ProviderHTTPError("503", context=ctx, status_code=503))
     nvidia_a = FakeProvider("nvidia_api", ProviderHTTPError("503", context=ctx, status_code=503))
-    nvidia_b = FakeProvider("nvidia_api", "must-not-run")
+    nvidia_b = FakeProvider("nvidia_api", "nvidia reserve continuation")
     openai = FakeProvider("openai", ProviderHTTPError("429", context=ctx, status_code=429))
     anthropic = FakeProvider("anthropic", "continuation")
 
@@ -73,7 +73,7 @@ def test_multiple_provider_outage_continues_to_next_provider(tmp_path: Path):
     )
 
     assert result.provider == "nvidia_api"
-    assert result.content == "must-not-run"
+    assert result.content == "nvidia reserve continuation"
     assert nvidia_a.calls == 1
     assert nvidia_b.calls == 1
     assert openai.calls == 1
