@@ -119,6 +119,7 @@ class NVIDIAAPIProvider:
             raise ProviderHTTPError(
                 f"NVIDIA HTTP request failed with status {exc.code}",
                 context=context,
+                status_code=exc.code,
             ) from None
         except (TimeoutError, socket.timeout) as exc:
             raise ProviderTimeoutError(
