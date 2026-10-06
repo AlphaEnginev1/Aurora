@@ -9,7 +9,13 @@
         "researcher"
       ],
       "model_preferences": [
-        "meta/llama-3.1-8b-instruct"
+        "nvidia/nemotron-3-ultra-550b-a55b",
+        "nvidia/nemotron-3-super-120b-a12b",
+        "z-ai/glm-5-3",
+        "deepseek-ai/deepseek-v4.1-flash",
+        "z-ai/glm-5-3-flash",
+        "google/gemma-4-31b-it",
+        "poolside/laguna-xs-2.1"
       ],
       "allowed_capabilities": [
         "tool:curl",
@@ -24,7 +30,13 @@
         "engineer"
       ],
       "model_preferences": [
-        "meta/llama-3.1-8b-instruct"
+        "nvidia/nemotron-3-ultra-550b-a55b",
+        "nvidia/nemotron-3-super-120b-a12b",
+        "z-ai/glm-5-3",
+        "deepseek-ai/deepseek-v4.1-flash",
+        "z-ai/glm-5-3-flash",
+        "google/gemma-4-31b-it",
+        "poolside/laguna-xs-2.1"
       ],
       "allowed_capabilities": [
         "tool:git",
@@ -42,7 +54,13 @@
         "data_engineer"
       ],
       "model_preferences": [
-        "meta/llama-3.1-8b-instruct"
+        "nvidia/nemotron-3-ultra-550b-a55b",
+        "nvidia/nemotron-3-super-120b-a12b",
+        "z-ai/glm-5-3",
+        "deepseek-ai/deepseek-v4.1-flash",
+        "z-ai/glm-5-3-flash",
+        "google/gemma-4-31b-it",
+        "poolside/laguna-xs-2.1"
       ],
       "allowed_capabilities": [
         "runtime:python",
@@ -59,7 +77,13 @@
         "verifier"
       ],
       "model_preferences": [
-        "meta/llama-3.1-8b-instruct"
+        "nvidia/nemotron-3-ultra-550b-a55b",
+        "nvidia/nemotron-3-super-120b-a12b",
+        "z-ai/glm-5-3",
+        "deepseek-ai/deepseek-v4.1-flash",
+        "z-ai/glm-5-3-flash",
+        "google/gemma-4-31b-it",
+        "poolside/laguna-xs-2.1"
       ],
       "allowed_capabilities": [
         "tool:curl",
@@ -76,7 +100,13 @@
         "security_reviewer"
       ],
       "model_preferences": [
-        "meta/llama-3.1-8b-instruct"
+        "nvidia/nemotron-3-ultra-550b-a55b",
+        "nvidia/nemotron-3-super-120b-a12b",
+        "z-ai/glm-5-3",
+        "deepseek-ai/deepseek-v4.1-flash",
+        "z-ai/glm-5-3-flash",
+        "google/gemma-4-31b-it",
+        "poolside/laguna-xs-2.1"
       ],
       "allowed_capabilities": [
         "tool:rg",
@@ -93,7 +123,13 @@
         "operator"
       ],
       "model_preferences": [
-        "meta/llama-3.1-8b-instruct"
+        "nvidia/nemotron-3-ultra-550b-a55b",
+        "nvidia/nemotron-3-super-120b-a12b",
+        "z-ai/glm-5-3",
+        "deepseek-ai/deepseek-v4.1-flash",
+        "z-ai/glm-5-3-flash",
+        "google/gemma-4-31b-it",
+        "poolside/laguna-xs-2.1"
       ],
       "allowed_capabilities": [
         "tool:rg",
@@ -110,7 +146,13 @@
         "discovery_agent"
       ],
       "model_preferences": [
-        "meta/llama-3.1-8b-instruct"
+        "nvidia/nemotron-3-ultra-550b-a55b",
+        "nvidia/nemotron-3-super-120b-a12b",
+        "z-ai/glm-5-3",
+        "deepseek-ai/deepseek-v4.1-flash",
+        "z-ai/glm-5-3-flash",
+        "google/gemma-4-31b-it",
+        "poolside/laguna-xs-2.1"
       ],
       "allowed_capabilities": [
         "tool:curl",
@@ -127,7 +169,13 @@
         "synthesizer"
       ],
       "model_preferences": [
-        "meta/llama-3.1-8b-instruct"
+        "nvidia/nemotron-3-ultra-550b-a55b",
+        "nvidia/nemotron-3-super-120b-a12b",
+        "z-ai/glm-5-3",
+        "deepseek-ai/deepseek-v4.1-flash",
+        "z-ai/glm-5-3-flash",
+        "google/gemma-4-31b-it",
+        "poolside/laguna-xs-2.1"
       ],
       "allowed_capabilities": [
         "runtime:python",
@@ -153,7 +201,13 @@
         "workbench:*"
       ],
       "model_preferences": [
-        "meta/llama-3.1-8b-instruct"
+        "nvidia/nemotron-3-ultra-550b-a55b",
+        "nvidia/nemotron-3-super-120b-a12b",
+        "z-ai/glm-5-3",
+        "deepseek-ai/deepseek-v4.1-flash",
+        "z-ai/glm-5-3-flash",
+        "google/gemma-4-31b-it",
+        "poolside/laguna-xs-2.1"
       ],
       "universal_access": true
     },
@@ -175,7 +229,13 @@
         "workbench:*"
       ],
       "model_preferences": [
-        "meta/llama-3.1-8b-instruct"
+        "nvidia/nemotron-3-ultra-550b-a55b",
+        "nvidia/nemotron-3-super-120b-a12b",
+        "z-ai/glm-5-3",
+        "deepseek-ai/deepseek-v4.1-flash",
+        "z-ai/glm-5-3-flash",
+        "google/gemma-4-31b-it",
+        "poolside/laguna-xs-2.1"
       ],
       "universal_access": true
     },
@@ -196,7 +256,13 @@
         "workbench:*"
       ],
       "model_preferences": [
-        "meta/llama-3.1-8b-instruct"
+        "nvidia/nemotron-3-ultra-550b-a55b",
+        "nvidia/nemotron-3-super-120b-a12b",
+        "z-ai/glm-5-3",
+        "deepseek-ai/deepseek-v4.1-flash",
+        "z-ai/glm-5-3-flash",
+        "google/gemma-4-31b-it",
+        "poolside/laguna-xs-2.1"
       ],
       "universal_access": true
     },
@@ -217,7 +283,13 @@
         "workbench:*"
       ],
       "model_preferences": [
-        "meta/llama-3.1-8b-instruct"
+        "nvidia/nemotron-3-ultra-550b-a55b",
+        "nvidia/nemotron-3-super-120b-a12b",
+        "z-ai/glm-5-3",
+        "deepseek-ai/deepseek-v4.1-flash",
+        "z-ai/glm-5-3-flash",
+        "google/gemma-4-31b-it",
+        "poolside/laguna-xs-2.1"
       ],
       "universal_access": true
     },
@@ -238,7 +310,13 @@
         "workbench:*"
       ],
       "model_preferences": [
-        "meta/llama-3.1-8b-instruct"
+        "nvidia/nemotron-3-ultra-550b-a55b",
+        "nvidia/nemotron-3-super-120b-a12b",
+        "z-ai/glm-5-3",
+        "deepseek-ai/deepseek-v4.1-flash",
+        "z-ai/glm-5-3-flash",
+        "google/gemma-4-31b-it",
+        "poolside/laguna-xs-2.1"
       ],
       "universal_access": true
     },
@@ -259,7 +337,13 @@
         "workbench:*"
       ],
       "model_preferences": [
-        "meta/llama-3.1-8b-instruct"
+        "nvidia/nemotron-3-ultra-550b-a55b",
+        "nvidia/nemotron-3-super-120b-a12b",
+        "z-ai/glm-5-3",
+        "deepseek-ai/deepseek-v4.1-flash",
+        "z-ai/glm-5-3-flash",
+        "google/gemma-4-31b-it",
+        "poolside/laguna-xs-2.1"
       ],
       "universal_access": true
     },
@@ -280,7 +364,13 @@
         "workbench:*"
       ],
       "model_preferences": [
-        "meta/llama-3.1-8b-instruct"
+        "nvidia/nemotron-3-ultra-550b-a55b",
+        "nvidia/nemotron-3-super-120b-a12b",
+        "z-ai/glm-5-3",
+        "deepseek-ai/deepseek-v4.1-flash",
+        "z-ai/glm-5-3-flash",
+        "google/gemma-4-31b-it",
+        "poolside/laguna-xs-2.1"
       ],
       "universal_access": true
     },
@@ -300,7 +390,13 @@
         "workbench:*"
       ],
       "model_preferences": [
-        "meta/llama-3.1-8b-instruct"
+        "nvidia/nemotron-3-ultra-550b-a55b",
+        "nvidia/nemotron-3-super-120b-a12b",
+        "z-ai/glm-5-3",
+        "deepseek-ai/deepseek-v4.1-flash",
+        "z-ai/glm-5-3-flash",
+        "google/gemma-4-31b-it",
+        "poolside/laguna-xs-2.1"
       ],
       "universal_access": true
     }
