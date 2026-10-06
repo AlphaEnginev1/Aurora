@@ -28,8 +28,14 @@ class ProviderSettingsService:
             settings = self.store.update_from_form(payload)
             router = self.runtime.director.planner.router
             nvidia_key = self.store.credential("nvidia_api")
+            openai_key = self.store.credential("openai")
+            anthropic_key = self.store.credential("anthropic")
             router.nvidia_api_key = nvidia_key or None
-            router.provider_registry = default_provider_registry(nvidia_api_key=nvidia_key or None)
+            router.provider_registry = default_provider_registry(
+                nvidia_api_key=nvidia_key or None,
+                openai_api_key=openai_key or None,
+                anthropic_api_key=anthropic_key or None,
+            )
 
             selected_model = str(settings["director"].get("model", "")).strip()
             if nvidia_key and str(settings["director"].get("provider", "")).strip().lower() == "nvidia_api" and selected_model:
@@ -68,8 +74,18 @@ class ProviderSettingsService:
 
             director = settings["director"]
             provider_id = str(director.get("provider", "")).strip().lower()
-            if provider_id in {"router", "nvidia_api"}:
+            if provider_id == "router":
                 provider = InferenceDirectorProvider(router)
+            elif provider_id in {"nvidia_api", "openai", "anthropic"}:
+                key = self.store.credential(provider_id)
+                if not key:
+                    raise DashboardProviderSettingsError(
+                        f"{provider_id} API key is required before selecting it as Director"
+                    )
+                from aurora.orchestration.director_provider_failover import BoundInferenceDirectorProvider
+                provider = BoundInferenceDirectorProvider(
+                    router, provider_id=provider_id, model=str(director["model"])
+                )
             elif provider_id == "gemini":
                 api_key = self.store.credential("gemini")
                 if not api_key:
@@ -104,32 +120,32 @@ class ProviderSettingsService:
             with _urlopen(request) as response:
                 json.loads(response.read().decode("utf-8"))
             return {"provider":"gemini","ok":True,"model":model}
-        if provider_id == "nvidia_api":
-            key = self.store.credential("nvidia_api")
+        if provider_id in {"nvidia_api", "openai", "anthropic"}:
+            key = self.store.credential(provider_id)
             if not key:
-                raise DashboardProviderSettingsError("NVIDIA API key is not configured")
-
+                raise DashboardProviderSettingsError(f"{provider_id} API key is not configured")
             discovery = getattr(self.runtime, "model_discovery", None)
             if discovery is None:
-                raise DashboardProviderSettingsError("NVIDIA model discovery is not available in the current runtime")
+                raise DashboardProviderSettingsError("model discovery is not available in the current runtime")
             try:
-                candidates = tuple(discovery.discover_and_stage("nvidia_api"))
+                candidates = tuple(discovery.discover_and_stage(provider_id))
             except ModelDiscoveryError as exc:
                 raise DashboardProviderSettingsError(str(exc)) from exc
-
             models = [
                 candidate.model.id
                 for candidate in candidates
                 if getattr(candidate, "model", None) is not None
             ]
             return {
-                "provider": "nvidia_api",
+                "provider": provider_id,
                 "ok": True,
                 "models": models[:100],
                 "staged_count": len(models),
                 "stage_state": "discovered",
             }
-        raise DashboardProviderSettingsError("provider test supports gemini or nvidia_api")
+        raise DashboardProviderSettingsError(
+            "provider test supports gemini, nvidia_api, openai, or anthropic"
+        )
 
 def _urlopen(request: urllib.request.Request):
     try:
