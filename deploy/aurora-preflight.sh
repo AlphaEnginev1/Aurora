@@ -67,14 +67,27 @@ enabled_models = [
 ]
 if not enabled_models:
     raise SystemExit("inference policy has no enabled model")
+free_provider_models = {}
+for provider_id, provider in free_policy.get("providers", {}).items():
+    rows = provider.get("models", {}) if isinstance(provider, dict) else {}
+    free_provider_models[provider_id] = {str(model_id): record for model_id, record in rows.items() if isinstance(record, dict) and str(record.get("tier", "")).strip().lower() == "free"}
 for model in enabled_models:
+    model_id = str(model.get("id", "")).strip()
+    provider_id = str(model.get("provider", "")).strip()
     if str(model.get("pricing_tier", "")).strip().lower() != "free":
-        raise SystemExit("enabled model is not explicitly marked free: " + str(model.get("id", "")))
+        raise SystemExit("enabled model is not explicitly marked free: " + model_id)
+    if model_id not in free_provider_models.get(provider_id, {}):
+        raise SystemExit("enabled model is absent from free-model allowlist: " + provider_id + "/" + model_id)
 if not os.getenv("NVIDIA_API_KEY", "").strip():
     raise SystemExit("NVIDIA_API_KEY is required for the configured inference fabric")
 
 director = os.getenv("AURORA_DIRECTOR_PROVIDER", "router").strip().lower()
 if director == "gemini":
+    gemini_model = os.getenv("GEMINI_MODEL_ID", "").strip()
+    if not gemini_model:
+        gemini_model = "gemini-3.8-flash"
+    if gemini_model not in free_provider_models.get("gemini", {}):
+        raise SystemExit("configured Gemini Director model is absent from free-model allowlist: " + gemini_model)
     if not os.getenv("GEMINI_API_KEY", "").strip():
         raise SystemExit("GEMINI_API_KEY is required when AURORA_DIRECTOR_PROVIDER=gemini")
     if not os.getenv("GEMINI_MODEL_ID", "").strip():
