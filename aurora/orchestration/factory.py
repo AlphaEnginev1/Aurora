@@ -235,9 +235,15 @@ def _build_director_provider_failover(
                 continue
             if provider_id not in credentials or not credentials[provider_id]:
                 continue
-            try:
-                discovered = discovery.discover_and_stage(provider_id)
-            except Exception:
+            refresh_interval = float(
+                os.getenv("AURORA_MODEL_DISCOVERY_REFRESH_SECONDS", "900")
+            )
+            refreshed = discovery.refresh_all(
+                provider_ids=(provider_id,),
+                min_interval_seconds=refresh_interval,
+            )
+            discovered = refreshed.get(provider_id, ())
+            if not discovered:
                 # Governed last-known discovery remains a valid reserve snapshot.
                 discovered = model_candidate_store.list(
                     provider_id=provider_id,
