@@ -163,6 +163,7 @@ class ProviderSettingsService:
                 candidate.model.id
                 for candidate in candidates
                 if getattr(candidate, "model", None) is not None
+                and getattr(candidate.model, "pricing_tier", "unknown") == "free"
             ]
             return {
                 "provider": provider_id,
