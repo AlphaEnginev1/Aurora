@@ -9,6 +9,7 @@ if TYPE_CHECKING:
     from aurora.context import ContextGate
 
 from .models import InferenceRequest, InferenceResponse, ModelSpec, new_execution_id
+from .provider_health import ProviderHealthStore
 from .multimodal import MultimodalContentError, message_modalities
 from .registry import ModelRegistry, ModelRegistryError
 from .providers.registry import ProviderRegistry, ProviderRegistryError, default_provider_registry
@@ -36,6 +37,7 @@ class ModelRouter:
     model_registry: ModelRegistry | None = None
     context_gate: ContextGate | None = None
     enforce_context: bool = False
+    health_store: ProviderHealthStore | None = None
 
     def __post_init__(self) -> None:
         if self.provider_registry is None:
@@ -63,10 +65,17 @@ class ModelRouter:
         self.enforce_context = enforce
 
     def available(self) -> list[ModelSpec]:
-        return [
+        models = [
             model
             for model in self._registered_models()
             if model.enabled and model.healthy and model.available
+        ]
+        if self.health_store is None:
+            return models
+        return [
+            model
+            for model in models
+            if self.health_store.is_eligible(model.provider, model.id)
         ]
 
     def route(
@@ -107,7 +116,10 @@ class ModelRouter:
                         f"Requested model {request.model} does not satisfy routing constraints"
                     )
                 score, factors = self._score_breakdown(
-                    model, request=request, preferred_models=preferred
+                    model,
+                    request=request,
+                    preferred_models=preferred,
+                    availability_score=self._availability_score(model),
                 )
                 return RoutingDecision(
                     selected_model=model.id,
@@ -151,6 +163,7 @@ class ModelRouter:
                     model,
                     request=request,
                     preferred_models=preferred,
+                    availability_score=self._availability_score(model),
                 ),
             )
             for model in candidates
@@ -256,6 +269,11 @@ class ModelRouter:
             request_id=request.request_id,
         )
 
+    def _availability_score(self, model: ModelSpec) -> float:
+        if self.health_store is None:
+            return 1.0
+        return self.health_store.snapshot(model.provider, model.id).availability_score
+
     @staticmethod
     def _meets_constraints(model: ModelSpec, request: InferenceRequest) -> bool:
         metadata = request.metadata or {}
@@ -283,6 +301,7 @@ class ModelRouter:
         *,
         request: InferenceRequest,
         preferred_models: Sequence[str],
+        availability_score: float = 1.0,
     ) -> tuple[float, dict[str, float]]:
         metadata = request.metadata or {}
         skill_tags = {
@@ -325,6 +344,7 @@ class ModelRouter:
             "context_fit": context_fit,
             "learned_score": learned_score,
             "preference": preference,
+            "availability": max(0.0, min(1.0, float(availability_score))),
         }
         score = (
             0.20 * factors["quality"]
@@ -334,7 +354,8 @@ class ModelRouter:
             + 0.15 * factors["work_type_match"]
             + 0.10 * factors["context_fit"]
             + 0.15 * factors["learned_score"]
-            + 0.10 * factors["preference"]
+            + 0.05 * factors["preference"]
+            + 0.05 * factors["availability"]
         )
         return score, factors
 
@@ -371,12 +392,32 @@ class ModelRouter:
         try:
             provider = self.provider_registry.create(spec)
         except ProviderRegistryError as exc:
+            if self.health_store is not None:
+                self.health_store.record_failure(spec.provider, spec.id, exc)
             raise ModelRoutingError(str(exc)) from exc
-        response = provider.generate(
-            request,
-            selected_model=spec.id,
-            execution_id=execution_id,
-        )
+        import time
+        started = time.monotonic()
+        try:
+            response = provider.generate(
+                request,
+                selected_model=spec.id,
+                execution_id=execution_id,
+            )
+        except Exception as exc:
+            if self.health_store is not None:
+                self.health_store.record_failure(
+                    spec.provider,
+                    spec.id,
+                    exc,
+                    latency_ms=int((time.monotonic() - started) * 1000),
+                )
+            raise
+        if self.health_store is not None:
+            self.health_store.record_success(
+                spec.provider,
+                spec.id,
+                latency_ms=int((time.monotonic() - started) * 1000),
+            )
         return InferenceResponse(
                 model=response.model,
                 provider=response.provider,
