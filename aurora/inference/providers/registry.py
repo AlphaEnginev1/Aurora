@@ -148,33 +148,47 @@ class ProviderRegistry:
         )
 
 
-def default_provider_registry(*, nvidia_api_key: str | None = None) -> ProviderRegistry:
-    """Build Aurora's current canonical provider registry.
+def default_provider_registry(
+    *,
+    nvidia_api_key: str | None = None,
+    openai_api_key: str | None = None,
+    anthropic_api_key: str | None = None,
+) -> ProviderRegistry:
+    """Build Aurora's canonical provider registry.
 
-    Provider adapters are imported lazily so registry initialization never
-    creates an inference-package import cycle.
+    All adapters remain lazy and provider credentials stay outside persisted
+    model/task state. Missing credentials are handled at execution time by the
+    provider health layer instead of disabling the registry entry.
     """
-
     def nvidia_factory(model: ModelSpec) -> InferenceProvider:
         from .nvidia_api import NVIDIAAPIProvider
-
         return NVIDIAAPIProvider(model, api_key=nvidia_api_key)
 
-    return ProviderRegistry(
-        (
-            ProviderSpec(
-                provider_id="nvidia_api",
-                name="NVIDIA NIM API",
-                capabilities=("chat", "reasoning"),
-                enabled=True,
-                factory=nvidia_factory,
-                discovery_factory=lambda: _nvidia_discovery_factory(
-                    api_key=nvidia_api_key
-                ),
-            ),
-        )
-    )
+    def openai_factory(model: ModelSpec) -> InferenceProvider:
+        from .openai_api import OpenAIAPIProvider
+        return OpenAIAPIProvider(model, api_key=openai_api_key)
 
+    def anthropic_factory(model: ModelSpec) -> InferenceProvider:
+        from .anthropic_api import AnthropicAPIProvider
+        return AnthropicAPIProvider(model, api_key=anthropic_api_key)
+
+    return ProviderRegistry((
+        ProviderSpec("anthropic", "Anthropic API", ("chat", "reasoning"), True, anthropic_factory,
+                     discovery_factory=lambda: _anthropic_discovery_factory(api_key=anthropic_api_key)),
+        ProviderSpec("nvidia_api", "NVIDIA NIM API", ("chat", "reasoning"), True, nvidia_factory,
+                     discovery_factory=lambda: _nvidia_discovery_factory(api_key=nvidia_api_key)),
+        ProviderSpec("openai", "OpenAI API", ("chat", "reasoning"), True, openai_factory,
+                     discovery_factory=lambda: _openai_discovery_factory(api_key=openai_api_key)),
+    ))
+
+
+def _openai_discovery_factory(*, api_key: str | None) -> "ModelDiscoveryProvider":
+    from .openai_api import OpenAIModelDiscoveryProvider
+    return OpenAIModelDiscoveryProvider(api_key=api_key)
+
+def _anthropic_discovery_factory(*, api_key: str | None) -> "ModelDiscoveryProvider":
+    from .anthropic_api import AnthropicModelDiscoveryProvider
+    return AnthropicModelDiscoveryProvider(api_key=api_key)
 
 def _nvidia_discovery_factory(*, api_key: str | None) -> "ModelDiscoveryProvider":
     from .nvidia_discovery import NVIDIAModelDiscoveryProvider
