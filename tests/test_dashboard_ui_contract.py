@@ -24,6 +24,9 @@ def test_dashboard_ui_assets_are_present():
     assert 'id="gemini-key"' not in html
     assert 'id="nvidia-key"' in html
     assert 'id="chat-expand"' in html
+    assert '<section id="view-health" class="view"' in html
+    assert '
+        id="view-health"' not in html
     assert 'id="chat-history"' in html
     assert 'id="projects-board"' in html
     assert 'id="task-matrix"' in html
