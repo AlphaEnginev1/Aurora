@@ -1,0 +1,59 @@
+name: Live Multi-Provider Resilience Gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      nvidia_model_id:
+        description: "Optional NVIDIA reasoning model override"
+        required: false
+        type: string
+      openai_model_id:
+        description: "Optional OpenAI reasoning model override"
+        required: false
+        type: string
+      anthropic_model_id:
+        description: "Optional Anthropic reasoning model override"
+        required: false
+        type: string
+      nvidia_endpoint:
+        description: "NVIDIA-compatible /v1 endpoint"
+        required: false
+        default: "https://integrate.api.nvidia.com/v1"
+        type: string
+
+jobs:
+  live-multi-provider-resilience:
+    runs-on: ubuntu-24.04
+    environment: multi-provider-live
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.ref }}
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip pytest && python -m pip install -e .
+      - name: Verify live gate revision
+        run: |
+          echo "branch=${GITHUB_REF_NAME}"
+          echo "sha=${GITHUB_SHA}"
+          grep -q 'AURORA_MULTI_PROVIDER_LIVE' tests/e2e/test_live_multi_provider_resilience.py
+          grep -q 'ModelEnsemble' tests/e2e/test_live_multi_provider_resilience.py
+          grep -q '_run_adversarial_review' tests/e2e/test_live_multi_provider_resilience.py
+          grep -q '_build_director_provider_failover' tests/e2e/test_live_multi_provider_resilience.py
+      - name: Run live multi-provider resilience acceptance
+        env:
+          NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+          NVIDIA_MODEL_ID: ${{ inputs.nvidia_model_id }}
+          NVIDIA_API_ENDPOINT: ${{ inputs.nvidia_endpoint }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_MODEL_ID: ${{ inputs.openai_model_id }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_MODEL_ID: ${{ inputs.anthropic_model_id }}
+          AURORA_MULTI_PROVIDER_LIVE: "1"
+          AURORA_PROVIDER_HEALTH_FAILURE_THRESHOLD: "1"
+          AURORA_MODEL_DISCOVERY_REFRESH_SECONDS: "0"
+          OPENAI_API_TIMEOUT: "90"
+          ANTHROPIC_API_TIMEOUT: "90"
+          NVIDIA_API_TIMEOUT: "120"
+        run: python -m pytest -q tests/e2e/test_live_multi_provider_resilience.py -m live

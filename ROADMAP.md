@@ -175,14 +175,39 @@ Scope remains isolated to safe replacement and recovery of an active Director du
 
 
 
-## Universal Work / Cowork Architecture — DESIGN FROZEN
+## Universal Work / Cowork Architecture — IMPLEMENTED AND VERIFIED
 
-The next architectural direction is frozen in:
+The Universal Workbench & Integration Plane is implemented on canonical `main` and has completed final Director-led end-to-end acceptance. The acceptance record is maintained in `docs/architecture/AURORA_UNIVERSAL_WORKBENCH_ARCHITECTURE.md`.
 
-`docs/architecture/AURORA_UNIVERSAL_WORKBENCH_ARCHITECTURE.md`
+The Workbench provides the governed shared capability plane for local files/computer, artifacts/documents/images, browser, GitHub, external connectors, MCP, research, multimodal processing, code/tool execution, capability discovery/acquisition/fallback and durable evidence/audit.
 
-Status: **DESIGN FROZEN — IMPLEMENTATION NOT AUTHORIZED BY THIS DOCUMENT**.
+It does not reopen Increment 11, Increment 12 or the frozen production-readiness queue.
 
-The contract establishes a Universal Work / Cowork operating model in which the Director and all specialist agents use one governed work-capability plane. Required capability families include local computer/workspace access, file/artifact intake, browser and desktop interaction, GitHub and external connectors, MCP bridging, multimodal processing, capability discovery/acquisition/fallback, project intake/source graph, capability census/preflight, durable evidence/audit, and natural Director conversation.
+## Increment 13 — Multi-Provider Inference Resilience — IMPLEMENTED / AUTOMATED VERIFIED / LIVE PENDING
 
-This architectural direction does not reopen Increment 11, Increment 12, or the closed production-readiness queue. Implementation must be separately scoped and validated with deterministic tests plus live/end-to-end evidence where an external boundary is involved.
+PRs already integrated on `main`:
+
+- **PR #149** — Critical Decision Model Ensemble.
+- **PR #150** — Multi-Agent Adversarial Review.
+- **PR #151** — Provider Availability, OpenAI + Anthropic adapters/discovery, dynamic reserve pool, governed catalog refresh and multi-provider outage resilience.
+
+The canonical CI for PR #151 passed the full unit/integration suite and the E2E suite.
+
+Implemented boundary:
+
+    provider/model health
+        -> health-aware ModelRouter
+        -> provider-specific discovery
+        -> governed staged candidates
+        -> dynamic reserve pool
+        -> existing Director provider failover
+        -> critical-decision ensemble
+        -> adversarial specialist review
+
+The remaining acceptance step is a dedicated LIVE gate against real NVIDIA, OpenAI and Anthropic providers.
+
+Acceptance artifact:
+
+`docs/operations/LIVE_MULTI_PROVIDER_RESILIENCE.md`
+
+**LIVE status:** PENDING execution of the dedicated gate.
