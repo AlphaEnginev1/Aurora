@@ -4,16 +4,16 @@ on:
   workflow_dispatch:
     inputs:
       nvidia_model_id:
-        description: "NVIDIA served reasoning model ID"
-        required: true
+        description: "Optional NVIDIA reasoning model override"
+        required: false
         type: string
       openai_model_id:
-        description: "OpenAI reasoning model ID"
-        required: true
+        description: "Optional OpenAI reasoning model override"
+        required: false
         type: string
       anthropic_model_id:
-        description: "Anthropic reasoning model ID"
-        required: true
+        description: "Optional Anthropic reasoning model override"
+        required: false
         type: string
       nvidia_endpoint:
         description: "NVIDIA-compatible /v1 endpoint"
