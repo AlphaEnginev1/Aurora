@@ -15,6 +15,7 @@ from typing import Any, Callable, Mapping
 from .director_provider import DirectorModelResponse, DirectorProvider, DirectorToolSpec
 from aurora.inference.models import InferenceRequest
 from aurora.inference.router import ModelRouter
+from aurora.inference.provider_health import ProviderHealthStore
 
 
 class DirectorProviderFailoverError(RuntimeError):
@@ -203,6 +204,7 @@ class DirectorProviderFailoverController:
             [list[dict[str, Any]], str | None, str],
             tuple[DirectorProviderCandidate, ...],
         ] | None = None,
+        health_store: ProviderHealthStore | None = None,
     ) -> None:
         if not getattr(active_provider, "provider_id", "").strip():
             raise DirectorProviderFailoverError("active Director provider must expose provider_id")
@@ -213,6 +215,7 @@ class DirectorProviderFailoverController:
         self._event_sink = event_sink
         self._context_provider = context_provider
         self._candidate_resolver = candidate_resolver
+        self._health_store = health_store
         self._lock = RLock()
         self._failed_candidates: set[tuple[str, str]] = set()
 
@@ -254,15 +257,24 @@ class DirectorProviderFailoverController:
         with self._lock:
             active = self._active_provider
             try:
-                return active.generate(
+                response = active.generate(
                     messages=messages,
                     model=model,
                     role=role,
                     tools=tools,
                 )
+                if self._health_store is not None:
+                    self._health_store.record_success(
+                        str(getattr(active, "provider_id", "") or ""),
+                        str(model or getattr(active, "model", "") or getattr(active, "provider_id", "") or "unknown"),
+                    )
+                return response
             except Exception as exc:
+                self._record_health(active, model, exc)
                 if not _is_failoverable(exc):
                     raise
+                if self._health_store is not None and not isinstance(exc, Exception):
+                    pass
                 correlation_id = self._correlation_id(active)
                 self._record_and_emit(
                     correlation_id=correlation_id,
@@ -341,6 +353,11 @@ class DirectorProviderFailoverController:
                             role=role,
                             tools=tools,
                         )
+                        if self._health_store is not None:
+                            self._health_store.record_success(
+                                candidate.provider_id,
+                                candidate.model or candidate.provider_id,
+                            )
                         self._activate(candidate, replacement)
                         self._active_provider = replacement
                         self._store.record(
@@ -368,6 +385,7 @@ class DirectorProviderFailoverController:
                         return response
                     except Exception as replacement_error:
                         last_error = replacement_error
+                        self._record_health(replacement, candidate.model, replacement_error)
                         self._failed_candidates.add(self._candidate_key(candidate))
                         self._store.record(
                             transition_id=f"{attempt_id}:failed",
@@ -418,6 +436,23 @@ class DirectorProviderFailoverController:
                 raise DirectorProviderFailoverError(
                     f"Director provider failover exhausted after {getattr(active, 'provider_id', 'unknown')} failed"
                 ) from last_error
+
+    def _record_health(
+        self,
+        provider: DirectorProvider,
+        model: str | None,
+        error: Exception,
+    ) -> None:
+        if self._health_store is None:
+            return
+        provider_id = str(getattr(provider, "provider_id", "") or "").strip()
+        model_id = str(model or getattr(provider, "model", "") or provider_id).strip()
+        if not provider_id or not model_id:
+            return
+        try:
+            self._health_store.record_failure(provider_id, model_id, error)
+        except Exception:
+            pass
 
     @staticmethod
     def _candidate_key(candidate: DirectorProviderCandidate) -> tuple[str, str]:
