@@ -96,7 +96,7 @@ class NVIDIAFreeEndpointCatalogProvider:
     def __init__(
         self,
         *,
-        url: str = "https://build.nvidia.com/models?pageSize=96",
+        url: str = "https://build.nvidia.com/models?pageSize=200",
         timeout_seconds: float = 20.0,
     ) -> None:
         self.url = str(url).strip()
