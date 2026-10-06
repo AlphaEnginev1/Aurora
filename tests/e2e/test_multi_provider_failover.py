@@ -43,7 +43,7 @@ def _candidate(provider: FakeProvider, model: str) -> DirectorProviderCandidate:
     )
 
 
-def test_nvidia_model_outage_continues_to_next_model(tmp_path: Path):
+def test_router_selected_nvidia_model_is_excluded_and_continues_to_next_model(tmp_path: Path):
     ctx = ProviderErrorContext("nvidia_api", "req", "exec", selected_model="nvidia/model-a")
     active = FakeProvider("inference_router", ProviderHTTPError("503", context=ctx, status_code=503))
     nvidia_a = FakeProvider("nvidia_api", ProviderHTTPError("503", context=ctx, status_code=503))
@@ -63,9 +63,9 @@ def test_nvidia_model_outage_continues_to_next_model(tmp_path: Path):
     )
     assert result.provider == "nvidia_api"
     assert result.content == "nvidia reserve continuation"
-    assert nvidia_a.calls == 1
+    assert nvidia_a.calls == 0
     assert nvidia_b.calls == 1
-    assert health.snapshot("nvidia_api", "nvidia/model-a").state == "cooldown"
+    assert health.snapshot("nvidia_api", "nvidia/model-a").state != "cooldown"
 
 
 def test_nvidia_all_reserve_models_fail_closed(tmp_path: Path):

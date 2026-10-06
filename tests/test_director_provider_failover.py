@@ -154,8 +154,194 @@ def test_factory_discovers_and_selects_available_nvidia_model_without_fixed_id(t
     )
 
     assert response.provider == "nvidia_api"
-    assert response.model == "nvidia/nemotron-3-ultra-550b-a55b"
+    # The concrete model that failed in the routed primary attempt must not be retried.
+    assert response.model == "google/gemma-4-31b-it"
     assert controller.provider_id == "nvidia_api"
+
+
+def test_factory_ignores_historical_health_cooldown_when_building_reserve_order(tmp_path: Path, monkeypatch):
+    from aurora.inference.discovery import DiscoveredModelCandidate, candidate_id
+    from aurora.inference.models import InferenceResponse, ModelSpec
+    from aurora.inference.provider_health import ProviderHealthStore
+    from aurora.inference.providers.registry import ProviderRegistry, ProviderSpec
+    from aurora.inference.registry import ModelRegistry
+    from aurora.inference.router import ModelRouter
+    from aurora.orchestration.factory import _build_director_provider_failover
+
+    class FakeNvidiaInferenceProvider:
+        provider_id = "nvidia_api"
+
+        def __init__(self, _model):
+            pass
+
+        def generate(self, request, *, selected_model, execution_id):
+            return InferenceResponse(
+                model=selected_model,
+                provider="nvidia_api",
+                content="reserve survives historical cooldown",
+                request_id=request.request_id,
+                execution_id=execution_id,
+            )
+
+    provider_registry = ProviderRegistry((
+        ProviderSpec(
+            provider_id="nvidia_api",
+            name="NVIDIA NIM API",
+            capabilities=("chat", "reasoning"),
+            enabled=True,
+            factory=lambda model: FakeNvidiaInferenceProvider(model),
+        ),
+    ))
+    model_registry = ModelRegistry([], provider_registry=provider_registry)
+    router = ModelRouter(
+        models=[],
+        nvidia_api_key="nvidia-secret",
+        provider_registry=provider_registry,
+        model_registry=model_registry,
+    )
+
+    discovered = (
+        DiscoveredModelCandidate(
+            candidate_id=candidate_id("nvidia_api", "google/gemma-4-31b-it"),
+            provider_id="nvidia_api",
+            model=ModelSpec(
+                id="google/gemma-4-31b-it",
+                provider="nvidia_api",
+                endpoint="https://integrate.api.nvidia.com/v1",
+                capabilities=("reasoning",),
+                quality_score=0.2,
+                pricing_tier="free",
+            ),
+            metadata={"free_endpoint": True},
+            discovered_at="2026-10-05T00:00:00+00:00",
+        ),
+        DiscoveredModelCandidate(
+            candidate_id=candidate_id("nvidia_api", "nvidia/nemotron-3-ultra-550b-a55b"),
+            provider_id="nvidia_api",
+            model=ModelSpec(
+                id="nvidia/nemotron-3-ultra-550b-a55b",
+                provider="nvidia_api",
+                endpoint="https://integrate.api.nvidia.com/v1",
+                capabilities=("reasoning",),
+                quality_score=0.9,
+                pricing_tier="free",
+            ),
+            metadata={"free_endpoint": True},
+            discovered_at="2026-10-05T00:00:00+00:00",
+        ),
+    )
+
+    class FakeDiscovery:
+        def __init__(self, *_args):
+            pass
+
+        def discover_and_stage(self, provider_id):
+            assert provider_id == "nvidia_api"
+            return discovered
+
+    monkeypatch.setattr("aurora.orchestration.factory.ModelDiscoveryService", FakeDiscovery)
+
+    health = ProviderHealthStore(tmp_path / "health.db", failure_threshold=1)
+    from aurora.inference.errors import ProviderTimeoutError, ProviderErrorContext
+
+    for model_id in ("google/gemma-4-31b-it", "nvidia/nemotron-3-ultra-550b-a55b"):
+        health.record_failure(
+            "nvidia_api",
+            model_id,
+            ProviderTimeoutError(
+                "historical outage",
+                context=ProviderErrorContext(
+                    provider="nvidia_api",
+                    request_id="historical",
+                    execution_id="historical",
+                    requested_model=model_id,
+                    selected_model=model_id,
+                    provider_model=model_id,
+                ),
+            ),
+        )
+
+    class FailingRouter:
+        provider_id = "inference_router"
+
+        def generate(self, **_kwargs):
+            raise ProviderTimeoutError(
+                "primary outage",
+                context=ProviderErrorContext(
+                    provider="nvidia_api",
+                    request_id="primary",
+                    execution_id="primary",
+                    requested_model=None,
+                    selected_model="nvidia/nemotron-3-ultra-550b-a55b",
+                    provider_model="nvidia/nemotron-3-ultra-550b-a55b",
+                ),
+            )
+
+    settings = OperatorSettingsStore(tmp_path / "operator-settings.json")
+    settings.save({"providers": {"nvidia_api": {"api_key": "nvidia-secret"}}})
+    controller = _build_director_provider_failover(
+        settings_store=settings,
+        router=router,
+        active_provider=FailingRouter(),
+        db_path=tmp_path / "tasks.db",
+        health_store=health,
+    )
+
+    response = controller.generate(
+        messages=[{"role": "user", "content": "hello"}],
+        model=None,
+        role="director_conversation",
+    )
+
+    assert response.provider == "nvidia_api"
+    assert response.model == "google/gemma-4-31b-it"
+    assert response.content == "reserve survives historical cooldown"
+
+
+def test_dynamic_failure_context_excludes_the_concrete_failed_model(tmp_path: Path):
+    from aurora.inference.errors import ProviderErrorContext, ProviderTimeoutError
+
+    failed = FakeProvider("nvidia_api", ["should not be called"])
+    reserve = FakeProvider("nvidia_api", ["reserve works"])
+
+    error = ProviderTimeoutError(
+        "primary timed out",
+        context=ProviderErrorContext(
+            provider="nvidia_api",
+            request_id="request-primary",
+            execution_id="execution-primary",
+            requested_model=None,
+            selected_model="nvidia/model-a",
+            provider_model="nvidia/model-a",
+        ),
+    )
+
+    class DynamicPrimary:
+        provider_id = "inference_router"
+
+        def generate(self, **_kwargs):
+            raise error
+
+    controller = DirectorProviderFailoverController(
+        active_provider=DynamicPrimary(),
+        candidates=(
+            _candidate("nvidia_api", failed, "nvidia/model-a"),
+            _candidate("nvidia_api", reserve, "nvidia/model-b"),
+        ),
+        store=DirectorProviderFailoverStore(str(tmp_path / "runtime.db")),
+        activate=lambda _candidate, _provider: None,
+    )
+
+    response = controller.generate(
+        messages=[{"role": "user", "content": "continue"}],
+        model=None,
+        role="director_conversation",
+    )
+
+    assert response.provider == "nvidia_api"
+    assert response.content == "reserve works"
+    assert failed.calls == 0
+    assert reserve.calls == 1
 
 
 def test_factory_uses_cached_nvidia_catalog_when_live_discovery_is_unavailable(tmp_path: Path, monkeypatch):
