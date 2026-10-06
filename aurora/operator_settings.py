@@ -43,7 +43,15 @@ class OperatorSettingsStore:
 
     def load(self) -> dict[str, Any]:
         with self._lock:
-            return _normalize(_merge(DEFAULT_SETTINGS, self._read()))
+            raw = self._read()
+            normalized = _normalize(_merge(DEFAULT_SETTINGS, raw))
+            if self.path.exists() and raw != normalized:
+                self.path.write_text(
+                    json.dumps(normalized, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+                    encoding="utf-8",
+                )
+                _chmod_private(self.path)
+            return normalized
 
     def save(self, payload: Mapping[str, Any]) -> dict[str, Any]:
         if not isinstance(payload, Mapping):

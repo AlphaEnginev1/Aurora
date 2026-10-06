@@ -92,7 +92,9 @@ if director == "nvidia_api":
         if nvidia_model not in {str(item.get("id", "")) for item in enabled_models if str(item.get("provider", "")) == "nvidia_api"}:
             raise SystemExit("configured NVIDIA Director model is absent from free-model catalog: " + nvidia_model)
 elif director not in {"router", "inference_fabric", ""}:
-    raise SystemExit("unsupported AURORA_DIRECTOR_PROVIDER: " + director)
+    # Legacy provider values cannot select another vendor; the runtime falls back
+    # to the NVIDIA-only router.
+    director = "router"
 
 dashboard_host = os.getenv("AURORA_DASHBOARD_HOST", "127.0.0.1").strip().lower()
 if dashboard_host not in {"127.0.0.1", "::1", "localhost"} and not os.getenv("AURORA_DASHBOARD_API_TOKEN", "").strip():

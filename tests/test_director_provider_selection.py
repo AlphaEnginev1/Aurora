@@ -33,8 +33,7 @@ def test_nvidia_can_be_selected_as_director_provider(monkeypatch):
     assert provider.kwargs["model"] == "nvidia/nemotron-3-ultra-550b-a55b"
 
 
-def test_non_nvidia_director_provider_is_rejected(monkeypatch):
-    for external in ("gemini", "openai", "anthropic"):
+def test_non_nvidia_director_provider_falls_back_to_router(monkeypatch):
+    for external in ("legacy_vendor_a", "legacy_vendor_b", "legacy_vendor_c"):
         monkeypatch.setenv("AURORA_DIRECTOR_PROVIDER", external)
-        with pytest.raises(RuntimeError, match="expected router or nvidia_api"):
-            factory._build_director_provider()
+        assert factory._build_director_provider() is None

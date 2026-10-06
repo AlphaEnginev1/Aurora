@@ -15,9 +15,7 @@ def test_operator_settings_round_trip_redacts_credentials(tmp_path: Path):
         },
         "providers": {
             "nvidia_api": {"api_key": "nvidia-secret"},
-            "gemini": {"api_key": "ignored"},
-            "openai": {"api_key": "ignored"},
-            "anthropic": {"api_key": "ignored"},
+            "legacy_provider": {"api_key": "ignored"},
         },
     })
     raw = store.load()

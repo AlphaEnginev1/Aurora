@@ -192,11 +192,9 @@ def _build_director_provider(
             model=model,
         )
 
-    raise RuntimeError(
-        "unsupported AURORA_DIRECTOR_PROVIDER: "
-        + director_provider_id
-        + "; expected router or nvidia_api"
-    )
+    # Legacy/external provider values are deliberately ignored. Aurora always
+    # falls back to its internal router, whose only external provider is NVIDIA.
+    return None
 
 def _build_director_provider_failover(
     *,
