@@ -176,7 +176,7 @@ def _build_director_provider(
             return None
         return GeminiDirectorProvider(
             api_key=key,
-            model=os.getenv("GEMINI_MODEL_ID") or str(configured.get("model", "gemini-3.7-flash")),
+            model=os.getenv("GEMINI_MODEL_ID") or str(configured.get("model", "gemini-3.8-flash")),
             endpoint=os.getenv("GEMINI_API_ENDPOINT") or str(
                 configured.get("endpoint", "https://generativelanguage.googleapis.com/v1beta")
             ),
