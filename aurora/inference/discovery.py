@@ -82,6 +82,15 @@ class ModelCandidateStore:
 
                 CREATE INDEX IF NOT EXISTS idx_model_candidates_state
                     ON model_candidates(state, updated_at);
+
+                CREATE TABLE IF NOT EXISTS model_discovery_refresh (
+                    provider_id TEXT PRIMARY KEY,
+                    last_started_at TEXT NOT NULL,
+                    last_completed_at TEXT,
+                    last_success INTEGER NOT NULL DEFAULT 0,
+                    staged_count INTEGER NOT NULL DEFAULT 0,
+                    last_error TEXT
+                );
                 """
             )
 
@@ -183,6 +192,63 @@ class ModelDiscoveryService:
         self.provider_registry = provider_registry
         self.model_registry = model_registry
         self.candidate_store = candidate_store
+
+    def refresh_all(
+        self,
+        *,
+        provider_ids: Sequence[str] | None = None,
+        min_interval_seconds: float = 900.0,
+        force: bool = False,
+    ) -> dict[str, tuple[DiscoveredModelCandidate, ...]]:
+        """Refresh eligible provider catalogs without promoting candidates."""
+        if min_interval_seconds < 0:
+            raise ValueError("min_interval_seconds cannot be negative")
+        ids = tuple(provider_ids) if provider_ids is not None else tuple(
+            str(item["provider_id"])
+            for item in self.provider_registry.catalog
+            if bool(item["enabled"]) and bool(item["discovery_supported"])
+        )
+        result: dict[str, tuple[DiscoveredModelCandidate, ...]] = {}
+        for provider_id in ids:
+            provider_id = str(provider_id).strip()
+            if not provider_id:
+                continue
+            with self.candidate_store._connect() as db:
+                row = db.execute(
+                    "SELECT last_completed_at FROM model_discovery_refresh WHERE provider_id=?",
+                    (provider_id,),
+                ).fetchone()
+                previous = _parse_datetime(row["last_completed_at"]) if row and row["last_completed_at"] else None
+                if (
+                    not force
+                    and previous is not None
+                    and (datetime.now(timezone.utc) - previous).total_seconds() < min_interval_seconds
+                ):
+                    continue
+                db.execute(
+                    """INSERT INTO model_discovery_refresh(provider_id,last_started_at,last_completed_at,last_success,staged_count,last_error)
+                       VALUES(?,?,NULL,0,0,NULL)
+                       ON CONFLICT(provider_id) DO UPDATE SET
+                       last_started_at=excluded.last_started_at,last_success=0,last_error=NULL""",
+                    (provider_id, _now()),
+                )
+            try:
+                staged = self.discover_and_stage(provider_id)
+            except Exception as exc:
+                result[provider_id] = ()
+                with self.candidate_store._connect() as db:
+                    db.execute(
+                        "UPDATE model_discovery_refresh SET last_completed_at=?,last_success=0,last_error=? WHERE provider_id=?",
+                        (_now(), str(exc)[:2000], provider_id),
+                    )
+            else:
+                result[provider_id] = tuple(staged)
+                with self.candidate_store._connect() as db:
+                    db.execute(
+                        "UPDATE model_discovery_refresh SET last_completed_at=?,last_success=1,staged_count=?,last_error=NULL WHERE provider_id=?",
+                        (_now(), len(staged), provider_id),
+                    )
+        return result
 
     def discover_and_stage(
         self,
@@ -313,6 +379,14 @@ def _row_to_candidate(row: sqlite3.Row) -> DiscoveredModelCandidate:
         state=str(row["state"]),
     )
 
+
+def _parse_datetime(value: object) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value))
+    except ValueError:
+        return None
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
