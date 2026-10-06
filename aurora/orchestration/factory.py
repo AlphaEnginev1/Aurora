@@ -172,17 +172,18 @@ def _build_director_provider(
                 configured.get("endpoint", "https://generativelanguage.googleapis.com/v1beta")
             ),
         )
-    if director_provider_id == "nvidia_api":
-        key = (
-            (settings_store.credential("nvidia_api") if settings_store is not None else "")
-            or os.getenv("NVIDIA_API_KEY", "")
-        )
+    if director_provider_id in {"nvidia_api", "openai", "anthropic"}:
+        credential_map = {
+            "nvidia_api": (settings_store.credential("nvidia_api") if settings_store is not None else "") or os.getenv("NVIDIA_API_KEY", ""),
+            "openai": (settings_store.credential("openai") if settings_store is not None else "") or os.getenv("OPENAI_API_KEY", ""),
+            "anthropic": (settings_store.credential("anthropic") if settings_store is not None else "") or os.getenv("ANTHROPIC_API_KEY", ""),
+        }
         model = str(configured.get("model", "")).strip()
-        if not key or router is None or not model:
+        if not credential_map[director_provider_id] or router is None or not model:
             return None
         return BoundInferenceDirectorProvider(
             router,
-            provider_id="nvidia_api",
+            provider_id=director_provider_id,
             model=model,
         )
     if director_provider_id in {"router", "inference_fabric", ""}:
@@ -190,7 +191,7 @@ def _build_director_provider(
     raise RuntimeError(
         "unsupported AURORA_DIRECTOR_PROVIDER: "
         + director_provider_id
-        + "; expected gemini or router"
+        + "; expected gemini, nvidia_api, openai, anthropic, or router"
     )
 
 
