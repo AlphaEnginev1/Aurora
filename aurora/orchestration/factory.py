@@ -70,12 +70,23 @@ from .task_worker import WorkerPolicy
 
 def build_orchestration_engine(policy_path: str | Path) -> OrchestrationEngine:
     nvidia_key = os.getenv("NVIDIA_API_KEY")
-    provider_registry = default_provider_registry(nvidia_api_key=nvidia_key)
+    openai_key = os.getenv("OPENAI_API_KEY")
+    anthropic_key = os.getenv("ANTHROPIC_API_KEY")
+    provider_registry = default_provider_registry(
+        nvidia_api_key=nvidia_key,
+        openai_api_key=openai_key,
+        anthropic_api_key=anthropic_key,
+    )
     model_registry = ModelRegistry.from_file(
         policy_path,
         provider_registry=provider_registry,
     )
-    health_store = ProviderHealthStore(Path(policy_path).resolve().parent / "provider-health.db")
+    health_store = ProviderHealthStore(
+        Path(policy_path).resolve().parent / "provider-health.db",
+        failure_threshold=int(os.getenv("AURORA_PROVIDER_HEALTH_FAILURE_THRESHOLD", "2")),
+        base_cooldown_seconds=float(os.getenv("AURORA_PROVIDER_HEALTH_BASE_COOLDOWN_SECONDS", "15")),
+        max_cooldown_seconds=float(os.getenv("AURORA_PROVIDER_HEALTH_MAX_COOLDOWN_SECONDS", "300")),
+    )
     return OrchestrationEngine(
         ModelRouter(
             models=list(model_registry.models),
