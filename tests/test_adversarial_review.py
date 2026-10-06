@@ -195,11 +195,6 @@ def test_director_runtime_injects_adversarial_evidence_into_review(tmp_path: Pat
     assert {item["role"] for item in review["reviewers"]} == {"researcher", "reviewer"}
     assert any("Independent verification" in item for item in review["findings"])
 
-    director_review_contexts = [
-        call
-        for call in getattr(director.planner, "review", lambda **kwargs: None).__self__.__dict__.values()
-        if False
-    ]
     assert all(
         call["use_workbench"] is False
         for call in orchestration.calls
