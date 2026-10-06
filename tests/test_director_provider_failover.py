@@ -272,6 +272,48 @@ def test_failures_are_tracked_per_nvidia_model_not_per_provider(tmp_path: Path):
     assert second.calls == 1
 
 
+def test_transient_failure_of_one_same_provider_model_continues_to_next_model(tmp_path: Path):
+    gemini = FakeProvider("gemini", [ProviderFailure("forced Gemini outage")])
+
+    from aurora.inference.errors import ProviderTimeoutError, ProviderErrorContext
+
+    timeout_error = ProviderTimeoutError(
+        "model A timed out",
+        context=ProviderErrorContext(
+            provider="nvidia_api",
+            request_id="request-a",
+            execution_id="execution-a",
+            requested_model=None,
+            selected_model="nvidia/model-a",
+            provider_model="nvidia/model-a",
+        ),
+    )
+    first = FakeProvider("nvidia_api", [timeout_error])
+    second = FakeProvider("nvidia_api", ["model B works"])
+    store = DirectorProviderFailoverStore(str(tmp_path / "runtime.db"))
+    controller = DirectorProviderFailoverController(
+        active_provider=gemini,
+        candidates=(),
+        store=store,
+        activate=lambda _candidate, _provider: None,
+        candidate_resolver=lambda _messages, _model, _role: (
+            _candidate("nvidia_api", first, "nvidia/model-a"),
+            _candidate("nvidia_api", second, "nvidia/model-b"),
+        ),
+    )
+
+    response = controller.generate(
+        messages=[{"role": "user", "content": "continue"}],
+        model="gemini/test-model",
+        role="director_conversation",
+    )
+
+    assert response.provider == "nvidia_api"
+    assert response.content == "model B works"
+    assert first.calls == 1
+    assert second.calls == 1
+
+
 def test_gemini_failure_switches_to_alternative_and_persists_transition(tmp_path: Path):
     gemini = FakeProvider("gemini", [ProviderFailure("forced Gemini outage")])
     nvidia = FakeProvider("nvidia_api", ["alternative answer"])
