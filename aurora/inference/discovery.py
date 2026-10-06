@@ -405,6 +405,7 @@ def _inactive_model(model: ModelSpec) -> ModelSpec:
         cost_score=model.cost_score,
         healthy=False,
         available=False,
+        pricing_tier=model.pricing_tier,
     )
 
 
