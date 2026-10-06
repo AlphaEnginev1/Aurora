@@ -119,7 +119,6 @@ class ModelRouter:
                     model,
                     request=request,
                     preferred_models=preferred,
-                    availability_score=self._availability_score(model),
                 )
                 return RoutingDecision(
                     selected_model=model.id,
@@ -163,7 +162,6 @@ class ModelRouter:
                     model,
                     request=request,
                     preferred_models=preferred,
-                    availability_score=self._availability_score(model),
                 ),
             )
             for model in candidates
@@ -301,7 +299,6 @@ class ModelRouter:
         *,
         request: InferenceRequest,
         preferred_models: Sequence[str],
-        availability_score: float = 1.0,
     ) -> tuple[float, dict[str, float]]:
         metadata = request.metadata or {}
         skill_tags = {
@@ -344,7 +341,6 @@ class ModelRouter:
             "context_fit": context_fit,
             "learned_score": learned_score,
             "preference": preference,
-            "availability": max(0.0, min(1.0, float(availability_score))),
         }
         score = (
             0.20 * factors["quality"]
@@ -354,8 +350,7 @@ class ModelRouter:
             + 0.15 * factors["work_type_match"]
             + 0.10 * factors["context_fit"]
             + 0.15 * factors["learned_score"]
-            + 0.05 * factors["preference"]
-            + 0.05 * factors["availability"]
+            + 0.10 * factors["preference"]
         )
         return score, factors
 
