@@ -72,9 +72,10 @@ def test_multiple_provider_outage_continues_to_next_provider(tmp_path: Path):
         role="director_planner",
     )
 
-    assert result.provider == "anthropic"
+    assert result.provider == "nvidia_api"
+    assert result.content == "must-not-run"
     assert nvidia_a.calls == 1
-    assert nvidia_b.calls == 0
+    assert nvidia_b.calls == 1
     assert openai.calls == 1
     assert anthropic.calls == 1
     assert health.snapshot("gemini", "gemini-model").state == "cooldown"
