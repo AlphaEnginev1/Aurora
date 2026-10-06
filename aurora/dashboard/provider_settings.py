@@ -35,9 +35,36 @@ class ProviderSettingsService:
             )
 
             selected_model = str(settings["director"].get("model", "")).strip()
-            if nvidia_key and str(settings["director"].get("provider", "")).strip().lower() == "nvidia_api" and selected_model:
-                existing = next((item for item in router.model_registry.models if item.id == selected_model), None)
+            if (
+                nvidia_key
+                and str(settings["director"].get("provider", "")).strip().lower() == "nvidia_api"
+                and selected_model
+            ):
+                existing = next(
+                    (item for item in router.model_registry.models if item.id == selected_model),
+                    None,
+                )
+                if existing is None and hasattr(self.runtime, "model_discovery"):
+                    try:
+                        self.runtime.model_discovery.refresh_all(
+                            provider_ids=("nvidia_api",),
+                            min_interval_seconds=0,
+                            force=True,
+                        )
+                        self.runtime.model_discovery.activate_free_discovered(
+                            provider_id="nvidia_api"
+                        )
+                        existing = next(
+                            (item for item in router.model_registry.models if item.id == selected_model),
+                            None,
+                        )
+                    except Exception:
+                        existing = None
                 if existing is None:
+                    if not is_free_model("nvidia_api", selected_model):
+                        raise DashboardProviderSettingsError(
+                            "free_only policy requires a currently discovered or explicitly seeded free NVIDIA model"
+                        )
                     existing = ModelSpec(
                         id=selected_model,
                         provider="nvidia_api",
@@ -45,7 +72,7 @@ class ProviderSettingsService:
                         capabilities=("chat", "reasoning", "tool_use"),
                         context_window=131072,
                         enabled=True,
-                        pricing_tier=("free" if is_free_model("nvidia_api", selected_model) else "unknown"),
+                        pricing_tier="free",
                     )
                     router.model_registry = type(router.model_registry).from_specs(
                         [*router.model_registry.models, existing],
@@ -66,7 +93,7 @@ class ProviderSettingsService:
                         cost_score=existing.cost_score,
                         healthy=existing.healthy,
                         available=existing.available,
-                        pricing_tier=existing.pricing_tier or ("free" if is_free_model("nvidia_api", existing.id) else "unknown"),
+                        pricing_tier=existing.pricing_tier or "free",
                     )
                     router.model_registry.replace(updated)
                     router.models = list(router.model_registry.models)
