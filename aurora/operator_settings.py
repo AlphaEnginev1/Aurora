@@ -121,7 +121,7 @@ def _normalize(data: Mapping[str, Any]) -> dict[str, Any]:
     director["provider"] = provider
     director["endpoint"] = NVIDIA_ENDPOINT
     model = str(director.get("model", "")).strip()
-    if not model or provider not in {"router", "nvidia_api"}:
+    if not _is_nvidia_model_id(model) or provider not in {"router", "nvidia_api"}:
         director["model"] = DEFAULT_NVIDIA_MODEL
     failover = director.get("failover", {})
     if not isinstance(failover, Mapping):
@@ -141,6 +141,12 @@ def _normalize(data: Mapping[str, Any]) -> dict[str, Any]:
         }
     }
     return result
+
+
+def _is_nvidia_model_id(model: str) -> bool:
+    """Accept NVIDIA model identifiers, including dynamically discovered models."""
+    normalized = str(model).strip()
+    return "/" in normalized and not normalized.startswith(("gemini", "gpt-", "claude"))
 
 
 def _validate(data: Mapping[str, Any]) -> None:
