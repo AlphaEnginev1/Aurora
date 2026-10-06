@@ -54,6 +54,12 @@ for relative in (
         raise SystemExit("required deployment file missing: " + relative)
 
 policy = json.loads((root / "config/inference-policy.json").read_text(encoding="utf-8"))
+free_policy_path = root / os.getenv("AURORA_FREE_MODEL_POLICY", policy.get("free_model_policy", "config/free-model-policy.json"))
+free_policy = json.loads(free_policy_path.read_text(encoding="utf-8"))
+if str(policy.get("cost_policy", "")).strip().lower() != "free_only":
+    raise SystemExit("inference policy must enforce cost_policy=free_only")
+if str(free_policy.get("mode", "")).strip().lower() != "free_only":
+    raise SystemExit("free-model policy must enforce mode=free_only")
 models = policy.get("models", [])
 enabled_models = [
     model for model in models
@@ -61,6 +67,9 @@ enabled_models = [
 ]
 if not enabled_models:
     raise SystemExit("inference policy has no enabled model")
+for model in enabled_models:
+    if str(model.get("pricing_tier", "")).strip().lower() != "free":
+        raise SystemExit("enabled model is not explicitly marked free: " + str(model.get("id", "")))
 if not os.getenv("NVIDIA_API_KEY", "").strip():
     raise SystemExit("NVIDIA_API_KEY is required for the configured inference fabric")
 
