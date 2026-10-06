@@ -16,6 +16,7 @@ from aurora.inference.models import InferenceRequest, ModelSpec
 from aurora.inference.discovery import ModelCandidateStore, ModelDiscoveryService
 from aurora.inference.providers.registry import default_provider_registry
 from aurora.inference.model_performance import ModelPerformanceStore
+from aurora.inference.provider_health import ProviderHealthStore
 from aurora.inference.ensemble import ModelEnsemble, ModelEnsembleStore
 from aurora.dashboard.gateway import DashboardGateway
 from aurora.research.discovery import HttpSearchProvider, ResearchSourceCatalog
@@ -74,12 +75,14 @@ def build_orchestration_engine(policy_path: str | Path) -> OrchestrationEngine:
         policy_path,
         provider_registry=provider_registry,
     )
+    health_store = ProviderHealthStore(Path(policy_path).resolve().parent / "provider-health.db")
     return OrchestrationEngine(
         ModelRouter(
             models=list(model_registry.models),
             nvidia_api_key=nvidia_key,
             provider_registry=provider_registry,
             model_registry=model_registry,
+            health_store=health_store,
         )
     )
 
@@ -376,17 +379,23 @@ def build_director_service(*, inference_policy_path: str | Path, autonomy_policy
 ) -> DirectorService:
     settings_store = OperatorSettingsStore(settings_path(workspace_root))
     nvidia_key = settings_store.credential("nvidia_api") or os.getenv("NVIDIA_API_KEY")
-    provider_registry = default_provider_registry(nvidia_api_key=nvidia_key)
+    provider_registry = default_provider_registry(
+        nvidia_api_key=nvidia_key,
+        openai_api_key=settings_store.credential("openai") or os.getenv("OPENAI_API_KEY"),
+        anthropic_api_key=settings_store.credential("anthropic") or os.getenv("ANTHROPIC_API_KEY"),
+    )
     model_registry = ModelRegistry.from_file(
         inference_policy_path,
         provider_registry=provider_registry,
     )
     inference_specs = list(model_registry.models)
+    health_store = ProviderHealthStore(Path(workspace_root).resolve() / "tasks.db")
     router=ModelRouter(
         models=inference_specs,
         nvidia_api_key=nvidia_key,
         provider_registry=provider_registry,
         model_registry=model_registry,
+        health_store=health_store,
     )
     _apply_local_model_settings(router, settings_store)
     skill_registry=SkillRegistry.from_file(skills_path,configured_models={model.id for model in inference_specs})
