@@ -34,6 +34,9 @@ def load_model_specs(path: str | Path) -> list[ModelSpec]:
         }
         if any(not isinstance(value, (int, float)) or not 0.0 <= float(value) <= 1.0 for value in scores.values()):
             raise InferenceConfigError(f"invalid model routing scores for {item.get('id')!r}")
+        pricing_tier = str(item.get("pricing_tier", "unknown")).strip().lower()
+        if pricing_tier not in {"free", "paid", "unknown"}:
+            raise InferenceConfigError(f"invalid pricing_tier for {item.get('id')!r}")
         result.append(ModelSpec(
             id=item["id"], provider=item["provider"], endpoint=item["endpoint"],
             capabilities=tuple(caps), context_window=item.get("context_window"),
@@ -41,5 +44,6 @@ def load_model_specs(path: str | Path) -> list[ModelSpec]:
             quality_score=float(scores["quality_score"]),
             latency_score=float(scores["latency_score"]),
             cost_score=float(scores["cost_score"]),
+            pricing_tier=str(item.get("pricing_tier", "unknown")).strip().lower(),
         ))
     return result
