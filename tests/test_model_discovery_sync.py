@@ -260,6 +260,7 @@ def test_nvidia_discovery_parses_openai_compatible_catalog(monkeypatch):
                             "owned_by": "meta",
                             "capabilities": ["chat", "reasoning"],
                             "context_window": 32768,
+                            "free_endpoint": True,
                         },
                         {"id": "", "object": "model"},
                         {"object": "model"},
@@ -289,6 +290,7 @@ def test_nvidia_discovery_parses_openai_compatible_catalog(monkeypatch):
     assert candidates[0].model.id == "meta/example-model"
     assert candidates[0].model.enabled is False
     assert candidates[0].model.context_window == 32768
+    assert candidates[0].model.pricing_tier == "free"
     assert candidates[0].metadata["owned_by"] == "meta"
     assert candidates[0].candidate_id == candidate_id(
         "nvidia_api", "meta/example-model"
@@ -338,7 +340,7 @@ def test_nvidia_discovery_conservatively_excludes_non_conversational_catalog_mod
     assert by_id["nvidia/nemotron-3-embed-1b"].capabilities == ()
     assert by_id["nvidia/cosmos-vision-1"].capabilities == ()
     assert by_id["nvidia/some-unknown-model"].capabilities == ()
-    assert by_id["nvidia/some-unknown-model"].pricing_tier == "unknown"
+    assert by_id["nvidia/some-unknown-model"].pricing_tier == "free"
 
 
 def test_candidate_id_is_deterministic():

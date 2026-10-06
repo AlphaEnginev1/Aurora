@@ -1,20 +1,31 @@
 {
-  "version": 1,
+  "version": 2,
   "mode": "free_only",
   "reviewed_at": "2026-10-06",
-  "description": "Curated Aurora free-model allowlist. Models may be routed only when their provider currently exposes them on a free tier/free endpoint. Discovery of other models remains staged and cannot activate them automatically.",
+  "description": "Free-only policy. NVIDIA uses its live Free Endpoint catalog as the authoritative eligibility source; checked-in NVIDIA models are seed metadata only and never a ceiling.",
   "providers": {
     "gemini": {
       "models": {
         "gemini-3.8-flash": {
           "tier": "free",
           "rank": 1,
-          "specialties": ["director", "agentic", "coding", "reasoning", "long_horizon"]
+          "specialties": [
+            "director",
+            "agentic",
+            "coding",
+            "reasoning",
+            "long_horizon"
+          ]
         },
         "gemini-3.7-flash": {
           "tier": "free",
           "rank": 2,
-          "specialties": ["director", "agentic", "coding", "reasoning"]
+          "specialties": [
+            "director",
+            "agentic",
+            "coding",
+            "reasoning"
+          ]
         }
       }
     },
@@ -23,45 +34,87 @@
         "nvidia/nemotron-3-ultra-550b-a55b": {
           "tier": "free",
           "rank": 1,
-          "specialties": ["reasoning", "planning", "coding", "tool_use", "agentic", "long_context"],
+          "specialties": [
+            "reasoning",
+            "planning",
+            "coding",
+            "tool_use",
+            "agentic",
+            "long_context"
+          ],
           "context_window": 1000000
         },
         "nvidia/nemotron-3-super-120b-a12b": {
           "tier": "free",
           "rank": 2,
-          "specialties": ["reasoning", "planning", "coding", "tool_use", "agentic", "long_context"],
+          "specialties": [
+            "reasoning",
+            "planning",
+            "coding",
+            "tool_use",
+            "agentic",
+            "long_context"
+          ],
           "context_window": 1000000
         },
         "z-ai/glm-5-3": {
           "tier": "free",
           "rank": 3,
-          "specialties": ["reasoning", "tool_use", "agentic", "long_context"],
+          "specialties": [
+            "reasoning",
+            "tool_use",
+            "agentic",
+            "long_context"
+          ],
           "context_window": 1000000
         },
         "z-ai/glm-5-3-flash": {
           "tier": "free",
           "rank": 4,
-          "specialties": ["reasoning", "tool_use", "multimodal", "agentic", "fast"]
+          "specialties": [
+            "reasoning",
+            "tool_use",
+            "multimodal",
+            "agentic",
+            "fast"
+          ]
         },
         "deepseek-ai/deepseek-v4.1-flash": {
           "tier": "free",
           "rank": 5,
-          "specialties": ["reasoning", "coding", "multimodal", "long_context", "fast"],
+          "specialties": [
+            "reasoning",
+            "coding",
+            "multimodal",
+            "long_context",
+            "fast"
+          ],
           "context_window": 1000000
         },
         "google/gemma-4-31b-it": {
           "tier": "free",
           "rank": 6,
-          "specialties": ["reasoning", "coding", "agentic", "multimodal"],
+          "specialties": [
+            "reasoning",
+            "coding",
+            "agentic",
+            "multimodal"
+          ],
           "context_window": 262000
         },
         "poolside/laguna-xs-2.1": {
           "tier": "free",
           "rank": 7,
-          "specialties": ["coding", "agentic", "tool_use", "terminal"],
+          "specialties": [
+            "coding",
+            "agentic",
+            "tool_use",
+            "terminal"
+          ],
           "context_window": 262000
         }
-      }
+      },
+      "dynamic_catalog": "free_endpoint"
     }
   }
 }
