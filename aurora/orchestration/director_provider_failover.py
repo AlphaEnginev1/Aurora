@@ -321,9 +321,7 @@ class DirectorProviderFailoverController:
                         candidate
                         for candidate in dynamic_candidates
                         if not (
-                            candidate.provider_id == active_provider_id
-                            and active_model_id
-                            and candidate.model == active_model_id
+                            active_model_id and candidate.model == active_model_id
                         )
                         and self._candidate_key(candidate) not in self._failed_candidates
                         and self._candidate_key(candidate) not in seen
