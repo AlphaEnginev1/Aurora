@@ -189,6 +189,7 @@ def _build_director_provider_failover(
     router: ModelRouter,
     active_provider,
     db_path: str | Path,
+    health_store: ProviderHealthStore | None = None,
 ):
     settings = settings_store.load()
     director = settings.get("director", {}) if isinstance(settings, dict) else {}
@@ -362,6 +363,7 @@ def _build_director_provider_failover(
         store=DirectorProviderFailoverStore(str(db_path)),
         activate=activate,
         candidate_resolver=resolve_candidates,
+        health_store=health_store,
     )
 
 
@@ -384,7 +386,12 @@ def build_director_service(*, inference_policy_path: str | Path, autonomy_policy
         provider_registry=provider_registry,
     )
     inference_specs = list(model_registry.models)
-    health_store = ProviderHealthStore(Path(workspace_root).resolve() / "tasks.db")
+    health_store = ProviderHealthStore(
+        Path(workspace_root).resolve() / "tasks.db",
+        failure_threshold=int(os.getenv("AURORA_PROVIDER_HEALTH_FAILURE_THRESHOLD", "2")),
+        base_cooldown_seconds=float(os.getenv("AURORA_PROVIDER_HEALTH_BASE_COOLDOWN_SECONDS", "15")),
+        max_cooldown_seconds=float(os.getenv("AURORA_PROVIDER_HEALTH_MAX_COOLDOWN_SECONDS", "300")),
+    )
     router=ModelRouter(
         models=inference_specs,
         nvidia_api_key=nvidia_key,
@@ -474,6 +481,7 @@ def build_director_service(*, inference_policy_path: str | Path, autonomy_policy
         router=router,
         active_provider=active_provider,
         db_path=provider_failover_db_path or (Path(workspace_root).resolve() / "tasks.db"),
+        health_store=health_store,
     )
     return DirectorService(planner,task_engine)
 
