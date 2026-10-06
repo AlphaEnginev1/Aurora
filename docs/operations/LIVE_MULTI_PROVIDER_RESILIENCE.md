@@ -23,9 +23,9 @@ The test never requires OpenAI or Anthropic credentials and the workflow explici
 
 ## Free-model policy
 
-The checked-in `config/free-model-policy.json` is the source of truth for models Aurora is allowed to route in `free_only` mode.
+The checked-in `config/free-model-policy.json` defines `free_only` and seed metadata. For NVIDIA, the authoritative free-access signal is the current official Build catalog `Free Endpoint` label joined with the models actually served by the configured `/v1/models` endpoint.
 
-The checked-in models are seed metadata only. Aurora dynamically discovers the NVIDIA catalog and activates every model exposed by the free endpoint; new models can enter automatically and removed models stop being eligible after refresh.
+The listed NVIDIA IDs are known-good seed metadata and are not a closed allowlist. The LIVE acceptance must validate that the runtime can discover and route current NVIDIA Free Endpoint models beyond the seed set.
 
 - Gemini: `gemini-3.8-flash`, `gemini-3.7-flash`
 - NVIDIA NIM: `nvidia/nemotron-3-ultra-550b-a55b`
@@ -36,7 +36,7 @@ The checked-in models are seed metadata only. Aurora dynamically discovers the N
 - NVIDIA NIM: `google/gemma-4-31b-it`
 - NVIDIA NIM: `poolside/laguna-xs-2.1`
 
-Google currently documents Gemini 3.8 Flash as Free Tier. NVIDIA currently exposes the listed NIM model pages with Free Endpoint availability. The runtime treats the allowlist as authoritative and stages newly discovered models without activating them automatically.
+Google currently documents Gemini 3.8 Flash as Free Tier. NVIDIA currently exposes the listed NIM model pages with Free Endpoint availability. The runtime fails closed on paid/unknown models and may activate models discovered from the authoritative Free Endpoint catalog.
 
 ## GitHub environment
 
@@ -48,7 +48,7 @@ Required secrets:
 
 No OpenAI or Anthropic secrets are required or used.
 
-Workflow inputs may override the Gemini/NVIDIA model IDs, but an override is accepted only when the selected model is explicitly present in the free-model policy.
+Workflow inputs may override the Gemini model. An NVIDIA override is accepted only when it is present in the current discovered Free Endpoint catalog.
 
 ## Acceptance
 
