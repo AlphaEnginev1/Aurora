@@ -11,7 +11,7 @@ import os
 from pathlib import Path
 from typing import Any, Mapping
 
-DEFAULT_FREE_MODEL_POLICY = Path("config/free-model-policy.json")
+DEFAULT_FREE_MODEL_POLICY = Path(__file__).resolve().parents[2] / "config/free-model-policy.json"
 
 
 class FreeModelPolicyError(ValueError):
