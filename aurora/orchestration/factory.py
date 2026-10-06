@@ -16,6 +16,7 @@ from aurora.inference.models import InferenceRequest, ModelSpec
 from aurora.inference.discovery import ModelCandidateStore, ModelDiscoveryService
 from aurora.inference.providers.registry import default_provider_registry
 from aurora.inference.model_performance import ModelPerformanceStore
+from aurora.inference.ensemble import ModelEnsemble, ModelEnsembleStore
 from aurora.dashboard.gateway import DashboardGateway
 from aurora.research.discovery import HttpSearchProvider, ResearchSourceCatalog
 from aurora.research.models import ResearchRequest
@@ -569,6 +570,10 @@ def build_director_runtime(*, inference_policy_path: str | Path, autonomy_policy
     skill_improvement_generator=SkillImprovementGenerator(service.planner.router, skill_learning)
 
     decision_performance=DirectorDecisionPerformanceStore(store.path)
+    model_ensemble=ModelEnsemble(
+        service.planner.router,
+        store=ModelEnsembleStore(store.path),
+    )
     decision_knowledge_store=DirectorDecisionKnowledgeStore(store.path)
     active_policy_store=DirectorDecisionPolicyActiveStore(store.path)
     policy_proposal_store=DirectorDecisionPolicyProposalStore(store.path)
@@ -641,6 +646,7 @@ def build_director_runtime(*, inference_policy_path: str | Path, autonomy_policy
         policy_proposal_store=policy_proposal_store,
         policy_contract_store=policy_contract_store,
         model_discovery=model_discovery,
+        model_ensemble=model_ensemble,
         dashboard_gateway=dashboard_gateway,
         conversation_service=conversation_service)
     runtime.bootstrap=bootstrap

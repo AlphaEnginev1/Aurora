@@ -53,6 +53,7 @@ from aurora.skills.acquisition_pipeline import PreparedSkillCandidate
 from aurora.skills.evolution_runtime import PreparedSkillEvolution, SkillEvolutionRuntime
 from aurora.skills.improvement import SkillImprovementGenerator
 from aurora.inference.discovery import ModelDiscoveryService
+from aurora.inference.ensemble import CriticalDecisionResult, ModelEnsemble
 from aurora.dashboard.gateway import DashboardGateway
 from .director_conversation import DirectorConversationService
 
@@ -132,6 +133,7 @@ class DirectorRuntime:
         policy_proposal_store: DirectorDecisionPolicyProposalStore | None = None,
         policy_contract_store: DirectorDecisionPolicyContractStore | None = None,
         model_discovery: ModelDiscoveryService | None = None,
+        model_ensemble: ModelEnsemble | None = None,
         dashboard_gateway: DashboardGateway | None = None,
         conversation_service: DirectorConversationService | None = None,
         sleep_fn: Callable[[float], None] = sleep,
@@ -165,6 +167,7 @@ class DirectorRuntime:
         self.idle_sleep_seconds = idle_sleep_seconds
         self.max_review_rounds = max_review_rounds
         self.model_discovery = model_discovery
+        self.model_ensemble = model_ensemble
         self.dashboard_gateway = dashboard_gateway
         self.conversation_service = conversation_service
         self._provider_failover_context: dict[str, str] | None = None
@@ -225,6 +228,55 @@ class DirectorRuntime:
         self._subscription: EventSubscription = self.event_bus.subscribe(event_consumer_id)
         self._workers: dict[str, TaskWorker] = {}
 
+
+    def run_critical_decision(
+        self,
+        *,
+        mission_id: str,
+        request,
+        capability: str = "reasoning",
+        ensemble_size: int = 3,
+        resolve_disagreement: bool = True,
+    ) -> CriticalDecisionResult:
+        """Execute a critical decision through the governed model ensemble."""
+        self._require_director_ownership(mission_id)
+        if self.model_ensemble is None:
+            raise DirectorRuntimeError("critical decision model ensemble is not configured")
+        metadata = dict(getattr(request, "metadata", {}) or {})
+        metadata["mission_id"] = mission_id
+        from aurora.inference.models import InferenceRequest
+
+        if not isinstance(request, InferenceRequest):
+            raise DirectorRuntimeError("critical decision request must be an InferenceRequest")
+        governed_request = InferenceRequest(
+            messages=list(request.messages),
+            model=request.model,
+            temperature=request.temperature,
+            max_tokens=request.max_tokens,
+            metadata=metadata,
+            request_id=request.request_id,
+        )
+        result = self.model_ensemble.run_critical_decision(
+            governed_request,
+            capability=capability,
+            ensemble_size=ensemble_size,
+            resolve_disagreement=resolve_disagreement,
+        )
+        self.event_bus.publish(
+            mission_id=mission_id,
+            event_type="director_critical_decision_ensemble",
+            payload={
+                "ensemble_id": result.ensemble_id,
+                "status": result.status,
+                "decision_available": result.decision is not None,
+                "candidate_models": list(result.candidate_models),
+                "member_models": [item.model for item in result.members],
+                "successful_member_count": sum(item.success for item in result.members),
+                "resolver_model": result.resolver_model,
+                "agreement_ratio": result.agreement_ratio,
+            },
+        )
+        return result
 
     def record_decision_comparison(
         self,
