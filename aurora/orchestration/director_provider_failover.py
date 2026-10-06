@@ -274,19 +274,19 @@ class DirectorProviderFailoverController:
                 if not _is_failoverable(exc):
                     raise
                 correlation_id = self._correlation_id(active)
+                active_provider_id = str(getattr(active, "provider_id", "") or "")
+                active_model_id = _failed_model_id(active, model, exc)
                 self._record_and_emit(
                     correlation_id=correlation_id,
                     phase="failure_detected",
                     role=role,
-                    from_provider=getattr(active, "provider_id", "unknown"),
+                    from_provider=active_provider_id or "unknown",
                     from_model=active_model_id or model,
                     to_provider=None,
                     to_model=None,
                     error=exc,
                 )
 
-                active_provider_id = str(getattr(active, "provider_id", "") or "")
-                active_model_id = _failed_model_id(active, model, exc)
                 candidates: list[DirectorProviderCandidate] = [
                     candidate
                     for candidate in self._candidates
