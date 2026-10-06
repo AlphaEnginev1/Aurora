@@ -47,7 +47,8 @@ def _candidate(provider: FakeProvider, model: str) -> DirectorProviderCandidate:
 def test_multiple_provider_outage_continues_to_next_provider(tmp_path: Path):
     ctx = ProviderErrorContext("gemini", "req", "exec", selected_model="gemini-model")
     gemini = FakeProvider("gemini", ProviderHTTPError("503", context=ctx, status_code=503))
-    nvidia = FakeProvider("nvidia_api", ProviderHTTPError("503", context=ctx, status_code=503))
+    nvidia_a = FakeProvider("nvidia_api", ProviderHTTPError("503", context=ctx, status_code=503))
+    nvidia_b = FakeProvider("nvidia_api", "must-not-run")
     openai = FakeProvider("openai", ProviderHTTPError("429", context=ctx, status_code=429))
     anthropic = FakeProvider("anthropic", "continuation")
 
@@ -55,7 +56,8 @@ def test_multiple_provider_outage_continues_to_next_provider(tmp_path: Path):
     controller = DirectorProviderFailoverController(
         active_provider=gemini,
         candidates=(
-            _candidate(nvidia, "nvidia/model-a"),
+            _candidate(nvidia_a, "nvidia/model-a"),
+            _candidate(nvidia_b, "nvidia/model-b"),
             _candidate(openai, "gpt/model-a"),
             _candidate(anthropic, "claude/model-a"),
         ),
@@ -71,11 +73,13 @@ def test_multiple_provider_outage_continues_to_next_provider(tmp_path: Path):
     )
 
     assert result.provider == "anthropic"
-    assert nvidia.calls == 1
-    assert openai.calls == 0
+    assert nvidia_a.calls == 1
+    assert nvidia_b.calls == 0
+    assert openai.calls == 1
     assert anthropic.calls == 1
     assert health.snapshot("gemini", "gemini-model").state == "cooldown"
     assert health.snapshot("nvidia_api", "nvidia/model-a").state == "cooldown"
+    assert health.snapshot("openai", "gpt/model-a").state == "cooldown"
 
 
 def test_multiple_provider_outage_fails_closed_when_all_are_down(tmp_path: Path):
