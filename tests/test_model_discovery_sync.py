@@ -301,6 +301,44 @@ def test_nvidia_discovery_parses_openai_compatible_catalog(monkeypatch):
     assert "secret-not-in-candidate" not in json.dumps(candidates[0].metadata)
 
 
+def test_nvidia_discovery_conservatively_excludes_non_conversational_catalog_models(monkeypatch):
+    from aurora.inference.providers.nvidia_discovery import NVIDIAModelDiscoveryProvider
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+        def __exit__(self, exc_type, exc, tb):
+            return False
+        def read(self):
+            return json.dumps({
+                "object": "list",
+                "data": [
+                    {"id": "nvidia/nemotron-3-super-120b-a12b", "object": "model"},
+                    {"id": "nvidia/nemotron-3.5-content-safety", "object": "model"},
+                    {"id": "nvidia/nemotron-3-embed-1b", "object": "model"},
+                    {"id": "nvidia/cosmos-vision-1", "object": "model"},
+                    {"id": "nvidia/some-unknown-model", "object": "model"},
+                ],
+            }).encode("utf-8")
+
+    monkeypatch.setattr(
+        "aurora.inference.providers.nvidia_discovery.urlopen",
+        lambda _request, timeout: FakeResponse(),
+    )
+
+    candidates = NVIDIAModelDiscoveryProvider(
+        base_url="https://integrate.api.nvidia.com/v1",
+        api_key="secret",
+    ).discover()
+
+    by_id = {candidate.model.id: candidate.model for candidate in candidates}
+    assert by_id["nvidia/nemotron-3-super-120b-a12b"].capabilities == ("chat", "reasoning")
+    assert by_id["nvidia/nemotron-3.5-content-safety"].capabilities == ()
+    assert by_id["nvidia/nemotron-3-embed-1b"].capabilities == ()
+    assert by_id["nvidia/cosmos-vision-1"].capabilities == ()
+    assert by_id["nvidia/some-unknown-model"].capabilities == ()
+
+
 def test_candidate_id_is_deterministic():
     assert candidate_id("fake", "model") == candidate_id(" fake ", " model ")
     assert candidate_id("fake", "model") != candidate_id("other", "model")
