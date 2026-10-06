@@ -12,6 +12,7 @@ from urllib.request import Request, urlopen
 
 from ..discovery import DiscoveredModelCandidate, candidate_id
 from ..models import ModelSpec
+from ..free_policy import record_metadata
 
 
 class NVIDIAModelDiscoveryError(RuntimeError):
@@ -87,6 +88,14 @@ class NVIDIAModelDiscoveryProvider:
             specialties = _string_tuple(row.get("specialties"))
             context_window = _positive_int(row.get("context_window"))
             normalized_model_id = model_id.strip()
+            free_metadata = record_metadata(self.provider_id, normalized_model_id)
+            if not capabilities:
+                capabilities = tuple(str(item) for item in free_metadata.get("capabilities", ()) if isinstance(item, str))
+            if not specialties:
+                specialties = tuple(str(item) for item in free_metadata.get("specialties", ()) if isinstance(item, str))
+            if context_window is None:
+                context_window = _positive_int(free_metadata.get("context_window"))
+            pricing_tier = str(free_metadata.get("tier", "unknown")).strip().lower()
             model = ModelSpec(
                 id=normalized_model_id,
                 provider=self.provider_id,
@@ -99,6 +108,7 @@ class NVIDIAModelDiscoveryProvider:
                 latency_score=_catalog_latency_score(normalized_model_id),
                 cost_score=_catalog_latency_score(normalized_model_id),
                 healthy=False,
+                pricing_tier=pricing_tier if pricing_tier in {"free", "paid", "unknown"} else "unknown",
                 available=False,
             )
             metadata = {

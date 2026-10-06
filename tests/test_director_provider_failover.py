@@ -94,10 +94,10 @@ def test_factory_discovers_and_selects_available_nvidia_model_without_fixed_id(t
 
     discovered = (
         DiscoveredModelCandidate(
-            candidate_id=candidate_id("nvidia_api", "model/slow"),
+            candidate_id=candidate_id("nvidia_api", "google/gemma-4-31b-it"),
             provider_id="nvidia_api",
             model=ModelSpec(
-                id="model/slow",
+                id="google/gemma-4-31b-it",
                 provider="nvidia_api",
                 endpoint="https://integrate.api.nvidia.com/v1",
                 capabilities=("reasoning",),
@@ -107,10 +107,10 @@ def test_factory_discovers_and_selects_available_nvidia_model_without_fixed_id(t
             discovered_at="2026-10-05T00:00:00+00:00",
         ),
         DiscoveredModelCandidate(
-            candidate_id=candidate_id("nvidia_api", "model/best"),
+            candidate_id=candidate_id("nvidia_api", "nvidia/nemotron-3-ultra-550b-a55b"),
             provider_id="nvidia_api",
             model=ModelSpec(
-                id="model/best",
+                id="nvidia/nemotron-3-ultra-550b-a55b",
                 provider="nvidia_api",
                 endpoint="https://integrate.api.nvidia.com/v1",
                 capabilities=("reasoning",),
@@ -154,7 +154,7 @@ def test_factory_discovers_and_selects_available_nvidia_model_without_fixed_id(t
     )
 
     assert response.provider == "nvidia_api"
-    assert response.model == "model/best"
+    assert response.model == "nvidia/nemotron-3-ultra-550b-a55b"
     assert controller.provider_id == "nvidia_api"
 
 
@@ -199,10 +199,10 @@ def test_factory_uses_cached_nvidia_catalog_when_live_discovery_is_unavailable(t
     )
 
     cached = DiscoveredModelCandidate(
-        candidate_id=candidate_id("nvidia_api", "cached/model"),
+        candidate_id=candidate_id("nvidia_api", "nvidia/nemotron-3-super-120b-a12b"),
         provider_id="nvidia_api",
         model=ModelSpec(
-            id="cached/model",
+            id="nvidia/nemotron-3-super-120b-a12b",
             provider="nvidia_api",
             endpoint="https://integrate.api.nvidia.com/v1",
             capabilities=("reasoning",),
@@ -240,7 +240,7 @@ def test_factory_uses_cached_nvidia_catalog_when_live_discovery_is_unavailable(t
     )
 
     assert response.provider == "nvidia_api"
-    assert response.model == "cached/model"
+    assert response.model == "nvidia/nemotron-3-super-120b-a12b"
     assert response.content == "cached NVIDIA replacement"
 
 
@@ -279,7 +279,7 @@ def test_gemini_failure_switches_to_alternative_and_persists_transition(tmp_path
     activated = []
     controller = DirectorProviderFailoverController(
         active_provider=gemini,
-        candidates=(_candidate("nvidia_api", nvidia, "nvidia/test-model"),),
+        candidates=(_candidate("nvidia_api", nvidia, "poolside/laguna-xs-2.1"),),
         store=store,
         activate=lambda candidate, provider: activated.append((candidate, provider)),
     )
@@ -309,7 +309,7 @@ def test_all_candidates_fail_closed_without_activation(tmp_path: Path):
     controller = DirectorProviderFailoverController(
         active_provider=gemini,
         candidates=(
-            _candidate("nvidia_api", nvidia, "nvidia/test-model"),
+            _candidate("nvidia_api", nvidia, "poolside/laguna-xs-2.1"),
             _candidate("inference_router", router, "router-model"),
         ),
         store=store,
@@ -415,7 +415,7 @@ def test_successful_nvidia_failover_persists_and_reloads_after_restart(tmp_path:
     controller = DirectorProviderFailoverController(
         active_provider=gemini,
         candidates=(
-            _candidate("nvidia_api", nvidia, "nvidia/test-model"),
+            _candidate("nvidia_api", nvidia, "poolside/laguna-xs-2.1"),
         ),
         store=store,
         activate=activate,
@@ -430,7 +430,7 @@ def test_successful_nvidia_failover_persists_and_reloads_after_restart(tmp_path:
     assert activated == ["nvidia_api"]
     persisted = settings.load()["director"]
     assert persisted["provider"] == "nvidia_api"
-    assert persisted["model"] == "nvidia/test-model"
+    assert persisted["model"] == "poolside/laguna-xs-2.1"
 
     from aurora.orchestration.factory import _build_director_provider
 

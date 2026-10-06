@@ -13,6 +13,7 @@ from aurora.autonomy.sandbox import SandboxExecutor, SandboxPolicy
 from aurora.inference.registry import ModelRegistry
 from aurora.inference.router import ModelRouter
 from aurora.inference.models import InferenceRequest, ModelSpec
+from aurora.inference.free_policy import is_free_model
 from aurora.inference.discovery import ModelCandidateStore, ModelDiscoveryService
 from aurora.inference.providers.registry import default_provider_registry
 from aurora.inference.model_performance import ModelPerformanceStore
@@ -70,17 +71,17 @@ from .task_worker import WorkerPolicy
 
 def build_orchestration_engine(policy_path: str | Path) -> OrchestrationEngine:
     nvidia_key = os.getenv("NVIDIA_API_KEY")
-    openai_key = os.getenv("OPENAI_API_KEY")
-    anthropic_key = os.getenv("ANTHROPIC_API_KEY")
     provider_registry = default_provider_registry(
         nvidia_api_key=nvidia_key,
-        openai_api_key=openai_key,
-        anthropic_api_key=anthropic_key,
     )
     model_registry = ModelRegistry.from_file(
         policy_path,
         provider_registry=provider_registry,
     )
+    policy_data = json.loads(Path(policy_path).read_text(encoding="utf-8"))
+    cost_policy = os.getenv("AURORA_INFERENCE_COST_POLICY", str(policy_data.get("cost_policy", "free_only"))).strip().lower()
+    if cost_policy != "free_only":
+        raise RuntimeError("Aurora canonical runtime requires cost_policy=free_only")
     runtime_root = Path(
         os.getenv("AURORA_WORKSPACE_ROOT", ".aurora-runtime")
     ).resolve()
@@ -97,6 +98,7 @@ def build_orchestration_engine(policy_path: str | Path) -> OrchestrationEngine:
             provider_registry=provider_registry,
             model_registry=model_registry,
             health_store=health_store,
+            cost_policy=cost_policy,
         )
     )
 
@@ -124,6 +126,7 @@ def _apply_local_model_settings(router: ModelRouter, settings_store: OperatorSet
             capabilities=("chat", "reasoning", "tool_use"),
             context_window=131072,
             enabled=True,
+            pricing_tier=("free" if is_free_model("nvidia_api", model_id) else "unknown"),
         )
         router.model_registry = type(router.model_registry).from_specs(
             [*router.model_registry.models, model],
@@ -145,6 +148,7 @@ def _apply_local_model_settings(router: ModelRouter, settings_store: OperatorSet
             cost_score=existing.cost_score,
             healthy=existing.healthy,
             available=existing.available,
+            pricing_tier=existing.pricing_tier or ("free" if is_free_model("nvidia_api", existing.id) else "unknown"),
         )
         router.model_registry.replace(updated)
         router.models = list(router.model_registry.models)
@@ -168,20 +172,27 @@ def _build_director_provider(
         )
         if not key and settings_store is not None:
             return None
+        selected_gemini_model = os.getenv("GEMINI_MODEL_ID") or str(configured.get("model", "gemini-3.8-flash"))
+        if router is not None and getattr(router, "cost_policy", "all") == "free_only" and not is_free_model("gemini", selected_gemini_model):
+            raise RuntimeError("free_only inference policy rejects Gemini model: " + selected_gemini_model)
         return GeminiDirectorProvider(
             api_key=key,
-            model=os.getenv("GEMINI_MODEL_ID") or str(configured.get("model", "gemini-3.7-flash")),
+            model=selected_gemini_model,
             endpoint=os.getenv("GEMINI_API_ENDPOINT") or str(
                 configured.get("endpoint", "https://generativelanguage.googleapis.com/v1beta")
             ),
         )
     if director_provider_id in {"nvidia_api", "openai", "anthropic"}:
+        if router is not None and getattr(router, "cost_policy", "all") == "free_only" and director_provider_id != "nvidia_api":
+            raise RuntimeError("free_only inference policy forbids paid Director provider: " + director_provider_id)
         credential_map = {
             "nvidia_api": (settings_store.credential("nvidia_api") if settings_store is not None else "") or os.getenv("NVIDIA_API_KEY", ""),
             "openai": (settings_store.credential("openai") if settings_store is not None else "") or os.getenv("OPENAI_API_KEY", ""),
             "anthropic": (settings_store.credential("anthropic") if settings_store is not None else "") or os.getenv("ANTHROPIC_API_KEY", ""),
         }
         model = str(configured.get("model", "")).strip()
+        if router is not None and getattr(router, "cost_policy", "all") == "free_only" and director_provider_id == "nvidia_api" and not is_free_model("nvidia_api", model):
+            raise RuntimeError("free_only inference policy rejects NVIDIA model: " + model)
         if not credential_map[director_provider_id] or router is None or not model:
             return None
         return BoundInferenceDirectorProvider(
@@ -212,10 +223,12 @@ def _build_director_provider_failover(
     if not bool(failover.get("enabled", True)):
         return active_provider
 
-    order = failover.get("order", ["nvidia_api", "openai", "anthropic", "router"])
+    order = failover.get("order", ["nvidia_api", "router"])
     if not isinstance(order, list):
         raise RuntimeError("director.failover.order must be a list")
     normalized_order = tuple(str(item).strip().lower() for item in order)
+    if getattr(router, "cost_policy", "all") == "free_only":
+        normalized_order = tuple(item for item in normalized_order if item in {"nvidia_api", "router"})
 
     model_candidate_store = ModelCandidateStore(
         Path(db_path).resolve().parent / "model-candidates.db"
@@ -246,6 +259,8 @@ def _build_director_provider_failover(
 
         for provider_id in normalized_order:
             if provider_id == "router":
+                continue
+            if getattr(router, "cost_policy", "all") == "free_only" and provider_id != "nvidia_api":
                 continue
             if provider_id == active_id:
                 continue
@@ -294,6 +309,7 @@ def _build_director_provider_failover(
                         latency_score=model.latency_score,
                         cost_score=model.cost_score,
                         healthy=True,
+                        pricing_tier=model.pricing_tier,
                         available=True,
                     )
                 )
@@ -327,6 +343,7 @@ def _build_director_provider_failover(
             context_gate=router.context_gate,
             enforce_context=router.enforce_context,
             health_store=router.health_store,
+            cost_policy=getattr(router, "cost_policy", "all"),
         )
         selection_request = InferenceRequest(
             messages=messages,
@@ -396,13 +413,15 @@ def build_director_service(*, inference_policy_path: str | Path, autonomy_policy
     nvidia_key = settings_store.credential("nvidia_api") or os.getenv("NVIDIA_API_KEY")
     provider_registry = default_provider_registry(
         nvidia_api_key=nvidia_key,
-        openai_api_key=settings_store.credential("openai") or os.getenv("OPENAI_API_KEY"),
-        anthropic_api_key=settings_store.credential("anthropic") or os.getenv("ANTHROPIC_API_KEY"),
     )
     model_registry = ModelRegistry.from_file(
         inference_policy_path,
         provider_registry=provider_registry,
     )
+    policy_data = json.loads(Path(inference_policy_path).read_text(encoding="utf-8"))
+    cost_policy = os.getenv("AURORA_INFERENCE_COST_POLICY", str(policy_data.get("cost_policy", "free_only"))).strip().lower()
+    if cost_policy != "free_only":
+        raise RuntimeError("Aurora canonical runtime requires cost_policy=free_only")
     inference_specs = list(model_registry.models)
     health_store = ProviderHealthStore(
         Path(workspace_root).resolve() / "tasks.db",
@@ -416,6 +435,7 @@ def build_director_service(*, inference_policy_path: str | Path, autonomy_policy
         provider_registry=provider_registry,
         model_registry=model_registry,
         health_store=health_store,
+        cost_policy=cost_policy,
     )
     _apply_local_model_settings(router, settings_store)
     skill_registry=SkillRegistry.from_file(skills_path,configured_models={model.id for model in inference_specs})

@@ -91,9 +91,17 @@ async def aurora_director_function(config: AuroraDirectorFunctionConfig, builder
 
         try:
             models = load_model_specs(inference_policy)
+            policy_data = __import__("json").loads(inference_policy.read_text(encoding="utf-8"))
+            cost_policy = os.getenv(
+                "AURORA_INFERENCE_COST_POLICY",
+                str(policy_data.get("cost_policy", "free_only")),
+            ).strip().lower()
+            if cost_policy != "free_only":
+                raise ModelRoutingError("Aurora canonical runtime requires cost_policy=free_only")
             router = ModelRouter(
                 models=models,
                 nvidia_api_key=os.getenv("NVIDIA_API_KEY"),
+                cost_policy=cost_policy,
             )
             organization = OrganizationRegistry.from_file(
                 Path(os.getenv("AURORA_ORGANIZATION_POLICY", "config/organization.json")),

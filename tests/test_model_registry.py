@@ -112,6 +112,7 @@ def test_registry_catalog_exposes_model_metadata_without_factories(
             "quality_score": 0.5,
             "latency_score": 0.5,
             "cost_score": 0.5,
+            "pricing_tier": "unknown",
         },
     )
 

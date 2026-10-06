@@ -39,13 +39,14 @@ remains as an auditable snapshot of the gate work and is not a second implementa
 | Sandbox / deterministic workspaces | YES | YES | YES | YES | None identified in frozen queue |
 | Application network gateway / proxy / dataplane | YES | YES | YES | YES | None identified in frozen queue |
 | Inference Fabric / ModelRouter | YES | YES | YES | YES | None identified in frozen queue |
-| Provider Health / Availability Layer | YES | YES | YES | PENDING NEW LIVE GATE | LIVE multi-provider acceptance |
-| OpenAI provider + discovery adapter | YES | YES | YES | PENDING NEW LIVE GATE | LIVE provider contract |
-| Anthropic provider + discovery adapter | YES | YES | YES | PENDING NEW LIVE GATE | LIVE provider contract |
-| Dynamic multi-provider Director reserve pool | YES | YES | YES | PENDING NEW LIVE GATE | LIVE reserve/failover acceptance |
-| Controlled autonomous model-catalog refresh | YES | YES | YES | PENDING NEW LIVE GATE | LIVE discovery/refresh acceptance |
-| Critical Decision Model Ensemble | YES | YES | YES | PENDING NEW LIVE GATE | LIVE ensemble acceptance |
-| Multi-Agent Adversarial Review | YES | YES | YES | PENDING NEW LIVE GATE | LIVE adversarial-review acceptance |
+| Provider Health / Availability Layer | YES | YES | YES | PENDING NEW LIVE GATE | LIVE free-model resilience acceptance |
+| Free-only model policy / routing guard | YES | YES | YES | PENDING NEW LIVE GATE | LIVE free-model policy acceptance |
+| Curated free NVIDIA model pool | YES | YES | YES | PENDING NEW LIVE GATE | LIVE free-model inference acceptance |
+| Optional paid-provider adapters | YES | YES | NO | N/A | Intentionally excluded from canonical free-only runtime |
+| Dynamic free Director reserve pool | YES | YES | YES | PENDING NEW LIVE GATE | LIVE free reserve/failover acceptance |
+| Controlled autonomous model-catalog refresh | YES | YES | YES | PENDING NEW LIVE GATE | LIVE free discovery/refresh acceptance |
+| Critical Decision Model Ensemble | YES | YES | YES | PENDING NEW LIVE GATE | LIVE free-model ensemble acceptance |
+| Multi-Agent Adversarial Review | YES | YES | YES | PENDING NEW LIVE GATE | LIVE free-model adversarial-review acceptance |
 | NVIDIA provider | YES | YES | YES | YES | None identified in frozen queue |
 | Director provider abstraction / Gemini adapter | YES | YES | YES | YES | None identified in frozen queue |
 | Director 24/7 runtime | YES | YES | YES | N/A | None identified in frozen queue |
@@ -157,8 +158,8 @@ The canonical implementation now includes:
 
 - durable provider/model availability and cooldown/probing;
 - health-aware routing and execution feedback;
-- OpenAI and Anthropic adapters plus model discovery;
-- dynamic reserve-pool construction using the existing provider failover controller;
+- curated free-model policy and free-only routing enforcement;
+- dynamic free reserve-pool construction using the existing provider failover controller;
 - rate-limited controlled model-catalog refresh;
 - deterministic multi-provider outage/fail-closed coverage.
 
@@ -317,7 +318,7 @@ The frozen production-readiness queue 1–7 is **COMPLETE / VERIFIED** on canoni
 
 There is no remaining block in this queue. Historical branches and closed PRs must not be used as alternate implementation queues.
 
-The newer Increment 13 architecture is tracked separately from that frozen queue and is not considered LIVE VERIFIED until `.github/workflows/live-multi-provider-resilience.yml` completes successfully.
+The newer Increment 13 architecture is tracked separately from that frozen queue and is not considered LIVE VERIFIED until `.github/workflows/live-multi-provider-resilience.yml` completes successfully with the free-only contract.
 
 The Controlled Live Authorization gate is established, but **live execution is not active by default**. A human operator must explicitly provide a valid authorization artifact; no authorization record or provider credential is stored in the repository.
 

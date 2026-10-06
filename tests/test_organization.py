@@ -11,14 +11,20 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_checked_in_organization_registry_loads_and_resolves():
     registry = OrganizationRegistry.from_file(
         ROOT / "config" / "organization.json",
-        configured_models={"meta/llama-3.1-8b-instruct"},
+        configured_models={"nvidia/nemotron-3-ultra-550b-a55b","nvidia/nemotron-3-super-120b-a12b","z-ai/glm-5-3","deepseek-ai/deepseek-v4.1-flash","z-ai/glm-5-3-flash","google/gemma-4-31b-it","poolside/laguna-xs-2.1"},
     )
 
     researcher = registry.resolve_agent("researcher")
     assert researcher.department == "research"
     assert registry.department_for("researcher").department_id == "research"
     assert registry.model_preferences_for("researcher") == (
-        "meta/llama-3.1-8b-instruct",
+        "nvidia/nemotron-3-ultra-550b-a55b",
+        "nvidia/nemotron-3-super-120b-a12b",
+        "z-ai/glm-5-3",
+        "deepseek-ai/deepseek-v4.1-flash",
+        "z-ai/glm-5-3-flash",
+        "google/gemma-4-31b-it",
+        "poolside/laguna-xs-2.1",
     )
 
 

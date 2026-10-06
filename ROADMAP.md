@@ -183,28 +183,29 @@ The Workbench provides the governed shared capability plane for local files/comp
 
 It does not reopen Increment 11, Increment 12 or the frozen production-readiness queue.
 
-## Increment 13 — Multi-Provider Inference Resilience — IMPLEMENTED / AUTOMATED VERIFIED / LIVE PENDING
+## Increment 13 — Free-Model Inference Resilience — IMPLEMENTED / AUTOMATED VERIFIED / LIVE PENDING
 
 PRs already integrated on `main`:
 
 - **PR #149** — Critical Decision Model Ensemble.
 - **PR #150** — Multi-Agent Adversarial Review.
-- **PR #151** — Provider Availability, OpenAI + Anthropic adapters/discovery, dynamic reserve pool, governed catalog refresh and multi-provider outage resilience.
+- **PR #151** — Provider Health / Availability, discovery, dynamic reserve pool, governed catalog refresh and multi-provider fail-closed resilience. Optional paid adapters remain outside the canonical free-only runtime.
 
 The canonical CI for PR #151 passed the full unit/integration suite and the E2E suite.
 
 Implemented boundary:
 
-    provider/model health
+    free-model policy
+        -> provider/model health
         -> health-aware ModelRouter
-        -> provider-specific discovery
+        -> NVIDIA catalog discovery
         -> governed staged candidates
-        -> dynamic reserve pool
+        -> dynamic free reserve pool
         -> existing Director provider failover
         -> critical-decision ensemble
         -> adversarial specialist review
 
-The remaining acceptance step is a dedicated LIVE gate against real NVIDIA, OpenAI and Anthropic providers.
+The remaining acceptance step is the dedicated LIVE gate against the real free Gemini tier and free NVIDIA NIM endpoints. Paid-provider credentials are neither required nor part of the canonical runtime.
 
 Acceptance artifact:
 

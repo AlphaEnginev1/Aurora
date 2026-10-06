@@ -140,6 +140,7 @@ class ModelRegistry:
                 "quality_score": model.quality_score,
                 "latency_score": model.latency_score,
                 "cost_score": model.cost_score,
+                "pricing_tier": model.pricing_tier,
             }
             for model in self.models
         )

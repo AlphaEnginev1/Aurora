@@ -23,11 +23,12 @@ class Runtime:
 
 def router(tmp_path: Path):
     model = ModelSpec(
-        "nvidia/base",
+        "nvidia/nemotron-3-ultra-550b-a55b",
         "nvidia_api",
         "https://integrate.api.nvidia.com/v1",
         capabilities=("reasoning", "chat"),
         enabled=False,
+        pricing_tier="free",
     )
     registry = ProviderRegistry((
         ProviderSpec("nvidia_api", "NVIDIA", ("chat", "reasoning"), True, lambda spec: object()),
@@ -110,13 +111,13 @@ def test_nvidia_selected_model_is_activated_without_editing_repo_policy(tmp_path
     state = service.save_and_apply({
         "director": {
             "provider": "nvidia_api",
-            "model": "nvidia/new-model",
+            "model": "google/gemma-4-31b-it",
             "endpoint": "https://integrate.api.nvidia.com/v1",
         },
     })
 
     assert state["runtime"]["director_provider"] == "inference_router"
-    model = runtime.director.planner.router.model_registry.resolve("nvidia/new-model")
+    model = runtime.director.planner.router.model_registry.resolve("google/gemma-4-31b-it")
     assert model.enabled is True
     assert model.provider == "nvidia_api"
     assert runtime.director.planner.provider.provider_id == "inference_router"
@@ -128,13 +129,13 @@ def test_local_nvidia_model_setting_can_be_restored_on_startup(tmp_path: Path):
     store.save({
         "director": {
             "provider": "nvidia_api",
-            "model": "nvidia/persisted-model",
+            "model": "poolside/laguna-xs-2.1",
             "endpoint": "https://integrate.api.nvidia.com/v1",
         },
         "providers": {"nvidia_api": {"api_key": "secret"}},
     })
     r = router(tmp_path)
     _apply_local_model_settings(r, store)
-    restored = r.model_registry.resolve("nvidia/persisted-model")
+    restored = r.model_registry.resolve("poolside/laguna-xs-2.1")
     assert restored.enabled is True
     assert restored.provider == "nvidia_api"

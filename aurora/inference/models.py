@@ -27,6 +27,7 @@ class ModelSpec:
     cost_score: float = 0.5
     healthy: bool = True
     available: bool = True
+    pricing_tier: str = "unknown"
 
 
 @dataclass(frozen=True)

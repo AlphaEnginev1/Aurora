@@ -3,6 +3,7 @@ from __future__ import annotations
 import json, urllib.error, urllib.request
 from typing import Any, Mapping
 from aurora.inference.models import ModelSpec
+from aurora.inference.free_policy import is_free_model
 from aurora.inference.providers.registry import default_provider_registry
 from aurora.inference.discovery import ModelDiscoveryError
 from aurora.operator_settings import OperatorSettingsError, OperatorSettingsStore
@@ -28,13 +29,9 @@ class ProviderSettingsService:
             settings = self.store.update_from_form(payload)
             router = self.runtime.director.planner.router
             nvidia_key = self.store.credential("nvidia_api")
-            openai_key = self.store.credential("openai")
-            anthropic_key = self.store.credential("anthropic")
             router.nvidia_api_key = nvidia_key or None
             router.provider_registry = default_provider_registry(
                 nvidia_api_key=nvidia_key or None,
-                openai_api_key=openai_key or None,
-                anthropic_api_key=anthropic_key or None,
             )
 
             selected_model = str(settings["director"].get("model", "")).strip()
@@ -48,6 +45,7 @@ class ProviderSettingsService:
                         capabilities=("chat", "reasoning", "tool_use"),
                         context_window=131072,
                         enabled=True,
+                        pricing_tier=("free" if is_free_model("nvidia_api", selected_model) else "unknown"),
                     )
                     router.model_registry = type(router.model_registry).from_specs(
                         [*router.model_registry.models, existing],
@@ -68,6 +66,7 @@ class ProviderSettingsService:
                         cost_score=existing.cost_score,
                         healthy=existing.healthy,
                         available=existing.available,
+                        pricing_tier=existing.pricing_tier or ("free" if is_free_model("nvidia_api", existing.id) else "unknown"),
                     )
                     router.model_registry.replace(updated)
                     router.models = list(router.model_registry.models)
@@ -77,6 +76,8 @@ class ProviderSettingsService:
             if provider_id in {"router", "nvidia_api"}:
                 provider = InferenceDirectorProvider(router)
             elif provider_id in {"openai", "anthropic"}:
+                if getattr(router, "cost_policy", "all") == "free_only":
+                    raise DashboardProviderSettingsError(f"{provider_id} is disabled by Aurora free_only policy")
                 key = self.store.credential(provider_id)
                 if not key:
                     raise DashboardProviderSettingsError(
@@ -120,7 +121,7 @@ class ProviderSettingsService:
             with _urlopen(request) as response:
                 json.loads(response.read().decode("utf-8"))
             return {"provider":"gemini","ok":True,"model":model}
-        if provider_id in {"nvidia_api", "openai", "anthropic"}:
+        if provider_id in {"nvidia_api"}:
             key = self.store.credential(provider_id)
             if not key:
                 raise DashboardProviderSettingsError(f"{provider_id} API key is not configured")
@@ -144,7 +145,7 @@ class ProviderSettingsService:
                 "stage_state": "discovered",
             }
         raise DashboardProviderSettingsError(
-            "provider test supports gemini, nvidia_api, openai, or anthropic"
+            "provider test supports gemini or nvidia_api"
         )
 
 def _urlopen(request: urllib.request.Request):

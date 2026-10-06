@@ -333,10 +333,12 @@ def test_nvidia_discovery_conservatively_excludes_non_conversational_catalog_mod
 
     by_id = {candidate.model.id: candidate.model for candidate in candidates}
     assert by_id["nvidia/nemotron-3-super-120b-a12b"].capabilities == ("chat", "reasoning")
+    assert by_id["nvidia/nemotron-3-super-120b-a12b"].pricing_tier == "free"
     assert by_id["nvidia/nemotron-3.5-content-safety"].capabilities == ()
     assert by_id["nvidia/nemotron-3-embed-1b"].capabilities == ()
     assert by_id["nvidia/cosmos-vision-1"].capabilities == ()
     assert by_id["nvidia/some-unknown-model"].capabilities == ()
+    assert by_id["nvidia/some-unknown-model"].pricing_tier == "unknown"
 
 
 def test_candidate_id_is_deterministic():
