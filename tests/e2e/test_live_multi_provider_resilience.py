@@ -185,6 +185,27 @@ def test_live_free_model_resilience_acceptance(tmp_path: Path):
     assert len(selected_models) == 3
     assert all(item.pricing_tier == "free" for item in selected_models)
 
+    # Discovery is intentionally non-authoritative. Promote this LIVE-test
+    # snapshot only inside the ephemeral test registry after policy checks.
+    selected_models = [
+        ModelSpec(
+            id=item.id,
+            provider=item.provider,
+            endpoint=nvidia_endpoint,
+            capabilities=item.capabilities,
+            context_window=item.context_window,
+            enabled=True,
+            specialties=item.specialties,
+            quality_score=item.quality_score,
+            latency_score=item.latency_score,
+            cost_score=1.0,
+            healthy=True,
+            available=True,
+            pricing_tier="free",
+        )
+        for item in selected_models
+    ]
+
     model_registry = ModelRegistry.from_specs(
         selected_models,
         provider_registry=provider_registry,
