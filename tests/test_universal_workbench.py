@@ -89,7 +89,7 @@ def test_workbench_scoped_file_operations_and_census(tmp_path: Path, monkeypatch
 def test_all_configured_agents_have_universal_work_access():
     organization = OrganizationRegistry.from_file(
         "config/organization.json",
-        configured_models={"meta/llama-3.1-8b-instruct"},
+        configured_models={"nvidia/nemotron-3-ultra-550b-a55b","nvidia/nemotron-3-super-120b-a12b","z-ai/glm-5-3","deepseek-ai/deepseek-v4.1-flash","z-ai/glm-5-3-flash","google/gemma-4-31b-it","poolside/laguna-xs-2.1"},
     )
     for agent in organization.agents.values():
         assert agent.universal_access is True
