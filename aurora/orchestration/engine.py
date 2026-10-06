@@ -80,6 +80,7 @@ class OrchestrationEngine:
         skill_tags: Sequence[str] | None = None,
         task_type: str | None = None,
         learned_model_scores: Mapping[str, float] | None = None,
+        use_workbench: bool = True,
     ) -> TaskResult:
         messages = list(context or [])
         messages.append({"role": "user", "content": objective})
@@ -107,7 +108,7 @@ class OrchestrationEngine:
             metadata=request_metadata,
         )
         try:
-            if self._workbench_loop is not None:
+            if use_workbench and self._workbench_loop is not None:
                 response = self._workbench_loop.run(
                     request=request,
                     actor=role,
