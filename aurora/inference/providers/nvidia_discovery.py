@@ -12,7 +12,8 @@ from urllib.request import Request, urlopen
 
 from ..discovery import DiscoveredModelCandidate, candidate_id
 from ..models import ModelSpec
-from ..free_policy import dynamic_catalog_mode, is_discovered_free_model, record_metadata
+from ..free_policy import is_discovered_free_model, record_metadata
+from .nvidia_free_catalog import NVIDIAFreeEndpointCatalogProvider
 
 
 class NVIDIAModelDiscoveryError(RuntimeError):
@@ -41,6 +42,18 @@ class NVIDIAModelDiscoveryProvider:
 
     def discover(self) -> tuple[DiscoveredModelCandidate, ...]:
         endpoint = f"{self.base_url}/models"
+        free_catalog_ids: set[str] = set()
+        try:
+            free_catalog_ids = set(
+                NVIDIAFreeEndpointCatalogProvider(
+                    url=os.getenv(
+                        "NVIDIA_FREE_CATALOG_URL",
+                        "https://build.nvidia.com/models?pageSize=96",
+                    )
+                ).discover()
+            )
+        except Exception:
+            free_catalog_ids = set()
         headers = {"Accept": "application/json"}
         if self.api_key.strip():
             headers["Authorization"] = f"Bearer {self.api_key}"
@@ -96,7 +109,7 @@ class NVIDIAModelDiscoveryProvider:
             if context_window is None:
                 context_window = _positive_int(free_metadata.get("context_window"))
             catalog_free_endpoint = bool(
-                dynamic_catalog_mode(self.provider_id) == "free_endpoint"
+                normalized_model_id in free_catalog_ids
                 or row.get("free_endpoint")
                 or str(row.get("access_tier", "")).strip().lower() == "free"
                 or str(row.get("pricing_tier", "")).strip().lower() == "free"
@@ -132,6 +145,12 @@ class NVIDIAModelDiscoveryProvider:
                     "context_window",
                 }
             }
+            if normalized_model_id in free_catalog_ids:
+                metadata["free_endpoint_catalog"] = True
+                metadata["free_endpoint_catalog_source"] = os.getenv(
+                    "NVIDIA_FREE_CATALOG_URL",
+                    "https://build.nvidia.com/models?pageSize=96",
+                )
             candidates.append(
                 DiscoveredModelCandidate(
                     candidate_id=candidate_id(self.provider_id, model.id),
