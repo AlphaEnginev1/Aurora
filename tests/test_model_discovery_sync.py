@@ -395,3 +395,40 @@ def test_dynamic_free_nvidia_candidate_is_activated(monkeypatch, tmp_path):
     assert model_registry.resolve(model_id).enabled is True
     assert model_registry.resolve(model_id).pricing_tier == "free"
     assert candidate_store.get(candidate.candidate_id).state == "synced"
+
+
+def test_nvidia_discovery_joins_served_catalog_with_official_free_catalog(monkeypatch):
+    from aurora.inference.providers.nvidia_discovery import NVIDIAModelDiscoveryProvider
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return json.dumps({
+                "object": "list",
+                "data": [
+                    {"id": "new/free-nvidia-model", "capabilities": ["chat", "reasoning"]},
+                    {"id": "new/served-but-not-free", "capabilities": ["chat", "reasoning"]},
+                ],
+            }).encode("utf-8")
+
+    monkeypatch.setattr(
+        "aurora.inference.providers.nvidia_discovery.urlopen",
+        lambda _request, timeout: FakeResponse(),
+    )
+    monkeypatch.setattr(
+        "aurora.inference.providers.nvidia_free_catalog.NVIDIAFreeEndpointCatalogProvider.discover",
+        lambda self: ("new/free-nvidia-model",),
+    )
+
+    candidates = NVIDIAModelDiscoveryProvider(
+        base_url="https://integrate.api.nvidia.com/v1",
+        api_key="secret",
+    ).discover()
+    by_id = {item.model.id: item.model for item in candidates}
+    assert by_id["new/free-nvidia-model"].pricing_tier == "free"
+    assert by_id["new/served-but-not-free"].pricing_tier == "unknown"
