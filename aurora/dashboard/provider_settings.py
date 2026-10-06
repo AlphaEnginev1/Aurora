@@ -74,9 +74,9 @@ class ProviderSettingsService:
 
             director = settings["director"]
             provider_id = str(director.get("provider", "")).strip().lower()
-            if provider_id == "router":
+            if provider_id in {"router", "nvidia_api"}:
                 provider = InferenceDirectorProvider(router)
-            elif provider_id in {"nvidia_api", "openai", "anthropic"}:
+            elif provider_id in {"openai", "anthropic"}:
                 key = self.store.credential(provider_id)
                 if not key:
                     raise DashboardProviderSettingsError(
