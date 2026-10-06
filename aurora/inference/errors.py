@@ -49,3 +49,13 @@ class ProviderResponseError(ProviderExecutionError):
 class ProviderHTTPError(ProviderExecutionError):
     code = "provider_http_error"
     retryable = False
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        context: ProviderErrorContext,
+        status_code: int | None = None,
+    ) -> None:
+        super().__init__(message, context=context)
+        self.status_code = status_code

@@ -14,11 +14,13 @@ DEFAULT_SETTINGS: dict[str, Any] = {
         "provider": "gemini",
         "model": "gemini-3.7-flash",
         "endpoint": "https://generativelanguage.googleapis.com/v1beta",
-        "failover": {"enabled": True, "order": ["nvidia_api", "router"]},
+        "failover": {"enabled": True, "order": ["nvidia_api", "openai", "anthropic", "router"]},
     },
     "providers": {
         "gemini": {"enabled": True, "api_key": ""},
         "nvidia_api": {"enabled": True, "api_key": "", "base_url": "https://integrate.api.nvidia.com/v1"},
+        "openai": {"enabled": True, "api_key": "", "base_url": "https://api.openai.com/v1"},
+        "anthropic": {"enabled": True, "api_key": "", "base_url": "https://api.anthropic.com/v1"},
     },
 }
 
@@ -65,7 +67,7 @@ class OperatorSettingsStore:
         next_data = _merge(current, payload)
         incoming_providers = payload.get("providers", {})
         if isinstance(incoming_providers, Mapping):
-            for provider_id in ("gemini", "nvidia_api"):
+            for provider_id in ("gemini", "nvidia_api", "openai", "anthropic"):
                 incoming = incoming_providers.get(provider_id, {})
                 if isinstance(incoming, Mapping) and "api_key" in incoming:
                     value = str(incoming.get("api_key") or "")
@@ -92,8 +94,8 @@ def _validate(data: Mapping[str, Any]) -> None:
     if not isinstance(director, Mapping) or not isinstance(providers, Mapping):
         raise OperatorSettingsError("operator settings require director and providers objects")
     provider = str(director.get("provider", "")).strip().lower()
-    if provider not in {"gemini", "router", "nvidia_api"}:
-        raise OperatorSettingsError("director.provider must be gemini, router, or nvidia_api")
+    if provider not in {"gemini", "router", "nvidia_api", "openai", "anthropic"}:
+        raise OperatorSettingsError("director.provider must be gemini, router, nvidia_api, openai, or anthropic")
     if not str(director.get("model", "")).strip():
         raise OperatorSettingsError("director.model cannot be empty")
     if not str(director.get("endpoint", "")).strip().startswith("https://"):
@@ -106,7 +108,7 @@ def _validate(data: Mapping[str, Any]) -> None:
     order = failover.get("order", [])
     if not isinstance(order, list) or not all(isinstance(item, str) for item in order):
         raise OperatorSettingsError("director.failover.order must be a string array")
-    allowed_failover = {"router", "nvidia_api"}
+    allowed_failover = {"router", "nvidia_api", "openai", "anthropic"}
     normalized_order = [item.strip().lower() for item in order]
     if any(item not in allowed_failover for item in normalized_order):
         raise OperatorSettingsError("director.failover.order contains an unsupported provider")
@@ -116,8 +118,8 @@ def _validate(data: Mapping[str, Any]) -> None:
         provider_data = providers.get(provider_id)
         if not isinstance(provider_data, Mapping):
             raise OperatorSettingsError(f"provider configuration missing: {provider_id}")
-        if provider_id == "nvidia_api" and not str(provider_data.get("base_url", "")).strip().startswith("https://"):
-            raise OperatorSettingsError("nvidia_api.base_url must use HTTPS")
+        if provider_id in {"nvidia_api", "openai", "anthropic"} and not str(provider_data.get("base_url", "")).strip().startswith("https://"):
+            raise OperatorSettingsError(f"{provider_id}.base_url must use HTTPS")
 
 def _merge(base: Mapping[str, Any], overlay: Mapping[str, Any]) -> dict[str, Any]:
     result = {str(k): _deepcopy(v) for k, v in base.items()}
