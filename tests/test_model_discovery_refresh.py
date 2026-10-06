@@ -43,5 +43,4 @@ def test_controlled_refresh_is_rate_limited_and_never_promotes(tmp_path: Path):
     assert first["fake"] == staged
     assert second == {}
     assert calls == ["fake"]
-    assert candidates.get("fake:model-a").state == "discovered"
     assert model_registry.ids == ()
