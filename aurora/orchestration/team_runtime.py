@@ -47,6 +47,75 @@ class TeamCoordinator:
         self.max_members = max_members
         self.skill_acquisition = skill_acquisition
 
+
+    def select_adversarial_reviewers(
+        self,
+        *,
+        objective: str,
+        current_roles: Sequence[str] = (),
+        min_reviewers: int = 2,
+        max_reviewers: int = 3,
+    ) -> tuple:
+        """Select distinct authorized specialists for an independent review panel.
+
+        Selection reuses the existing AgentSelector and organization registry. The
+        current team is preferred for context continuity, while at least one reviewer
+        from outside the current team is preferred when one is available.
+        """
+        objective = objective.strip()
+        if not objective:
+            raise TeamCoordinatorError("review objective is empty")
+        if min_reviewers < 2:
+            raise TeamCoordinatorError("adversarial review requires at least two reviewers")
+        if max_reviewers < min_reviewers:
+            raise TeamCoordinatorError("max_reviewers must be >= min_reviewers")
+
+        decision = self.agent_selector.route(
+            objective=f"independent adversarial review: {objective}",
+        )
+        ranked = list(decision.candidates)
+        current = {role for role in current_roles if role.strip()}
+        selected_roles: list[str] = []
+
+        def add(role: str) -> None:
+            if role not in selected_roles and len(selected_roles) < max_reviewers:
+                selected_roles.append(role)
+
+        for role, _score in ranked:
+            if role in current:
+                add(role)
+                if selected_roles:
+                    break
+
+        for role, _score in ranked:
+            if role not in current:
+                add(role)
+                if len(selected_roles) >= min_reviewers:
+                    break
+
+        for role, _score in ranked:
+            add(role)
+            if len(selected_roles) >= max_reviewers:
+                break
+
+        if len(selected_roles) < min_reviewers:
+            raise TeamCoordinatorError(
+                "adversarial review requires at least two distinct authorized specialists"
+            )
+
+        from aurora.organization.agent_team import TeamMember
+
+        scores = dict(ranked)
+        return tuple(
+            TeamMember(
+                role=role,
+                score=scores.get(role, 0.0),
+                covered_skills=(),
+                department=self.agent_selector.organization.resolve_agent(role).department,
+            )
+            for role in selected_roles
+        )
+
     def adapt_for_runtime(
         self,
         *,
