@@ -291,6 +291,59 @@ class ModelDiscoveryService:
             staged.append(staged_candidate)
         return tuple(staged)
 
+    def activate_free_discovered(
+        self,
+        *,
+        provider_id: str,
+        limit: int = 500,
+    ) -> tuple[ModelSpec, ...]:
+        """Activate every policy-approved free model discovered from a trusted catalog."""
+        if limit < 1:
+            raise ValueError("limit must be at least 1")
+        from .free_policy import is_discovered_free_model
+
+        activated: list[ModelSpec] = []
+        for candidate in self.candidate_store.list(
+            provider_id=provider_id, state="discovered", limit=limit
+        ):
+            model = candidate.model
+            metadata = dict(candidate.metadata)
+            catalog_free = bool(
+                metadata.get("free_endpoint")
+                or str(metadata.get("access_tier", "")).strip().lower() == "free"
+                or str(metadata.get("pricing_tier", "")).strip().lower() == "free"
+                or str(metadata.get("tier", "")).strip().lower() == "free"
+                or model.pricing_tier == "free"
+            )
+            if not is_discovered_free_model(
+                provider_id, model.id, discovered_free_endpoint=catalog_free
+            ):
+                continue
+            approved = ModelSpec(
+                id=model.id,
+                provider=model.provider,
+                endpoint=model.endpoint,
+                capabilities=model.capabilities,
+                context_window=model.context_window,
+                enabled=True,
+                specialties=model.specialties,
+                quality_score=model.quality_score,
+                latency_score=model.latency_score,
+                cost_score=1.0,
+                healthy=True,
+                available=True,
+                pricing_tier="free",
+            )
+            try:
+                self.model_registry.register(approved)
+            except ModelRegistryError as exc:
+                if "duplicate model registration" not in str(exc):
+                    raise ModelDiscoveryError(str(exc)) from exc
+                self.model_registry.replace(approved)
+            self.candidate_store.set_state(candidate.candidate_id, "synced")
+            activated.append(approved)
+        return tuple(activated)
+
     def promote(
         self,
         candidate_id: str,
