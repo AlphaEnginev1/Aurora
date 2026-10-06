@@ -4,7 +4,7 @@ Autonomous multi-agent engineering system.
 
 ## Current status
 
-**IMPLEMENTATION COMPLETE — LIVE RESILIENCE CLOSURE IN PROGRESS**
+**IMPLEMENTATION COMPLETE — FREE-MODEL RESILIENCE CLOSURE IN PROGRESS**
 
 Aurora has one authoritative engineering line:
 
@@ -66,6 +66,6 @@ The Director and every specialist agent can request the work capability required
 
 The contract preserves least-privilege, approvals, sandboxing, credential isolation, provenance, evidence and auditability. It also explicitly preserves all previously closed acceptance boundaries.
 
-## Current multi-provider resilience closure
+## Current free-model resilience closure
 
-PR #151 is integrated. The implementation and deterministic coverage are green on canonical `main`. The remaining LIVE closure is defined in `docs/operations/LIVE_MULTI_PROVIDER_RESILIENCE.md` and validates real NVIDIA, OpenAI and Anthropic adapters, provider health, discovery/staging, dynamic reserve failover, critical-decision ensemble and Director adversarial review.
+The canonical Aurora runtime is now **free-only**. The active Director path uses the free Gemini tier, and specialist inference/failover uses the curated free NVIDIA NIM pool under `config/free-model-policy.json`. The runtime rejects paid or unclassified models before routing, and the dedicated LIVE gate in `docs/operations/LIVE_MULTI_PROVIDER_RESILIENCE.md` requires only Gemini and NVIDIA credentials.\n\n### Current curated free model pool\n\nDirector: `gemini-3.8-flash` (with `gemini-3.7-flash` retained as a free fallback). Specialist/reserve pool: `nvidia/nemotron-3-ultra-550b-a55b`, `nvidia/nemotron-3-super-120b-a12b`, `z-ai/glm-5-3`, `z-ai/glm-5-3-flash`, `deepseek-ai/deepseek-v4.1-flash`, `google/gemma-4-31b-it`, and `poolside/laguna-xs-2.1`.\n
