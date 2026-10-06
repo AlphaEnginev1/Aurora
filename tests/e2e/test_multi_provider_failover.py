@@ -76,8 +76,11 @@ def test_multiple_provider_outage_continues_to_next_provider(tmp_path: Path):
     assert result.content == "nvidia reserve continuation"
     assert nvidia_a.calls == 1
     assert nvidia_b.calls == 1
-    assert openai.calls == 1
-    assert anthropic.calls == 1
+    # A successful second NVIDIA reserve model ends this failover chain.
+    # Later providers must not be touched once a healthy same-provider reserve
+    # candidate succeeds.
+    assert openai.calls == 0
+    assert anthropic.calls == 0
     assert health.snapshot("gemini", "gemini-model").state == "cooldown"
     assert health.snapshot("nvidia_api", "nvidia/model-a").state == "cooldown"
     assert health.snapshot("openai", "gpt/model-a").state == "cooldown"
