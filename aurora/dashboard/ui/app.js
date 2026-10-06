@@ -547,7 +547,7 @@
       const models = safeArray(data.models);
       $("nvidia-models").innerHTML = models.length
         ? '<div class="settings-model-title">DISCOVERED MODELS</div>' +
-          models.slice(0, 40).map(function (model) {
+          models.map(function (model) {
             return '<button type="button" class="settings-model" data-model="' + esc(model) + '">' + esc(model) + '</button>';
           }).join("")
         : '<div class="empty-state">No model IDs returned by NVIDIA.</div>';
