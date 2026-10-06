@@ -25,7 +25,7 @@ The test never requires OpenAI or Anthropic credentials and the workflow explici
 
 The checked-in `config/free-model-policy.json` is the source of truth for models Aurora is allowed to route in `free_only` mode.
 
-Current curated models:
+The checked-in models are seed metadata only. Aurora dynamically discovers the NVIDIA catalog and activates every model exposed by the free endpoint; new models can enter automatically and removed models stop being eligible after refresh.
 
 - Gemini: `gemini-3.8-flash`, `gemini-3.7-flash`
 - NVIDIA NIM: `nvidia/nemotron-3-ultra-550b-a55b`
