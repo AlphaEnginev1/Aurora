@@ -118,7 +118,7 @@ def _validate(data: Mapping[str, Any]) -> None:
         provider_data = providers.get(provider_id)
         if not isinstance(provider_data, Mapping):
             raise OperatorSettingsError(f"provider configuration missing: {provider_id}")
-        if bool(director.get("free_only", True)) and provider_id in {"gemini", "nvidia_api"}:
+        if bool(director.get("free_only", True)) and provider == provider_id and provider_id in {"gemini", "nvidia_api"}:
             model_id = str(director.get("model", "")).strip()
             if not is_free_model(provider_id, model_id):
                 raise OperatorSettingsError(
