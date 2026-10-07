@@ -63,7 +63,7 @@ class ProviderHealthStore:
             if row is None:
                 return ProviderHealthSnapshot(provider_id,model_id,"healthy",0,0,0,None,None,None,None,None,now.isoformat())
             expiry=_parse_datetime(row["cooldown_until"])
-            if row["state"]=="cooldown" and expiry is not None and now>=expiry:
+            if row["state"] in {"cooldown", "unavailable"} and expiry is not None and now>=expiry:
                 db.execute("UPDATE provider_health SET state='probing',updated_at=? WHERE provider_id=? AND model_id=?",(now.isoformat(),provider_id,model_id))
                 row=db.execute("SELECT * FROM provider_health WHERE provider_id=? AND model_id=?",(provider_id,model_id)).fetchone()
             return _row_to_snapshot(row,now.isoformat())
