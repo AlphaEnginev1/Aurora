@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import re
 from typing import Any, Protocol
 from uuid import uuid4
 
@@ -60,6 +61,15 @@ class InferenceDirectorProvider:
     """Compatibility adapter from Aurora's inference fabric to DirectorProvider."""
 
     provider_id = "inference_router"
+    _TEXT_TOOL_CALL_RE = re.compile(
+        r"^\[(?P<name>[A-Za-z0-9_.:-]+)(?P<meta>[^\]]*)\]\s*"
+        r"(?P<body>.*?)\s*\[/\1\]$",
+        re.DOTALL,
+    )
+    _TASK_RE = re.compile(
+        r'^task\s*:\s*"(?P<objective>.*?)"\s*$',
+        re.DOTALL,
+    )
 
     def __init__(self, router: ModelRouter) -> None:
         self._router = router
@@ -116,15 +126,16 @@ class InferenceDirectorProvider:
             "Available tools:\n" + declarations
         )
 
-    @staticmethod
+    @classmethod
     def _parse_tool_calls(
+        cls,
         content: str,
         tools: tuple[DirectorToolSpec, ...],
     ) -> tuple[DirectorToolCall, ...]:
         if not tools:
             return ()
         raw = content.strip()
-        fence = "```"
+        fence = chr(96) * 3
         if raw.startswith(fence):
             lines = raw.splitlines()
             if len(lines) >= 3 and lines[-1].strip().startswith(fence):
@@ -132,12 +143,49 @@ class InferenceDirectorProvider:
         try:
             payload = json.loads(raw)
         except json.JSONDecodeError:
+            payload = None
+        if isinstance(payload, dict) and isinstance(payload.get("tool_calls"), list):
+            return cls._build_tool_calls(payload["tool_calls"], tools)
+        return cls._parse_structured_text_tool_call(raw, tools)
+
+    @classmethod
+    def _parse_structured_text_tool_call(
+        cls,
+        raw: str,
+        tools: tuple[DirectorToolSpec, ...],
+    ) -> tuple[DirectorToolCall, ...]:
+        match = cls._TEXT_TOOL_CALL_RE.fullmatch(raw)
+        if match is None:
             return ()
-        if not isinstance(payload, dict) or not isinstance(payload.get("tool_calls"), list):
-            return ()
+        name = match.group("name")
+        known = {tool.name for tool in tools}
+        if name not in known:
+            raise RuntimeError(f"Director requested unregistered tool: {name}")
+        objective = None
+        for line in match.group("body").splitlines():
+            line = line.strip()
+            task_match = cls._TASK_RE.fullmatch(line)
+            if task_match:
+                objective = task_match.group("objective").strip()
+                break
+        if not objective:
+            raise RuntimeError(f"Director tool call {name} is missing a non-empty task")
+        return (
+            DirectorToolCall(
+                call_id=uuid4().hex,
+                name=name,
+                arguments={"objective": objective},
+            ),
+        )
+
+    @staticmethod
+    def _build_tool_calls(
+        raw_calls: list[Any],
+        tools: tuple[DirectorToolSpec, ...],
+    ) -> tuple[DirectorToolCall, ...]:
         known = {tool.name for tool in tools}
         calls: list[DirectorToolCall] = []
-        for item in payload["tool_calls"]:
+        for item in raw_calls:
             if not isinstance(item, dict):
                 raise RuntimeError("Director tool call item must be an object")
             name = item.get("name")
@@ -146,11 +194,13 @@ class InferenceDirectorProvider:
                 raise RuntimeError(f"Director requested unregistered tool: {name}")
             if not isinstance(arguments, dict):
                 raise RuntimeError("Director tool call arguments must be an object")
-            calls.append(DirectorToolCall(
-                call_id=uuid4().hex,
-                name=name,
-                arguments=arguments,
-            ))
+            calls.append(
+                DirectorToolCall(
+                    call_id=uuid4().hex,
+                    name=name,
+                    arguments=arguments,
+                )
+            )
         return tuple(calls)
 
 
