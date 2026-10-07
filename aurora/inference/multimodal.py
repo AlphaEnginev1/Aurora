@@ -104,9 +104,13 @@ def openai_messages(messages: list[dict[str, Any]], *, allowed_modalities: froze
         for part in parts:
             if part.modality not in allowed_modalities:
                 raise MultimodalContentError(f"modality {part.modality} is not supported by this provider")
-        content = parts[0].as_openai_part() if len(parts) == 1 and parts[0].modality == "text" else [
-            part.as_openai_part() for part in parts
-        ]
+        if len(parts) == 1 and parts[0].modality == "text":
+            # OpenAI-compatible providers such as NVIDIA expect plain text
+            # messages to use a string content value. Multimodal messages
+            # continue to use the structured content-part representation.
+            content = parts[0].text or ""
+        else:
+            content = [part.as_openai_part() for part in parts]
         result.append({"role": message.get("role"), "content": content})
     return result
 

@@ -97,3 +97,38 @@ def test_router_uses_health_to_remove_cooled_model(tmp_path: Path):
         router.generate(request, capability="reasoning")
     assert health.snapshot("test", "m1").state == "cooldown"
     assert router.route(request, capability="reasoning").selected_model == "m2"
+
+
+def test_configuration_failure_reenters_probing_after_revalidation_window(tmp_path: Path):
+    store = ProviderHealthStore(
+        tmp_path / "runtime.db",
+        failure_threshold=1,
+        base_cooldown_seconds=1,
+        max_cooldown_seconds=10,
+    )
+    failed = store.record_failure(
+        "nvidia_api",
+        "model/recovered",
+        ProviderHTTPError(
+            "unauthorized",
+            context=_ctx(provider="nvidia_api", model="model/recovered"),
+            status_code=401,
+        ),
+    )
+    assert failed.state == "unavailable"
+    assert not failed.routable
+    assert not store.is_eligible("nvidia_api", "model/recovered")
+
+    future = datetime.now(timezone.utc) + timedelta(seconds=11)
+    probing = store.snapshot("nvidia_api", "model/recovered", now=future)
+    assert probing.state == "probing"
+    assert probing.routable
+
+    recovered = store.record_success(
+        "nvidia_api",
+        "model/recovered",
+        latency_ms=25,
+    )
+    assert recovered.state == "healthy"
+    assert recovered.consecutive_failures == 0
+    assert recovered.last_error_code is None
