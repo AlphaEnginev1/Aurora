@@ -72,3 +72,14 @@ def test_openai_translation_preserves_image_as_data_url():
     assert translated[0]["content"][1]["type"] == "image_url"
     assert translated[0]["content"][1]["image_url"]["url"] == "data:image/png;base64,ZmFrZQ=="
 
+
+
+def test_openai_translation_uses_plain_string_for_text_only_messages():
+    translated = openai_messages(
+        [{"role": "user", "content": "Reply with exactly: AURORA_PROVIDER_OK"}],
+        allowed_modalities=frozenset({"text", "image"}),
+    )
+    assert translated == [{
+        "role": "user",
+        "content": "Reply with exactly: AURORA_PROVIDER_OK",
+    }]
