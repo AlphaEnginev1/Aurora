@@ -404,6 +404,43 @@ def _build_director_provider_failover(
     )
 
 
+
+def _activate_selected_discovered_models(
+    router: ModelRouter,
+    settings_store: OperatorSettingsStore,
+    workspace_root: Path,
+) -> None:
+    """Make persisted/live free NVIDIA discovery available before Director startup.
+
+    The Director may be configured to use a model learned from NVIDIA's live Free
+    Endpoint catalog. Startup must therefore activate governed discovered candidates
+    before validating the configured Director model; otherwise a valid dynamic model
+    is rejected merely because the static seed policy does not list it.
+    """
+    settings = settings_store.load()
+    director = settings.get("director", {}) if isinstance(settings, dict) else {}
+    provider_id = str(director.get("provider", "router")).strip().lower()
+    model_id = str(director.get("model", "")).strip()
+    if provider_id != "nvidia_api" or not model_id:
+        return
+    if is_free_model("nvidia_api", model_id):
+        return
+    if not router.provider_registry or not router.model_registry:
+        return
+    candidate_store = ModelCandidateStore(workspace_root / "model-candidates.db")
+    discovery = ModelDiscoveryService(
+        router.provider_registry,
+        router.model_registry,
+        candidate_store,
+    )
+    # Reuse the governed refresh interval. If the catalog was refreshed recently,
+    # refresh_all returns the persisted candidates without another network call.
+    discovery.refresh_all(
+        provider_ids=("nvidia_api",),
+        min_interval_seconds=float(os.getenv("AURORA_MODEL_DISCOVERY_REFRESH_SECONDS", "900")),
+    )
+    discovery.activate_free_discovered(provider_id="nvidia_api", limit=500)
+
 def build_director_service(*, inference_policy_path: str | Path, autonomy_policy_path: str | Path,
     registry_path: str | Path, network_policy_path: str | Path, workspace_root: str | Path,
     egress_proxy_host: str, egress_proxy_port: int=3128, organization_path: str | Path="config/organization.json",
@@ -440,6 +477,8 @@ def build_director_service(*, inference_policy_path: str | Path, autonomy_policy
         cost_policy=cost_policy,
     )
     _apply_local_model_settings(router, settings_store)
+    root=Path(workspace_root).resolve()
+    _activate_selected_discovered_models(router, settings_store, root)
     skill_registry=SkillRegistry.from_file(skills_path,configured_models={model.id for model in inference_specs})
     organization=OrganizationRegistry.from_file(organization_path,configured_models={model.id for model in inference_specs})
     skill_registry.validate_organization(organization)
