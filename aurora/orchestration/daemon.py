@@ -20,6 +20,7 @@ from aurora.operator_settings import OperatorSettingsStore, settings_path
 from aurora.dashboard.provider_settings import ProviderSettingsService
 from aurora.dashboard.update_service import DashboardUpdateService
 from aurora.dashboard.health import DashboardHealthService
+from aurora.workbench.github_auth import GitHubOAuthService
 
 
 def _path_env(name: str, default: str) -> Path:
@@ -120,6 +121,14 @@ def main() -> int:
     dashboard_server = None
     operator_store = OperatorSettingsStore(settings_path(os.getenv("AURORA_WORKSPACE_ROOT", ".aurora-runtime")))
     provider_settings = ProviderSettingsService(operator_store, runtime)
+    github_oauth = GitHubOAuthService(
+        operator_store,
+        getattr(getattr(runtime, "workbench", None), "gateway", None),
+        runtime_root=_path_env("AURORA_WORKSPACE_ROOT", ".aurora-runtime"),
+    )
+    if github_oauth.gateway is None:
+        parser.error("GitHub OAuth requires the Universal Workbench network gateway")
+    github_oauth.restore_runtime_token()
     update_service = DashboardUpdateService(Path(__file__).resolve().parents[2])
     if args.dashboard:
         try:
@@ -139,6 +148,7 @@ def main() -> int:
                 provider_settings=provider_settings,
                 update_service=update_service,
                 health_service=health_service,
+                github_oauth=github_oauth,
             )
         except DashboardHTTPError as exc:
             parser.error(str(exc))
