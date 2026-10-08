@@ -14,6 +14,8 @@ import time
 import urllib.error
 import urllib.request
 
+from aurora.autonomy.internet import InternetPolicyError
+
 from ..audit import now_utc
 from ..errors import (
     ProviderConfigurationError,
@@ -47,10 +49,12 @@ class NVIDIAAPIProvider:
         spec: ModelSpec,
         api_key: str | None = None,
         timeout: float = 60.0,
+        gateway=None,
     ):
         self.spec = spec
         self.api_key = api_key or os.getenv("NVIDIA_API_KEY")
         self.timeout = timeout
+        self.gateway = gateway
 
     def health(self) -> bool:
         return bool(self.spec.enabled and self.spec.endpoint and self.api_key)
@@ -101,20 +105,31 @@ class NVIDIAAPIProvider:
         if request.max_tokens is not None:
             payload["max_tokens"] = request.max_tokens
 
-        req = urllib.request.Request(
-            self.spec.endpoint.rstrip("/") + "/chat/completions",
-            data=json.dumps(payload).encode("utf-8"),
-            method="POST",
-            headers={
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-            },
-        )
-
+        endpoint = self.spec.endpoint.rstrip("/") + "/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        }
+        body = json.dumps(payload).encode("utf-8")
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as response:
-                raw = json.loads(response.read().decode("utf-8"))
+            if self.gateway is not None:
+                response = self.gateway.request_with_metadata(
+                    endpoint,
+                    method="POST",
+                    headers=headers,
+                    body=body,
+                )
+                raw = json.loads(response.body.decode("utf-8"))
+            else:
+                req = urllib.request.Request(
+                    endpoint,
+                    data=body,
+                    method="POST",
+                    headers=headers,
+                )
+                with urllib.request.urlopen(req, timeout=self.timeout) as response:
+                    raw = json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             raise ProviderHTTPError(
                 f"NVIDIA HTTP request failed with status {exc.code}",
@@ -124,6 +139,11 @@ class NVIDIAAPIProvider:
         except (TimeoutError, socket.timeout) as exc:
             raise ProviderTimeoutError(
                 "NVIDIA inference request timed out",
+                context=context,
+            ) from None
+        except InternetPolicyError as exc:
+            raise ProviderTransportError(
+                "NVIDIA inference transport failed",
                 context=context,
             ) from None
         except urllib.error.URLError as exc:
