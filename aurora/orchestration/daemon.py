@@ -121,14 +121,18 @@ def main() -> int:
     dashboard_server = None
     operator_store = OperatorSettingsStore(settings_path(os.getenv("AURORA_WORKSPACE_ROOT", ".aurora-runtime")))
     provider_settings = ProviderSettingsService(operator_store, runtime)
-    github_oauth = GitHubOAuthService(
-        operator_store,
-        getattr(getattr(runtime, "workbench", None), "gateway", None),
-        runtime_root=_path_env("AURORA_WORKSPACE_ROOT", ".aurora-runtime"),
+    workbench_gateway = getattr(getattr(runtime, "workbench", None), "gateway", None)
+    github_oauth = (
+        GitHubOAuthService(
+            operator_store,
+            workbench_gateway,
+            runtime_root=_path_env("AURORA_WORKSPACE_ROOT", ".aurora-runtime"),
+        )
+        if workbench_gateway is not None
+        else None
     )
-    if github_oauth.gateway is None:
-        parser.error("GitHub OAuth requires the Universal Workbench network gateway")
-    github_oauth.restore_runtime_token()
+    if github_oauth is not None:
+        github_oauth.restore_runtime_token()
     update_service = DashboardUpdateService(Path(__file__).resolve().parents[2])
     if args.dashboard:
         try:
