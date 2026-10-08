@@ -8,7 +8,7 @@ from pathlib import Path
 import re
 import uuid
 from typing import Any
-from urllib.parse import unquote, urlparse
+from urllib.parse import quote, unquote, urlparse
 
 from .conversation_api import DashboardConversationAPI, DashboardConversationAPIError
 from .gateway import DashboardGateway, DashboardGatewayError
