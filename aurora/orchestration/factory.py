@@ -455,14 +455,6 @@ def build_director_service(*, inference_policy_path: str | Path, autonomy_policy
     provider_failover_db_path: str | Path | None = None,
 ) -> DirectorService:
     settings_store = OperatorSettingsStore(settings_path(workspace_root))
-    # The canonical runtime is Router-first. A persisted provider selection is
-    # legacy/operator state and must not silently pin the Director on restart.
-    # Direct NVIDIA mode is opt-in through the explicit runtime environment.
-    if not os.getenv("AURORA_DIRECTOR_PROVIDER"):
-        current_settings = settings_store.load()
-        director = current_settings.get("director", {}) if isinstance(current_settings, dict) else {}
-        if str(director.get("provider", "router")).strip().lower() != "router":
-            settings_store.save({"director": {"provider": "router", "model": "router"}})
     nvidia_key = settings_store.credential("nvidia_api") or os.getenv("NVIDIA_API_KEY")
     provider_registry = default_provider_registry(
         nvidia_api_key=nvidia_key,
