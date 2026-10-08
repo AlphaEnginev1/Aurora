@@ -12,6 +12,9 @@ class FakeSettingsStore:
     def load(self):
         return {"director": {"provider": self.provider, "model": self.model}}
 
+    def credential(self, provider_id):
+        return "test-key" if provider_id == "nvidia_api" else ""
+
 
 class FakeDiscovery:
     calls = []
@@ -31,10 +34,12 @@ class FakeDiscovery:
 def test_startup_activates_dynamic_nvidia_model_before_director_validation(monkeypatch, tmp_path):
     FakeDiscovery.calls = []
     monkeypatch.setattr(factory, "ModelDiscoveryService", FakeDiscovery)
-    monkeypatch.setattr(factory, "is_free_model", lambda provider, model: False)
     monkeypatch.setattr(factory, "ModelCandidateStore", lambda path: path)
 
-    router = SimpleNamespace(provider_registry=object(), model_registry=object())
+    router = SimpleNamespace(
+        provider_registry=SimpleNamespace(ids=("nvidia_api",)),
+        model_registry=object(),
+    )
     settings = FakeSettingsStore()
 
     factory._activate_selected_discovered_models(router, settings, Path(tmp_path))
@@ -47,11 +52,17 @@ def test_startup_activates_dynamic_nvidia_model_before_director_validation(monke
     assert FakeDiscovery.calls[1][1] == {"provider_id": "nvidia_api", "limit": 500}
 
 
-def test_startup_does_not_refresh_static_free_model(monkeypatch, tmp_path):
-    monkeypatch.setattr(factory, "is_free_model", lambda provider, model: True)
-    monkeypatch.setattr(factory, "ModelDiscoveryService", lambda *args: (_ for _ in ()).throw(AssertionError("discovery should not run")))
+def test_startup_refreshes_dynamic_catalog_even_when_director_mode_is_router(monkeypatch, tmp_path):
+    FakeDiscovery.calls = []
+    monkeypatch.setattr(factory, "ModelDiscoveryService", FakeDiscovery)
+    monkeypatch.setattr(factory, "ModelCandidateStore", lambda path: path)
 
-    router = SimpleNamespace(provider_registry=object(), model_registry=object())
-    settings = FakeSettingsStore(model="nvidia/nemotron-3-super-120b-a12b")
+    router = SimpleNamespace(
+        provider_registry=SimpleNamespace(ids=("nvidia_api",)),
+        model_registry=object(),
+    )
+    settings = FakeSettingsStore(provider="router")
 
     factory._activate_selected_discovered_models(router, settings, Path(tmp_path))
+
+    assert FakeDiscovery.calls[0][0] == "refresh_all"
