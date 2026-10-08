@@ -19,92 +19,178 @@
       "id": "nvidia/nemotron-3-ultra-550b-a55b",
       "provider": "nvidia_api",
       "endpoint": "https://integrate.api.nvidia.com/v1",
-      "capabilities": ["coding", "reasoning", "tool_use", "agentic", "long_context"],
+      "capabilities": [
+        "coding",
+        "reasoning",
+        "tool_use",
+        "agentic",
+        "long_context"
+      ],
       "context_window": 1000000,
-      "specialties": ["reasoning", "planning", "coding", "tool_use", "agentic", "long_context"],
+      "specialties": [
+        "reasoning",
+        "planning",
+        "coding",
+        "tool_use",
+        "agentic",
+        "long_context"
+      ],
       "quality_score": 0.99,
-      "latency_score": 0.40,
-      "cost_score": 1.0,
+      "latency_score": 0.4,
+      "cost_score": 1,
       "pricing_tier": "free",
-      "enabled": true
+      "enabled": false
     },
     {
       "id": "nvidia/nemotron-3-super-120b-a12b",
       "provider": "nvidia_api",
       "endpoint": "https://integrate.api.nvidia.com/v1",
-      "capabilities": ["coding", "reasoning", "tool_use", "agentic", "long_context"],
+      "capabilities": [
+        "coding",
+        "reasoning",
+        "tool_use",
+        "agentic",
+        "long_context"
+      ],
       "context_window": 1000000,
-      "specialties": ["reasoning", "planning", "coding", "tool_use", "agentic", "long_context"],
+      "specialties": [
+        "reasoning",
+        "planning",
+        "coding",
+        "tool_use",
+        "agentic",
+        "long_context"
+      ],
       "quality_score": 0.97,
       "latency_score": 0.58,
-      "cost_score": 1.0,
+      "cost_score": 1,
       "pricing_tier": "free",
-      "enabled": true
+      "enabled": false
     },
     {
       "id": "z-ai/glm-5-3",
       "provider": "nvidia_api",
       "endpoint": "https://integrate.api.nvidia.com/v1",
-      "capabilities": ["coding", "reasoning", "tool_use", "agentic", "long_context"],
+      "capabilities": [
+        "coding",
+        "reasoning",
+        "tool_use",
+        "agentic",
+        "long_context"
+      ],
       "context_window": 1000000,
-      "specialties": ["reasoning", "coding", "tool_use", "agentic", "long_context"],
+      "specialties": [
+        "reasoning",
+        "coding",
+        "tool_use",
+        "agentic",
+        "long_context"
+      ],
       "quality_score": 0.96,
       "latency_score": 0.38,
-      "cost_score": 1.0,
+      "cost_score": 1,
       "pricing_tier": "free",
-      "enabled": true
+      "enabled": false
     },
     {
       "id": "z-ai/glm-5-3-flash",
       "provider": "nvidia_api",
       "endpoint": "https://integrate.api.nvidia.com/v1",
-      "capabilities": ["coding", "reasoning", "tool_use", "agentic", "multimodal"],
+      "capabilities": [
+        "coding",
+        "reasoning",
+        "tool_use",
+        "agentic",
+        "multimodal"
+      ],
       "context_window": 1000000,
-      "specialties": ["reasoning", "coding", "tool_use", "agentic", "fast", "multimodal"],
+      "specialties": [
+        "reasoning",
+        "coding",
+        "tool_use",
+        "agentic",
+        "fast",
+        "multimodal"
+      ],
       "quality_score": 0.92,
       "latency_score": 0.78,
-      "cost_score": 1.0,
+      "cost_score": 1,
       "pricing_tier": "free",
-      "enabled": true
+      "enabled": false
     },
     {
       "id": "deepseek-ai/deepseek-v4.1-flash",
       "provider": "nvidia_api",
       "endpoint": "https://integrate.api.nvidia.com/v1",
-      "capabilities": ["coding", "reasoning", "chat", "multimodal", "agentic"],
+      "capabilities": [
+        "coding",
+        "reasoning",
+        "chat",
+        "multimodal",
+        "agentic"
+      ],
       "context_window": 1000000,
-      "specialties": ["reasoning", "coding", "multimodal", "long_context", "fast"],
+      "specialties": [
+        "reasoning",
+        "coding",
+        "multimodal",
+        "long_context",
+        "fast"
+      ],
       "quality_score": 0.94,
       "latency_score": 0.72,
-      "cost_score": 1.0,
+      "cost_score": 1,
       "pricing_tier": "free",
-      "enabled": true
+      "enabled": false
     },
     {
       "id": "google/gemma-4-31b-it",
       "provider": "nvidia_api",
       "endpoint": "https://integrate.api.nvidia.com/v1",
-      "capabilities": ["coding", "reasoning", "chat", "tool_use", "agentic", "multimodal"],
+      "capabilities": [
+        "coding",
+        "reasoning",
+        "chat",
+        "tool_use",
+        "agentic",
+        "multimodal"
+      ],
       "context_window": 262000,
-      "specialties": ["reasoning", "coding", "agentic", "multimodal"],
-      "quality_score": 0.90,
+      "specialties": [
+        "reasoning",
+        "coding",
+        "agentic",
+        "multimodal"
+      ],
+      "quality_score": 0.9,
       "latency_score": 0.82,
-      "cost_score": 1.0,
+      "cost_score": 1,
       "pricing_tier": "free",
-      "enabled": true
+      "enabled": false
     },
     {
       "id": "poolside/laguna-xs-2.1",
       "provider": "nvidia_api",
       "endpoint": "https://integrate.api.nvidia.com/v1",
-      "capabilities": ["coding", "reasoning", "chat", "tool_use", "agentic"],
+      "capabilities": [
+        "coding",
+        "reasoning",
+        "chat",
+        "tool_use",
+        "agentic"
+      ],
       "context_window": 262000,
-      "specialties": ["coding", "agentic", "tool_use", "terminal"],
+      "specialties": [
+        "coding",
+        "agentic",
+        "tool_use",
+        "terminal"
+      ],
       "quality_score": 0.86,
       "latency_score": 0.86,
-      "cost_score": 1.0,
+      "cost_score": 1,
       "pricing_tier": "free",
-      "enabled": true
+      "enabled": false
     }
   ]
 }
