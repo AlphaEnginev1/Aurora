@@ -433,7 +433,12 @@ def _activate_selected_discovered_models(
         provider_ids=("nvidia_api",),
         min_interval_seconds=float(os.getenv("AURORA_MODEL_DISCOVERY_REFRESH_SECONDS", "900")),
     )
-    discovery.activate_free_discovered(provider_id="nvidia_api", limit=500)
+    discovery.activate_eligible_discovered(
+        provider_id="nvidia_api",
+        cost_policy=getattr(router, "cost_policy", "free_only"),
+        health_store=router.health_store,
+        limit=500,
+    )
 
 def build_director_service(*, inference_policy_path: str | Path, autonomy_policy_path: str | Path,
     registry_path: str | Path, network_policy_path: str | Path, workspace_root: str | Path,
