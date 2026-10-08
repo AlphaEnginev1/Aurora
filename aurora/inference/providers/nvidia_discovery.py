@@ -13,7 +13,7 @@ from urllib.request import Request, urlopen
 from ..discovery import DiscoveredModelCandidate, candidate_id
 from ..models import ModelSpec
 from ..free_policy import is_discovered_free_model, record_metadata
-from .nvidia_free_catalog import NVIDIAFreeEndpointCatalogProvider
+from .nvidia_free_catalog import NVIDIAFreeEndpointCatalogProvider, NVIDIAFreeCatalogError
 
 
 class NVIDIAModelDiscoveryError(RuntimeError):
@@ -42,14 +42,19 @@ class NVIDIAModelDiscoveryProvider:
 
     def discover(self) -> tuple[DiscoveredModelCandidate, ...]:
         endpoint = f"{self.base_url}/models"
-        free_catalog_ids = set(
-            NVIDIAFreeEndpointCatalogProvider(
-                url=os.getenv(
-                    "NVIDIA_FREE_CATALOG_URL",
-                    "https://build.nvidia.com/models?pageSize=200",
-                )
-            ).discover()
-        )
+        try:
+            free_catalog_ids = set(
+                NVIDIAFreeEndpointCatalogProvider(
+                    url=os.getenv(
+                        "NVIDIA_FREE_CATALOG_URL",
+                        "https://build.nvidia.com/models?pageSize=200",
+                    )
+                ).discover()
+            )
+        except NVIDIAFreeCatalogError as exc:
+            raise NVIDIAModelDiscoveryError(
+                f"NVIDIA Free Endpoint catalog discovery failed: {exc}"
+            ) from None
         headers = {"Accept": "application/json"}
         if self.api_key.strip():
             headers["Authorization"] = f"Bearer {self.api_key}"
