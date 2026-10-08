@@ -11,8 +11,9 @@ from .discovery import (
     ModelPromotionValidation,
 )
 from .router import ModelRouter
+from .reserve_pool import DynamicReservePool, DynamicReservePoolError, ReserveCandidate
 from .provider_health import AvailabilityState, ProviderAvailabilitySnapshot, ProviderHealthSnapshot, ProviderHealthStore, classify_failure
 from .ensemble import CriticalDecisionResult, EnsembleMemberResult, ModelEnsemble, ModelEnsembleError, ModelEnsembleStore
 from .providers.registry import ProviderRegistry, ProviderRegistryError, ProviderSpec
 
-__all__ = ["InferenceRequest", "InferenceResponse", "ModelRouter", "ModelSpec", "ModelRegistry", "ModelRegistryError", "DiscoveredModelCandidate", "ModelCandidateStore", "ModelDiscoveryError", "ModelDiscoveryProvider", "ModelDiscoveryService", "ModelPromotionValidation", "ProviderRegistry", "ProviderRegistryError", "ProviderSpec", "AvailabilityState", "ProviderAvailabilitySnapshot", "ProviderHealthSnapshot", "ProviderHealthStore", "classify_failure", "CriticalDecisionResult", "EnsembleMemberResult", "ModelEnsemble", "ModelEnsembleError", "ModelEnsembleStore"]
+__all__ = ["InferenceRequest", "InferenceResponse", "ModelRouter", "DynamicReservePool", "DynamicReservePoolError", "ReserveCandidate", "ModelSpec", "ModelRegistry", "ModelRegistryError", "DiscoveredModelCandidate", "ModelCandidateStore", "ModelDiscoveryError", "ModelDiscoveryProvider", "ModelDiscoveryService", "ModelPromotionValidation", "ProviderRegistry", "ProviderRegistryError", "ProviderSpec", "AvailabilityState", "ProviderAvailabilitySnapshot", "ProviderHealthSnapshot", "ProviderHealthStore", "classify_failure", "CriticalDecisionResult", "EnsembleMemberResult", "ModelEnsemble", "ModelEnsembleError", "ModelEnsembleStore"]

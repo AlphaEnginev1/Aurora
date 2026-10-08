@@ -18,6 +18,7 @@ from aurora.inference.discovery import ModelCandidateStore, ModelDiscoveryServic
 from aurora.inference.providers.registry import default_provider_registry
 from aurora.inference.model_performance import ModelPerformanceStore
 from aurora.inference.provider_health import ProviderHealthStore
+from aurora.inference.reserve_pool import DynamicReservePool
 from aurora.inference.ensemble import ModelEnsemble, ModelEnsembleStore
 from aurora.dashboard.gateway import DashboardGateway
 from aurora.research.discovery import HttpSearchProvider, ResearchSourceCatalog
@@ -323,10 +324,9 @@ def _build_director_provider_failover(
             pool_specs,
             provider_registry=router.provider_registry,
         )
-        # Keep the execution router health-aware, but do not let historical
-        # cooldowns suppress the reserve catalog itself. The failover controller
-        # already excludes candidates that fail during this call; the normal
-        # router remains responsible for health-aware primary routing.
+        # DynamicReservePool is the single reserve-selection layer. It reuses
+        # the canonical router's policy/scoring and health store; the failover
+        # controller remains responsible only for execution and activation.
         pool_router = ModelRouter(
             models=list(pool_registry.models),
             nvidia_api_key=credentials["nvidia_api"],
@@ -337,32 +337,25 @@ def _build_director_provider_failover(
             health_store=router.health_store,
             cost_policy=getattr(router, "cost_policy", "all"),
         )
-        selection_router = ModelRouter(
-            models=list(pool_registry.models),
-            nvidia_api_key=credentials["nvidia_api"],
-            provider_registry=router.provider_registry,
-            model_registry=pool_registry,
-            context_gate=router.context_gate,
-            enforce_context=router.enforce_context,
-            health_store=None,
-            cost_policy=getattr(router, "cost_policy", "all"),
-        )
         selection_request = InferenceRequest(
             messages=messages,
             model=None,
             metadata={"role": role, "allowed_models": [model.id for model in pool_specs]},
         )
+        reserve_pool = DynamicReservePool(router, max_candidates=500)
         try:
-            decision = selection_router.route(selection_request, capability="reasoning")
+            reserve_candidates = reserve_pool.build(
+                selection_request,
+                models=pool_specs,
+                capability="reasoning",
+                exclude=((active_id, active_model_id),) if active_model_id else (),
+            )
         except Exception:
             return ()
 
-        by_id = {model.id: model for model in pool_specs}
         candidates: list[DirectorProviderCandidate] = []
-        for model_id, _score in decision.candidates:
-            selected = by_id.get(model_id)
-            if selected is None:
-                continue
+        for reserve_candidate in reserve_candidates:
+            selected = reserve_candidate.model
             candidates.append(
                 DirectorProviderCandidate(
                     provider_id=selected.provider,
