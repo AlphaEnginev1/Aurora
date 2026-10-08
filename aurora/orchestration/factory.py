@@ -460,9 +460,11 @@ def build_director_service(*, inference_policy_path: str | Path, autonomy_policy
     provider_failover_db_path: str | Path | None = None,
 ) -> DirectorService:
     settings_store = OperatorSettingsStore(settings_path(workspace_root))
+    gateway = InternetGateway(InternetPolicy.from_file(network_policy_path))
     nvidia_key = settings_store.credential("nvidia_api") or os.getenv("NVIDIA_API_KEY")
     provider_registry = default_provider_registry(
         nvidia_api_key=nvidia_key,
+        network_gateway=gateway,
     )
     model_registry = ModelRegistry.from_file(
         inference_policy_path,
@@ -510,7 +512,6 @@ def build_director_service(*, inference_policy_path: str | Path, autonomy_policy
     root=Path(workspace_root).resolve(); root.mkdir(parents=True,exist_ok=True)
     dynamic_registry=CapabilityRegistryStore(root/"capability-registry.json")
     registry=merge_registries(registry_path,dynamic_registry.path)
-    gateway=InternetGateway(InternetPolicy.from_file(network_policy_path))
     install_root=root/"managed-site"; transaction_dir=root/"transactions"; audit_path=root/"audit.jsonl"
     sandbox_policy=SandboxPolicy(network=False,timeout_seconds=120,cpu_seconds=60,memory_bytes=1_073_741_824,
         max_processes=64,max_open_files=256,max_output_bytes=1_048_576,

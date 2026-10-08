@@ -8,6 +8,7 @@ import socket
 from datetime import datetime, timezone
 from typing import Any
 from urllib.error import HTTPError, URLError
+from aurora.autonomy.internet import InternetPolicyError
 from urllib.request import Request, urlopen
 
 from ..discovery import DiscoveredModelCandidate, candidate_id
@@ -31,10 +32,12 @@ class NVIDIAModelDiscoveryProvider:
         base_url: str,
         api_key: str | None = None,
         timeout_seconds: float = 15.0,
+        gateway=None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key or os.getenv("NVIDIA_API_KEY", "")
         self.timeout_seconds = timeout_seconds
+        self.gateway = gateway
         if not self.base_url:
             raise NVIDIAModelDiscoveryError("NVIDIA model discovery base URL is empty")
         if self.timeout_seconds <= 0:
@@ -48,7 +51,8 @@ class NVIDIAModelDiscoveryProvider:
                     url=os.getenv(
                         "NVIDIA_FREE_CATALOG_URL",
                         "https://build.nvidia.com/models?pageSize=200",
-                    )
+                    ),
+                    gateway=self.gateway,
                 ).discover()
             )
         except NVIDIAFreeCatalogError as exc:
@@ -61,12 +65,24 @@ class NVIDIAModelDiscoveryProvider:
 
         request = Request(endpoint, headers=headers, method="GET")
         try:
-            with urlopen(request, timeout=self.timeout_seconds) as response:
-                payload = json.loads(response.read().decode("utf-8"))
+            if self.gateway is not None:
+                response = self.gateway.request_with_metadata(
+                    endpoint,
+                    method="GET",
+                    headers=headers,
+                )
+                payload = json.loads(response.body.decode("utf-8"))
+            else:
+                with urlopen(request, timeout=self.timeout_seconds) as response:
+                    payload = json.loads(response.read().decode("utf-8"))
         except HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")[:500]
             raise NVIDIAModelDiscoveryError(
                 f"NVIDIA model discovery HTTP {exc.code}: {detail}"
+            ) from None
+        except InternetPolicyError as exc:
+            raise NVIDIAModelDiscoveryError(
+                f"NVIDIA model discovery transport failure: {exc}"
             ) from None
         except (URLError, TimeoutError, socket.timeout, OSError) as exc:
             raise NVIDIAModelDiscoveryError(

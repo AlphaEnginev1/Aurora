@@ -126,6 +126,7 @@ def default_provider_registry(
     *,
     nvidia_api_key: str | None = None,
     openai_api_key: str | None = None,
+    network_gateway=None,
     anthropic_api_key: str | None = None,
     include_external: bool = False,
 ) -> ProviderRegistry:
@@ -133,7 +134,7 @@ def default_provider_registry(
 
     def nvidia_factory(model: ModelSpec) -> InferenceProvider:
         from .nvidia_api import NVIDIAAPIProvider
-        return NVIDIAAPIProvider(model, api_key=nvidia_api_key)
+        return NVIDIAAPIProvider(model, api_key=nvidia_api_key, gateway=network_gateway)
 
     def openai_factory(model: ModelSpec) -> InferenceProvider:
         from .openai_api import OpenAIAPIProvider
@@ -150,7 +151,7 @@ def default_provider_registry(
             ("chat", "reasoning"),
             True,
             nvidia_factory,
-            discovery_factory=lambda: _nvidia_discovery_factory(api_key=nvidia_api_key),
+            discovery_factory=lambda: _nvidia_discovery_factory(api_key=nvidia_api_key, gateway=network_gateway),
         ),
     ]
     if include_external:
@@ -173,11 +174,12 @@ def default_provider_registry(
             ]
         )
     return ProviderRegistry(tuple(providers))
-def _nvidia_discovery_factory(*, api_key: str | None) -> "ModelDiscoveryProvider":
+def _nvidia_discovery_factory(*, api_key: str | None, gateway=None) -> "ModelDiscoveryProvider":
     from .nvidia_discovery import NVIDIAModelDiscoveryProvider
     return NVIDIAModelDiscoveryProvider(
         base_url="https://integrate.api.nvidia.com/v1",
         api_key=api_key,
+        gateway=gateway,
     )
 
 

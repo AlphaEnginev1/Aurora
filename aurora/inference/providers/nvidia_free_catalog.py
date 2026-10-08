@@ -98,9 +98,11 @@ class NVIDIAFreeEndpointCatalogProvider:
         *,
         url: str = "https://build.nvidia.com/models?pageSize=200",
         timeout_seconds: float = 20.0,
+        gateway=None,
     ) -> None:
         self.url = str(url).strip()
         self.timeout_seconds = float(timeout_seconds)
+        self.gateway = gateway
         if not self.url:
             raise NVIDIAFreeCatalogError("NVIDIA free catalog URL is empty")
         if self.timeout_seconds <= 0:
@@ -116,8 +118,19 @@ class NVIDIAFreeEndpointCatalogProvider:
             method="GET",
         )
         try:
-            with urlopen(request, timeout=self.timeout_seconds) as response:
-                html = response.read().decode("utf-8")
+            if self.gateway is not None:
+                response = self.gateway.request_with_metadata(
+                    self.url,
+                    method="GET",
+                    headers={
+                        "Accept": "text/html,application/xhtml+xml",
+                        "User-Agent": "Aurora-NVIDIA-Catalog/1.0",
+                    },
+                )
+                html = response.body.decode("utf-8")
+            else:
+                with urlopen(request, timeout=self.timeout_seconds) as response:
+                    html = response.read().decode("utf-8")
         except Exception as exc:
             raise NVIDIAFreeCatalogError(
                 f"NVIDIA Free Endpoint catalog transport failure: {exc}"
