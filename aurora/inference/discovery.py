@@ -358,6 +358,80 @@ class ModelDiscoveryService:
             activated.append(approved)
         return tuple(activated)
 
+    def activate_eligible_discovered(
+        self,
+        *,
+        provider_id: str,
+        cost_policy: str = "free_only",
+        health_store: "ProviderHealthStore | None" = None,
+        limit: int = 500,
+    ) -> tuple[ModelSpec, ...]:
+        """Activate governed candidates that satisfy current policy and health."""
+        if limit < 1:
+            raise ValueError("limit must be at least 1")
+        normalized_policy = str(cost_policy or "free_only").strip().lower()
+        if normalized_policy not in {"free_only", "all"}:
+            raise ModelDiscoveryError(f"unsupported discovery cost policy: {cost_policy}")
+        from .free_policy import is_discovered_free_model
+
+        candidates = (
+            self.candidate_store.list(provider_id=provider_id, state="discovered", limit=limit)
+            + self.candidate_store.list(provider_id=provider_id, state="synced", limit=limit)
+        )
+        activated: list[ModelSpec] = []
+        seen: set[str] = set()
+        for candidate in candidates:
+            if candidate.candidate_id in seen:
+                continue
+            seen.add(candidate.candidate_id)
+            model = candidate.model
+            metadata = dict(candidate.metadata)
+            catalog_free = bool(
+                metadata.get("free_endpoint")
+                or metadata.get("free_endpoint_catalog")
+                or str(metadata.get("access_tier", "")).strip().lower() == "free"
+                or str(metadata.get("pricing_tier", "")).strip().lower() == "free"
+                or str(metadata.get("tier", "")).strip().lower() == "free"
+                or model.pricing_tier == "free"
+            )
+            if normalized_policy == "free_only" and not is_discovered_free_model(
+                provider_id, model.id, discovered_free_endpoint=catalog_free
+            ):
+                continue
+            if health_store is not None and not health_store.is_eligible(
+                model.provider, model.id
+            ):
+                continue
+            pricing_tier = (
+                "free"
+                if normalized_policy == "free_only"
+                else (model.pricing_tier if model.pricing_tier in {"free", "paid"} else "unknown")
+            )
+            approved = ModelSpec(
+                id=model.id,
+                provider=model.provider,
+                endpoint=model.endpoint,
+                capabilities=model.capabilities,
+                context_window=model.context_window,
+                enabled=True,
+                specialties=model.specialties,
+                quality_score=model.quality_score,
+                latency_score=model.latency_score,
+                cost_score=(1.0 if pricing_tier == "free" else model.cost_score),
+                healthy=True,
+                available=True,
+                pricing_tier=pricing_tier,
+            )
+            try:
+                self.model_registry.register(approved)
+            except ModelRegistryError as exc:
+                if "duplicate model registration" not in str(exc):
+                    raise ModelDiscoveryError(str(exc)) from exc
+                self.model_registry.replace(approved)
+            self.candidate_store.set_state(candidate.candidate_id, "synced")
+            activated.append(approved)
+        return tuple(activated)
+
     def promote(
         self,
         candidate_id: str,
