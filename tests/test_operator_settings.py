@@ -35,7 +35,7 @@ def test_blank_form_key_preserves_existing_secret(tmp_path: Path):
     assert store.credential("nvidia_api") == "existing-nvidia"
 
 
-def test_legacy_external_model_is_migrated_to_nvidia_default(tmp_path: Path):
+def test_legacy_external_model_is_migrated_to_router_contract(tmp_path: Path):
     path = tmp_path / "operator-settings.json"
     path.write_text(
         """{
@@ -55,5 +55,5 @@ def test_legacy_external_model_is_migrated_to_nvidia_default(tmp_path: Path):
     store = OperatorSettingsStore(path)
     loaded = store.load()
     assert loaded["director"]["provider"] == "router"
-    assert loaded["director"]["model"] == "nvidia/nemotron-3-ultra-550b-a55b"
+    assert loaded["director"]["model"] == "router"
     assert loaded["director"]["endpoint"] == "https://integrate.api.nvidia.com/v1"
