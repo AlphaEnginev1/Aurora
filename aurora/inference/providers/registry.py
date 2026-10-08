@@ -127,6 +127,7 @@ def default_provider_registry(
     nvidia_api_key: str | None = None,
     openai_api_key: str | None = None,
     anthropic_api_key: str | None = None,
+    include_external: bool = False,
 ) -> ProviderRegistry:
     """Build the canonical provider registry without coupling the router to vendors."""
 
@@ -142,14 +143,7 @@ def default_provider_registry(
         from .anthropic_api import AnthropicAPIProvider
         return AnthropicAPIProvider(model, api_key=anthropic_api_key)
 
-    return ProviderRegistry((
-        ProviderSpec(
-            "anthropic",
-            "Anthropic API",
-            ("chat", "reasoning", "tool_use", "image"),
-            True,
-            anthropic_factory,
-        ),
+    providers = [
         ProviderSpec(
             "nvidia_api",
             "NVIDIA NIM API",
@@ -158,14 +152,27 @@ def default_provider_registry(
             nvidia_factory,
             discovery_factory=lambda: _nvidia_discovery_factory(api_key=nvidia_api_key),
         ),
-        ProviderSpec(
-            "openai",
-            "OpenAI API",
-            ("chat", "reasoning", "tool_use", "image"),
-            True,
-            openai_factory,
-        ),
-    ))
+    ]
+    if include_external:
+        providers.extend(
+            [
+                ProviderSpec(
+                    "anthropic",
+                    "Anthropic API",
+                    ("chat", "reasoning", "tool_use", "image"),
+                    True,
+                    anthropic_factory,
+                ),
+                ProviderSpec(
+                    "openai",
+                    "OpenAI API",
+                    ("chat", "reasoning", "tool_use", "image"),
+                    True,
+                    openai_factory,
+                ),
+            ]
+        )
+    return ProviderRegistry(tuple(providers))
 def _nvidia_discovery_factory(*, api_key: str | None) -> "ModelDiscoveryProvider":
     from .nvidia_discovery import NVIDIAModelDiscoveryProvider
     return NVIDIAModelDiscoveryProvider(
