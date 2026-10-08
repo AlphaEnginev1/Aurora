@@ -51,6 +51,7 @@ class NVIDIAModelDiscoveryProvider:
                     url=os.getenv(
                         "NVIDIA_FREE_CATALOG_URL",
                         "https://build.nvidia.com/models?pageSize=200",
+                    ),
                     gateway=self.gateway,
                 ).discover()
             )
