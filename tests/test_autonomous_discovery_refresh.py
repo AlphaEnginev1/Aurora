@@ -9,6 +9,7 @@ from aurora.inference.discovery import (
 )
 from aurora.inference.models import InferenceRequest, ModelSpec
 from aurora.inference.provider_health import ProviderHealthStore
+from aurora.inference.errors import ProviderTimeoutError
 from aurora.inference.registry import ModelRegistry
 from aurora.inference.router import ModelRouter
 from aurora.inference.providers.registry import ProviderRegistry, ProviderSpec
@@ -61,7 +62,7 @@ def test_health_gates_discovered_activation_and_reserve_pool(tmp_path: Path):
     store.upsert(healthy)
     store.upsert(blocked)
 
-    error = RuntimeError("provider unavailable")
+    error = ProviderTimeoutError("provider unavailable", context={})
     health.record_failure("fake", "blocked", error)
     health.record_failure("fake", "blocked", error)
 
