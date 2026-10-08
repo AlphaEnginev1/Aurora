@@ -9,7 +9,15 @@ from aurora.inference.reserve_pool import DynamicReservePool, DynamicReservePool
 from aurora.inference.router import ModelRouter
 
 
-def _model(model_id, *, provider="nvidia_api", quality=0.5, latency=0.5, specialties=()):
+def _model(
+    model_id,
+    *,
+    provider="nvidia_api",
+    quality=0.5,
+    latency=0.5,
+    specialties=(),
+    pricing_tier="free",
+):
     return ModelSpec(
         id=model_id,
         provider=provider,
@@ -19,7 +27,7 @@ def _model(model_id, *, provider="nvidia_api", quality=0.5, latency=0.5, special
         quality_score=quality,
         latency_score=latency,
         cost_score=1.0,
-        pricing_tier="free",
+        pricing_tier=pricing_tier,
     )
 
 
@@ -53,7 +61,11 @@ def test_dynamic_pool_ranks_by_existing_router_score_and_deduplicates(tmp_path):
 
 def test_dynamic_pool_excludes_cooldown_models_and_fails_closed_when_empty(tmp_path):
     router, health = _router(tmp_path)
-    health.record_failure("nvidia_api", "m1", ProviderTimeoutError("timeout"))
+    health.record_failure(
+        "nvidia_api",
+        "m1",
+        ProviderTimeoutError("timeout", context={}),
+    )
 
     pool = DynamicReservePool(router)
     request = InferenceRequest(messages=[{"role": "user", "content": "hello"}])
@@ -70,14 +82,14 @@ def test_dynamic_pool_honors_provider_diversity_and_learned_scores(tmp_path):
     models = [
         _model("nvidia-a", provider="nvidia_api", quality=0.6),
         _model("nvidia-b", provider="nvidia_api", quality=0.95),
-        _model("openai-a", provider="openai", quality=0.7),
+        _model("openai-a", provider="openai", quality=0.7, pricing_tier="paid"),
     ]
     router = ModelRouter(models=models, health_store=health, cost_policy="free_only")
     pool = DynamicReservePool(router, max_candidates=3, max_per_provider=1)
     request = InferenceRequest(messages=[{"role": "user", "content": "hello"}])
 
     # free_only remains a policy guard, so the external provider is intentionally
-    # excluded until its pricing tier is governed as free.
+    # excluded because this fixture does not govern it as free.
     candidates = pool.build(
         request,
         models=models,
