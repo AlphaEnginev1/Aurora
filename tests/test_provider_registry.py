@@ -152,3 +152,22 @@ def test_default_registry_constructs_nvidia_discovery_adapter():
     registry = default_provider_registry(nvidia_api_key="test-key")
     discovery = registry.create_discovery("nvidia_api")
     assert discovery.provider_id == "nvidia_api"
+
+
+def test_default_registry_can_opt_into_external_providers():
+    registry = default_provider_registry(
+        nvidia_api_key="test-key",
+        openai_api_key="openai-test",
+        anthropic_api_key="anthropic-test",
+        include_external=True,
+    )
+    assert registry.ids == ("anthropic", "nvidia_api", "openai")
+
+    openai = registry.create(
+        ModelSpec("gpt-test", "openai", "https://api.openai.test/v1")
+    )
+    anthropic = registry.create(
+        ModelSpec("claude-test", "anthropic", "https://api.anthropic.test/v1")
+    )
+    assert openai.provider_id == "openai"
+    assert anthropic.provider_id == "anthropic"
