@@ -53,6 +53,7 @@ from aurora.skills.acquisition_pipeline import PreparedSkillCandidate
 from aurora.skills.evolution_runtime import PreparedSkillEvolution, SkillEvolutionRuntime
 from aurora.skills.improvement import SkillImprovementGenerator
 from aurora.inference.discovery import ModelDiscoveryService
+from aurora.inference.autonomous_discovery import AutonomousDiscoveryRefreshService
 from aurora.inference.ensemble import CriticalDecisionResult, ModelEnsemble
 from aurora.dashboard.gateway import DashboardGateway
 from .director_conversation import DirectorConversationService
@@ -153,6 +154,7 @@ class DirectorRuntime:
         policy_proposal_store: DirectorDecisionPolicyProposalStore | None = None,
         policy_contract_store: DirectorDecisionPolicyContractStore | None = None,
         model_discovery: ModelDiscoveryService | None = None,
+        autonomous_discovery_refresh: AutonomousDiscoveryRefreshService | None = None,
         model_discovery_refresh_enabled: bool = True,
         model_discovery_refresh_interval_seconds: float = 900.0,
         model_ensemble: ModelEnsemble | None = None,
@@ -197,6 +199,7 @@ class DirectorRuntime:
         if model_discovery_refresh_interval_seconds < 0:
             raise DirectorRuntimeError("model_discovery_refresh_interval_seconds cannot be negative")
         self.model_discovery = model_discovery
+        self.autonomous_discovery_refresh = autonomous_discovery_refresh
         self.model_discovery_refresh_enabled = bool(model_discovery_refresh_enabled)
         self.model_discovery_refresh_interval_seconds = float(model_discovery_refresh_interval_seconds)
         self._last_model_discovery_refresh_at = 0.0
@@ -1114,14 +1117,17 @@ class DirectorRuntime:
             return
         self._last_model_discovery_refresh_at = now
         try:
-            self.model_discovery.refresh_all(
-                provider_ids=("nvidia_api",),
-                min_interval_seconds=self.model_discovery_refresh_interval_seconds
-            )
-            self.model_discovery.activate_free_discovered(provider_id="nvidia_api")
+            if self.autonomous_discovery_refresh is not None:
+                self.autonomous_discovery_refresh.refresh_if_due()
+            else:
+                self.model_discovery.refresh_all(
+                    provider_ids=("nvidia_api",),
+                    min_interval_seconds=self.model_discovery_refresh_interval_seconds,
+                )
+                self.model_discovery.activate_free_discovered(provider_id="nvidia_api")
         except Exception:
-            # Catalog refresh is advisory; the durable staged snapshot and
-            # existing failover path remain authoritative.
+            # Catalog refresh is advisory; the durable staged snapshot, health
+            # state and existing failover path remain authoritative.
             return
 
     def _worker_for(self, mission_id: str, slot: int = 0) -> TaskWorker:
