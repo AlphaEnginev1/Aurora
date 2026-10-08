@@ -303,9 +303,23 @@ class ModelDiscoveryService:
         from .free_policy import is_discovered_free_model
 
         activated: list[ModelSpec] = []
-        for candidate in self.candidate_store.list(
-            provider_id=provider_id, state="discovered", limit=limit
-        ):
+        # synced means governance already approved the candidate. It is durable
+        # approval, not a guarantee that the current in-memory registry still contains
+        # the model, because the registry is rebuilt on every process start.
+        # Rehydrate both newly discovered and previously synced candidates.
+        candidates = (
+            self.candidate_store.list(
+                provider_id=provider_id, state="discovered", limit=limit
+            )
+            + self.candidate_store.list(
+                provider_id=provider_id, state="synced", limit=limit
+            )
+        )
+        seen_ids: set[str] = set()
+        for candidate in candidates:
+            if candidate.candidate_id in seen_ids:
+                continue
+            seen_ids.add(candidate.candidate_id)
             model = candidate.model
             metadata = dict(candidate.metadata)
             catalog_free = bool(
