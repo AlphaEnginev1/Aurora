@@ -3,9 +3,14 @@ import pytest
 from aurora.orchestration import factory
 
 
-def test_default_director_provider_is_nvidia_router(monkeypatch):
+def test_default_director_provider_is_router_even_with_legacy_persisted_nvidia(monkeypatch):
     monkeypatch.delenv("AURORA_DIRECTOR_PROVIDER", raising=False)
-    assert factory._build_director_provider() is None
+
+    class Settings:
+        def load(self):
+            return {"director": {"provider": "nvidia_api", "model": "nvidia/nemotron-3.5-lightning-30b-a3b"}}
+
+    assert factory._build_director_provider(Settings()) is None
 
 
 def test_nvidia_can_be_selected_as_director_provider(monkeypatch):
