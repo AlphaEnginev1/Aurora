@@ -15,6 +15,7 @@ from aurora.inference.router import ModelRouter
 from aurora.inference.models import InferenceRequest, ModelSpec
 from aurora.inference.free_policy import is_free_model
 from aurora.inference.discovery import ModelCandidateStore, ModelDiscoveryService
+from aurora.inference.autonomous_discovery import AutonomousDiscoveryRefreshService
 from aurora.inference.providers.registry import default_provider_registry
 from aurora.inference.model_performance import ModelPerformanceStore
 from aurora.inference.provider_health import ProviderHealthStore
@@ -432,7 +433,17 @@ def _activate_selected_discovered_models(
         provider_ids=("nvidia_api",),
         min_interval_seconds=float(os.getenv("AURORA_MODEL_DISCOVERY_REFRESH_SECONDS", "900")),
     )
-    discovery.activate_free_discovered(provider_id="nvidia_api", limit=500)
+    if hasattr(discovery, "activate_eligible_discovered"):
+        discovery.activate_eligible_discovered(
+            provider_id="nvidia_api",
+            cost_policy=getattr(router, "cost_policy", "free_only"),
+            health_store=getattr(router, "health_store", None),
+            limit=500,
+        )
+    else:
+        # Backward-compatible test/double seam; production discovery always
+        # exposes the health-aware activation contract.
+        discovery.activate_free_discovered(provider_id="nvidia_api", limit=500)
 
 def build_director_service(*, inference_policy_path: str | Path, autonomy_policy_path: str | Path,
     registry_path: str | Path, network_policy_path: str | Path, workspace_root: str | Path,
@@ -612,6 +623,12 @@ def build_director_runtime(*, inference_policy_path: str | Path, autonomy_policy
         service.planner.router.model_registry,
         model_candidate_store,
     )
+    autonomous_discovery_refresh=AutonomousDiscoveryRefreshService(
+        discovery=model_discovery,
+        router=service.planner.router,
+        health_store=service.planner.router.health_store,
+        interval_seconds=float(os.getenv("AURORA_MODEL_DISCOVERY_REFRESH_SECONDS", "900")),
+    )
     acquisition_pipeline=SkillAcquisitionPipeline(skill_acquisition,runtime_root/"skill-acquisition-artifacts.db")
     source_catalog=ResearchSourceCatalog.from_environment()
 
@@ -730,6 +747,7 @@ def build_director_runtime(*, inference_policy_path: str | Path, autonomy_policy
         policy_proposal_store=policy_proposal_store,
         policy_contract_store=policy_contract_store,
         model_discovery=model_discovery,
+        autonomous_discovery_refresh=autonomous_discovery_refresh,
         model_discovery_refresh_enabled=(
             os.getenv("AURORA_MODEL_DISCOVERY_REFRESH_ENABLED", "1").strip().lower()
             not in {"0", "false", "no", "off"}
