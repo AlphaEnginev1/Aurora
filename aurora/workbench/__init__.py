@@ -8,6 +8,7 @@ from .session import WorkSession, WorkSessionStore
 from .project_intake import ProjectIntakeError, ProjectIntakeReport, ProjectIntakeService, ProjectSource, ProjectSourceGraph
 from .connectors import ConnectorClient, ConnectorError, ConnectorRegistry, ConnectorSpec
 from .service import UniversalWorkbench, WorkbenchError
+from .github_auth import GitHubOAuthError, GitHubOAuthService
 
 __all__ = [
     "WorkbenchCapability",
@@ -35,4 +36,6 @@ __all__ = [
     "ConnectorError",
     "ConnectorRegistry",
     "ConnectorSpec",
+    "GitHubOAuthError",
+    "GitHubOAuthService",
 ]

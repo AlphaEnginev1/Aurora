@@ -24,7 +24,7 @@ class GitHubConnector:
 
     @property
     def write_enabled(self) -> bool:
-        return os.getenv("AURORA_GITHUB_ALLOW_WRITES", "0").strip().lower() in {"1", "true", "yes"}
+        return os.getenv("AURORA_GITHUB_ALLOW_WRITES", "1").strip().lower() in {"1", "true", "yes"}
 
     @property
     def merge_enabled(self) -> bool:

@@ -8,13 +8,14 @@ from pathlib import Path
 import re
 import uuid
 from typing import Any
-from urllib.parse import unquote, urlparse
+from urllib.parse import quote, unquote, urlparse
 
 from .conversation_api import DashboardConversationAPI, DashboardConversationAPIError
 from .gateway import DashboardGateway, DashboardGatewayError
 from .provider_settings import DashboardProviderSettingsError, ProviderSettingsService
 from .update_service import DashboardUpdateError, DashboardUpdateService
 from .health import DashboardHealthService
+from aurora.workbench.github_auth import GitHubOAuthError, GitHubOAuthService
 
 
 class DashboardHTTPError(RuntimeError):
@@ -45,6 +46,7 @@ def create_dashboard_server(
     update_service: DashboardUpdateService | None = None,
     health_service: DashboardHealthService | None = None,
     workbench=None,
+    github_oauth: GitHubOAuthService | None = None,
 ) -> ThreadingHTTPServer:
     _validate_bind(host, api_token)
     if port < 0 or port > 65535:
@@ -64,6 +66,7 @@ def create_dashboard_server(
     Handler.update_service = update_service
     Handler.health_service = health_service
     Handler.workbench = workbench
+    Handler.github_oauth = github_oauth
 
     return ThreadingHTTPServer((host, port), Handler)
 
@@ -77,6 +80,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
     update_service: DashboardUpdateService | None
     health_service: DashboardHealthService | None
     workbench: Any | None
+    github_oauth: GitHubOAuthService | None
 
     server_version = "AuroraDashboard/1"
 
@@ -98,6 +102,31 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 if self.health_service is None:
                     raise DashboardHTTPError("dashboard health service is not configured")
                 self._json(200, self.health_service.health())
+                return
+            if path == "/api/github/status":
+                self._json(200, self._github_oauth().public())
+                return
+            if path == "/api/github/oauth/start":
+                location = self._github_oauth().authorization_url()
+                self.send_response(302)
+                self.send_header("Location", location)
+                self.end_headers()
+                return
+            if path == "/api/github/oauth/callback":
+                query = parsed.query
+                params = {}
+                for item in query.split("&"):
+                    if not item:
+                        continue
+                    key, _, value = item.partition("=")
+                    params[unquote(key)] = unquote(value)
+                result = self._github_oauth().callback(params.get("code", ""), params.get("state", ""))
+                self._html_redirect("/?github=connected&login=" + quote(str(result.get("login") or "")))
+                return
+            if path == "/api/github/disconnect":
+                self._require_token()
+                self._github_oauth().disconnect()
+                self._json(200, {"connected": False})
                 return
             if path == "/api/dashboard/settings":
                 self._require_token()
@@ -128,7 +157,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 self._static("index.html")
                 return
             self._static(path.lstrip("/"))
-        except (DashboardGatewayError, DashboardConversationAPIError, DashboardHTTPError, DashboardProviderSettingsError, DashboardUpdateError) as exc:
+        except (DashboardGatewayError, DashboardConversationAPIError, DashboardHTTPError, DashboardProviderSettingsError, DashboardUpdateError, GitHubOAuthError) as exc:
             self._json(400, {"error": str(exc)})
         except Exception as exc:
             self._json(500, {"error": "internal dashboard error", "type": type(exc).__name__})
@@ -221,10 +250,21 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 )
                 return
             self._json(404, {"error": "dashboard route not found"})
-        except (DashboardConversationAPIError, DashboardHTTPError, DashboardProviderSettingsError, DashboardUpdateError) as exc:
+        except (DashboardConversationAPIError, DashboardHTTPError, DashboardProviderSettingsError, DashboardUpdateError, GitHubOAuthError) as exc:
             self._json(400, {"error": str(exc)})
         except Exception as exc:
             self._json(500, {"error": "internal dashboard error", "type": type(exc).__name__})
+
+    def _github_oauth(self) -> GitHubOAuthService:
+        service = getattr(self, "github_oauth", None)
+        if service is None:
+            raise DashboardHTTPError("GitHub account connection is not configured")
+        return service
+
+    def _html_redirect(self, location: str) -> None:
+        self.send_response(302)
+        self.send_header("Location", location)
+        self.end_headers()
 
     def _principal(self) -> str:
         return "dashboard"

@@ -922,6 +922,8 @@ async function testProvider(provider) {
   });
 
   setupNavigation();
+  setupGitHubConnection();
+  loadGitHubStatus().catch(function () {});
   setupConversation();
   setupAvatarPortrait();
   setupAvatarVoice();

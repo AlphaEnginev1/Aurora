@@ -23,14 +23,14 @@ class FakeGateway:
         )
 
 
-def test_github_connector_requires_explicit_write_policy(monkeypatch):
+def test_github_connector_writes_are_available_after_authentication(monkeypatch):
     gateway = FakeGateway()
     connector = GitHubConnector(gateway)
     monkeypatch.setenv("GITHUB_TOKEN", "test-token")
     monkeypatch.delenv("AURORA_GITHUB_ALLOW_WRITES", raising=False)
 
-    with pytest.raises(GitHubConnectorError, match="disabled by policy"):
-        connector.create_branch("AlphaEnginev1", "Aurora", "test-branch", "abc123")
+    branch = connector.create_branch("AlphaEnginev1", "Aurora", "test-branch", "abc123")
+    assert branch["ok"] is True
 
 
 def test_github_connector_can_create_branch_and_pr_when_enabled(monkeypatch):
