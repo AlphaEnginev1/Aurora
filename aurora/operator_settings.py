@@ -15,7 +15,7 @@ DEFAULT_NVIDIA_MODEL = "nvidia/nemotron-3-ultra-550b-a55b"
 DEFAULT_SETTINGS: dict[str, Any] = {
     "director": {
         "provider": "router",
-        "model": DEFAULT_NVIDIA_MODEL,
+        "model": "router",
         "endpoint": NVIDIA_ENDPOINT,
         "failover": {"enabled": True, "order": ["nvidia_api"]},
     },
@@ -121,7 +121,13 @@ def _normalize(data: Mapping[str, Any]) -> dict[str, Any]:
     director["provider"] = provider
     director["endpoint"] = NVIDIA_ENDPOINT
     model = str(director.get("model", "")).strip()
-    if not _is_nvidia_model_id(model) or provider not in {"router", "nvidia_api"}:
+    if provider == "router":
+        # Router mode owns model selection dynamically. Never persist or resurrect
+        # a historical NVIDIA model as the Director model in this mode.
+        director["model"] = "router"
+    elif not _is_nvidia_model_id(model):
+        # Direct NVIDIA mode requires an explicit NVIDIA model. The selected model
+        # is validated against the live discovery pool before execution.
         director["model"] = DEFAULT_NVIDIA_MODEL
     failover = director.get("failover", {})
     if not isinstance(failover, Mapping):
@@ -157,8 +163,13 @@ def _validate(data: Mapping[str, Any]) -> None:
     provider = str(director.get("provider", "")).strip().lower()
     if provider not in {"router", "nvidia_api"}:
         raise OperatorSettingsError("director.provider must be router or nvidia_api")
-    if not str(director.get("model", "")).strip():
+    model = str(director.get("model", "")).strip()
+    if not model:
         raise OperatorSettingsError("director.model cannot be empty")
+    if provider == "router" and model != "router":
+        raise OperatorSettingsError("router director must not pin a provider model")
+    if provider == "nvidia_api" and not _is_nvidia_model_id(model):
+        raise OperatorSettingsError("nvidia_api director.model must be an NVIDIA model identifier")
     if not str(director.get("endpoint", "")).strip().startswith("https://"):
         raise OperatorSettingsError("director.endpoint must use HTTPS")
     failover = director.get("failover", {})
