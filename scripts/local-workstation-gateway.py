@@ -7,6 +7,7 @@ import io
 import json
 import os
 import subprocess
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -14,6 +15,7 @@ HOST = os.getenv("AURORA_LOCAL_GATEWAY_BIND", "127.0.0.1")
 PORT = int(os.getenv("AURORA_LOCAL_GATEWAY_PORT", "8790"))
 TOKEN = os.getenv("AURORA_LOCAL_GATEWAY_TOKEN", "").strip()
 ALLOW_GUI = os.getenv("AURORA_LOCAL_ALLOW_GUI", "0").strip().lower() in {"1", "true", "yes"}
+ALLOW_OS = os.getenv("AURORA_LOCAL_ALLOW_OS", "0").strip().lower() in {"1", "true", "yes"}
 AUDIT_PATH = Path(os.getenv("AURORA_LOCAL_GATEWAY_AUDIT", str(Path.home() / ".aurora-local-gateway-audit.jsonl"))).expanduser()
 MAX_STEPS = 40
 MAX_BODY = 2 * 1024 * 1024
@@ -135,6 +137,53 @@ class Handler(BaseHTTPRequestHandler):
             buffer = io.BytesIO()
             image.save(buffer, format="PNG")
             return {"action": kind, "mime_type": "image/png", "data": base64.b64encode(buffer.getvalue()).decode("ascii")}
+        if kind in {"launch", "shell", "download", "install", "process_list", "process_terminate"} and not ALLOW_OS:
+            raise ValueError("OS actions are disabled; set AURORA_LOCAL_ALLOW_OS=1")
+        if kind == "launch":
+            command = action.get("command")
+            if not isinstance(command, list) or not command or not all(isinstance(item, str) and item for item in command):
+                raise ValueError("launch command must be a non-empty string array")
+            cwd = _safe_path(str(action.get("cwd") or str(ROOTS[0] if ROOTS else Path.home())))
+            process = subprocess.Popen(command, cwd=str(cwd), close_fds=True)
+            return {"action": kind, "pid": process.pid, "command": command}
+        if kind == "shell":
+            command = action.get("command")
+            if not isinstance(command, list) or not command or not all(isinstance(item, str) for item in command):
+                raise ValueError("shell command must be a string array")
+            cwd = _safe_path(str(action.get("cwd") or str(ROOTS[0] if ROOTS else Path.home())))
+            timeout = max(1.0, min(float(action.get("timeout", 60)), 600.0))
+            completed = subprocess.run(command, cwd=str(cwd), capture_output=True, text=True, timeout=timeout, shell=False)
+            return {"action": kind, "returncode": completed.returncode, "stdout": completed.stdout[-20000:], "stderr": completed.stderr[-20000:]}
+        if kind == "process_list":
+            command = ["tasklist"] if os.name == "nt" else ["ps", "-eo", "pid,ppid,stat,etime,cmd"]
+            completed = subprocess.run(command, capture_output=True, text=True, timeout=20, shell=False)
+            return {"action": kind, "returncode": completed.returncode, "stdout": completed.stdout[-30000:]}
+        if kind == "process_terminate":
+            pid = int(action.get("pid"))
+            if pid <= 0 or pid == os.getpid():
+                raise ValueError("invalid or protected pid")
+            command = ["taskkill", "/PID", str(pid), "/T", "/F"] if os.name == "nt" else ["kill", str(pid)]
+            completed = subprocess.run(command, capture_output=True, text=True, timeout=20, shell=False)
+            return {"action": kind, "pid": pid, "returncode": completed.returncode, "stdout": completed.stdout, "stderr": completed.stderr}
+        if kind == "download":
+            url = str(action.get("url") or "").strip()
+            destination = _safe_path(str(action.get("destination") or ""))
+            if not url.startswith(("https://", "http://")):
+                raise ValueError("download requires http(s) URL")
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            with urllib.request.urlopen(url, timeout=60) as response:
+                data = response.read(50 * 1024 * 1024 + 1)
+            if len(data) > 50 * 1024 * 1024:
+                raise ValueError("download exceeds 50 MiB limit")
+            destination.write_bytes(data)
+            return {"action": kind, "url": url, "destination": str(destination), "bytes": len(data)}
+        if kind == "install":
+            package = str(action.get("package") or "").strip()
+            if not package or any(ch in package for ch in "\\r\\n;&|$<>"):
+                raise ValueError("invalid package identifier")
+            command = ["winget", "install", "--id", package, "--exact", "--accept-source-agreements", "--accept-package-agreements"] if os.name == "nt" else ["apt-get", "install", "-y", package]
+            completed = subprocess.run(command, capture_output=True, text=True, timeout=600, shell=False)
+            return {"action": kind, "package": package, "returncode": completed.returncode, "stdout": completed.stdout[-20000:], "stderr": completed.stderr[-20000:]}
         if kind in {"click", "type", "hotkey"} and not ALLOW_GUI:
             raise ValueError("GUI mutation actions are disabled; set AURORA_LOCAL_ALLOW_GUI=1")
         if kind == "click":
