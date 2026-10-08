@@ -1,45 +1,16 @@
-"""Autonomous capability subsystem."""
-
-from .capability_resolution import (
-    CapabilityDiscoveryProvider,
-    CapabilityResolution,
-    CapabilityResolutionError,
-    CapabilityResolutionRuntime,
-    HttpCapabilityDiscoveryProvider,
-)
-from .credential_broker import (
-    CredentialBroker,
-    CredentialBrokerError,
-    CredentialGrant,
-    CredentialPolicy,
-    SecretBackend,
-)
-from .computer_operator import (
-    ComputerAction,
-    ComputerOperator,
-    ComputerOperatorError,
-    ComputerPolicy,
-    CredentialProvider,
-    CredentialRef,
-    PlaywrightSession,
-)
+"""Aurora autonomy control surfaces."""
+from .computer_use import AutonomousComputerUse, ComputerObservation, ComputerStep, ComputerUseError
+from .discovery_loop import DiscoveryCycle, DiscoveryLoop, DiscoveryLoopError, DiscoveryResult
+from .mission_manager import AutonomousMissionManager, MissionManagerError, MissionRun
+from .rsi import RSICycle, RSIError, RSIResult, RecursiveSelfImprovement
+from .software_engineer import AutonomousSoftwareEngineer, EngineeringIteration, EngineeringMissionResult, SoftwareEngineeringError
 
 __all__ = [
-    "CapabilityDiscoveryProvider",
-    "CapabilityResolution",
-    "CapabilityResolutionError",
-    "CapabilityResolutionRuntime",
-    "HttpCapabilityDiscoveryProvider",
-    "CredentialBroker",
-    "CredentialBrokerError",
-    "CredentialGrant",
-    "CredentialPolicy",
-    "SecretBackend",
-    "ComputerAction",
-    "ComputerOperator",
-    "ComputerOperatorError",
-    "ComputerPolicy",
-    "CredentialProvider",
-    "CredentialRef",
-    "PlaywrightSession",
+    "AutonomousComputerUse", "AutonomousMissionManager", "AutonomousSoftwareEngineer",
+    "ComputerObservation", "ComputerStep", "ComputerUseError",
+    "DiscoveryCycle", "DiscoveryLoop", "DiscoveryLoopError", "DiscoveryResult",
+    "EngineeringIteration", "EngineeringMissionResult",
+    "MissionManagerError", "MissionRun",
+    "RSICycle", "RSIError", "RSIResult", "RecursiveSelfImprovement",
+    "SoftwareEngineeringError",
 ]
