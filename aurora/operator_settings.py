@@ -26,6 +26,14 @@ DEFAULT_SETTINGS: dict[str, Any] = {
             "base_url": NVIDIA_ENDPOINT,
         }
     },
+    "github": {
+        "access_token": "",
+        "login": "",
+        "name": "",
+        "avatar_url": "",
+        "scopes": [],
+        "connected_at": "",
+    },
 }
 
 
@@ -71,16 +79,59 @@ class OperatorSettingsStore:
         provider = dict(data["providers"]["nvidia_api"])
         key = str(provider.pop("api_key", "") or "")
         provider["api_key_present"] = bool(key.strip())
+        github = dict(data.get("github", {}))
+        github_token = str(github.pop("access_token", "") or "")
+        github["access_token_present"] = bool(github_token.strip())
         return {
             "director": dict(data["director"]),
             "providers": {"nvidia_api": provider},
+            "github": github,
         }
 
     def credential(self, provider_id: str) -> str:
-        if str(provider_id).strip().lower() != "nvidia_api":
-            return ""
-        provider = self.load()["providers"].get("nvidia_api", {})
-        return str(provider.get("api_key", "") or "").strip()
+        provider_id = str(provider_id).strip().lower()
+        if provider_id == "nvidia_api":
+            provider = self.load()["providers"].get("nvidia_api", {})
+            return str(provider.get("api_key", "") or "").strip()
+        if provider_id == "github":
+            github = self.load().get("github", {})
+            return str(github.get("access_token", "") or "").strip()
+        return ""
+
+    def set_github_connection(
+        self,
+        *,
+        access_token: str,
+        login: str,
+        name: str = "",
+        avatar_url: str = "",
+        scopes: list[str] | tuple[str, ...] = (),
+    ) -> dict[str, Any]:
+        if not access_token.strip() or not login.strip():
+            raise OperatorSettingsError("GitHub connection requires access_token and login")
+        from datetime import datetime, timezone
+        return self.save({
+            "github": {
+                "access_token": access_token.strip(),
+                "login": login.strip(),
+                "name": name.strip(),
+                "avatar_url": avatar_url.strip(),
+                "scopes": [str(item).strip() for item in scopes if str(item).strip()],
+                "connected_at": datetime.now(timezone.utc).isoformat(),
+            }
+        })
+
+    def clear_github_connection(self) -> dict[str, Any]:
+        return self.save({
+            "github": {
+                "access_token": "",
+                "login": "",
+                "name": "",
+                "avatar_url": "",
+                "scopes": [],
+                "connected_at": "",
+            }
+        })
 
     def update_from_form(self, payload: Mapping[str, Any]) -> dict[str, Any]:
         current = self.load()
@@ -148,6 +199,18 @@ def _normalize(data: Mapping[str, Any]) -> dict[str, Any]:
             "api_key": str(nvidia.get("api_key", "") or ""),
             "base_url": str(nvidia.get("base_url", NVIDIA_ENDPOINT) or NVIDIA_ENDPOINT).rstrip("/"),
         }
+    }
+    github = result.get("github", {})
+    if not isinstance(github, Mapping):
+        github = {}
+    scopes = github.get("scopes", [])
+    result["github"] = {
+        "access_token": str(github.get("access_token", "") or ""),
+        "login": str(github.get("login", "") or ""),
+        "name": str(github.get("name", "") or ""),
+        "avatar_url": str(github.get("avatar_url", "") or ""),
+        "scopes": [str(item).strip() for item in scopes if str(item).strip()] if isinstance(scopes, list) else [],
+        "connected_at": str(github.get("connected_at", "") or ""),
     }
     return result
 
