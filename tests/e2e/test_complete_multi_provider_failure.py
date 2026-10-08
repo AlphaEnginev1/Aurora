@@ -3,6 +3,7 @@ from pathlib import Path
 from aurora.inference.autonomous_discovery import AutonomousDiscoveryRefreshService
 from aurora.inference.discovery import DiscoveredModelCandidate, ModelCandidateStore, ModelDiscoveryService, candidate_id
 from aurora.inference.models import InferenceRequest, ModelSpec
+from aurora.inference.errors import ProviderTimeoutError
 from aurora.inference.provider_health import ProviderHealthStore
 from aurora.inference.providers.registry import ProviderRegistry, ProviderSpec
 from aurora.inference.registry import ModelRegistry
@@ -65,7 +66,7 @@ def test_complete_multi_provider_failure_uses_discovery_health_reserve_and_failo
     store.upsert(_candidate("gemini", "gemini-primary", 1.0))
     store.upsert(_candidate("nvidia_api", "nvidia-reserve", 0.9))
     store.upsert(_candidate("nvidia_api", "nvidia-blocked", 0.95))
-    health.record_failure("nvidia_api", "nvidia-blocked", RuntimeError("forced health failure"))
+    health.record_failure("nvidia_api", "nvidia-blocked", ProviderTimeoutError("forced health failure", context={}))
 
     activated = discovery.activate_eligible_discovered(
         provider_id="nvidia_api", cost_policy="free_only", health_store=health,
