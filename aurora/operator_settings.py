@@ -117,7 +117,9 @@ def _normalize(data: Mapping[str, Any]) -> dict[str, Any]:
     director = result["director"]
     provider = str(director.get("provider", "router")).strip().lower()
     if provider not in {"router", "nvidia_api"}:
-        provider = "router"
+        # Legacy external providers are migrated to the canonical direct-NVIDIA
+        # fallback without introducing an implicit runtime write.
+        provider = "nvidia_api"
     director["provider"] = provider
     director["endpoint"] = NVIDIA_ENDPOINT
     model = str(director.get("model", "")).strip()
