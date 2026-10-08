@@ -179,3 +179,40 @@ def test_nvidia_provider_preserves_image_content_in_openai_request(monkeypatch):
     content = captured["body"]["messages"][0]["content"]
     assert content[1]["type"] == "image_url"
     assert content[1]["image_url"]["url"] == "data:image/png;base64,ZmFrZQ=="
+
+class _Gateway:
+    def __init__(self):
+        self.calls = []
+
+    def request_with_metadata(self, url, *, method="GET", headers=None, body=None):
+        self.calls.append((url, method, headers or {}, body))
+        from aurora.autonomy.internet import InternetResponse
+        return InternetResponse(
+            requested_url=url,
+            final_url=url,
+            status_code=200,
+            content_type="application/json",
+            body=json.dumps({
+                "model": "nvidia/model-a",
+                "choices": [{"message": {"content": "gateway-ok"}}],
+            }).encode(),
+        )
+
+
+def test_nvidia_provider_uses_network_gateway_when_bound():
+    gateway = _Gateway()
+    provider = NVIDIAAPIProvider(
+        ModelSpec(
+            id="nvidia/model-a",
+            provider="nvidia_api",
+            endpoint="https://integrate.api.nvidia.com/v1",
+        ),
+        api_key="SECRET-NVIDIA-KEY",
+        gateway=gateway,
+    )
+    response = provider.generate(InferenceRequest(messages=[{"role": "user", "content": "hello"}]))
+
+    assert response.content == "gateway-ok"
+    assert gateway.calls
+    assert gateway.calls[0][0].endswith("/chat/completions")
+    assert gateway.calls[0][1] == "POST"
