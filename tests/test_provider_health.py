@@ -132,3 +132,49 @@ def test_configuration_failure_reenters_probing_after_revalidation_window(tmp_pa
     assert recovered.state == "healthy"
     assert recovered.consecutive_failures == 0
     assert recovered.last_error_code is None
+
+
+def test_provider_availability_aggregates_model_health(tmp_path: Path):
+    store = ProviderHealthStore(tmp_path / "health.db", failure_threshold=1)
+    store.record_success("nvidia_api", "m1", latency_ms=20)
+    store.record_failure(
+        "nvidia_api",
+        "m2",
+        ProviderTimeoutError("timeout", context=_ctx(provider="nvidia_api", model="m2")),
+    )
+
+    snapshot = store.provider_snapshot("nvidia_api")
+    assert snapshot.state == "healthy"
+    assert snapshot.model_count == 2
+    assert snapshot.routable_model_count == 1
+    assert snapshot.healthy_model_count == 1
+    assert snapshot.cooldown_model_count == 1
+    assert snapshot.routable
+    assert snapshot.availability_score == 1.0
+
+    available = store.available_providers(("nvidia_api", "missing"))
+    assert [item.provider_id for item in available] == ["nvidia_api"]
+
+
+def test_provider_availability_fails_closed_when_all_models_are_unavailable(tmp_path: Path):
+    store = ProviderHealthStore(
+        tmp_path / "health.db",
+        failure_threshold=1,
+        base_cooldown_seconds=1,
+        max_cooldown_seconds=10,
+    )
+    for model in ("m1", "m2"):
+        store.record_failure(
+            "nvidia_api",
+            model,
+            ProviderHTTPError(
+                "unauthorized",
+                context=_ctx(provider="nvidia_api", model=model),
+                status_code=401,
+            ),
+        )
+    snapshot = store.provider_snapshot("nvidia_api")
+    assert snapshot.state == "unavailable"
+    assert snapshot.routable_model_count == 0
+    assert not snapshot.routable
+    assert store.available_providers(("nvidia_api",)) == ()
