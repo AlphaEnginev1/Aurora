@@ -432,3 +432,68 @@ def test_nvidia_discovery_joins_served_catalog_with_official_free_catalog(monkey
     by_id = {item.model.id: item.model for item in candidates}
     assert by_id["new/free-nvidia-model"].pricing_tier == "free"
     assert by_id["new/served-but-not-free"].pricing_tier == "unknown"
+
+
+def test_synced_dynamic_free_candidate_is_rehydrated_after_restart(monkeypatch, tmp_path):
+    from aurora.inference.discovery import (
+        DiscoveredModelCandidate,
+        ModelCandidateStore,
+        ModelDiscoveryService,
+        candidate_id,
+    )
+    from aurora.inference.models import ModelSpec
+    from aurora.inference.registry import ModelRegistry
+    from aurora.inference.providers.registry import ProviderRegistry, ProviderSpec
+
+    model_id = "new/free-nvidia-model"
+    candidate = DiscoveredModelCandidate(
+        candidate_id=candidate_id("nvidia_api", model_id),
+        provider_id="nvidia_api",
+        model=ModelSpec(
+            id=model_id,
+            provider="nvidia_api",
+            endpoint="https://integrate.api.nvidia.com/v1",
+            capabilities=("chat", "reasoning"),
+            enabled=False,
+            healthy=False,
+            available=False,
+            pricing_tier="free",
+        ),
+        metadata={"free_endpoint_catalog": True},
+        discovered_at="2026-10-07T00:00:00+00:00",
+    )
+    provider_registry = ProviderRegistry((
+        ProviderSpec(
+            "nvidia_api",
+            "NVIDIA",
+            ("chat", "reasoning"),
+            True,
+            lambda model: object(),
+            discovery_factory=lambda: FakeDiscoveryProvider((candidate,)),
+        ),
+    ))
+    store = ModelCandidateStore(tmp_path / "candidates.db")
+    first_registry = ModelRegistry([], provider_registry=provider_registry)
+    first_service = ModelDiscoveryService(provider_registry, first_registry, store)
+    first_service.discover_and_stage("nvidia_api")
+
+    monkeypatch.setattr(
+        "aurora.inference.free_policy.is_discovered_free_model",
+        lambda provider_id, model_id, **kwargs: (
+            provider_id == "nvidia_api"
+            and kwargs.get("discovered_free_endpoint") is True
+        ),
+    )
+    assert [item.id for item in first_service.activate_free_discovered(
+        provider_id="nvidia_api"
+    )] == [model_id]
+    assert store.get(candidate.candidate_id).state == "synced"
+
+    second_registry = ModelRegistry([], provider_registry=provider_registry)
+    second_service = ModelDiscoveryService(provider_registry, second_registry, store)
+    activated = second_service.activate_free_discovered(provider_id="nvidia_api")
+
+    assert [item.id for item in activated] == [model_id]
+    assert second_registry.resolve(model_id).enabled is True
+    assert second_registry.resolve(model_id).pricing_tier == "free"
+    assert store.get(candidate.candidate_id).state == "synced"
