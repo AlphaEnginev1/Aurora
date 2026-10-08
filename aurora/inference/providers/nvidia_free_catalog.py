@@ -10,7 +10,6 @@ from __future__ import annotations
 from html.parser import HTMLParser
 from urllib.parse import unquote, urlparse
 from urllib.request import Request, urlopen
-import json as _json
 
 
 class NVIDIAFreeCatalogError(RuntimeError):
