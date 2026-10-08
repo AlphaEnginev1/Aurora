@@ -15,6 +15,7 @@ from aurora.inference.router import ModelRouter
 from aurora.inference.models import InferenceRequest, ModelSpec
 from aurora.inference.free_policy import is_free_model
 from aurora.inference.discovery import ModelCandidateStore, ModelDiscoveryService
+from aurora.inference.autonomous_discovery import AutonomousDiscoveryRefreshService
 from aurora.inference.providers.registry import default_provider_registry
 from aurora.inference.model_performance import ModelPerformanceStore
 from aurora.inference.provider_health import ProviderHealthStore
@@ -612,6 +613,12 @@ def build_director_runtime(*, inference_policy_path: str | Path, autonomy_policy
         service.planner.router.model_registry,
         model_candidate_store,
     )
+    autonomous_discovery_refresh=AutonomousDiscoveryRefreshService(
+        discovery=model_discovery,
+        router=service.planner.router,
+        health_store=service.planner.router.health_store,
+        interval_seconds=float(os.getenv("AURORA_MODEL_DISCOVERY_REFRESH_SECONDS", "900")),
+    )
     acquisition_pipeline=SkillAcquisitionPipeline(skill_acquisition,runtime_root/"skill-acquisition-artifacts.db")
     source_catalog=ResearchSourceCatalog.from_environment()
 
@@ -730,6 +737,7 @@ def build_director_runtime(*, inference_policy_path: str | Path, autonomy_policy
         policy_proposal_store=policy_proposal_store,
         policy_contract_store=policy_contract_store,
         model_discovery=model_discovery,
+        autonomous_discovery_refresh=autonomous_discovery_refresh,
         model_discovery_refresh_enabled=(
             os.getenv("AURORA_MODEL_DISCOVERY_REFRESH_ENABLED", "1").strip().lower()
             not in {"0", "false", "no", "off"}
