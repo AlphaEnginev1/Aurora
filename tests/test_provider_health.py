@@ -157,7 +157,12 @@ def test_provider_availability_aggregates_model_health(tmp_path: Path):
 
 
 def test_provider_availability_fails_closed_when_all_models_are_unavailable(tmp_path: Path):
-    store = ProviderHealthStore(tmp_path / "health.db", failure_threshold=1, max_cooldown_seconds=10)
+    store = ProviderHealthStore(
+        tmp_path / "health.db",
+        failure_threshold=1,
+        base_cooldown_seconds=1,
+        max_cooldown_seconds=10,
+    )
     for model in ("m1", "m2"):
         store.record_failure(
             "nvidia_api",
