@@ -7,8 +7,6 @@ operator-controlled step.
 
 from __future__ import annotations
 
-from typing import Any
-
 from .operator_settings import OperatorSettingsStore
 
 
