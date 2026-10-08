@@ -187,7 +187,12 @@ def _build_director_provider(
         if settings_store is None:
             key = os.getenv("NVIDIA_API_KEY", "")
         else:
-            key = settings_store.credential("nvidia_api") or os.getenv("NVIDIA_API_KEY", "")
+            credential = getattr(settings_store, "credential", None)
+            key = (
+                credential("nvidia_api")
+                if callable(credential)
+                else ""
+            ) or os.getenv("NVIDIA_API_KEY", "")
         if not key or router is None:
             return None
         return BoundInferenceDirectorProvider(
