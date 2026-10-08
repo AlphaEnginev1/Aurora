@@ -52,14 +52,20 @@ class ProviderSettingsService:
                 )
                 if existing is None and hasattr(self.runtime, "model_discovery"):
                     try:
-                        self.runtime.model_discovery.refresh_all(
-                            provider_ids=("nvidia_api",),
-                            min_interval_seconds=0,
-                            force=True,
-                        )
-                        self.runtime.model_discovery.activate_free_discovered(
-                            provider_id="nvidia_api"
-                        )
+                        refresh_service = getattr(self.runtime, "autonomous_discovery_refresh", None)
+                        if refresh_service is not None:
+                            refresh_service.refresh_if_due(force=True)
+                        else:
+                            self.runtime.model_discovery.refresh_all(
+                                provider_ids=("nvidia_api",),
+                                min_interval_seconds=0,
+                                force=True,
+                            )
+                            self.runtime.model_discovery.activate_eligible_discovered(
+                                provider_id="nvidia_api",
+                                cost_policy=getattr(router, "cost_policy", "free_only"),
+                                health_store=getattr(router, "health_store", None),
+                            )
                         existing = next(
                             (item for item in router.model_registry.models if item.id == selected_model),
                             None,
