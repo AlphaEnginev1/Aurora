@@ -103,8 +103,9 @@ def test_anthropic_adapter_translates_system_and_image_messages(monkeypatch):
     assert response.provider == "anthropic"
     assert response.content == "hello world"
     assert response.usage.total_tokens == 12
-    assert captured["headers"]["X-Api-Key"] == "SECRET-ANTHROPIC"
-    assert captured["headers"]["Anthropic-Version"] == "2023-06-01"
+    headers = {key.lower(): value for key, value in captured["headers"].items()}
+    assert headers["x-api-key"] == "SECRET-ANTHROPIC"
+    assert headers["anthropic-version"] == "2023-06-01"
     assert captured["body"]["system"] == "You are Aurora."
     image = captured["body"]["messages"][0]["content"][1]
     assert image["type"] == "image"
