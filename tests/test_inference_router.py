@@ -165,3 +165,73 @@ def test_free_only_router_rejects_paid_and_unknown_models():
         assert "unavailable" in str(exc)
     else:
         raise AssertionError("paid model unexpectedly routed under free_only policy")
+
+
+def test_router_retries_next_ranked_model_after_provider_failure():
+    from aurora.inference.models import InferenceResponse
+    from aurora.inference.providers.registry import ProviderRegistry, ProviderSpec
+    from aurora.inference.errors import ProviderHTTPError, ProviderErrorContext
+
+    attempts = []
+
+    class FakeProvider:
+        provider_id = "fake"
+
+        def __init__(self, spec):
+            self.spec = spec
+
+        def generate(self, request, *, selected_model=None, execution_id=""):
+            attempts.append(selected_model)
+            if selected_model == "model/a":
+                raise ProviderHTTPError(
+                    "forced provider failure",
+                    context=ProviderErrorContext(
+                        provider="fake",
+                        request_id=request.request_id,
+                        execution_id=execution_id,
+                        requested_model=request.model,
+                        selected_model=selected_model,
+                        provider_model=selected_model,
+                    ),
+                    status_code=403,
+                )
+            return InferenceResponse(
+                model=selected_model,
+                provider="fake",
+                content="ok",
+                raw={},
+                request_id=request.request_id,
+                execution_id=execution_id,
+                requested_model=request.model,
+                selected_model=selected_model,
+                provider_model=selected_model,
+            )
+
+    registry = ProviderRegistry((
+        ProviderSpec("fake", "Fake", ("chat", "reasoning"), True, FakeProvider),
+    ))
+    models = [
+        ModelSpec(
+            "model/a",
+            "fake",
+            "https://example.invalid",
+            capabilities=("reasoning",),
+            enabled=True,
+        ),
+        ModelSpec(
+            "model/b",
+            "fake",
+            "https://example.invalid",
+            capabilities=("reasoning",),
+            enabled=True,
+        ),
+    ]
+    router = ModelRouter(models, provider_registry=registry)
+    response = router.generate(
+        InferenceRequest(messages=[{"role": "user", "content": "x"}]),
+        capability="reasoning",
+        preferred_models=("model/a", "model/b"),
+    )
+
+    assert response.content == "ok"
+    assert attempts == ["model/a", "model/b"]
