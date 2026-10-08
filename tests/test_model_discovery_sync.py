@@ -280,6 +280,10 @@ def test_nvidia_discovery_parses_openai_compatible_catalog(monkeypatch):
         "aurora.inference.providers.nvidia_discovery.urlopen",
         fake_urlopen,
     )
+    monkeypatch.setattr(
+        "aurora.inference.providers.nvidia_free_catalog.NVIDIAFreeEndpointCatalogProvider.discover",
+        lambda self: ("meta/example-model",),
+    )
 
     candidates = NVIDIAModelDiscoveryProvider(
         base_url="https://integrate.api.nvidia.com/v1",
@@ -326,6 +330,10 @@ def test_nvidia_discovery_conservatively_excludes_non_conversational_catalog_mod
     monkeypatch.setattr(
         "aurora.inference.providers.nvidia_discovery.urlopen",
         lambda _request, timeout: FakeResponse(),
+    )
+    monkeypatch.setattr(
+        "aurora.inference.providers.nvidia_free_catalog.NVIDIAFreeEndpointCatalogProvider.discover",
+        lambda self: ("nvidia/nemotron-3-super-120b-a12b",),
     )
 
     candidates = NVIDIAModelDiscoveryProvider(
