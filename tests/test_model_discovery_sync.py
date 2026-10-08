@@ -497,3 +497,86 @@ def test_synced_dynamic_free_candidate_is_rehydrated_after_restart(monkeypatch, 
     assert second_registry.resolve(model_id).enabled is True
     assert second_registry.resolve(model_id).pricing_tier == "free"
     assert store.get(candidate.candidate_id).state == "synced"
+def test_canonical_startup_rehydrates_synced_model_before_director_validation(monkeypatch, tmp_path):
+    """The real startup ordering must accept a durable discovered Director model after restart."""
+    from types import SimpleNamespace
+
+    from aurora.orchestration import factory
+
+    model_id = "nvidia/durable-free-model"
+    candidate = DiscoveredModelCandidate(
+        candidate_id=candidate_id("nvidia_api", model_id),
+        provider_id="nvidia_api",
+        model=ModelSpec(
+            id=model_id,
+            provider="nvidia_api",
+            endpoint="https://integrate.api.nvidia.com/v1",
+            capabilities=("chat", "reasoning", "tool_use"),
+            context_window=131072,
+            pricing_tier="free",
+        ),
+        metadata={"free_endpoint_catalog": True},
+        discovered_at="2026-10-08T00:00:00+00:00",
+        state="synced",
+    )
+    provider_registry = ProviderRegistry((
+        ProviderSpec(
+            "nvidia_api",
+            "NVIDIA",
+            ("chat", "reasoning"),
+            True,
+            lambda model: object(),
+            discovery_factory=lambda: FakeDiscoveryProvider(()),
+        ),
+    ))
+    store = ModelCandidateStore(tmp_path / "model-candidates.db")
+    store.upsert(candidate)
+    registry = ModelRegistry([], provider_registry=provider_registry)
+    router = SimpleNamespace(
+        provider_registry=provider_registry,
+        model_registry=registry,
+        models=[],
+        cost_policy="free_only",
+    )
+
+    class Settings:
+        def load(self):
+            return {"director": {"provider": "nvidia_api", "model": model_id}}
+
+        def credential(self, provider_id):
+            assert provider_id == "nvidia_api"
+            return "ci-test-credential"
+
+    real_service = ModelDiscoveryService(provider_registry, registry, store)
+
+    class StartupDiscovery:
+        def __init__(self, *_args):
+            pass
+
+        def refresh_all(self, **_kwargs):
+            return {"nvidia_api": ()}
+
+        def activate_free_discovered(self, **kwargs):
+            return real_service.activate_free_discovered(**kwargs)
+
+    monkeypatch.setattr(factory, "ModelDiscoveryService", StartupDiscovery)
+    monkeypatch.setattr(factory, "is_free_model", lambda _provider, _model: False)
+    monkeypatch.setattr(
+        "aurora.inference.free_policy.is_discovered_free_model",
+        lambda provider_id, _model_id, **kwargs: (
+            provider_id == "nvidia_api"
+            and kwargs.get("discovered_free_endpoint") is True
+        ),
+    )
+
+    factory._activate_selected_discovered_models(
+        router,
+        Settings(),
+        tmp_path,
+    )
+
+    assert registry.resolve(model_id).enabled is True
+    assert registry.resolve(model_id).pricing_tier == "free"
+    provider = factory._build_director_provider(Settings(), router=router)
+    assert provider is not None
+    assert provider.provider_id == "nvidia_api"
