@@ -380,60 +380,96 @@ class ModelRouter:
         preferred_models: Sequence[str] | None = None,
     ) -> InferenceResponse:
         request = self._enforce_authoritative_context(request)
-        decision = self.route(
-            request,
-            capability=capability,
-            preferred_models=preferred_models,
-        )
-        spec = self._model_by_id(decision.selected_model)
-        execution_id = new_execution_id()
-        if self.provider_registry is None:
-            raise ModelRoutingError("inference provider registry is not configured")
-        try:
-            provider = self.provider_registry.create(spec)
-        except ProviderRegistryError as exc:
-            if self.health_store is not None:
-                self.health_store.record_failure(spec.provider, spec.id, exc)
-            raise ModelRoutingError(str(exc)) from exc
-        import time
-        started = time.monotonic()
-        try:
-            response = provider.generate(
-                request,
-                selected_model=spec.id,
-                execution_id=execution_id,
+        tried: set[str] = set()
+        routing_request = request
+        last_error: Exception | None = None
+
+        while True:
+            decision = self.route(
+                routing_request,
+                capability=capability,
+                preferred_models=preferred_models,
             )
-        except Exception as exc:
-            if self.health_store is not None:
-                self.health_store.record_failure(
-                    spec.provider,
-                    spec.id,
-                    exc,
-                    latency_ms=int((time.monotonic() - started) * 1000),
-                )
-            raise
-        if self.health_store is not None:
-            self.health_store.record_success(
-                spec.provider,
-                spec.id,
-                latency_ms=int((time.monotonic() - started) * 1000),
-            )
-        return InferenceResponse(
-                model=response.model,
-                provider=response.provider,
-                content=response.content,
-                raw=response.raw,
-                request_id=response.request_id,
-                execution_id=response.execution_id,
-                requested_model=response.requested_model,
-                selected_model=response.selected_model,
-                provider_model=response.provider_model,
-                reported_model=response.reported_model,
-                usage=response.usage,
-                telemetry=response.telemetry,
-                routing_score=decision.selected_score,
-                routing_factors=dict(decision.factors),
-                routing_candidates=decision.candidates,
+            spec = self._model_by_id(decision.selected_model)
+            tried.add(spec.id)
+            execution_id = new_execution_id()
+            if self.provider_registry is None:
+                raise ModelRoutingError("inference provider registry is not configured")
+            try:
+                provider = self.provider_registry.create(spec)
+            except ProviderRegistryError as exc:
+                if self.health_store is not None:
+                    self.health_store.record_failure(spec.provider, spec.id, exc)
+                last_error = ModelRoutingError(str(exc))
+            else:
+                import time
+                started = time.monotonic()
+                try:
+                    response = provider.generate(
+                        routing_request,
+                        selected_model=spec.id,
+                        execution_id=execution_id,
+                    )
+                except Exception as exc:
+                    last_error = exc
+                    if self.health_store is not None:
+                        self.health_store.record_failure(
+                            spec.provider,
+                            spec.id,
+                            exc,
+                            latency_ms=int((time.monotonic() - started) * 1000),
+                        )
+                else:
+                    if self.health_store is not None:
+                        self.health_store.record_success(
+                            spec.provider,
+                            spec.id,
+                            latency_ms=int((time.monotonic() - started) * 1000),
+                        )
+                    return InferenceResponse(
+                        model=response.model,
+                        provider=response.provider,
+                        content=response.content,
+                        raw=response.raw,
+                        request_id=response.request_id,
+                        execution_id=response.execution_id,
+                        requested_model=response.requested_model,
+                        selected_model=response.selected_model,
+                        provider_model=response.provider_model,
+                        reported_model=response.reported_model,
+                        usage=response.usage,
+                        telemetry=response.telemetry,
+                        routing_score=decision.selected_score,
+                        routing_factors=dict(decision.factors),
+                        routing_candidates=decision.candidates,
+                    )
+
+            remaining = [
+                model_id
+                for model_id, _score in decision.candidates
+                if model_id not in tried
+            ]
+            if not remaining:
+                if last_error is not None:
+                    raise last_error
+                raise ModelRoutingError("inference failed without a provider error")
+
+            metadata = dict(routing_request.metadata or {})
+            original_allowed = _allowed_models(routing_request)
+            if original_allowed is not None:
+                remaining = [model_id for model_id in remaining if model_id in original_allowed]
+            if not remaining:
+                if last_error is not None:
+                    raise last_error
+                raise ModelRoutingError("no eligible reserve model remains after provider failure")
+            metadata["allowed_models"] = remaining
+            routing_request = InferenceRequest(
+                messages=routing_request.messages,
+                model=None,
+                temperature=routing_request.temperature,
+                max_tokens=routing_request.max_tokens,
+                metadata=metadata,
+                request_id=routing_request.request_id,
             )
 
 
