@@ -166,7 +166,7 @@ def _build_director_provider(
     # Direct provider selection requires an explicit process-level opt-in.
     director_provider_id = os.getenv(
         "AURORA_DIRECTOR_PROVIDER",
-        "router",
+        str(configured.get("provider", "router")),
     ).strip().lower()
 
     if director_provider_id in {"router", "inference_fabric", ""}:
