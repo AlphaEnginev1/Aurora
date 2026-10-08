@@ -1,5 +1,4 @@
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 
 import pytest
 
@@ -93,8 +92,9 @@ def test_router_uses_health_to_remove_cooled_model(tmp_path: Path):
     request = InferenceRequest(messages=[{"role":"user","content":"x"}])
 
     assert router.route(request, capability="reasoning").selected_model == "m1"
-    with pytest.raises(ProviderTimeoutError):
-        router.generate(request, capability="reasoning")
+    response = router.generate(request, capability="reasoning")
+    assert response.content == "ok"
+    assert response.selected_model == "m2"
     assert health.snapshot("test", "m1").state == "cooldown"
     assert router.route(request, capability="reasoning").selected_model == "m2"
 
