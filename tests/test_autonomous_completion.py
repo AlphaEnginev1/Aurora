@@ -1,0 +1,49 @@
+from aurora.autonomy.computer_use import AutonomousComputerUse
+from aurora.autonomy.discovery_loop import DiscoveryLoop
+from aurora.autonomy.mission_manager import AutonomousMissionManager
+from aurora.autonomy.rsi import RecursiveSelfImprovement
+from aurora.autonomy.software_engineer import AutonomousSoftwareEngineer
+
+def test_computer_use_observe_act_loop():
+    state={"n":0}
+    def decide(ctx):
+        if state["n"]>=2: return None
+        state["n"]+=1
+        return {"action":"type","text":str(state["n"])}
+    steps=AutonomousComputerUse(lambda actions:{"completed":False,"actions":actions},decide=decide,max_steps=4).run("do it")
+    assert len(steps)==2
+
+def test_software_engineer_reaches_publish():
+    phases=[]
+    def execute(phase,state):
+        phases.append(phase); return {"last_phase":phase}
+    result=AutonomousSoftwareEngineer(execute=execute,evaluate=lambda state:"succeeded" if state["last_phase"]=="publish" else "continue").run("fix project")
+    assert result.status=="succeeded"
+    assert phases==["inspect","research","plan","edit","test","verify","publish"]
+
+def test_discovery_loop_requires_verified_novel_result():
+    learned=[]
+    loop=DiscoveryLoop(
+        investigate=lambda h:{"sources":["s1"]},
+        hypothesize=lambda h,e:h+" improved",
+        falsify=lambda h,e:{"verdict":"supported","evidence":["e1"]},
+        novelty=lambda h,e:"novel",
+        learn=lambda h,e:learned.append(h) or "ka-1")
+    result=loop.run("hypothesis")
+    assert result.status=="discovered" and learned
+
+def test_mission_manager_delegates_to_existing_runtime():
+    class Submission: mission_id="m-1"
+    class Result: status="succeeded"
+    class Runtime:
+        def submit_mission(self,*,objective,context=None): return Submission()
+        def run_until_terminal(self,submission,*,max_cycles): assert max_cycles==4; return Result()
+    result=AutonomousMissionManager(Runtime(),max_cycles=4).run("mission")
+    assert result.mission_id=="m-1" and result.status=="succeeded"
+
+def test_rsi_runs_full_cycle():
+    phases=[]
+    def execute(phase,state):
+        phases.append(phase); return {"change_id":"c-1"} if phase=="ci" else {}
+    result=RecursiveSelfImprovement(execute_phase=execute,evaluate=lambda state:"improved",max_cycles=1).run("improve Aurora")
+    assert result.status=="succeeded" and result.change_id=="c-1" and phases[-1]=="learn"
