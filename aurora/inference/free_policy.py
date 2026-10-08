@@ -62,11 +62,16 @@ def dynamic_catalog_mode(provider_id: str, path: str | Path | None = None) -> st
 
 
 def is_discovered_free_model(provider_id: str, model_id: str, *, discovered_free_endpoint: bool = False, path: str | Path | None = None) -> bool:
-    if is_free_model(provider_id, model_id, path):
-        return True
-    return (str(provider_id).strip().lower() == "nvidia_api"
-            and dynamic_catalog_mode(provider_id, path) == "free_endpoint"
-            and discovered_free_endpoint)
+    """Return whether a discovered model is currently authorized as free.
+
+    NVIDIA's dynamic free-endpoint mode is deliberately fail-closed: checked-in
+    seed records provide metadata only and cannot authorize a served model that
+    is absent from the current official Free Endpoint catalog.
+    """
+    normalized_provider = str(provider_id).strip().lower()
+    if normalized_provider == "nvidia_api" and dynamic_catalog_mode(provider_id, path) == "free_endpoint":
+        return bool(discovered_free_endpoint)
+    return is_free_model(provider_id, model_id, path)
 
 
 def is_free_model(provider_id: str, model_id: str, path: str | Path | None = None) -> bool:

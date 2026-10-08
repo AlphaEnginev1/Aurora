@@ -13,7 +13,7 @@ from urllib.request import Request, urlopen
 from ..discovery import DiscoveredModelCandidate, candidate_id
 from ..models import ModelSpec
 from ..free_policy import is_discovered_free_model, record_metadata
-from .nvidia_free_catalog import NVIDIAFreeEndpointCatalogProvider
+from .nvidia_free_catalog import NVIDIAFreeEndpointCatalogProvider, NVIDIAFreeCatalogError
 
 
 class NVIDIAModelDiscoveryError(RuntimeError):
@@ -42,7 +42,6 @@ class NVIDIAModelDiscoveryProvider:
 
     def discover(self) -> tuple[DiscoveredModelCandidate, ...]:
         endpoint = f"{self.base_url}/models"
-        free_catalog_ids: set[str] = set()
         try:
             free_catalog_ids = set(
                 NVIDIAFreeEndpointCatalogProvider(
@@ -52,8 +51,10 @@ class NVIDIAModelDiscoveryProvider:
                     )
                 ).discover()
             )
-        except Exception:
-            free_catalog_ids = set()
+        except NVIDIAFreeCatalogError as exc:
+            raise NVIDIAModelDiscoveryError(
+                f"NVIDIA Free Endpoint catalog discovery failed: {exc}"
+            ) from None
         headers = {"Accept": "application/json"}
         if self.api_key.strip():
             headers["Authorization"] = f"Bearer {self.api_key}"
@@ -108,13 +109,11 @@ class NVIDIAModelDiscoveryProvider:
                 specialties = tuple(str(item) for item in free_metadata.get("specialties", ()) if isinstance(item, str))
             if context_window is None:
                 context_window = _positive_int(free_metadata.get("context_window"))
-            catalog_free_endpoint = bool(
-                normalized_model_id in free_catalog_ids
-                or row.get("free_endpoint")
-                or str(row.get("access_tier", "")).strip().lower() == "free"
-                or str(row.get("pricing_tier", "")).strip().lower() == "free"
-                or str(row.get("tier", "")).strip().lower() == "free"
-            )
+            # The official Build catalog is the authoritative NVIDIA Free
+            # Endpoint signal. /v1/models and checked-in policy metadata may
+            # describe served models, but neither is allowed to override the
+            # current catalog.
+            catalog_free_endpoint = normalized_model_id in free_catalog_ids
             discovered_free = is_discovered_free_model(
                 self.provider_id, normalized_model_id,
                 discovered_free_endpoint=catalog_free_endpoint,

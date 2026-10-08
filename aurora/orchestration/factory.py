@@ -415,11 +415,11 @@ def _activate_selected_discovered_models(
     director = settings.get("director", {}) if isinstance(settings, dict) else {}
     provider_id = str(director.get("provider", "router")).strip().lower()
     model_id = str(director.get("model", "")).strip()
-    if provider_id != "nvidia_api" or not model_id:
-        return
-    if is_free_model("nvidia_api", model_id):
-        return
     if not router.provider_registry or not router.model_registry:
+        return
+    if "nvidia_api" not in router.provider_registry.ids:
+        return
+    if not (settings_store.credential("nvidia_api") or os.getenv("NVIDIA_API_KEY", "")):
         return
     candidate_store = ModelCandidateStore(workspace_root / "model-candidates.db")
     discovery = ModelDiscoveryService(
@@ -483,6 +483,10 @@ def build_director_service(*, inference_policy_path: str | Path, autonomy_policy
     _apply_local_model_settings(router, settings_store)
     root=Path(workspace_root).resolve()
     _activate_selected_discovered_models(router, settings_store, root)
+    # Dynamic NVIDIA discovery is authoritative for the active free-model pool;
+    # downstream registries must see the post-discovery model set, not the stale
+    # checked-in seed snapshot captured before activation.
+    inference_specs = list(router.model_registry.models)
     skill_registry=SkillRegistry.from_file(skills_path,configured_models={model.id for model in inference_specs})
     organization=OrganizationRegistry.from_file(organization_path,configured_models={model.id for model in inference_specs})
     skill_registry.validate_organization(organization)
