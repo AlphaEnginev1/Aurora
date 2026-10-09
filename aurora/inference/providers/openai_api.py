@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import socket
 import time
 import urllib.error
@@ -110,8 +111,15 @@ class OpenAIAPIProvider:
             with urllib.request.urlopen(req, timeout=self.timeout) as response:
                 raw = json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
+            # Keep the response headers and raw body private, but preserve the
+            # provider's structured error code/type/message for actionable
+            # troubleshooting (e.g. Groq's model-permission error codes).
+            detail = _safe_http_error_detail(exc, api_key=self.api_key)
+            message = f"API HTTP request failed with status {exc.code}"
+            if detail:
+                message += f" ({detail})"
             raise ProviderHTTPError(
-                f"API HTTP request failed with status {exc.code}",
+                message,
                 context=context,
                 status_code=exc.code,
             ) from None
@@ -159,6 +167,40 @@ class OpenAIAPIProvider:
             usage=usage,
             telemetry=telemetry,
         )
+
+
+def _safe_http_error_detail(exc: urllib.error.HTTPError, *, api_key: str | None) -> str | None:
+    """Extract only safe structured diagnostic fields; never expose headers or raw bodies."""
+    try:
+        payload = json.loads(exc.read(16_384).decode("utf-8"))
+    except (AttributeError, OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    error = payload.get("error")
+    if not isinstance(error, dict):
+        return None
+
+    parts: list[str] = []
+    for field in ("code", "type", "message"):
+        value = error.get(field)
+        if not isinstance(value, str) or not value.strip():
+            continue
+        safe_value = " ".join(value.split())
+        if api_key:
+            safe_value = safe_value.replace(api_key, "[REDACTED]")
+        safe_value = re.sub(
+            r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+",
+            "Bearer [REDACTED]",
+            safe_value,
+        )
+        safe_value = re.sub(
+            r"\b(?:gsk_[A-Za-z0-9_-]{8,}|sk-or-v1-[A-Za-z0-9_-]{8,}|AIza[0-9A-Za-z_-]{20,})\b",
+            "[REDACTED]",
+            safe_value,
+        )
+        parts.append(f"{field}={safe_value[:400]}")
+    return "; ".join(parts)[:900] or None
 
 
 def _usage(value: object, context: ProviderErrorContext) -> InferenceUsage:
