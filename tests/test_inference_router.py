@@ -228,10 +228,14 @@ def test_router_retries_next_ranked_model_after_provider_failure():
     ]
     router = ModelRouter(models, provider_registry=registry)
     response = router.generate(
-        InferenceRequest(messages=[{"role": "user", "content": "x"}]),
+        InferenceRequest(
+            messages=[{"role": "user", "content": "x"}],
+            metadata={"allowed_models": ["model/a", "model/b"]},
+        ),
         capability="reasoning",
         preferred_models=("model/a", "model/b"),
     )
 
     assert response.content == "ok"
+    assert response.model == "model/b"
     assert attempts == ["model/a", "model/b"]
