@@ -144,6 +144,7 @@ def test_factory_wires_capability_resolution_into_runtime_workbench(tmp_path: Pa
         workbench = service.task_engine.orchestration._workbench
         assert workbench is not None
         assert workbench.resolution is not None
+        assert service.autonomous_mission_manager.runtime is service
     finally:
         for key, value in previous.items():
             if value is None:
