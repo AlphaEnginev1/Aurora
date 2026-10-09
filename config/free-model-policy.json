@@ -119,7 +119,7 @@
         },
         "openai/gpt-oss-20b": {
           "tier": "free",
-          "rank": 2,
+          "rank": 3,
           "specialties": [
             "fast",
             "coding",
@@ -135,6 +135,29 @@
           "context_window": 131072,
           "quality_score": 0.84,
           "latency_score": 0.9
+        },
+        "qwen/qwen3.8-27b": {
+          "tier": "free",
+          "rank": 2,
+          "specialties": [
+            "reasoning",
+            "coding",
+            "tool_use",
+            "multimodal",
+            "vision",
+            "agentic"
+          ],
+          "capabilities": [
+            "chat",
+            "reasoning",
+            "coding",
+            "tool_use",
+            "agentic",
+            "image"
+          ],
+          "context_window": 131072,
+          "quality_score": 0.9,
+          "latency_score": 0.74
         }
       },
       "free_tier_confirmation_env": "AURORA_GROQ_FREE_TIER_CONFIRMED"
