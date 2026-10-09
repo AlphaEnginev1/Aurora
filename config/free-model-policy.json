@@ -238,6 +238,31 @@
           "latency_score": 0.7
         }
       }
+    },
+    "mistral": {
+      "account_policy": "Only the officially listed free Labs Leanstral API model; access is time-limited and must be re-verified. Never use paid Mistral models.",
+      "endpoint": "https://api.mistral.ai/v1",
+      "api_key_env": "MISTRAL_API_KEY",
+      "free_tier_confirmation_env": "AURORA_MISTRAL_FREE_TIER_CONFIRMED",
+      "models": {
+        "labs-leanstral-2603": {
+          "tier": "free",
+          "rank": 1,
+          "specialties": [
+            "coding",
+            "lean4",
+            "formal_proofs",
+            "agentic"
+          ],
+          "capabilities": [
+            "chat",
+            "coding",
+            "tool_use"
+          ],
+          "quality_score": 0.78,
+          "latency_score": 0.7
+        }
+      }
     }
   }
 }
