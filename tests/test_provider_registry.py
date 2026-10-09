@@ -1,6 +1,7 @@
 import pytest
 
 from aurora.inference.models import InferenceRequest, InferenceResponse, ModelSpec
+from aurora.inference.reserve_pool import DynamicReservePool
 from aurora.inference.providers.registry import (
     ProviderRegistry,
     ProviderRegistryError,
@@ -242,3 +243,31 @@ def test_free_only_router_rejects_unallowlisted_model_even_if_marked_free():
             InferenceRequest(messages=[{"role": "user", "content": "test"}]),
             capability="coding",
         )
+
+
+
+def test_free_only_reserve_pool_rejects_unallowlisted_model_marked_free():
+    registry = default_provider_registry(
+        include_free=True,
+        free_api_keys={"groq": "test-key"},
+    )
+    unknown = ModelSpec(
+        "groq/paid-or-unknown-model",
+        "groq",
+        "https://api.groq.com/openai/v1",
+        capabilities=("coding",),
+        enabled=True,
+        pricing_tier="free",
+    )
+    router = ModelRouter(
+        models=[],
+        provider_registry=registry,
+        cost_policy="free_only",
+    )
+    pool = DynamicReservePool(router)
+    candidates = pool.build(
+        InferenceRequest(messages=[{"role": "user", "content": "test"}]),
+        models=[unknown],
+        capability="coding",
+    )
+    assert candidates == ()
