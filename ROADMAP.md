@@ -109,16 +109,19 @@ Integrated and verified:
 - active policy registry;
 - immutable typed active policy contracts.
 
-## Live Provider Verification — VERIFIED
+## Current live-provider verification — NOT CLOSED
 
-The dedicated live-provider evidence gates are closed:
-- LIVE-RESEARCH-DISCOVERY — VERIFIED;
-- LIVE-NVIDIA — VERIFIED;
-- LIVE-GEMINI — VERIFIED.
+Historical live-provider gates are retained as evidence of earlier runtime states; they do not certify the current NVIDIA-only free-model topology. The current live NVIDIA inference gate failed with HTTP 403 on runs 37814164201 and 37813096077. The current free-model resilience gate remains pending until real NVIDIA inference succeeds and reserve/fail-closed behavior is proven. Do not label the current provider topology LIVE VERIFIED based on historical Gemini-to-NVIDIA runs.
 
-## Frozen Production Readiness — COMPLETE
+Current evidence:
+- ordinary CI on main: run 37884952749 SUCCESS;
+- current NVIDIA live inference: BLOCKED, HTTP 403;
+- current multi-provider/free-model resilience: LIVE PENDING;
+- local WSL/dashboard conversation: NOT VERIFIED by GitHub CI.
 
-Blocks 1–7 of the ordered production-readiness queue are VERIFIED on canonical `main`:
+## Frozen historical production-readiness queue — COMPLETE AT ITS VERIFIED BASELINE
+
+Blocks 1–7 were verified on their respective historical canonical commits. That historical closure is not evidence that the current provider configuration is live-ready. The current NVIDIA-only live gate remains blocked as stated above. The historical queue was:
 1. LIVE-RESEARCH-DISCOVERY
 2. OS-NETWORK-ENFORCEMENT
 3. LIVE-NVIDIA
@@ -170,7 +173,7 @@ External live proof:
 - result: SUCCESS — real primary response, controlled Gemini failure, real NVIDIA replacement response, provider transition evidence recorded;
 - credential leakage: none observed in the gate output.
 
-**Increment 12 acceptance: CLOSED / VERIFIED.**
+**Increment 12 historical acceptance: CLOSED / VERIFIED for the Gemini-to-NVIDIA topology tested in run 37179243481. This does not verify the current NVIDIA-only runtime.**
 
 No live authorization is activated by the gate.
 
