@@ -1,3 +1,4 @@
+import io
 import json
 
 import pytest
@@ -68,6 +69,46 @@ def test_openai_http_failure_is_typed_without_secret(monkeypatch):
         provider.generate(InferenceRequest(messages=[]), execution_id="exec-openai-error")
     assert caught.value.status_code == 401
     assert "SECRET-OPENAI" not in str(caught.value)
+
+
+def test_openai_http_failure_includes_sanitized_provider_diagnostic(monkeypatch):
+    payload = {
+        "error": {
+            "message": (
+                "The model is blocked at the project level. "
+                "credential echo SECRET-OPENAI and gsk_123456789abcdefgh"
+            ),
+            "type": "permissions_error",
+            "code": "model_permission_blocked_project",
+        }
+    }
+    error = __import__("urllib.error", fromlist=["HTTPError"]).HTTPError(
+        "https://api.groq.test/openai/v1/chat/completions",
+        403,
+        "forbidden",
+        {},
+        io.BytesIO(json.dumps(payload).encode("utf-8")),
+    )
+    monkeypatch.setattr("urllib.request.urlopen", lambda request, timeout: (_ for _ in ()).throw(error))
+    provider = OpenAIAPIProvider(
+        ModelSpec("openai/gpt-oss-120b", "groq", "https://api.groq.test/openai/v1"),
+        api_key="SECRET-OPENAI",
+        provider_id="groq",
+    )
+
+    with pytest.raises(ProviderHTTPError) as caught:
+        provider.generate(
+            InferenceRequest(messages=[{"role": "user", "content": "hello"}], model="openai/gpt-oss-120b")
+        )
+
+    diagnostic = str(caught.value)
+    assert caught.value.status_code == 403
+    assert "model_permission_blocked_project" in diagnostic
+    assert "permissions_error" in diagnostic
+    assert "blocked at the project level" in diagnostic
+    assert "SECRET-OPENAI" not in diagnostic
+    assert "gsk_123456789abcdefgh" not in diagnostic
+    assert "[REDACTED]" in diagnostic
 
 
 def test_anthropic_adapter_translates_system_and_image_messages(monkeypatch):
