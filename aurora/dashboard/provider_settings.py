@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import urllib.error
 import urllib.request
 from typing import Any, Mapping
@@ -36,7 +37,17 @@ class ProviderSettingsService:
             router = self.runtime.director.planner.router
             nvidia_key = self.store.credential("nvidia_api")
             router.nvidia_api_key = nvidia_key or None
-            router.provider_registry = default_provider_registry(nvidia_api_key=nvidia_key or None)
+            free_api_keys = {
+                "groq": os.getenv("GROQ_API_KEY", ""),
+                "gemini": os.getenv("GEMINI_API_KEY", ""),
+                "cloudflare": os.getenv("CLOUDFLARE_API_TOKEN", ""),
+                "openrouter": os.getenv("OPENROUTER_API_KEY", ""),
+            }
+            router.provider_registry = default_provider_registry(
+                nvidia_api_key=nvidia_key or None,
+                include_free=True,
+                free_api_keys=free_api_keys,
+            )
 
             selected_model = str(settings["director"].get("model", "")).strip()
             provider_id = str(settings["director"].get("provider", "")).strip().lower()
