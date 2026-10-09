@@ -56,7 +56,9 @@ def test_live_free_api_provider_returns_real_inference(tmp_path, monkeypatch):
     monkeypatch.setenv("AURORA_WORKSPACE_ROOT", str(tmp_path / "runtime"))
     policy_path = Path(__file__).resolve().parents[2] / "config" / "inference-policy.json"
     engine = build_orchestration_engine(policy_path)
-    model_id = os.getenv("AURORA_FREE_API_MODEL", MODEL_BY_PROVIDER[provider_id]).strip()
+    # GitHub Actions always exports this variable; an empty optional input must
+    # preserve the provider's safe default rather than selecting an empty model ID.
+    model_id = os.getenv("AURORA_FREE_API_MODEL", "").strip() or MODEL_BY_PROVIDER[provider_id]
 
     result = engine.run_task(
         task_id="live-free-api-smoke",
