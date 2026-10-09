@@ -214,3 +214,31 @@ def test_free_api_provider_does_not_fall_back_to_openai_key(monkeypatch):
     )
     assert provider.api_key == ""
     assert provider.health() is False
+
+
+
+def test_free_only_router_rejects_unallowlisted_model_even_if_marked_free():
+    registry = default_provider_registry(
+        include_free=True,
+        free_api_keys={"groq": "test-key"},
+    )
+    router = ModelRouter(
+        models=[
+            ModelSpec(
+                "groq/paid-or-unknown-model",
+                "groq",
+                "https://api.groq.com/openai/v1",
+                capabilities=("coding", "reasoning"),
+                enabled=True,
+                pricing_tier="free",
+            )
+        ],
+        provider_registry=registry,
+        cost_policy="free_only",
+    )
+    assert router.available() == []
+    with pytest.raises(ModelRoutingError, match="No enabled, healthy, available model"):
+        router.generate(
+            InferenceRequest(messages=[{"role": "user", "content": "test"}]),
+            capability="coding",
+        )
