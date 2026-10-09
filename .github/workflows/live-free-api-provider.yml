@@ -13,6 +13,10 @@ on:
           - gemini
           - cloudflare
           - mistral
+      model_id:
+        description: "Optional model ID override from the selected provider's free allowlist; leave blank for the default"
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -36,6 +40,7 @@ jobs:
         env:
           AURORA_FREE_API_LIVE: "1"
           AURORA_FREE_API_PROVIDER: ${{ inputs.provider }}
+          AURORA_FREE_API_MODEL: ${{ inputs.model_id }}
           AURORA_INFERENCE_COST_POLICY: "free_only"
           AURORA_FREE_MODEL_POLICY: "config/free-model-policy.json"
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
