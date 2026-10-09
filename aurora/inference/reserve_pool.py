@@ -78,8 +78,13 @@ class DynamicReservePool:
                 continue
             if not model.enabled or not model.healthy or not model.available:
                 continue
-            if self.router.cost_policy == "free_only" and model.pricing_tier != "free":
-                continue
+            if self.router.cost_policy == "free_only":
+                if model.pricing_tier != "free":
+                    continue
+                if model.provider != "nvidia_api":
+                    from .free_policy import is_free_model
+                    if not is_free_model(model.provider, model.id):
+                        continue
             if allowed_models is not None and model.id not in allowed_models:
                 continue
             if capability and capability not in model.capabilities:
