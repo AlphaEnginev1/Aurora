@@ -129,6 +129,8 @@ def default_provider_registry(
     network_gateway=None,
     anthropic_api_key: str | None = None,
     include_external: bool = False,
+    include_free: bool = False,
+    free_api_keys: dict[str, str | None] | None = None,
 ) -> ProviderRegistry:
     """Build the canonical provider registry without coupling the router to vendors."""
 
@@ -144,6 +146,18 @@ def default_provider_registry(
         from .anthropic_api import AnthropicAPIProvider
         return AnthropicAPIProvider(model, api_key=anthropic_api_key)
 
+    free_keys = free_api_keys or {}
+
+    def compatible_factory(provider_id: str) -> ProviderFactory:
+        def factory(model: ModelSpec) -> InferenceProvider:
+            from .openai_api import OpenAIAPIProvider
+            return OpenAIAPIProvider(
+                model,
+                api_key=free_keys.get(provider_id, ""),
+                provider_id=provider_id,
+            )
+        return factory
+
     providers = [
         ProviderSpec(
             "nvidia_api",
@@ -154,6 +168,16 @@ def default_provider_registry(
             discovery_factory=lambda: _nvidia_discovery_factory(api_key=nvidia_api_key, gateway=network_gateway),
         ),
     ]
+    if include_free:
+        providers.extend(
+            [
+                ProviderSpec("groq", "GroqCloud Free API", ("chat", "reasoning", "coding", "tool_use"), True, compatible_factory("groq")),
+                ProviderSpec("gemini", "Google AI Studio Free API", ("chat", "reasoning", "coding", "tool_use", "image"), True, compatible_factory("gemini")),
+                ProviderSpec("cloudflare", "Cloudflare Workers AI Free Allocation", ("chat", "reasoning", "coding"), True, compatible_factory("cloudflare")),
+                ProviderSpec("mistral", "Mistral Labs Free API Model", ("chat", "reasoning", "coding", "tool_use"), True, compatible_factory("mistral")),
+                ProviderSpec("openrouter", "OpenRouter Free Models", ("chat", "reasoning", "coding", "tool_use"), True, compatible_factory("openrouter")),
+            ]
+        )
     if include_external:
         providers.extend(
             [

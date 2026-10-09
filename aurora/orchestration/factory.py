@@ -14,7 +14,7 @@ from aurora.autonomy.sandbox import SandboxExecutor, SandboxPolicy
 from aurora.inference.registry import ModelRegistry
 from aurora.inference.router import ModelRouter
 from aurora.inference.models import InferenceRequest, ModelSpec
-from aurora.inference.free_policy import is_free_model
+from aurora.inference.free_policy import is_free_model, free_model_ids, record_metadata
 from aurora.inference.discovery import ModelCandidateStore, ModelDiscoveryService
 from aurora.inference.autonomous_discovery import AutonomousDiscoveryRefreshService
 from aurora.inference.providers.registry import default_provider_registry
@@ -73,13 +73,58 @@ from .task_worker import WorkerPolicy
 
 def build_orchestration_engine(policy_path: str | Path) -> OrchestrationEngine:
     nvidia_key = os.getenv("NVIDIA_API_KEY")
+    free_api_keys = {
+        "groq": os.getenv("GROQ_API_KEY", "") if os.getenv("AURORA_GROQ_FREE_TIER_CONFIRMED") == "1" else "",
+        "gemini": os.getenv("GEMINI_API_KEY", "") if os.getenv("AURORA_GEMINI_FREE_TIER_CONFIRMED") == "1" else "",
+        "cloudflare": os.getenv("CLOUDFLARE_API_TOKEN", "") if os.getenv("AURORA_CLOUDFLARE_FREE_TIER_CONFIRMED") == "1" else "",
+        "mistral": os.getenv("MISTRAL_API_KEY", "") if os.getenv("AURORA_MISTRAL_FREE_TIER_CONFIRMED") == "1" else "",
+        "openrouter": os.getenv("OPENROUTER_API_KEY", ""),
+    }
     provider_registry = default_provider_registry(
         nvidia_api_key=nvidia_key,
+        include_free=True,
+        free_api_keys=free_api_keys,
     )
     model_registry = ModelRegistry.from_file(
         policy_path,
         provider_registry=provider_registry,
     )
+    # Seed only explicitly allowlisted free models for providers whose credentials
+    # are present. This prevents missing-key providers from entering routing and
+    # keeps discovery from turning unknown pricing into an eligible model.
+    from aurora.inference.free_policy import load_free_model_policy
+    free_policy = load_free_model_policy()
+    for provider_id, api_key in free_api_keys.items():
+        provider_policy = free_policy.get("providers", {}).get(provider_id, {})
+        if not api_key or not isinstance(provider_policy, dict):
+            continue
+        confirmation_env = str(provider_policy.get("free_tier_confirmation_env", "")).strip()
+        if confirmation_env and os.getenv(confirmation_env, "").strip() != "1":
+            continue
+        if provider_id == "cloudflare" and not os.getenv("CLOUDFLARE_ACCOUNT_ID", "").strip():
+            continue
+        endpoint = str(provider_policy.get("endpoint", "")).strip()
+        if not endpoint:
+            continue
+        for model_id in free_model_ids(provider_id):
+            if any(model.id == model_id for model in model_registry.models):
+                continue
+            metadata = record_metadata(provider_id, model_id)
+            capabilities = tuple(metadata.get("capabilities", ("chat",)))
+            specialties = tuple(metadata.get("specialties", ()))
+            model_registry.register(ModelSpec(
+                id=model_id,
+                provider=provider_id,
+                endpoint=endpoint,
+                capabilities=capabilities,
+                context_window=metadata.get("context_window"),
+                enabled=True,
+                specialties=specialties,
+                quality_score=float(metadata.get("quality_score", 0.5)),
+                latency_score=float(metadata.get("latency_score", 0.5)),
+                cost_score=1.0,
+                pricing_tier="free",
+            ))
     policy_data = json.loads(Path(policy_path).read_text(encoding="utf-8"))
     cost_policy = os.getenv("AURORA_INFERENCE_COST_POLICY", str(policy_data.get("cost_policy", "free_only"))).strip().lower()
     if cost_policy != "free_only":

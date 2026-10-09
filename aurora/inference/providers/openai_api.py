@@ -40,9 +40,15 @@ class OpenAIAPIProvider:
         spec: ModelSpec,
         api_key: str | None = None,
         timeout: float = 60.0,
+        *,
+        provider_id: str = "openai",
+        api_key_env: str = "OPENAI_API_KEY",
     ) -> None:
         self.spec = spec
-        self.api_key = api_key or os.getenv("OPENAI_API_KEY")
+        # An explicit empty string means "not configured"; never borrow another
+        # provider's environment key by accident.
+        self.api_key = api_key if api_key is not None else os.getenv(api_key_env)
+        self.provider_id = provider_id
         self.timeout = timeout
 
     def health(self) -> bool:
@@ -68,12 +74,12 @@ class OpenAIAPIProvider:
             provider_model=self.spec.id,
         )
         if not self.health():
-            raise ProviderConfigurationError("OpenAI provider is not configured", context=context)
+            raise ProviderConfigurationError("API provider is not configured", context=context)
         try:
             messages = openai_messages(request.messages, allowed_modalities=frozenset({"text", "image"}))
         except MultimodalContentError as exc:
             raise ProviderResponseError(
-                f"OpenAI request contains unsupported multimodal content: {exc}",
+                f"API request contains unsupported multimodal content: {exc}",
                 context=context,
             ) from exc
         payload = {"model": request.model or self.spec.id, "messages": messages}
@@ -81,8 +87,17 @@ class OpenAIAPIProvider:
             payload["temperature"] = request.temperature
         if request.max_tokens is not None:
             payload["max_tokens"] = request.max_tokens
+        endpoint = self.spec.endpoint
+        if "{account_id}" in endpoint:
+            account_id = os.getenv("CLOUDFLARE_ACCOUNT_ID", "").strip()
+            if not account_id:
+                raise ProviderConfigurationError(
+                    "API provider account configuration is missing",
+                    context=context,
+                )
+            endpoint = endpoint.replace("{account_id}", account_id)
         req = urllib.request.Request(
-            self.spec.endpoint.rstrip("/") + "/chat/completions",
+            endpoint.rstrip("/") + "/chat/completions",
             data=json.dumps(payload).encode("utf-8"),
             method="POST",
             headers={
@@ -96,28 +111,28 @@ class OpenAIAPIProvider:
                 raw = json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             raise ProviderHTTPError(
-                f"OpenAI HTTP request failed with status {exc.code}",
+                f"API HTTP request failed with status {exc.code}",
                 context=context,
                 status_code=exc.code,
             ) from None
         except (TimeoutError, socket.timeout):
-            raise ProviderTimeoutError("OpenAI inference request timed out", context=context) from None
+            raise ProviderTimeoutError("API inference request timed out", context=context) from None
         except urllib.error.URLError:
-            raise ProviderTransportError("OpenAI inference transport failed", context=context) from None
+            raise ProviderTransportError("API inference transport failed", context=context) from None
         except (UnicodeDecodeError, json.JSONDecodeError):
-            raise ProviderResponseError("OpenAI inference response was not valid JSON", context=context) from None
+            raise ProviderResponseError("API inference response was not valid JSON", context=context) from None
 
         if not isinstance(raw, dict):
-            raise ProviderResponseError("OpenAI response body must be a JSON object", context=context)
+            raise ProviderResponseError("API response body must be a JSON object", context=context)
         try:
             content = raw["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError):
             raise ProviderResponseError(
-                "OpenAI response did not contain choices[0].message.content",
+                "API response did not contain choices[0].message.content",
                 context=context,
             ) from None
         if not isinstance(content, str):
-            raise ProviderResponseError("OpenAI response content must be a string", context=context)
+            raise ProviderResponseError("API response content must be a string", context=context)
         usage = _usage(raw.get("usage"), context)
         reported_model = _reported_model(raw.get("model"), context)
         duration_ms = int((time.monotonic() - started) * 1000)
@@ -150,7 +165,7 @@ def _usage(value: object, context: ProviderErrorContext) -> InferenceUsage:
     if value is None:
         return InferenceUsage()
     if not isinstance(value, dict):
-        raise ProviderResponseError("OpenAI response usage must be an object", context=context)
+        raise ProviderResponseError("API response usage must be an object", context=context)
     return InferenceUsage(
         prompt_tokens=_as_int(value.get("prompt_tokens")),
         completion_tokens=_as_int(value.get("completion_tokens")),
@@ -162,7 +177,7 @@ def _reported_model(value: object, context: ProviderErrorContext) -> str | None:
     if value is None:
         return None
     if not isinstance(value, str) or not value.strip():
-        raise ProviderResponseError("OpenAI response model must be a non-empty string", context=context)
+        raise ProviderResponseError("API response model must be a non-empty string", context=context)
     return value
 
 

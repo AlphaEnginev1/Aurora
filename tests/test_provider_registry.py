@@ -1,6 +1,7 @@
 import pytest
 
 from aurora.inference.models import InferenceRequest, InferenceResponse, ModelSpec
+from aurora.inference.reserve_pool import DynamicReservePool
 from aurora.inference.providers.registry import (
     ProviderRegistry,
     ProviderRegistryError,
@@ -171,3 +172,102 @@ def test_default_registry_can_opt_into_external_providers():
     )
     assert openai.provider_id == "openai"
     assert anthropic.provider_id == "anthropic"
+
+
+
+def test_default_registry_can_opt_into_free_api_providers():
+    registry = default_provider_registry(
+        nvidia_api_key="nvidia-test",
+        include_free=True,
+        free_api_keys={
+            "groq": "groq-test",
+            "gemini": "gemini-test",
+            "cloudflare": "cloudflare-test",
+            "openrouter": "openrouter-test",
+        },
+    )
+    assert {"nvidia_api", "groq", "gemini", "cloudflare", "mistral", "openrouter"} <= set(registry.ids)
+    provider = registry.create(
+        ModelSpec(
+            "openai/gpt-oss-120b",
+            "groq",
+            "https://api.groq.com/openai/v1",
+            pricing_tier="free",
+        )
+    )
+    assert provider.provider_id == "groq"
+    assert provider.api_key == "groq-test"
+
+
+def test_free_api_provider_does_not_fall_back_to_openai_key(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "must-not-be-borrowed")
+    registry = default_provider_registry(
+        include_free=True,
+        free_api_keys={"groq": ""},
+    )
+    provider = registry.create(
+        ModelSpec(
+            "openai/gpt-oss-20b",
+            "groq",
+            "https://api.groq.com/openai/v1",
+            pricing_tier="free",
+        )
+    )
+    assert provider.api_key == ""
+    assert provider.health() is False
+
+
+
+def test_free_only_router_rejects_unallowlisted_model_even_if_marked_free():
+    registry = default_provider_registry(
+        include_free=True,
+        free_api_keys={"groq": "test-key"},
+    )
+    router = ModelRouter(
+        models=[
+            ModelSpec(
+                "groq/paid-or-unknown-model",
+                "groq",
+                "https://api.groq.com/openai/v1",
+                capabilities=("coding", "reasoning"),
+                enabled=True,
+                pricing_tier="free",
+            )
+        ],
+        provider_registry=registry,
+        cost_policy="free_only",
+    )
+    assert router.available() == []
+    with pytest.raises(ModelRoutingError, match="No enabled, healthy, available model"):
+        router.generate(
+            InferenceRequest(messages=[{"role": "user", "content": "test"}]),
+            capability="coding",
+        )
+
+
+
+def test_free_only_reserve_pool_rejects_unallowlisted_model_marked_free():
+    registry = default_provider_registry(
+        include_free=True,
+        free_api_keys={"groq": "test-key"},
+    )
+    unknown = ModelSpec(
+        "groq/paid-or-unknown-model",
+        "groq",
+        "https://api.groq.com/openai/v1",
+        capabilities=("coding",),
+        enabled=True,
+        pricing_tier="free",
+    )
+    router = ModelRouter(
+        models=[],
+        provider_registry=registry,
+        cost_policy="free_only",
+    )
+    pool = DynamicReservePool(router)
+    candidates = pool.build(
+        InferenceRequest(messages=[{"role": "user", "content": "test"}]),
+        models=[unknown],
+        capability="coding",
+    )
+    assert candidates == ()

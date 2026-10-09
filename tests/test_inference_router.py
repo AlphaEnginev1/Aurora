@@ -146,16 +146,16 @@ def test_router_uses_learned_skill_performance():
 
 def test_free_only_router_rejects_paid_and_unknown_models():
     models = [
-        ModelSpec("model/free", "fake", "https://example.invalid", capabilities=("reasoning",), pricing_tier="free"),
+        ModelSpec("nvidia/nemotron-3-ultra-550b-a55b", "nvidia_api", "https://example.invalid", capabilities=("reasoning",), pricing_tier="free"),
         ModelSpec("model/unknown", "fake", "https://example.invalid", capabilities=("reasoning",), pricing_tier="unknown"),
         ModelSpec("model/paid", "fake", "https://example.invalid", capabilities=("reasoning",), pricing_tier="paid"),
     ]
     router = ModelRouter(models, cost_policy="free_only")
-    assert [item.id for item in router.available()] == ["model/free"]
+    assert [item.id for item in router.available()] == ["nvidia/nemotron-3-ultra-550b-a55b"]
     assert router.select(
         InferenceRequest(messages=[{"role": "user", "content": "x"}]),
         capability="reasoning",
-    ).id == "model/free"
+    ).id == "nvidia/nemotron-3-ultra-550b-a55b"
     try:
         router.select(
             InferenceRequest(messages=[{"role": "user", "content": "x"}], model="model/paid"),
