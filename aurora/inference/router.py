@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
+import logging
 from typing import TYPE_CHECKING, Mapping, Sequence
 
 if TYPE_CHECKING:
@@ -13,6 +15,9 @@ from .provider_health import ProviderHealthStore
 from .multimodal import MultimodalContentError, message_modalities
 from .registry import ModelRegistry, ModelRegistryError
 from .providers.registry import ProviderRegistry, ProviderRegistryError, default_provider_registry
+
+
+logger = logging.getLogger(__name__)
 
 
 class ModelRoutingError(RuntimeError):
@@ -412,6 +417,27 @@ class ModelRouter:
                     )
                 except Exception as exc:
                     last_error = exc
+                    # Emit a durable, secret-free attempt record. Never include the
+                    # provider response body, headers, request payload, or credentials.
+                    status_code = getattr(exc, "status_code", None)
+                    if status_code is None:
+                        status_code = getattr(exc, "http_status", None)
+                    logger.warning(
+                        "AURORA_INFERENCE_ATTEMPT %s",
+                        json.dumps(
+                            {
+                                "event": "provider_attempt_failed",
+                                "request_id": routing_request.request_id,
+                                "execution_id": execution_id,
+                                "provider": spec.provider,
+                                "model": spec.id,
+                                "http_status": status_code,
+                                "error_type": type(exc).__name__,
+                            },
+                            sort_keys=True,
+                            separators=(",", ":"),
+                        ),
+                    )
                     if self.health_store is not None:
                         self.health_store.record_failure(
                             spec.provider,
