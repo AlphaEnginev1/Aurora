@@ -80,11 +80,11 @@ remains as an auditable snapshot of the gate work and is not a second implementa
 - **LIVE VERIFICADO:** a real external provider/environment run has been executed and its evidence recorded.
 - **PENDIENTE REAL:** work that is still genuinely required; this is not a synonym for “nice to have”.
 
-## Production-readiness closure
+## Historical production-readiness closure
 
-The frozen production-readiness queue 1–7 is complete on the canonical `main` line.
+The frozen production-readiness queue 1–7 was completed against its historical verified baseline. That historical closure is preserved, but it does not certify the current NVIDIA-only runtime after later provider-topology changes. Current live acceptance is tracked separately below and remains blocked until real inference succeeds.
 
-Verified blocks:
+Historically verified blocks:
 1. LIVE-RESEARCH-DISCOVERY — VERIFIED
 2. OS-NETWORK-ENFORCEMENT — VERIFIED
 3. LIVE-NVIDIA — VERIFIED
@@ -115,15 +115,16 @@ Therefore the canonical production-readiness status is:
 
 The dedicated LIVE-RESEARCH-DISCOVERY gate sequence is closed and verified. The historical controlled/local HTTP E2E remains valid as component evidence; the dedicated live gate provides the production-readiness closure.
 
-## 3. Live provider verification
+## 3. Current live provider verification
 
-The dedicated live-provider gates have been executed successfully and are closed:
+Historical live-provider gates remain valid only for the architecture and commit they exercised. They do not establish live readiness of the current NVIDIA-only free-model topology.
 
-- LIVE-NVIDIA — verified by the dedicated Live NVIDIA Learning Gate (#11).
-- LIVE-GEMINI — verified by the dedicated Gemini Director Gate (#6, plus subsequent CI hardening and fail-closed checks).
-- LIVE-RESEARCH-DISCOVERY — verified by the dedicated research discovery gate sequence through the final green gate (#27).
+- LIVE-RESEARCH-DISCOVERY: historical gate evidence exists; current endpoint/runtime still depends on local configuration.
+- LIVE-NVIDIA: CURRENTLY BLOCKED; runs [37814164201](https://github.com/AlphaEnginev1/Aurora/actions/runs/37814164201) and [37813096077](https://github.com/AlphaEnginev1/Aurora/actions/runs/37813096077) failed with HTTP 403 during actual inference.
+- LIVE-GEMINI: historical evidence only; Gemini is not part of the active provider registry in the current NVIDIA-only contract.
+- LIVE multi-provider resilience: PENDING current live acceptance.
 
-These runs prove the intended provider/runtime integration paths. They do not create an automatic production authorization.
+The HTTP 403 cannot be fixed by changing test expectations or simulating inference. The credential owner must verify account/model/endpoint entitlement before the current live gate can pass. These gates do not create automatic production authorization.
 
 ## 3.1 Director provider failover / replacement
 

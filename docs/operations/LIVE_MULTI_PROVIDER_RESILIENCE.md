@@ -12,6 +12,6 @@ Gemini, OpenAI and Anthropic are not part of the active provider registry, Direc
 
 ## LIVE acceptance
 
-The workflow `.github/workflows/live-multi-provider-resilience.yml` is now the NVIDIA-only LIVE gate. It requires only `NVIDIA_API_KEY`, performs dynamic Free Endpoint discovery, and executes a real reasoning request against NVIDIA.
+The workflow `.github/workflows/live-multi-provider-resilience.yml` is the NVIDIA-only LIVE gate. It requires `NVIDIA_API_KEY`, performs dynamic Free Endpoint discovery, and executes a real reasoning request against NVIDIA. Current status: BLOCKED until the real inference stage succeeds; runs 37814164201 and 37813096077 returned HTTP 403. Never count catalog discovery alone as live inference success.
 
 Historical Gemini and multi-vendor acceptance records remain archived as evidence of previous architecture states; they are not active runtime dependencies.
