@@ -131,8 +131,22 @@ class NVIDIAAPIProvider:
                 with urllib.request.urlopen(req, timeout=self.timeout) as response:
                     raw = json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
+            # Keep response bodies and request headers out of logs/errors: they may
+            # contain provider diagnostics or credential-adjacent information.
+            message = f"NVIDIA HTTP request failed with status {exc.code}"
+            if exc.code == 401:
+                message += "; authentication rejected—verify NVIDIA_API_KEY configuration"
+            elif exc.code == 403:
+                message += (
+                    "; access denied—verify API-key permissions, model entitlement, "
+                    "and endpoint access in the NVIDIA account"
+                )
+            elif exc.code == 404:
+                message += "; endpoint or model not found—verify the configured model ID and endpoint"
+            elif exc.code == 429:
+                message += "; rate limit or quota reached—check account limits and retry policy"
             raise ProviderHTTPError(
-                f"NVIDIA HTTP request failed with status {exc.code}",
+                message,
                 context=context,
                 status_code=exc.code,
             ) from None

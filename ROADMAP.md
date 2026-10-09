@@ -2,6 +2,9 @@
 
 ## Canonical status
 
+**Current acceptance exceptions (2026-10-09):** the latest live NVIDIA-only acceptance runs (37814164201 and 37813096077) failed with HTTP 403 during real inference. This is not a green live gate. The five autonomy controllers from PR #177 have deterministic unit coverage, but runtime integration is only partial; the mission manager is now wired into the canonical runtime on the current remediation branch. Do not mark these items complete until the corresponding live/E2E proofs pass.
+
+
 **Canonical engineering branch: `main`**
 
 Authoritative status:

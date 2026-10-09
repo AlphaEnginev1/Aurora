@@ -49,3 +49,32 @@ def test_rsi_runs_full_cycle():
     assert result.status=="succeeded" and result.change_id=="c-1" and phases[-1]=="learn"
 
 # CI acceptance marker: autonomous completion control surfaces are covered.
+
+
+
+def test_computer_use_reobserves_environment_after_each_action():
+    observations = []
+    actions = []
+
+    def observe():
+        value = {"observation": len(observations)}
+        observations.append(value)
+        return value
+
+    def decide(context):
+        actions.append(context["observation"]["observation"])
+        if len(actions) == 3:
+            return None
+        return {"action": "read", "path": f"/tmp/{len(actions)}"}
+
+    steps = AutonomousComputerUse(
+        execute=lambda batch: {"completed": False, "actions": batch},
+        observe=observe,
+        decide=decide,
+        max_steps=4,
+    ).run("observe the changing environment")
+
+    assert len(steps) == 2
+    assert len(observations) == 3
+    assert actions == [0, 1, 2]
+    assert steps[0].observation.value["last_action_result"]["completed"] is False

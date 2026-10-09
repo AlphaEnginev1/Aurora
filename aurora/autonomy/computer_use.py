@@ -58,7 +58,15 @@ class AutonomousComputerUse:
                 return tuple(steps)
             action = dict(decision)
             result = self.execute([action])
-            observation = dict(result)
+            # Observe the actual environment again after every action. Treating
+            # the action receipt itself as the next observation caused the model
+            # to plan from stale state and violated the advertised observe-act-
+            # observe loop.
+            if self.observe is not None:
+                observation = dict(self.observe())
+                observation["last_action_result"] = dict(result)
+            else:
+                observation = dict(result)
             steps.append(ComputerStep(action=action, observation=ComputerObservation(observation)))
             if bool(result.get("completed")):
                 return tuple(steps)

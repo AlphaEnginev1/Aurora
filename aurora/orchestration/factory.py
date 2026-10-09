@@ -3,6 +3,7 @@ from __future__ import annotations
 import json, os
 from pathlib import Path
 from aurora.autonomy.acquisition import AcquisitionManager
+from aurora.autonomy.mission_manager import AutonomousMissionManager
 from aurora.autonomy.broker import CapabilityBroker
 from aurora.autonomy.capability_runtime import CapabilityRuntime
 from aurora.autonomy.capability_resolution import CapabilityResolutionRuntime, HttpCapabilityDiscoveryProvider
@@ -773,4 +774,8 @@ def build_director_runtime(*, inference_policy_path: str | Path, autonomy_policy
     runtime.bootstrap=bootstrap
     runtime.bootstrap_state=bootstrap_state
     runtime.workbench=service.task_engine.orchestration._workbench
+    # Expose the autonomous mission controller on the canonical runtime. It
+    # delegates to this exact DirectorRuntime, preserving durable mission/task
+    # identity, ownership, event bus, and terminal-state semantics.
+    runtime.autonomous_mission_manager = AutonomousMissionManager(runtime)
     return runtime

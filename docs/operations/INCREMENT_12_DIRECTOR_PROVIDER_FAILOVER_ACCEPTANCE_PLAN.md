@@ -1,54 +1,29 @@
-# Increment 12 — Provider Failover Acceptance Plan
+# Provider Failover Acceptance — Current Runtime and Historical Evidence
 
-## Canonical prerequisite
+## Status
 
-Increment 11 is closed on canonical main. Gate 8 remains complete.
+The deterministic acceptance for the historical Gemini-to-NVIDIA/router topology remains historical evidence. It does not establish live readiness of the current NVIDIA-only runtime.
 
-## Acceptance sequence
+The canonical runtime is free-only and uses NVIDIA NIM through Aurora's inference router. The current live acceptance is blocked by an external HTTP 403 returned during actual NVIDIA inference:
 
-1. Build a Gemini primary provider that returns a real successful Director response.
-2. Inject a forced Gemini execution failure after the primary success.
-3. Provide an eligible NVIDIA/Router alternative.
-4. Verify the same provider request is served by the alternative without recreating Aurora state.
-5. Verify the failover transition is durably recorded.
-6. Verify subsequent Director calls use the replacement provider.
-7. Verify durable conversation continuity.
-8. Verify durable mission continuity and no duplicate completed work.
-9. Force every candidate to fail and verify DirectorProviderFailoverError plus no activation.
-10. Restart from the same runtime database and verify the successful replacement remains active.
+- [Run 37814164201](https://github.com/AlphaEnginev1/Aurora/actions/runs/37814164201)
+- [Run 37813096077](https://github.com/AlphaEnginev1/Aurora/actions/runs/37813096077)
 
-## Canonical deterministic acceptance evidence
+Both failures occurred in `test_live_nvidia_only_catalog_and_inference`, after the live catalog step, during the actual inference request. The provider adapter deliberately does not log the response body or credentials. HTTP 403 may indicate key permissions, model entitlement, or endpoint access; the workflow cannot read or repair the secret itself.
 
-The deterministic provider, mission, conversation, fail-closed and restart-persistence acceptance suite is green on canonical main after PR #121:
-- PR #121 merged as `69edf62465e6aebea6a064d23b06efc3df38058d`;
-- canonical CI #2104 passed with `test` and `e2e-network` green.
+## Required current acceptance sequence
 
-## Deterministic E2E topology
+1. Retrieve the live NVIDIA serving catalog through the configured network gateway.
+2. Resolve at least one model whose live catalog metadata explicitly establishes Free Endpoint eligibility.
+3. Execute real inference against an eligible model.
+4. Force a controlled failure for the selected model without corrupting a live request.
+5. Confirm the reserve selector chooses another eligible model and the same request continues.
+6. Verify durable transition evidence, no secret leakage, and no duplicated mission/task execution.
+7. Exhaust eligible candidates and verify fail-closed behavior with no failed candidate activation.
+8. Re-run after the NVIDIA account's access to the selected free model and endpoint has been verified.
 
-    Gemini(primary fake success)
-    -> forced Gemini failure
-    -> NVIDIA/Router candidate
-    -> same DurableTaskStore / conversation store
-    -> terminal mission
+## Historical deterministic acceptance
 
-The test must assert stable mission/task/session identifiers rather than merely asserting that a second provider returned text.
+Earlier deterministic tests for provider failover, mission continuity, conversation continuity, fail-closed behavior, and restart persistence remain regression tests. They are not a substitute for the current live test.
 
-## Live verification
-
-The existing LIVE-GEMINI gate remains the proof that the Gemini provider can execute against the real external API.
-
-Increment 12 adds a dedicated live-failover gate only when two independent real provider credentials are available. It must force failure through an injectable failure boundary rather than intentionally corrupting a live request.
-
-The live gate proves:
-
-- real Gemini primary response;
-- controlled failure injected after primary response;
-- real alternative provider response;
-- durable active-provider persistence;
-- no credential leakage in failover evidence.
-
-Workflow: `.github/workflows/live-director-provider-failover.yml`.
-Environment: `director-provider-failover-live`.
-Status after implementation merge: READY / NOT YET EXECUTED.
-
-No live external execution authorization is activated by this gate.
+No external live authorization is enabled by this acceptance plan.

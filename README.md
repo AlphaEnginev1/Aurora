@@ -4,7 +4,7 @@ Autonomous multi-agent engineering system.
 
 ## Current status
 
-**IMPLEMENTATION COMPLETE — NVIDIA-ONLY FREE MODEL RUNTIME**
+**CORE RUNTIME IMPLEMENTED — CURRENT LIVE NVIDIA ACCEPTANCE BLOCKED**
 
 Aurora has one authoritative engineering line:
 
@@ -22,7 +22,7 @@ Aurora has one authoritative engineering line:
 - PR #149: Critical Decision Model Ensemble — MERGED
 - PR #150: Multi-Agent Adversarial Review — MERGED
 - PR #151: Provider Availability & Multi-Provider Resilience — MERGED
-- current NVIDIA-only LIVE acceptance: defined and ready for execution
+- current NVIDIA-only LIVE acceptance: FAILED on 2026-10-08 with HTTP 403 during real inference; see runs 37814164201 and 37813096077
 
 `main` remains the single authoritative engineering line. Closed increments are not reopened.
 
@@ -41,11 +41,11 @@ The matrix distinguishes **IMPLEMENTADO**, **TESTEADO**, **RUNTIME INTEGRADO**, 
 
 ## Frozen production-readiness queue — COMPLETE
 
-The ordered production-readiness blocks 1–7 are verified on canonical `main`:
+The historical production-readiness blocks 1–7 have prior verification evidence. The current NVIDIA-only free-model resilience acceptance is a separate gate and is **not** verified: the latest live runs returned HTTP 403 during actual inference.
 
 1. LIVE-RESEARCH-DISCOVERY — VERIFIED
 2. OS-NETWORK-ENFORCEMENT — VERIFIED
-3. LIVE-NVIDIA — VERIFIED
+3. LIVE-NVIDIA — HISTORICAL GATE VERIFIED; CURRENT NVIDIA-ONLY INFERENCE GATE BLOCKED (HTTP 403)
 4. LIVE-GEMINI — VERIFIED
 5. PRODUCTION-OBSERVABILITY — VERIFIED
 6. RECOVERY-DRILLS — VERIFIED
@@ -58,7 +58,7 @@ Historical branches and closed PRs are not alternate work queues. Increment 11 a
 
 ## Universal Work / Cowork architecture
 
-The Universal Workbench is **IMPLEMENTED AND VERIFIED** on canonical `main`.
+The Universal Workbench is **IMPLEMENTED AND VERIFIED** on canonical `main`; the newer five-controller autonomy composition is implemented but still requires real runtime integration and E2E acceptance before it can be marked complete.
 
 `docs/architecture/AURORA_UNIVERSAL_WORKBENCH_ARCHITECTURE.md`
 
@@ -68,7 +68,7 @@ The contract preserves least-privilege, approvals, sandboxing, credential isolat
 
 ## Current free-model resilience closure
 
-The canonical Aurora runtime is now **NVIDIA-only and free-only**. The Director runs through Aurora's provider-neutral inference router, whose only external provider is NVIDIA NIM. Director failover stays inside the NVIDIA Free Endpoint catalog: when one NVIDIA model fails, Aurora can continue to another eligible NVIDIA model without switching vendors. Gemini, OpenAI and Anthropic are not runtime providers, not dashboard options and not credential dependencies.
+The canonical Aurora runtime is **NVIDIA-only and free-only**. Live inference against the currently selected free-model catalog is not currently proven because the latest two live acceptance runs returned HTTP 403. The Director runs through Aurora's provider-neutral inference router, whose only external provider is NVIDIA NIM. Director failover stays inside the NVIDIA Free Endpoint catalog: when one NVIDIA model fails, Aurora can continue to another eligible NVIDIA model without switching vendors. Gemini, OpenAI and Anthropic are not runtime providers, not dashboard options and not credential dependencies.
 
 ### Dynamic NVIDIA model catalog
 The checked-in NVIDIA entries are only known-good seed metadata. At runtime Aurora joins the live NVIDIA `/v1/models` serving catalog with NVIDIA's official Build catalog labels, where `Free Endpoint` is the authoritative free-access signal. Every currently served NVIDIA Free Endpoint can therefore enter Aurora dynamically; the seed list is never a ceiling. Models are then routed according to the execution capability their provider adapter supports.
