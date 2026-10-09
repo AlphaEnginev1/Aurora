@@ -11,7 +11,7 @@ Set credentials in the local process environment or a secret manager. Do not put
 | Provider | Environment key | Initial allowlist | Activation gate |
 |---|---|---|---|
 | NVIDIA | `NVIDIA_API_KEY` | Official live NVIDIA Free Endpoint catalog | Live catalog eligibility |
-| Groq | `GROQ_API_KEY` | `openai/gpt-oss-120b`, `openai/gpt-oss-20b` | `AURORA_GROQ_FREE_TIER_CONFIRMED=1` |
+| Groq | `GROQ_API_KEY` | `openai/gpt-oss-120b`, `qwen/qwen3.8-27b`, `openai/gpt-oss-20b` | `AURORA_GROQ_FREE_TIER_CONFIRMED=1` |
 | Google AI Studio | `GEMINI_API_KEY` | `gemini-3.8-flash` | `AURORA_GEMINI_FREE_TIER_CONFIRMED=1` |
 | Cloudflare Workers AI | `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` | Llama 3.3 70B and Llama 3.1 8B FP8 Fast | `AURORA_CLOUDFLARE_FREE_TIER_CONFIRMED=1` |
 | Mistral | `MISTRAL_API_KEY` | `labs-leanstral-2603` only | `AURORA_MISTRAL_FREE_TIER_CONFIRMED=1`; time-limited free availability must be rechecked |
@@ -55,7 +55,7 @@ Do not set confirmation flags blindly. The app does not have an authoritative AP
 
 ## Official references checked 2026-10-09
 
-- Groq model catalog: https://console.groq.com/docs/models
+- Groq model catalog and deprecations: https://console.groq.com/docs/models and https://console.groq.com/docs/deprecations
 - Google Gemini API pricing and free-tier data-use terms: https://ai.google.dev/gemini-api/docs/pricing
 - Cloudflare Workers AI pricing and free allocation: https://developers.cloudflare.com/workers-ai/platform/pricing/
 - Mistral API pricing and free Labs model listing: https://mistral.ai/pricing/api/
