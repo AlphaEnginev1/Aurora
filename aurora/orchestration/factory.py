@@ -119,8 +119,8 @@ def build_orchestration_engine(policy_path: str | Path) -> OrchestrationEngine:
                 context_window=metadata.get("context_window"),
                 enabled=True,
                 specialties=specialties,
-                quality_score=0.85,
-                latency_score=0.7,
+                quality_score=float(metadata.get("quality_score", 0.5)),
+                latency_score=float(metadata.get("latency_score", 0.5)),
                 cost_score=1.0,
                 pricing_tier="free",
             ))
