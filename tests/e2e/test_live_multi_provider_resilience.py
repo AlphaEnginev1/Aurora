@@ -48,6 +48,19 @@ def test_live_nvidia_only_catalog_and_inference(tmp_path: Path):
     assert free_models, "NVIDIA account exposed no Free Endpoint models"
     assert all(item.provider == "nvidia_api" for item in free_models)
 
+    # Discovery deliberately stages candidates as inactive. Promote only candidates
+    # accepted by Aurora's free-model governance before asking the router to use them.
+    activated = discovery.activate_free_discovered(provider_id="nvidia_api")
+    reasoning_models = tuple(
+        model
+        for model in activated
+        if model.provider == "nvidia_api" and "reasoning" in model.capabilities
+    )
+    assert reasoning_models, (
+        "NVIDIA Free Endpoint catalog has no governance-approved model with "
+        "the required reasoning capability"
+    )
+
     response = router.generate(
         InferenceRequest(
             messages=[
@@ -56,11 +69,11 @@ def test_live_nvidia_only_catalog_and_inference(tmp_path: Path):
                     "content": "Respond with exactly one short sentence confirming NVIDIA inference.",
                 }
             ],
-            metadata={"allowed_models": [item.id for item in free_models]},
+            metadata={"allowed_models": [model.id for model in reasoning_models]},
         ),
         capability="reasoning",
-        preferred_models=tuple(item.id for item in free_models),
+        preferred_models=tuple(model.id for model in reasoning_models),
     )
     assert response.provider == "nvidia_api"
-    assert response.model
+    assert response.model in {model.id for model in reasoning_models}
     assert response.content.strip()
