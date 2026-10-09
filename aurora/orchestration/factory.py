@@ -97,6 +97,9 @@ def build_orchestration_engine(policy_path: str | Path) -> OrchestrationEngine:
         provider_policy = free_policy.get("providers", {}).get(provider_id, {})
         if not api_key or not isinstance(provider_policy, dict):
             continue
+        confirmation_env = str(provider_policy.get("free_tier_confirmation_env", "")).strip()
+        if confirmation_env and os.getenv(confirmation_env, "").strip() != "1":
+            continue
         if provider_id == "cloudflare" and not os.getenv("CLOUDFLARE_ACCOUNT_ID", "").strip():
             continue
         endpoint = str(provider_policy.get("endpoint", "")).strip()
