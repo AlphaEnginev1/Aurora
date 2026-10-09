@@ -2,7 +2,7 @@
   "version": 2,
   "mode": "free_only",
   "reviewed_at": "2026-10-09",
-  "description": "Fail-closed free-only policy. NVIDIA models are authorized only by its live Free Endpoint catalog; other providers require explicit reviewed model records and free-tier credentials.",
+  "description": "Fail-closed free-only policy. NVIDIA models are authorized only by its live Free Endpoint catalog; other providers require explicit reviewed model records and free-tier credentials. Non-NVIDIA quality/latency scores are initial routing priors, not benchmark claims; runtime performance evidence should update them.",
   "providers": {
     "nvidia_api": {
       "models": {
@@ -113,7 +113,9 @@
             "tool_use",
             "agentic"
           ],
-          "context_window": 131072
+          "context_window": 131072,
+          "quality_score": 0.93,
+          "latency_score": 0.68
         },
         "openai/gpt-oss-20b": {
           "tier": "free",
@@ -130,7 +132,9 @@
             "coding",
             "tool_use"
           ],
-          "context_window": 131072
+          "context_window": 131072,
+          "quality_score": 0.84,
+          "latency_score": 0.9
         }
       },
       "free_tier_confirmation_env": "AURORA_GROQ_FREE_TIER_CONFIRMED"
@@ -159,7 +163,9 @@
             "long_context",
             "image"
           ],
-          "context_window": 1000000
+          "context_window": 1000000,
+          "quality_score": 0.94,
+          "latency_score": 0.8
         }
       },
       "free_tier_confirmation_env": "AURORA_GEMINI_FREE_TIER_CONFIRMED"
@@ -184,7 +190,9 @@
             "reasoning",
             "coding"
           ],
-          "context_window": 131072
+          "context_window": 131072,
+          "quality_score": 0.88,
+          "latency_score": 0.48
         },
         "@cf/meta/llama-3.1-8b-instruct-fp8-fast": {
           "tier": "free",
@@ -199,7 +207,9 @@
             "chat",
             "reasoning"
           ],
-          "context_window": 131072
+          "context_window": 131072,
+          "quality_score": 0.76,
+          "latency_score": 0.88
         }
       },
       "free_tier_confirmation_env": "AURORA_CLOUDFLARE_FREE_TIER_CONFIRMED"
@@ -223,7 +233,9 @@
             "reasoning",
             "coding",
             "tool_use"
-          ]
+          ],
+          "quality_score": 0.82,
+          "latency_score": 0.7
         }
       }
     }
