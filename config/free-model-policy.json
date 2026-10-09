@@ -1,8 +1,8 @@
 {
   "version": 2,
   "mode": "free_only",
-  "reviewed_at": "2026-10-06",
-  "description": "NVIDIA-only free policy. NVIDIA's live Free Endpoint catalog is the authoritative eligibility source; checked-in NVIDIA models are seed metadata only and never a ceiling.",
+  "reviewed_at": "2026-10-09",
+  "description": "Fail-closed free-only policy. NVIDIA models are authorized only by its live Free Endpoint catalog; other providers require explicit reviewed model records and free-tier credentials.",
   "providers": {
     "nvidia_api": {
       "models": {
@@ -90,6 +90,139 @@
         }
       },
       "dynamic_catalog": "free_endpoint"
+    },
+    "groq": {
+      "account_policy": "Free API tier only; quota exhaustion must fail without paid upgrade.",
+      "endpoint": "https://api.groq.com/openai/v1",
+      "api_key_env": "GROQ_API_KEY",
+      "models": {
+        "openai/gpt-oss-120b": {
+          "tier": "free",
+          "rank": 1,
+          "specialties": [
+            "reasoning",
+            "planning",
+            "coding",
+            "tool_use",
+            "agentic"
+          ],
+          "capabilities": [
+            "chat",
+            "reasoning",
+            "coding",
+            "tool_use",
+            "agentic"
+          ],
+          "context_window": 131072
+        },
+        "openai/gpt-oss-20b": {
+          "tier": "free",
+          "rank": 2,
+          "specialties": [
+            "fast",
+            "coding",
+            "tool_use",
+            "chat"
+          ],
+          "capabilities": [
+            "chat",
+            "reasoning",
+            "coding",
+            "tool_use"
+          ],
+          "context_window": 131072
+        }
+      }
+    },
+    "gemini": {
+      "account_policy": "Google AI Studio free tier only; never switch to paid billing. Free-tier prompts may be used to improve Google products.",
+      "endpoint": "https://generativelanguage.googleapis.com/v1beta/openai",
+      "api_key_env": "GEMINI_API_KEY",
+      "models": {
+        "gemini-3.8-flash": {
+          "tier": "free",
+          "rank": 1,
+          "specialties": [
+            "reasoning",
+            "planning",
+            "coding",
+            "agentic",
+            "long_context"
+          ],
+          "capabilities": [
+            "chat",
+            "reasoning",
+            "coding",
+            "tool_use",
+            "agentic",
+            "long_context",
+            "image"
+          ],
+          "context_window": 1000000
+        }
+      }
+    },
+    "cloudflare": {
+      "account_policy": "Workers Free allocation only (10,000 Neurons/day); no paid Workers plan or prepaid AI Gateway credits. Requests over the free allocation must fail.",
+      "endpoint": "https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/v1",
+      "api_key_env": "CLOUDFLARE_API_TOKEN",
+      "account_id_env": "CLOUDFLARE_ACCOUNT_ID",
+      "models": {
+        "@cf/meta/llama-3.3-70b-instruct-fp8-fast": {
+          "tier": "free",
+          "rank": 1,
+          "specialties": [
+            "reasoning",
+            "coding",
+            "analysis",
+            "long_context"
+          ],
+          "capabilities": [
+            "chat",
+            "reasoning",
+            "coding"
+          ],
+          "context_window": 131072
+        },
+        "@cf/meta/llama-3.1-8b-instruct-fp8-fast": {
+          "tier": "free",
+          "rank": 2,
+          "specialties": [
+            "fast",
+            "classification",
+            "summarization",
+            "chat"
+          ],
+          "capabilities": [
+            "chat",
+            "reasoning"
+          ],
+          "context_window": 131072
+        }
+      }
+    },
+    "openrouter": {
+      "account_policy": "Use only the documented free router/model endpoint; never substitute a paid model. Free quota and model routing may change.",
+      "endpoint": "https://openrouter.ai/api/v1",
+      "api_key_env": "OPENROUTER_API_KEY",
+      "models": {
+        "openrouter/free": {
+          "tier": "free",
+          "rank": 1,
+          "specialties": [
+            "general",
+            "reasoning",
+            "coding",
+            "tool_use"
+          ],
+          "capabilities": [
+            "chat",
+            "reasoning",
+            "coding",
+            "tool_use"
+          ]
+        }
+      }
     }
   }
 }
