@@ -81,9 +81,8 @@ class ModelRouter:
         ]
         if self.cost_policy == "free_only":
             # Never trust a model's self-declared pricing_tier alone. Every
-            # non-NVIDIA candidate must also be explicitly allowlisted. NVIDIA's
-            # dynamic models remain eligible only through the existing governed
-            # Free Endpoint discovery/activation path.
+            # non-NVIDIA candidate must also be explicitly allowlisted. NVIDIA
+            # retains its provider-specific free-catalog eligibility pathway.
             from .free_policy import is_free_model
 
             models = [
