@@ -174,6 +174,7 @@ def default_provider_registry(
                 ProviderSpec("groq", "GroqCloud Free API", ("chat", "reasoning", "coding", "tool_use"), True, compatible_factory("groq")),
                 ProviderSpec("gemini", "Google AI Studio Free API", ("chat", "reasoning", "coding", "tool_use", "image"), True, compatible_factory("gemini")),
                 ProviderSpec("cloudflare", "Cloudflare Workers AI Free Allocation", ("chat", "reasoning", "coding"), True, compatible_factory("cloudflare")),
+                ProviderSpec("mistral", "Mistral Labs Free API Model", ("chat", "reasoning", "coding", "tool_use"), True, compatible_factory("mistral")),
                 ProviderSpec("openrouter", "OpenRouter Free Models", ("chat", "reasoning", "coding", "tool_use"), True, compatible_factory("openrouter")),
             ]
         )
