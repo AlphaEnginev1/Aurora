@@ -134,6 +134,30 @@ def test_http_failure_does_not_capture_response_body_or_credentials(monkeypatch)
         {"choices": [{"message": {"content": "ok"}}], "model": 123},
     ],
 )
+def test_forbidden_http_error_has_safe_actionable_diagnostic(monkeypatch):
+    http_error = urllib.error.HTTPError(
+        "https://example.invalid/v1/chat/completions",
+        403,
+        "forbidden",
+        {},
+        None,
+    )
+    monkeypatch.setattr(
+        "urllib.request.urlopen",
+        lambda req, timeout: (_ for _ in ()).throw(http_error),
+    )
+
+    with pytest.raises(ProviderHTTPError) as caught:
+        _provider().generate(InferenceRequest(messages=[]), execution_id="exec-forbidden")
+
+    message = str(caught.value)
+    assert caught.value.status_code == 403
+    assert "access denied" in message
+    assert "API-key permissions" in message
+    assert "model entitlement" in message
+    assert "SECRET-NVIDIA-KEY" not in message
+
+
 def test_invalid_provider_responses_are_typed(monkeypatch, payload):
     monkeypatch.setattr("urllib.request.urlopen", lambda req, timeout: _Response(payload))
     with pytest.raises(ProviderResponseError):
