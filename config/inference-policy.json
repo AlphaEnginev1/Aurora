@@ -13,21 +13,24 @@
       "enabled": true,
       "api_key_env": "GROQ_API_KEY",
       "base_url": "https://api.groq.com/openai/v1",
-      "pricing_policy": "free_tier_only"
+      "pricing_policy": "free_tier_only",
+      "free_tier_confirmation_env": "AURORA_GROQ_FREE_TIER_CONFIRMED"
     },
     "gemini": {
       "enabled": true,
       "api_key_env": "GEMINI_API_KEY",
       "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
       "pricing_policy": "free_tier_only",
-      "privacy_note": "Free-tier prompts may be used to improve Google products."
+      "privacy_note": "Free-tier prompts may be used to improve Google products.",
+      "free_tier_confirmation_env": "AURORA_GEMINI_FREE_TIER_CONFIRMED"
     },
     "cloudflare": {
       "enabled": true,
       "api_key_env": "CLOUDFLARE_API_TOKEN",
       "account_id_env": "CLOUDFLARE_ACCOUNT_ID",
       "base_url": "https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/v1",
-      "pricing_policy": "Workers Free allocation only; no paid plan or prepaid credits."
+      "pricing_policy": "Workers Free allocation only; no paid plan or prepaid credits.",
+      "free_tier_confirmation_env": "AURORA_CLOUDFLARE_FREE_TIER_CONFIRMED"
     },
     "openrouter": {
       "enabled": true,
