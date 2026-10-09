@@ -78,8 +78,22 @@ class ModelRouter:
             model
             for model in self._registered_models()
             if model.enabled and model.healthy and model.available
-            and (self.cost_policy != "free_only" or model.pricing_tier == "free")
         ]
+        if self.cost_policy == "free_only":
+            # Never trust a model's self-declared pricing_tier alone. Every
+            # non-NVIDIA candidate must also be explicitly allowlisted. NVIDIA's
+            # dynamic models remain eligible only through the existing governed
+            # Free Endpoint discovery/activation path.
+            from .free_policy import is_free_model
+
+            models = [
+                model for model in models
+                if model.pricing_tier == "free"
+                and (
+                    model.provider == "nvidia_api"
+                    or is_free_model(model.provider, model.id)
+                )
+            ]
         if self.health_store is None:
             return models
         return [
