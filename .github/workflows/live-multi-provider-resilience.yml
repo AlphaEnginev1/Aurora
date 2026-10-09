@@ -43,4 +43,4 @@ jobs:
           AURORA_NVIDIA_ONLY_LIVE: "1"
           AURORA_INFERENCE_COST_POLICY: "free_only"
           AURORA_FREE_MODEL_POLICY: "config/free-model-policy.json"
-        run: python -m pytest -q tests/e2e/test_live_multi_provider_resilience.py -m live
+        run: python -m pytest -q -s tests/e2e/test_live_multi_provider_resilience.py -m live
