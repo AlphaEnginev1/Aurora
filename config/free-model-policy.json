@@ -132,7 +132,8 @@
           ],
           "context_window": 131072
         }
-      }
+      },
+      "free_tier_confirmation_env": "AURORA_GROQ_FREE_TIER_CONFIRMED"
     },
     "gemini": {
       "account_policy": "Google AI Studio free tier only; never switch to paid billing. Free-tier prompts may be used to improve Google products.",
@@ -160,7 +161,8 @@
           ],
           "context_window": 1000000
         }
-      }
+      },
+      "free_tier_confirmation_env": "AURORA_GEMINI_FREE_TIER_CONFIRMED"
     },
     "cloudflare": {
       "account_policy": "Workers Free allocation only (10,000 Neurons/day); no paid Workers plan or prepaid AI Gateway credits. Requests over the free allocation must fail.",
@@ -199,7 +201,8 @@
           ],
           "context_window": 131072
         }
-      }
+      },
+      "free_tier_confirmation_env": "AURORA_CLOUDFLARE_FREE_TIER_CONFIRMED"
     },
     "openrouter": {
       "account_policy": "Use only the documented free router/model endpoint; never substitute a paid model. Free quota and model routing may change.",
