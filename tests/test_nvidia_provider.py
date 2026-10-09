@@ -123,17 +123,6 @@ def test_http_failure_does_not_capture_response_body_or_credentials(monkeypatch)
     assert caught.value.context.execution_id == "exec-http"
 
 
-@pytest.mark.parametrize(
-    "payload",
-    [
-        {},
-        {"choices": []},
-        {"choices": [{"message": {}}]},
-        {"choices": [{"message": {"content": 123}}]},
-        {"choices": [{"message": {"content": "ok"}}], "usage": []},
-        {"choices": [{"message": {"content": "ok"}}], "model": 123},
-    ],
-)
 def test_forbidden_http_error_has_safe_actionable_diagnostic(monkeypatch):
     http_error = urllib.error.HTTPError(
         "https://example.invalid/v1/chat/completions",
@@ -158,6 +147,17 @@ def test_forbidden_http_error_has_safe_actionable_diagnostic(monkeypatch):
     assert "SECRET-NVIDIA-KEY" not in message
 
 
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {},
+        {"choices": []},
+        {"choices": [{"message": {}}]},
+        {"choices": [{"message": {"content": 123}}]},
+        {"choices": [{"message": {"content": "ok"}}], "usage": []},
+        {"choices": [{"message": {"content": "ok"}}], "model": 123},
+    ],
+)
 def test_invalid_provider_responses_are_typed(monkeypatch, payload):
     monkeypatch.setattr("urllib.request.urlopen", lambda req, timeout: _Response(payload))
     with pytest.raises(ProviderResponseError):
