@@ -23,3 +23,21 @@ def test_free_model_metadata_contains_specialties():
     metadata = record_metadata("nvidia_api", "poolside/laguna-xs-2.1")
     assert metadata["tier"] == "free"
     assert "coding" in metadata["specialties"]
+
+
+
+def test_free_api_allowlists_are_explicit_and_fail_closed():
+    assert is_free_model("groq", "openai/gpt-oss-120b") is True
+    assert is_free_model("groq", "openai/gpt-oss-20b") is True
+    assert is_free_model("gemini", "gemini-3.8-flash") is True
+    assert is_free_model("cloudflare", "@cf/meta/llama-3.3-70b-instruct-fp8-fast") is True
+    assert is_free_model("openrouter", "openrouter/free") is True
+    assert is_free_model("groq", "some-paid-model") is False
+    assert is_free_model("gemini", "gemini-3.9-future") is False
+    assert is_free_model("cloudflare", "@cf/zai-org/glm-5.3") is False
+
+
+def test_free_api_catalogs_are_ranked():
+    assert free_model_ids("groq")[0] == "openai/gpt-oss-120b"
+    assert free_model_ids("cloudflare")[0] == "@cf/meta/llama-3.3-70b-instruct-fp8-fast"
+    assert record_metadata("gemini", "gemini-3.8-flash")["tier"] == "free"
