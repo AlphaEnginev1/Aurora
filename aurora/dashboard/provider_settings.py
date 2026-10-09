@@ -38,9 +38,9 @@ class ProviderSettingsService:
             nvidia_key = self.store.credential("nvidia_api")
             router.nvidia_api_key = nvidia_key or None
             free_api_keys = {
-                "groq": os.getenv("GROQ_API_KEY", ""),
-                "gemini": os.getenv("GEMINI_API_KEY", ""),
-                "cloudflare": os.getenv("CLOUDFLARE_API_TOKEN", ""),
+                "groq": os.getenv("GROQ_API_KEY", "") if os.getenv("AURORA_GROQ_FREE_TIER_CONFIRMED") == "1" else "",
+                "gemini": os.getenv("GEMINI_API_KEY", "") if os.getenv("AURORA_GEMINI_FREE_TIER_CONFIRMED") == "1" else "",
+                "cloudflare": os.getenv("CLOUDFLARE_API_TOKEN", "") if os.getenv("AURORA_CLOUDFLARE_FREE_TIER_CONFIRMED") == "1" else "",
                 "openrouter": os.getenv("OPENROUTER_API_KEY", ""),
             }
             router.provider_registry = default_provider_registry(
