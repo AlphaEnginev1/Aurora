@@ -41,6 +41,7 @@ class ProviderSettingsService:
                 "groq": os.getenv("GROQ_API_KEY", "") if os.getenv("AURORA_GROQ_FREE_TIER_CONFIRMED") == "1" else "",
                 "gemini": os.getenv("GEMINI_API_KEY", "") if os.getenv("AURORA_GEMINI_FREE_TIER_CONFIRMED") == "1" else "",
                 "cloudflare": os.getenv("CLOUDFLARE_API_TOKEN", "") if os.getenv("AURORA_CLOUDFLARE_FREE_TIER_CONFIRMED") == "1" else "",
+                "mistral": os.getenv("MISTRAL_API_KEY", "") if os.getenv("AURORA_MISTRAL_FREE_TIER_CONFIRMED") == "1" else "",
                 "openrouter": os.getenv("OPENROUTER_API_KEY", ""),
             }
             router.provider_registry = default_provider_registry(
