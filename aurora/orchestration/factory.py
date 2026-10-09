@@ -77,6 +77,7 @@ def build_orchestration_engine(policy_path: str | Path) -> OrchestrationEngine:
         "groq": os.getenv("GROQ_API_KEY", ""),
         "gemini": os.getenv("GEMINI_API_KEY", ""),
         "cloudflare": os.getenv("CLOUDFLARE_API_TOKEN", ""),
+        "mistral": os.getenv("MISTRAL_API_KEY", ""),
         "openrouter": os.getenv("OPENROUTER_API_KEY", ""),
     }
     provider_registry = default_provider_registry(
