@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "cost_policy": "free_only",
   "free_model_policy": "config/free-model-policy.json",
   "default_capability": "coding",
@@ -8,6 +8,32 @@
       "enabled": true,
       "api_key_env": "NVIDIA_API_KEY",
       "base_url": "https://integrate.api.nvidia.com/v1"
+    },
+    "groq": {
+      "enabled": true,
+      "api_key_env": "GROQ_API_KEY",
+      "base_url": "https://api.groq.com/openai/v1",
+      "pricing_policy": "free_tier_only"
+    },
+    "gemini": {
+      "enabled": true,
+      "api_key_env": "GEMINI_API_KEY",
+      "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+      "pricing_policy": "free_tier_only",
+      "privacy_note": "Free-tier prompts may be used to improve Google products."
+    },
+    "cloudflare": {
+      "enabled": true,
+      "api_key_env": "CLOUDFLARE_API_TOKEN",
+      "account_id_env": "CLOUDFLARE_ACCOUNT_ID",
+      "base_url": "https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/v1",
+      "pricing_policy": "Workers Free allocation only; no paid plan or prepaid credits."
+    },
+    "openrouter": {
+      "enabled": true,
+      "api_key_env": "OPENROUTER_API_KEY",
+      "base_url": "https://openrouter.ai/api/v1",
+      "pricing_policy": "explicit free endpoint only"
     }
   },
   "routing": {
