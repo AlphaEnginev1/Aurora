@@ -185,7 +185,7 @@ def test_default_registry_can_opt_into_free_api_providers():
             "openrouter": "openrouter-test",
         },
     )
-    assert {"nvidia_api", "groq", "gemini", "cloudflare", "openrouter"} <= set(registry.ids)
+    assert {"nvidia_api", "groq", "gemini", "cloudflare", "mistral", "openrouter"} <= set(registry.ids)
     provider = registry.create(
         ModelSpec(
             "openai/gpt-oss-120b",
