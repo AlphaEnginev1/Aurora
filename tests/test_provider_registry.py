@@ -171,3 +171,46 @@ def test_default_registry_can_opt_into_external_providers():
     )
     assert openai.provider_id == "openai"
     assert anthropic.provider_id == "anthropic"
+
+
+
+def test_default_registry_can_opt_into_free_api_providers():
+    registry = default_provider_registry(
+        nvidia_api_key="nvidia-test",
+        include_free=True,
+        free_api_keys={
+            "groq": "groq-test",
+            "gemini": "gemini-test",
+            "cloudflare": "cloudflare-test",
+            "openrouter": "openrouter-test",
+        },
+    )
+    assert {"nvidia_api", "groq", "gemini", "cloudflare", "openrouter"} <= set(registry.ids)
+    provider = registry.create(
+        ModelSpec(
+            "openai/gpt-oss-120b",
+            "groq",
+            "https://api.groq.com/openai/v1",
+            pricing_tier="free",
+        )
+    )
+    assert provider.provider_id == "groq"
+    assert provider.api_key == "groq-test"
+
+
+def test_free_api_provider_does_not_fall_back_to_openai_key(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "must-not-be-borrowed")
+    registry = default_provider_registry(
+        include_free=True,
+        free_api_keys={"groq": ""},
+    )
+    provider = registry.create(
+        ModelSpec(
+            "openai/gpt-oss-20b",
+            "groq",
+            "https://api.groq.com/openai/v1",
+            pricing_tier="free",
+        )
+    )
+    assert provider.api_key == ""
+    assert provider.health() is False
