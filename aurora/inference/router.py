@@ -398,6 +398,7 @@ class ModelRouter:
             spec = self._model_by_id(decision.selected_model)
             tried.add(spec.id)
             execution_id = new_execution_id()
+            attempt_status_code = None
             if self.provider_registry is None:
                 raise ModelRoutingError("inference provider registry is not configured")
             try:
@@ -419,9 +420,9 @@ class ModelRouter:
                     last_error = exc
                     # Emit a durable, secret-free attempt record. Never include the
                     # provider response body, headers, request payload, or credentials.
-                    status_code = getattr(exc, "status_code", None)
-                    if status_code is None:
-                        status_code = getattr(exc, "http_status", None)
+                    attempt_status_code = getattr(exc, "status_code", None)
+                    if attempt_status_code is None:
+                        attempt_status_code = getattr(exc, "http_status", None)
                     logger.warning(
                         "AURORA_INFERENCE_ATTEMPT %s",
                         json.dumps(
@@ -431,7 +432,7 @@ class ModelRouter:
                                 "execution_id": execution_id,
                                 "provider": spec.provider,
                                 "model": spec.id,
-                                "http_status": status_code,
+                                "http_status": attempt_status_code,
                                 "error_type": type(exc).__name__,
                             },
                             sort_keys=True,
@@ -476,6 +477,21 @@ class ModelRouter:
                 if model_id not in tried
             ]
             if not remaining:
+                logger.warning(
+                    "AURORA_INFERENCE_FAILOVER %s",
+                    json.dumps(
+                        {
+                            "event": "reserve_pool_exhausted",
+                            "request_id": routing_request.request_id,
+                            "failed_model": spec.id,
+                            "http_status": attempt_status_code,
+                            "tried_models": sorted(tried),
+                            "reserve_models": [],
+                        },
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ),
+                )
                 if last_error is not None:
                     raise last_error
                 raise ModelRoutingError("inference failed without a provider error")
@@ -485,9 +501,39 @@ class ModelRouter:
             if original_allowed is not None:
                 remaining = [model_id for model_id in remaining if model_id in original_allowed]
             if not remaining:
+                logger.warning(
+                    "AURORA_INFERENCE_FAILOVER %s",
+                    json.dumps(
+                        {
+                            "event": "no_eligible_reserve_after_allowlist",
+                            "request_id": routing_request.request_id,
+                            "failed_model": spec.id,
+                            "http_status": attempt_status_code,
+                            "tried_models": sorted(tried),
+                            "reserve_models": [],
+                        },
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ),
+                )
                 if last_error is not None:
                     raise last_error
                 raise ModelRoutingError("no eligible reserve model remains after provider failure")
+            logger.warning(
+                "AURORA_INFERENCE_FAILOVER %s",
+                json.dumps(
+                    {
+                        "event": "reserve_models_selected",
+                        "request_id": routing_request.request_id,
+                        "failed_model": spec.id,
+                        "http_status": attempt_status_code,
+                        "tried_models": sorted(tried),
+                        "reserve_models": remaining,
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+            )
             metadata["allowed_models"] = remaining
             routing_request = InferenceRequest(
                 messages=routing_request.messages,
