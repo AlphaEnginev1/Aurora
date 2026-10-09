@@ -37,6 +37,12 @@
       "api_key_env": "OPENROUTER_API_KEY",
       "base_url": "https://openrouter.ai/api/v1",
       "pricing_policy": "explicit free endpoint only"
+    },
+    "mistral": {
+      "enabled": true,
+      "api_key_env": "MISTRAL_API_KEY",
+      "base_url": "https://api.mistral.ai/v1",
+      "pricing_policy": "only free Labs model; gated by AURORA_MISTRAL_FREE_TIER_CONFIRMED"
     }
   },
   "routing": {
