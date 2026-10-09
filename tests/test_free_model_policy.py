@@ -29,6 +29,7 @@ def test_free_model_metadata_contains_specialties():
 def test_free_api_allowlists_are_explicit_and_fail_closed():
     assert is_free_model("groq", "openai/gpt-oss-120b") is True
     assert is_free_model("groq", "openai/gpt-oss-20b") is True
+    assert is_free_model("groq", "qwen/qwen3.8-27b") is True
     assert is_free_model("gemini", "gemini-3.8-flash") is True
     assert is_free_model("cloudflare", "@cf/meta/llama-3.3-70b-instruct-fp8-fast") is True
     assert is_free_model("openrouter", "openrouter/free") is True
@@ -39,7 +40,7 @@ def test_free_api_allowlists_are_explicit_and_fail_closed():
 
 
 def test_free_api_catalogs_are_ranked():
-    assert free_model_ids("groq")[0] == "openai/gpt-oss-120b"
+    assert free_model_ids("groq")[:2] == ("openai/gpt-oss-120b", "qwen/qwen3.8-27b")
     assert free_model_ids("cloudflare")[0] == "@cf/meta/llama-3.3-70b-instruct-fp8-fast"
     assert free_model_ids("mistral") == ("labs-leanstral-2603",)
     assert record_metadata("gemini", "gemini-3.8-flash")["tier"] == "free"
@@ -82,4 +83,5 @@ def test_factory_requires_credentials_and_free_tier_confirmation(monkeypatch, tm
     assert {model.id for model in groq_models} == {
         "openai/gpt-oss-120b",
         "openai/gpt-oss-20b",
+        "qwen/qwen3.8-27b",
     }
