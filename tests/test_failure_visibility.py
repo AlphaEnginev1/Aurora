@@ -22,13 +22,15 @@ def test_failure_counter_alerts_and_recovery_are_recorded(tmp_path):
 
 def test_error_secrets_are_redacted_from_snapshot_and_journal(tmp_path):
     journal = tmp_path / "failures.jsonl"
-    tracker = FailureTracker(journal_path=str(journal))
+    alerts = []
+    tracker = FailureTracker(alert_threshold=1, alert_sink=alerts.append, journal_path=str(journal))
     tracker.record_failure("unit", RuntimeError("request failed Bearer abc.DEF-123 and nvapi-SECRETKEY999"))
     snapshot = tracker.snapshot()["unit"]["last_error"]
     stored = journal.read_text()
-    assert "abc.DEF-123" not in snapshot + stored
-    assert "SECRETKEY999" not in snapshot + stored
-    assert "REDACTED" in snapshot + stored
+    rendered_alerts = repr(alerts)
+    assert "abc.DEF-123" not in snapshot + stored + rendered_alerts
+    assert "SECRETKEY999" not in snapshot + stored + rendered_alerts
+    assert "REDACTED" in snapshot + stored + rendered_alerts
 
 
 def test_failure_journal_write_failure_does_not_break_runtime(tmp_path, caplog):
