@@ -1134,8 +1134,9 @@ class DirectorRuntime:
             self._model_catalog_refresh_consecutive_failures += 1
             failures = self._model_catalog_refresh_consecutive_failures
             logging.getLogger(__name__).error(
-                "NVIDIA model catalog refresh failed (consecutive_failures=%d)",
+                "NVIDIA model catalog refresh failed (consecutive_failures=%d, error=%s)",
                 failures,
+                _safe_error_text(exc),
             )
             try:
                 self.event_bus.publish(
@@ -1161,8 +1162,8 @@ class DirectorRuntime:
                     )
             except Exception:
                 # Preserve the original failure signal in logs if telemetry is unavailable.
-                logging.getLogger(__name__).exception(
-                    "Unable to publish durable NVIDIA catalog refresh failure event"
+                logging.getLogger(__name__).error(
+                    "Unable to publish durable NVIDIA catalog refresh failure event (%s)", type(exc).__name__
                 )
             return
         else:
@@ -1182,7 +1183,7 @@ class DirectorRuntime:
                     )
                 except Exception:
                     logging.getLogger(__name__).exception(
-                        "Unable to publish durable NVIDIA catalog refresh recovery event"
+                        "Unable to publish durable NVIDIA catalog refresh recovery event (%s)", type(exc).__name__
                     )
             self._model_catalog_refresh_consecutive_failures = 0
 
