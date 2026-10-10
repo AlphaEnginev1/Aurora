@@ -6,6 +6,11 @@ on:
     paths:
       - "Aurora-main-fase0.zip"
       - ".github/workflows/validate-fase0-archive.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "Aurora-main-fase0.zip"
+      - ".github/workflows/validate-fase0-archive.yml"
 
 permissions:
   contents: read
@@ -66,6 +71,20 @@ jobs:
           print(f"ZIP entries: {len(ZipFile(archive).infolist())}")
           PY
 
+      - name: Apply reviewed Director race fix and build corrected ZIP candidate
+        shell: bash
+        env:
+          FIX_BRANCH: fix/director-failover-correlation-race
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin "refs/heads/${FIX_BRANCH}:refs/remotes/origin/${FIX_BRANCH}"
+          project_root="${{ steps.archive.outputs.project_root }}"
+          git show "refs/remotes/origin/${FIX_BRANCH}:aurora/orchestration/director_runtime.py" > "$project_root/aurora/orchestration/director_runtime.py"
+          mkdir -p "$RUNNER_TEMP/corrected-archive"
+          (cd "$RUNNER_TEMP/aurora-fase0" && zip -qr "$RUNNER_TEMP/corrected-archive/Aurora-main-fase0-corrected.zip" .)
+          echo "Built corrected ZIP with the reviewed PR #186 Director correlation-race fix."
+          sha256sum "$RUNNER_TEMP/corrected-archive/Aurora-main-fase0-corrected.zip"
+
       - name: Set up Python
         uses: actions/setup-python@v7
         with:
@@ -99,6 +118,15 @@ jobs:
         run: |
           set -o pipefail
           python -m pytest -q tests/e2e 2>&1 | tee "$RUNNER_TEMP/fase0-e2e-tests.log"
+
+      - name: Publish corrected ZIP candidate
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Aurora-main-fase0-corrected
+          path: ${{ runner.temp }}/corrected-archive/Aurora-main-fase0-corrected.zip
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Save test logs
         if: always()
