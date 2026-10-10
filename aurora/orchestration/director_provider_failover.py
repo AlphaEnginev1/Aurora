@@ -12,6 +12,8 @@ import sqlite3
 from threading import RLock
 from typing import Any, Callable, Mapping
 
+from aurora.failure_tracker import report_failure
+
 from .director_provider import DirectorModelResponse, DirectorProvider, DirectorToolSpec
 from aurora.inference.models import InferenceRequest
 from aurora.inference.router import ModelRouter
@@ -399,8 +401,8 @@ class DirectorProviderFailoverController:
                                     candidate.model or candidate.provider_id,
                                     replacement_error,
                                 )
-                            except Exception:
-                                pass
+                            except Exception as health_exc:
+                                report_failure("provider_health_store", health_exc)
                         self._failed_candidates.add(self._candidate_key(candidate))
                         self._store.record(
                             transition_id=f"{attempt_id}:failed",
@@ -466,8 +468,8 @@ class DirectorProviderFailoverController:
             return
         try:
             self._health_store.record_failure(provider_id, model_id, error)
-        except Exception:
-            pass
+        except Exception as health_exc:
+            report_failure("provider_health_store", health_exc)
 
     @staticmethod
     def _candidate_key(candidate: DirectorProviderCandidate) -> tuple[str, str]:
@@ -495,10 +497,10 @@ class DirectorProviderFailoverController:
             event.update({str(key): value for key, value in context.items() if key not in event})
         try:
             self._event_sink(event)
-        except Exception:
+        except Exception as sink_exc:
             # Failover evidence is durably stored above; telemetry must not
             # prevent the replacement provider from serving the Director.
-            pass
+            report_failure("failover_event_sink", sink_exc)
 
     def _record_and_emit(
         self,
