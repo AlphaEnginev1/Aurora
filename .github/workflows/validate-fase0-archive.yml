@@ -40,12 +40,25 @@ jobs:
                       raise SystemExit(f"Unsafe ZIP member path: {member.filename}")
               zf.extractall(destination)
           projects = sorted(destination.rglob("pyproject.toml"))
-          if len(projects) != 1:
+          # The archive intentionally contains the main Aurora project and the
+          # separate aurora_director subproject. Select the root that owns the
+          # top-level aurora/ package and tests/ suite.
+          candidates = [
+              project.parent for project in projects
+              if (project.parent / "aurora").is_dir()
+              and (project.parent / "tests").is_dir()
+          ]
+          if len(candidates) != 1:
               print("Found pyproject.toml files:")
               for project in projects:
                   print(project)
-              raise SystemExit(f"Expected exactly one project root, found {len(projects)}")
-          project_root = projects[0].parent
+              print("Eligible main-project roots:")
+              for candidate in candidates:
+                  print(candidate)
+              raise SystemExit(
+                  f"Expected exactly one main Aurora project root, found {len(candidates)}"
+              )
+          project_root = candidates[0]
           with open(__import__("os").environ["GITHUB_OUTPUT"], "a") as out:
               out.write(f"project_root={project_root}\n")
           print(f"Archive extracted to: {destination}")
