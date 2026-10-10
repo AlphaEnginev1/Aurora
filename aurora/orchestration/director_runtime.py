@@ -11,6 +11,8 @@ from time import sleep
 from typing import Any, Callable, Mapping
 from uuid import uuid4
 
+from aurora.failure_tracker import _safe_error_text
+
 from .director import DirectorPlanError
 from .director_handoff_store import DirectorHandoff, DirectorHandoffRejected, DirectorHandoffStore
 from .director_eligibility import DirectorEligibilityError, DirectorEligibilityStore
@@ -1131,7 +1133,7 @@ class DirectorRuntime:
             # Catalog refresh is advisory, but its failure must never be silent.
             self._model_catalog_refresh_consecutive_failures += 1
             failures = self._model_catalog_refresh_consecutive_failures
-            logging.getLogger(__name__).exception(
+            logging.getLogger(__name__).error(
                 "NVIDIA model catalog refresh failed (consecutive_failures=%d)",
                 failures,
             )
@@ -1143,7 +1145,7 @@ class DirectorRuntime:
                         "provider_id": "nvidia_api",
                         "consecutive_failures": failures,
                         "error_type": type(exc).__name__,
-                        "error": str(exc)[:500],
+                        "error": _safe_error_text(exc),
                         "alert_threshold_reached": failures >= 3,
                     },
                 )
