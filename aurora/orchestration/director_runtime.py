@@ -13,7 +13,7 @@ from typing import Any, Callable, Mapping
 from uuid import uuid4
 
 
-_CATALOG_SECRET_PATTERN = re.compile(r"(nvapi-[A-Za-z0-9_-]+|Bearer\\s+[A-Za-z0-9._-]+|api[_-]?key\\s*[=:]\\s*[^\\s,;]+)", re.IGNORECASE)
+_CATALOG_SECRET_PATTERN = re.compile(r"(nvapi-[A-Za-z0-9_-]+|Bearer\s+[A-Za-z0-9._-]+|api[_-]?key\s*[=:]\s*[^\s,;]+)", re.IGNORECASE)
 
 
 def _safe_catalog_error_text(error: BaseException) -> str:
