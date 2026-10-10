@@ -1,0 +1,99 @@
+name: Validate uploaded Aurora Fase 0 ZIP
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "Aurora-main-fase0.zip"
+      - ".github/workflows/validate-fase0-archive.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  validate-archive:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Checkout repository containing the uploaded archive
+        uses: actions/checkout@v7
+
+      - name: Check ZIP integrity and safely extract archive
+        id: archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s Aurora-main-fase0.zip
+          unzip -t Aurora-main-fase0.zip
+          mkdir -p "$RUNNER_TEMP/aurora-fase0"
+          python - <<'PY'
+          from pathlib import Path
+          from zipfile import ZipFile
+
+          archive = Path("Aurora-main-fase0.zip")
+          destination = Path(__import__("os").environ["RUNNER_TEMP"]) / "aurora-fase0"
+          with ZipFile(archive) as zf:
+              root = destination.resolve()
+              for member in zf.infolist():
+                  target = (destination / member.filename).resolve()
+                  if target != root and root not in target.parents:
+                      raise SystemExit(f"Unsafe ZIP member path: {member.filename}")
+              zf.extractall(destination)
+          projects = sorted(destination.rglob("pyproject.toml"))
+          if len(projects) != 1:
+              print("Found pyproject.toml files:")
+              for project in projects:
+                  print(project)
+              raise SystemExit(f"Expected exactly one project root, found {len(projects)}")
+          project_root = projects[0].parent
+          with open(__import__("os").environ["GITHUB_OUTPUT"], "a") as out:
+              out.write(f"project_root={project_root}\n")
+          print(f"Archive extracted to: {destination}")
+          print(f"Project root: {project_root}")
+          print(f"ZIP entries: {len(ZipFile(archive).infolist())}")
+          PY
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies from the extracted ZIP
+        working-directory: ${{ steps.archive.outputs.project_root }}
+        run: |
+          python -m pip install --upgrade pip pytest
+          python -m pip install -e .
+
+      - name: Run unit and non-E2E regression suite from the ZIP
+        working-directory: ${{ steps.archive.outputs.project_root }}
+        shell: bash
+        run: |
+          set -o pipefail
+          python -m pytest -q tests --ignore=tests/e2e 2>&1 | tee "$RUNNER_TEMP/fase0-unit-tests.log"
+
+      - name: Install Linux dependencies for E2E tests
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap slirp4netns nftables iproute2 util-linux curl ca-certificates
+          sudo sysctl -w kernel.unprivileged_userns_clone=1 || true
+          if sudo sysctl -a 2>/dev/null | grep -q '^kernel.apparmor_restrict_unprivileged_userns'; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+
+      - name: Run E2E regression suite from the ZIP
+        working-directory: ${{ steps.archive.outputs.project_root }}
+        shell: bash
+        run: |
+          set -o pipefail
+          python -m pytest -q tests/e2e 2>&1 | tee "$RUNNER_TEMP/fase0-e2e-tests.log"
+
+      - name: Save test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aurora-fase0-archive-validation-logs
+          path: |
+            ${{ runner.temp }}/fase0-unit-tests.log
+            ${{ runner.temp }}/fase0-e2e-tests.log
+          if-no-files-found: ignore
+          retention-days: 14
