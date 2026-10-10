@@ -12,6 +12,8 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Sequence
 
+from aurora.failure_tracker import report_failure
+
 from aurora.research.models import EvidenceState, ResearchRequest
 from aurora.research.service import ResearchService
 from aurora.research.learning import ResearchLearningGate
@@ -357,9 +359,10 @@ class TaskEngine:
                 trusted_research_artifact_ids=result.trusted_research_artifact_ids,
                 research_trust_state=result.research_trust_state,
             )
-        except Exception:
+        except Exception as exc:
             # Learning must never turn a completed task into a false execution
             # failure. The durable execution result remains authoritative.
+            report_failure("task_learning", exc)
             return result
 
     def _skill_tags(self, task: DelegatedTask) -> tuple[str, ...]:
