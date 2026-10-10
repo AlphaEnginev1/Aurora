@@ -2619,7 +2619,22 @@ class DirectorRuntime:
                 now=now,
             )
         except DirectorOwnershipRejected as exc:
+            # Another contender may have completed the takeover after our
+            # initial ownership snapshot. Derive correlation from the durable
+            # winner observed after the failed atomic acquire, not from a
+            # potentially stale pre-acquire epoch calculation.
             current = self.director_ownership.get(mission_id, now=now)
+            rejected_correlation_id = failover_correlation_id
+            if (
+                current is not None
+                and current.owner_id != self.worker_id
+                and current.fencing_epoch >= 2
+                and self.director_eligibility is not None
+            ):
+                rejected_correlation_id = (
+                    f"director-failover:{mission_id}:epoch-"
+                    f"{current.fencing_epoch}"
+                )
             self.event_bus.publish(
                 mission_id=mission_id,
                 event_type="director_ownership_rejected",
@@ -2629,7 +2644,7 @@ class DirectorRuntime:
                     "current_owner_id": current.owner_id if current else None,
                     "current_fencing_epoch": current.fencing_epoch if current else None,
                 },
-                correlation_id=failover_correlation_id,
+                correlation_id=rejected_correlation_id,
             )
             return False
 
