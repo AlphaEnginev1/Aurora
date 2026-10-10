@@ -6,6 +6,11 @@ on:
     paths:
       - "Aurora-main-fase0.zip"
       - ".github/workflows/validate-fase0-archive.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "Aurora-main-fase0.zip"
+      - ".github/workflows/validate-fase0-archive.yml"
 
 permissions:
   contents: read
