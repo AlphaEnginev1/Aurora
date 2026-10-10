@@ -82,3 +82,20 @@ def test_catalog_refresh_success_resets_failure_counter_and_records_recovery():
         and event["payload"]["previous_consecutive_failures"] == 1
         for event in runtime.event_bus.events
     )
+
+
+
+def test_catalog_refresh_failure_redacts_api_secrets_from_logs_and_events(caplog):
+    secret = "nvapi-SUPERSECRET123"
+    discovery = _Discovery(RuntimeError(f"HTTP 403 Bearer abc.DEF-123 {secret}"))
+    runtime = _runtime(discovery)
+
+    with caplog.at_level(logging.ERROR):
+        runtime._refresh_model_catalogs_if_due()
+
+    failure_events = [event for event in runtime.event_bus.events if event["event_type"] == "model_catalog_refresh_failed"]
+    assert failure_events
+    rendered = caplog.text + repr(failure_events)
+    assert secret not in rendered
+    assert "abc.DEF-123" not in rendered
+    assert "REDACTED" in rendered
