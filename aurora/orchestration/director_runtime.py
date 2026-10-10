@@ -6,12 +6,19 @@ from dataclasses import dataclass
 from concurrent.futures import ThreadPoolExecutor
 import json
 import logging
+import re
 from threading import Event, RLock
 from time import sleep
 from typing import Any, Callable, Mapping
 from uuid import uuid4
 
-from aurora.failure_tracker import _safe_error_text
+
+_CATALOG_SECRET_PATTERN = re.compile(r"(nvapi-[A-Za-z0-9_-]+|Bearer\\s+[A-Za-z0-9._-]+|api[_-]?key\\s*[=:]\\s*[^\\s,;]+)", re.IGNORECASE)
+
+
+def _safe_catalog_error_text(error: BaseException) -> str:
+    return _CATALOG_SECRET_PATTERN.sub("***REDACTED***", f"{type(error).__name__}: {error}")[:300]
+
 
 from .director import DirectorPlanError
 from .director_handoff_store import DirectorHandoff, DirectorHandoffRejected, DirectorHandoffStore
@@ -1136,7 +1143,7 @@ class DirectorRuntime:
             logging.getLogger(__name__).error(
                 "NVIDIA model catalog refresh failed (consecutive_failures=%d, error=%s)",
                 failures,
-                _safe_error_text(exc),
+                _safe_catalog_error_text(exc),
             )
             try:
                 self.event_bus.publish(
