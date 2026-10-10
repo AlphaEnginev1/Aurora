@@ -1,0 +1,581 @@
+diff -ruN '--exclude=__pycache__' '--exclude=.pytest_cache' /tmp/p0/Aurora-main/aurora/dashboard/http_server.py Aurora-main/aurora/dashboard/http_server.py
+--- a/aurora/dashboard/http_server.py	2026-10-09 18:47:51.000000000 +0000
++++ b/aurora/dashboard/http_server.py	2026-10-10 20:59:48.248296530 +0000
+@@ -4,6 +4,7 @@
+ 
+ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+ import json
++import logging
+ from pathlib import Path
+ import re
+ import uuid
+@@ -15,8 +16,11 @@
+ from .provider_settings import DashboardProviderSettingsError, ProviderSettingsService
+ from .update_service import DashboardUpdateError, DashboardUpdateService
+ from .health import DashboardHealthService
++from aurora.failure_tracker import get_tracker
+ from aurora.workbench.github_auth import GitHubOAuthError, GitHubOAuthService
+ 
++logger = logging.getLogger("aurora.dashboard")
++
+ 
+ class DashboardHTTPError(RuntimeError):
+     """Raised when the dashboard HTTP server cannot be configured safely."""
+@@ -101,7 +105,9 @@
+                 self._require_token()
+                 if self.health_service is None:
+                     raise DashboardHTTPError("dashboard health service is not configured")
+-                self._json(200, self.health_service.health())
++                health_payload = dict(self.health_service.health())
++                health_payload["runtime_failures"] = get_tracker().snapshot()
++                self._json(200, health_payload)
+                 return
+             if path == "/api/github/status":
+                 self._json(200, self._github_oauth().public())
+@@ -160,6 +166,7 @@
+         except (DashboardGatewayError, DashboardConversationAPIError, DashboardHTTPError, DashboardProviderSettingsError, DashboardUpdateError, GitHubOAuthError) as exc:
+             self._json(400, {"error": str(exc)})
+         except Exception as exc:
++            logger.exception("dashboard request failed: %s %s", self.command, self.path.split("?", 1)[0])
+             self._json(500, {"error": "internal dashboard error", "type": type(exc).__name__})
+ 
+     def do_POST(self) -> None:
+@@ -253,6 +260,7 @@
+         except (DashboardConversationAPIError, DashboardHTTPError, DashboardProviderSettingsError, DashboardUpdateError, GitHubOAuthError) as exc:
+             self._json(400, {"error": str(exc)})
+         except Exception as exc:
++            logger.exception("dashboard request failed: %s %s", self.command, self.path.split("?", 1)[0])
+             self._json(500, {"error": "internal dashboard error", "type": type(exc).__name__})
+ 
+     def _github_oauth(self) -> GitHubOAuthService:
+diff -ruN '--exclude=__pycache__' '--exclude=.pytest_cache' /tmp/p0/Aurora-main/aurora/failure_tracker.py Aurora-main/aurora/failure_tracker.py
+--- a/aurora/failure_tracker.py	1970-01-01 00:00:00.000000000 +0000
++++ b/aurora/failure_tracker.py	2026-10-10 20:59:36.543508225 +0000
+@@ -0,0 +1,196 @@
++"""Visibilidad de fallos tragados a proposito (best-effort) en el runtime 24/7.
++
++Varias rutas de Aurora capturan ``Exception`` a proposito para no tumbar una
++mision por un fallo "consultivo" (refresco de catalogos, observabilidad, salud
++de proveedores...). Hasta ahora esos fallos desaparecian sin dejar rastro.
++
++Este modulo no cambia el comportamiento: sigue sin propagar. Solo:
++  * registra el fallo en el log (journald lo captura desde stderr),
++  * cuenta fallos consecutivos por componente,
++  * dispara un callback de alerta al superar un umbral (con enfriamiento),
++  * expone un resumen para el endpoint de salud.
++"""
++from __future__ import annotations
++
++import logging
++import os
++import re
++import threading
++import time
++from typing import Any, Callable, Mapping
++
++logger = logging.getLogger("aurora.health")
++
++_SECRET_PATTERN = re.compile(r"(nvapi-|Bearer\s+|api[_-]?key=)[A-Za-z0-9._\-]+", re.IGNORECASE)
++_MAX_ERROR_CHARS = 300
++
++AlertSink = Callable[[Mapping[str, Any]], None]
++
++
++def _safe_error_text(error: BaseException) -> str:
++    text = f"{type(error).__name__}: {error}"
++    text = _SECRET_PATTERN.sub(lambda m: m.group(1) + "***", text)
++    return text[:_MAX_ERROR_CHARS]
++
++
++def _env_int(name: str, default: int) -> int:
++    try:
++        return max(1, int(os.getenv(name, "").strip() or default))
++    except ValueError:
++        return default
++
++
++def _env_float(name: str, default: float) -> float:
++    try:
++        return max(0.0, float(os.getenv(name, "").strip() or default))
++    except ValueError:
++        return default
++
++
++class FailureTracker:
++    """Contadores thread-safe de fallos consecutivos por componente."""
++
++    def __init__(
++        self,
++        *,
++        alert_threshold: int | None = None,
++        alert_cooldown_seconds: float | None = None,
++        alert_sink: AlertSink | None = None,
++        monotonic: Callable[[], float] = time.monotonic,
++        wall_clock: Callable[[], float] = time.time,
++    ) -> None:
++        self.alert_threshold = alert_threshold or _env_int("AURORA_FAILURE_ALERT_THRESHOLD", 3)
++        self.alert_cooldown_seconds = (
++            alert_cooldown_seconds
++            if alert_cooldown_seconds is not None
++            else _env_float("AURORA_FAILURE_ALERT_COOLDOWN_SECONDS", 900.0)
++        )
++        self.alert_sink = alert_sink
++        self._monotonic = monotonic
++        self._wall_clock = wall_clock
++        self._lock = threading.Lock()
++        self._state: dict[str, dict[str, Any]] = {}
++
++    def record_failure(self, component: str, error: BaseException) -> int:
++        """Registra un fallo tragado. Devuelve los fallos consecutivos actuales."""
++        text = _safe_error_text(error)
++        alert: dict[str, Any] | None = None
++        with self._lock:
++            state = self._state.setdefault(component, self._new_state())
++            state["consecutive_failures"] += 1
++            state["total_failures"] += 1
++            state["last_error"] = text
++            state["last_failure_at"] = self._wall_clock()
++            consecutive = state["consecutive_failures"]
++            if consecutive >= self.alert_threshold:
++                now = self._monotonic()
++                last = state["_last_alert_monotonic"]
++                if last is None or now - last >= self.alert_cooldown_seconds:
++                    state["_last_alert_monotonic"] = now
++                    state["alerting"] = True
++                    alert = {
++                        "kind": "failure_threshold",
++                        "component": component,
++                        "consecutive_failures": consecutive,
++                        "total_failures": state["total_failures"],
++                        "last_error": text,
++                    }
++        logger.warning("swallowed failure in %s (consecutive=%d): %s", component, consecutive, text)
++        if alert is not None:
++            logger.error(
++                "ALERT %s failed %d times in a row: %s",
++                component,
++                alert["consecutive_failures"],
++                text,
++            )
++            self._send(alert)
++        return consecutive
++
++    def record_success(self, component: str) -> None:
++        """Marca recuperacion: reinicia el contador y avisa si estaba en alerta."""
++        recovered: dict[str, Any] | None = None
++        with self._lock:
++            state = self._state.setdefault(component, self._new_state())
++            was_alerting = state["alerting"]
++            previous = state["consecutive_failures"]
++            state["consecutive_failures"] = 0
++            state["alerting"] = False
++            state["_last_alert_monotonic"] = None
++            state["last_success_at"] = self._wall_clock()
++            if was_alerting:
++                recovered = {
++                    "kind": "recovered",
++                    "component": component,
++                    "previous_consecutive_failures": previous,
++                }
++        if recovered is not None:
++            logger.warning("RECOVERED %s after %d consecutive failures", component, recovered["previous_consecutive_failures"])
++            self._send(recovered)
++
++    def snapshot(self) -> dict[str, dict[str, Any]]:
++        with self._lock:
++            return {
++                name: {key: value for key, value in state.items() if not key.startswith("_")}
++                for name, state in self._state.items()
++            }
++
++    def degraded_components(self) -> list[str]:
++        with self._lock:
++            return sorted(name for name, state in self._state.items() if state["alerting"])
++
++    def _send(self, payload: Mapping[str, Any]) -> None:
++        sink = self.alert_sink
++        if sink is None:
++            return
++        try:
++            sink(payload)
++        except Exception:  # el canal de alertas nunca debe romper el runtime
++            logger.exception("alert sink failed for %s", payload.get("component"))
++
++    @staticmethod
++    def _new_state() -> dict[str, Any]:
++        return {
++            "consecutive_failures": 0,
++            "total_failures": 0,
++            "last_error": None,
++            "last_failure_at": None,
++            "last_success_at": None,
++            "alerting": False,
++            "_last_alert_monotonic": None,
++        }
++
++
++_default_tracker = FailureTracker()
++
++
++def get_tracker() -> FailureTracker:
++    return _default_tracker
++
++
++def set_tracker(tracker: FailureTracker) -> FailureTracker:
++    """Sustituye el tracker global (lo usaran las alertas de la tarea 3 y los tests)."""
++    global _default_tracker
++    previous = _default_tracker
++    _default_tracker = tracker
++    return previous
++
++
++def report_failure(component: str, error: BaseException) -> int:
++    return _default_tracker.record_failure(component, error)
++
++
++def report_success(component: str) -> None:
++    _default_tracker.record_success(component)
++
++
++def configure_logging(level: str | None = None) -> None:
++    """Configura logging a stderr (journald) una sola vez. Nivel: AURORA_LOG_LEVEL."""
++    root = logging.getLogger()
++    if any(getattr(handler, "_aurora_handler", False) for handler in root.handlers):
++        return
++    handler = logging.StreamHandler()
++    handler._aurora_handler = True  # type: ignore[attr-defined]
++    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
++    root.addHandler(handler)
++    chosen = (level or os.getenv("AURORA_LOG_LEVEL", "INFO")).strip().upper()
++    root.setLevel(getattr(logging, chosen, logging.INFO))
+diff -ruN '--exclude=__pycache__' '--exclude=.pytest_cache' /tmp/p0/Aurora-main/aurora/orchestration/daemon.py Aurora-main/aurora/orchestration/daemon.py
+--- a/aurora/orchestration/daemon.py	2026-10-09 18:47:51.000000000 +0000
++++ b/aurora/orchestration/daemon.py	2026-10-10 20:59:48.248501426 +0000
+@@ -8,6 +8,7 @@
+ from threading import Event, Thread
+ import signal
+ 
++from aurora.failure_tracker import configure_logging
+ from .factory import build_director_runtime
+ from aurora.dashboard.conversation_api import DashboardConversationAPI
+ from aurora.dashboard.http_server import DashboardHTTPError, create_dashboard_server
+@@ -65,6 +66,7 @@
+         help="Dashboard HTTP port.",
+     )
+     args = parser.parse_args()
++    configure_logging()
+ 
+     proxy_host = os.getenv("AURORA_EGRESS_PROXY_HOST")
+     if not proxy_host:
+diff -ruN '--exclude=__pycache__' '--exclude=.pytest_cache' /tmp/p0/Aurora-main/aurora/orchestration/director_provider_failover.py Aurora-main/aurora/orchestration/director_provider_failover.py
+--- a/aurora/orchestration/director_provider_failover.py	2026-10-09 18:47:51.000000000 +0000
++++ b/aurora/orchestration/director_provider_failover.py	2026-10-10 20:59:48.246771077 +0000
+@@ -12,6 +12,7 @@
+ from threading import RLock
+ from typing import Any, Callable, Mapping
+ 
++from aurora.failure_tracker import report_failure
+ from .director_provider import DirectorModelResponse, DirectorProvider, DirectorToolSpec
+ from aurora.inference.models import InferenceRequest
+ from aurora.inference.router import ModelRouter
+@@ -399,8 +400,8 @@
+                                     candidate.model or candidate.provider_id,
+                                     replacement_error,
+                                 )
+-                            except Exception:
+-                                pass
++                            except Exception as health_exc:
++                                report_failure("provider_health_store", health_exc)
+                         self._failed_candidates.add(self._candidate_key(candidate))
+                         self._store.record(
+                             transition_id=f"{attempt_id}:failed",
+@@ -466,8 +467,8 @@
+             return
+         try:
+             self._health_store.record_failure(provider_id, model_id, error)
+-        except Exception:
+-            pass
++        except Exception as health_exc:
++            report_failure("provider_health_store", health_exc)
+ 
+     @staticmethod
+     def _candidate_key(candidate: DirectorProviderCandidate) -> tuple[str, str]:
+@@ -495,10 +496,10 @@
+             event.update({str(key): value for key, value in context.items() if key not in event})
+         try:
+             self._event_sink(event)
+-        except Exception:
++        except Exception as sink_exc:
+             # Failover evidence is durably stored above; telemetry must not
+             # prevent the replacement provider from serving the Director.
+-            pass
++            report_failure("failover_event_sink", sink_exc)
+ 
+     def _record_and_emit(
+         self,
+diff -ruN '--exclude=__pycache__' '--exclude=.pytest_cache' /tmp/p0/Aurora-main/aurora/orchestration/director_runtime.py Aurora-main/aurora/orchestration/director_runtime.py
+--- a/aurora/orchestration/director_runtime.py	2026-10-09 18:47:51.000000000 +0000
++++ b/aurora/orchestration/director_runtime.py	2026-10-10 20:59:36.604258199 +0000
+@@ -10,6 +10,8 @@
+ from typing import Any, Callable, Mapping
+ from uuid import uuid4
+ 
++from aurora.failure_tracker import report_failure, report_success
++
+ from .director import DirectorPlanError
+ from .director_handoff_store import DirectorHandoff, DirectorHandoffRejected, DirectorHandoffStore
+ from .director_eligibility import DirectorEligibilityError, DirectorEligibilityStore
+@@ -1125,9 +1127,12 @@
+                     min_interval_seconds=self.model_discovery_refresh_interval_seconds,
+                 )
+                 self.model_discovery.activate_free_discovered(provider_id="nvidia_api")
+-        except Exception:
++            report_success("model_catalog_refresh")
++        except Exception as exc:
+             # Catalog refresh is advisory; the durable staged snapshot, health
+-            # state and existing failover path remain authoritative.
++            # state and existing failover path remain authoritative. The failure
++            # is still recorded so repeated errors surface as an alert.
++            report_failure("model_catalog_refresh", exc)
+             return
+ 
+     def _worker_for(self, mission_id: str, slot: int = 0) -> TaskWorker:
+@@ -1156,8 +1161,10 @@
+             events = self.store.events(mission_id)
+             tasks = {item.task.task_id: item for item in self.store.list_tasks(mission_id)}
+             self.observability.record_mission_events(events, task_results=tasks)
+-        except Exception:
++            report_success("observability_record")
++        except Exception as exc:
+             # Observability is never allowed to alter authoritative mission state.
++            report_failure("observability_record", exc)
+             return
+ 
+     def _record_worker_result(self, mission_id: str, cycle: WorkerCycle) -> None:
+diff -ruN '--exclude=__pycache__' '--exclude=.pytest_cache' /tmp/p0/Aurora-main/aurora/orchestration/factory.py Aurora-main/aurora/orchestration/factory.py
+--- a/aurora/orchestration/factory.py	2026-10-09 18:47:51.000000000 +0000
++++ b/aurora/orchestration/factory.py	2026-10-10 20:59:48.247634584 +0000
+@@ -2,6 +2,7 @@
+ from __future__ import annotations
+ import json, os
+ from pathlib import Path
++from aurora.failure_tracker import report_failure
+ from aurora.autonomy.acquisition import AcquisitionManager
+ from aurora.autonomy.mission_manager import AutonomousMissionManager
+ from aurora.autonomy.broker import CapabilityBroker
+@@ -359,7 +360,8 @@
+                 capability="reasoning",
+                 exclude=((active_id, active_model_id),) if active_model_id else (),
+             )
+-        except Exception:
++        except Exception as exc:
++            report_failure("failover_reserve_pool", exc)
+             return ()
+ 
+         candidates: list[DirectorProviderCandidate] = []
+diff -ruN '--exclude=__pycache__' '--exclude=.pytest_cache' /tmp/p0/Aurora-main/aurora/orchestration/task_engine.py Aurora-main/aurora/orchestration/task_engine.py
+--- a/aurora/orchestration/task_engine.py	2026-10-09 18:47:51.000000000 +0000
++++ b/aurora/orchestration/task_engine.py	2026-10-10 20:59:48.247174560 +0000
+@@ -12,6 +12,8 @@
+ from pathlib import Path
+ from typing import Sequence
+ 
++from aurora.failure_tracker import report_failure
++
+ from aurora.research.models import EvidenceState, ResearchRequest
+ from aurora.research.service import ResearchService
+ from aurora.research.learning import ResearchLearningGate
+@@ -220,15 +222,20 @@
+                     for role in member_roles
+                 ]
+                 selected = None
++                rejections: list[str] = []
+                 for candidate in candidates:
+                     try:
+                         self.validate((candidate,))
+                         selected = candidate
+                         break
+-                    except Exception:
++                    except Exception as exc:
++                        rejections.append(f"{candidate.role}: {type(exc).__name__}: {str(exc)[:120]}")
+                         continue
+                 if selected is None:
+-                    raise TaskEngineError("no viable team member for task " + task.task_id)
++                    raise TaskEngineError(
++                        "no viable team member for task " + task.task_id
++                        + (" (" + "; ".join(rejections) + ")" if rejections else "")
++                    )
+                 normalized.append(selected)
+             else:
+                 if task.role not in member_roles:
+@@ -357,9 +364,10 @@
+                 trusted_research_artifact_ids=result.trusted_research_artifact_ids,
+                 research_trust_state=result.research_trust_state,
+             )
+-        except Exception:
++        except Exception as exc:
+             # Learning must never turn a completed task into a false execution
+             # failure. The durable execution result remains authoritative.
++            report_failure("task_learning", exc)
+             return result
+ 
+     def _skill_tags(self, task: DelegatedTask) -> tuple[str, ...]:
+diff -ruN '--exclude=__pycache__' '--exclude=.pytest_cache' /tmp/p0/Aurora-main/tests/test_failure_visibility.py Aurora-main/tests/test_failure_visibility.py
+--- a/tests/test_failure_visibility.py	1970-01-01 00:00:00.000000000 +0000
++++ b/tests/test_failure_visibility.py	2026-10-10 21:05:14.285335999 +0000
+@@ -0,0 +1,155 @@
++"""Tarea 2 (Fase 1): los fallos tragados a proposito ya no desaparecen sin rastro."""
++import json
++import logging
++from pathlib import Path
++from threading import Thread
++from types import SimpleNamespace
++from urllib.error import HTTPError
++from urllib.request import urlopen
++
++import pytest
++
++from aurora.dashboard.http_server import create_dashboard_server
++from aurora.failure_tracker import FailureTracker, set_tracker
++from aurora.orchestration.director_runtime import DirectorRuntime
++
++UI_ROOT = Path(__file__).parents[1] / "aurora" / "dashboard" / "ui"
++
++
++@pytest.fixture
++def tracker():
++    alerts = []
++    clock = {"now": 0.0}
++    instance = FailureTracker(
++        alert_threshold=3,
++        alert_cooldown_seconds=100.0,
++        alert_sink=alerts.append,
++        monotonic=lambda: clock["now"],
++    )
++    instance.alerts = alerts
++    instance.clock = clock
++    previous = set_tracker(instance)
++    yield instance
++    set_tracker(previous)
++
++
++def test_counts_consecutive_failures_and_alerts_once_at_threshold(tracker, caplog):
++    caplog.set_level(logging.WARNING, logger="aurora.health")
++    for _ in range(2):
++        tracker.record_failure("model_catalog_refresh", RuntimeError("boom"))
++    assert tracker.alerts == []
++    tracker.record_failure("model_catalog_refresh", RuntimeError("boom"))
++    assert len(tracker.alerts) == 1
++    assert tracker.alerts[0]["kind"] == "failure_threshold"
++    assert tracker.alerts[0]["consecutive_failures"] == 3
++    # un cuarto fallo dentro del enfriamiento no repite la alerta
++    tracker.record_failure("model_catalog_refresh", RuntimeError("boom"))
++    assert len(tracker.alerts) == 1
++    assert tracker.degraded_components() == ["model_catalog_refresh"]
++    assert "swallowed failure in model_catalog_refresh" in caplog.text
++
++
++def test_alert_repeats_after_cooldown_and_recovery_is_reported(tracker):
++    for _ in range(3):
++        tracker.record_failure("x", ValueError("a"))
++    tracker.clock["now"] = 101.0
++    tracker.record_failure("x", ValueError("a"))
++    assert [a["kind"] for a in tracker.alerts] == ["failure_threshold", "failure_threshold"]
++    tracker.record_success("x")
++    assert tracker.alerts[-1]["kind"] == "recovered"
++    assert tracker.snapshot()["x"]["consecutive_failures"] == 0
++    assert tracker.snapshot()["x"]["total_failures"] == 4
++    assert tracker.degraded_components() == []
++
++
++def test_secrets_are_redacted_and_errors_truncated(tracker):
++    tracker.record_failure("x", RuntimeError("401 Bearer abc.DEF-123 and nvapi-SECRETKEY999 " + "z" * 1000))
++    text = tracker.snapshot()["x"]["last_error"]
++    assert "abc.DEF-123" not in text and "SECRETKEY999" not in text
++    assert "***" in text and len(text) <= 300
++
++
++def test_failing_alert_sink_never_breaks_the_runtime():
++    def bad_sink(_payload):
++        raise RuntimeError("telegram down")
++
++    local = FailureTracker(alert_threshold=1, alert_sink=bad_sink)
++    assert local.record_failure("x", RuntimeError("e")) == 1
++
++
++def _runtime_stub(discovery):
++    return SimpleNamespace(
++        model_discovery_refresh_enabled=True,
++        model_discovery=discovery,
++        autonomous_discovery_refresh=None,
++        _last_model_discovery_refresh_at=None,
++        model_discovery_refresh_interval_seconds=900.0,
++    )
++
++
++def test_catalog_refresh_failures_are_counted_then_recover(tracker):
++    class Discovery:
++        fail = True
++
++        def refresh_all(self, **_kwargs):
++            if self.fail:
++                raise RuntimeError("catalog unreachable")
++
++        def activate_free_discovered(self, **_kwargs):
++            return None
++
++    discovery = Discovery()
++    stub = _runtime_stub(discovery)
++    for _ in range(3):
++        stub._last_model_discovery_refresh_at = None  # saltar el intervalo
++        DirectorRuntime._refresh_model_catalogs_if_due(stub)  # no debe propagar
++    assert tracker.snapshot()["model_catalog_refresh"]["consecutive_failures"] == 3
++    assert len(tracker.alerts) == 1
++    discovery.fail = False
++    stub._last_model_discovery_refresh_at = None
++    DirectorRuntime._refresh_model_catalogs_if_due(stub)
++    assert tracker.snapshot()["model_catalog_refresh"]["consecutive_failures"] == 0
++    assert tracker.alerts[-1]["kind"] == "recovered"
++
++
++def _serve(health_service):
++    server = create_dashboard_server(
++        dashboard_gateway=SimpleNamespace(snapshot=lambda **_: {}),
++        conversation_api=object(),
++        health_service=health_service,
++        host="127.0.0.1",
++        port=0,
++        ui_root=UI_ROOT,
++    )
++    Thread(target=server.serve_forever, daemon=True).start()
++    return server, "http://127.0.0.1:" + str(server.server_address[1])
++
++
++def test_health_endpoint_exposes_runtime_failures(tracker):
++    tracker.record_failure("observability_record", RuntimeError("disk full"))
++    server, base = _serve(SimpleNamespace(health=lambda: {"status": "ok"}))
++    try:
++        with urlopen(base + "/api/dashboard/health", timeout=5) as response:
++            data = json.loads(response.read().decode("utf-8"))
++        assert data["status"] == "ok"
++        assert data["runtime_failures"]["observability_record"]["consecutive_failures"] == 1
++    finally:
++        server.shutdown()
++
++
++def test_internal_dashboard_errors_are_logged_server_side(tracker, caplog):
++    def broken():
++        raise RuntimeError("secret internals")
++
++    caplog.set_level(logging.ERROR, logger="aurora.dashboard")
++    server, base = _serve(SimpleNamespace(health=broken))
++    try:
++        with pytest.raises(HTTPError) as caught:
++            urlopen(base + "/api/dashboard/health", timeout=5)
++        assert caught.value.code == 500
++        body = caught.value.read().decode("utf-8")
++        assert "secret internals" not in body  # el cliente sigue sin ver detalles
++    finally:
++        server.shutdown()
++    assert "dashboard request failed" in caplog.text
++    assert "secret internals" in caplog.text  # pero el operador si los ve en el log
