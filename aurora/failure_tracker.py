@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping
 
 logger = logging.getLogger("aurora.health")
-_SECRET_PATTERN = re.compile(r"(nvapi-[A-Za-z0-9_-]+|Bearer\\s+[A-Za-z0-9._-]+|api[_-]?key\\s*[=:]\\s*[^\\s,;]+)", re.IGNORECASE)
+_SECRET_PATTERN = re.compile(r"(nvapi-[A-Za-z0-9_-]+|Bearer\s+[A-Za-z0-9._-]+|api[_-]?key\s*[=:]\s*[^\s,;]+)", re.IGNORECASE)
 _MAX_ERROR_CHARS = 300
 AlertSink = Callable[[Mapping[str, Any]], None]
 
@@ -42,7 +42,7 @@ class FailureTracker:
         try:
             self.journal_path.parent.mkdir(parents=True, exist_ok=True)
             with self.journal_path.open("a", encoding="utf-8") as stream:
-                stream.write(json.dumps(dict(event), sort_keys=True) + "\\n")
+                stream.write(json.dumps(dict(event), sort_keys=True) + "\n")
         except Exception as exc:
             # Do not print filesystem exception text: paths or environment may be sensitive.
             logger.error("failure journal append failed (%s)", type(exc).__name__)
