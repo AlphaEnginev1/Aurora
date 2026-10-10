@@ -2,6 +2,7 @@
 from __future__ import annotations
 import json, os
 from pathlib import Path
+from aurora.failure_tracker import report_failure
 from aurora.autonomy.acquisition import AcquisitionManager
 from aurora.autonomy.mission_manager import AutonomousMissionManager
 from aurora.autonomy.broker import CapabilityBroker
@@ -359,7 +360,8 @@ def _build_director_provider_failover(
                 capability="reasoning",
                 exclude=((active_id, active_model_id),) if active_model_id else (),
             )
-        except Exception:
+        except Exception as exc:
+            report_failure("failover_reserve_pool", exc)
             return ()
 
         candidates: list[DirectorProviderCandidate] = []
