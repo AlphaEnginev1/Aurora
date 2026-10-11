@@ -32,7 +32,9 @@ def fetch_health(url: str | None = None, *, timeout: float = 5.0) -> dict[str, A
     if token:
         headers["Authorization"] = f"Bearer {token}"
     request = Request(url or _health_url(), headers=headers)
-    # The health endpoint is local; bypass the remote egress proxy for loopback only.\n    opener = build_opener(ProxyHandler({}))\n    with opener.open(request, timeout=timeout) as response:
+    # The health endpoint is local; bypass the remote egress proxy for loopback only.
+    opener = build_opener(ProxyHandler({}))
+    with opener.open(request, timeout=timeout) as response:
         if response.status != 200:
             raise URLError(f"health endpoint returned HTTP {response.status}")
         payload = json.loads(response.read(2_000_000).decode("utf-8"))
