@@ -7,6 +7,8 @@ import os
 import shutil
 import socket
 import time
+from ipaddress import ip_address
+from urllib.parse import urlsplit
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.error import URLError
@@ -26,13 +28,30 @@ def _health_url() -> str:
     return os.getenv("AURORA_MONITOR_HEALTH_URL", "http://127.0.0.1:8787/api/dashboard/health")
 
 
+def _require_loopback_health_url(url: str) -> str:
+    """Reject remote health URLs before disabling proxy use for the local request."""
+    parsed = urlsplit(url)
+    host = (parsed.hostname or "").rstrip(".").lower()
+    if parsed.scheme not in {"http", "https"} or not host or parsed.username or parsed.password:
+        raise ValueError("health URL must be an HTTP(S) loopback URL without credentials")
+    if host != "localhost":
+        try:
+            if not ip_address(host).is_loopback:
+                raise ValueError("health URL must target loopback only")
+        except ValueError as exc:
+            raise ValueError("health URL must target loopback only") from exc
+    if parsed.fragment:
+        raise ValueError("health URL must not contain a fragment")
+    return url
+
+
 def fetch_health(url: str | None = None, *, timeout: float = 5.0) -> dict[str, Any]:
     headers = {"Accept": "application/json"}
     token = os.getenv("AURORA_DASHBOARD_API_TOKEN", "").strip()
     if token:
         headers["Authorization"] = f"Bearer {token}"
-    request = Request(url or _health_url(), headers=headers)
-    # The health endpoint is local; bypass the remote egress proxy for loopback only.
+    request = Request(_require_loopback_health_url(url or _health_url()), headers=headers)
+    # The proxy bypass is safe only after the URL has been restricted to loopback.
     opener = build_opener(ProxyHandler({}))
     with opener.open(request, timeout=timeout) as response:
         if response.status != 200:
