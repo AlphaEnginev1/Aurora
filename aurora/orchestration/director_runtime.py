@@ -1170,7 +1170,7 @@ class DirectorRuntime:
             except Exception as publish_exc:
                 # Preserve the original failure signal in logs if telemetry is unavailable.
                 logging.getLogger(__name__).error(
-                    "Unable to publish durable NVIDIA catalog refresh failure event (%s)", _safe_catalog_error_text(publish_exc)
+                    "Unable to publish durable NVIDIA catalog refresh failure event (%s)", type(publish_exc).__name__
                 )
             return
         else:
@@ -1190,7 +1190,7 @@ class DirectorRuntime:
                     )
                 except Exception as publish_exc:
                     logging.getLogger(__name__).error(
-                        "Unable to publish durable NVIDIA catalog refresh recovery event (%s)", _safe_catalog_error_text(publish_exc)
+                        "Unable to publish durable NVIDIA catalog refresh recovery event (%s)", type(publish_exc).__name__
                     )
             self._model_catalog_refresh_consecutive_failures = 0
 

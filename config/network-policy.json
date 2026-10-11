@@ -4,16 +4,19 @@
     "https"
   ],
   "allowed_hosts": [
-    "github.com",
     "api.github.com",
-    "pypi.org",
-    "files.pythonhosted.org",
-    "registry.npmjs.org",
+    "api.telegram.org",
     "archive.ubuntu.com",
-    "security.ubuntu.com",
-    "integrate.api.nvidia.com",
+    "build.nvidia.com",
+    "files.pythonhosted.org",
     "generativelanguage.googleapis.com",
-    "build.nvidia.com"
+    "github.com",
+    "integrate.api.nvidia.com",
+    "pypi.org",
+    "registry.npmjs.org",
+    "security.ubuntu.com",
+    "smtp.gmail.com",
+    "smtp.office365.com"
   ],
   "browser_isolation_required": true,
   "sandbox_network": "broker_only",
@@ -22,5 +25,9 @@
     "required": true,
     "unshare_net": true,
     "direct_network": false
-  }
+  },
+  "allowed_ports": [
+    443,
+    465
+  ]
 }

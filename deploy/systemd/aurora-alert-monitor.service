@@ -1,0 +1,19 @@
+[Unit]
+Description=Aurora external health and alert monitor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=aurora
+Group=aurora
+WorkingDirectory=/opt/aurora
+EnvironmentFile=-/etc/aurora/aurora.env
+Environment=AURORA_MONITOR_HEALTH_URL=http://127.0.0.1:8787/api/dashboard/health
+Environment=AURORA_MONITOR_STATE_FILE=/opt/aurora/.aurora-runtime/alert-monitor-state.json
+Environment=AURORA_FAILURE_JOURNAL=/opt/aurora/.aurora-runtime/failure-events.jsonl
+ExecStart=/opt/aurora/.venv/bin/python -m aurora.alert_monitor --once
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/opt/aurora/.aurora-runtime
