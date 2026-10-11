@@ -88,7 +88,7 @@ def test_monitor_detects_no_models_disk_proxy_and_403_429(monkeypatch, tmp_path)
     sent = []
     health = {
         "summary": {"stale_tasks": 0},
-        "components": [{"key": "models", "status": "DEGRADED", "reason": "No enabled healthy and available model is currently registered."}],
+        "components": [{"key": "models", "status": "UNKNOWN", "reason": "No enabled healthy and available model is currently registered."}],
     }
     result = run_check(health_fetcher=lambda: health, sink=sent.append,
                        state_path=tmp_path / "state.json", now=2002)
