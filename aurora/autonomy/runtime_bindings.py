@@ -67,7 +67,7 @@ def _mission_summary(director_service, phase: str, objective: str, state: Mappin
     )
     tasks = tuple(getattr(result, "tasks", ()) or ())
     statuses = [
-        str(getattr(item, "status", getattr(item, "state", "unknown"))).strip().lower()
+        str(getattr(item, "status", getattr(item, "state", "unknown"))).strip().lower().rsplit(".", 1)[-1]
         for item in tasks
     ]
     success_states = {"success", "succeeded", "complete", "completed"}
