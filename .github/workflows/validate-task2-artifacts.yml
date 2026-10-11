@@ -61,7 +61,7 @@ jobs:
           targets = []
           for line in patch.read_text(encoding="utf-8").splitlines():
               if line.startswith("+++ b/"):
-                  path = line[6:].split("\t", 1)[0].strip()
+                  path = line[6:].split("\\t", 1)[0].split("\t", 1)[0].split("  ", 1)[0].strip()
                   if path != "/dev/null":
                       targets.append(path)
           targets = list(dict.fromkeys(targets))
