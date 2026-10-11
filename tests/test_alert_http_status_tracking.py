@@ -25,7 +25,7 @@ def test_nvidia_403_429_are_recorded_for_rate_monitoring(monkeypatch, status):
     )
     with pytest.raises(nvidia_api.ProviderHTTPError):
         provider.generate(InferenceRequest(messages=[{"role": "user", "content": "ping"}]))
-    assert observed == [("provider_http_403_429", f"RuntimeError: NVIDIA HTTP status {status}")]
+    assert observed == [("provider_http_403_429", f"NVIDIA HTTP status {status}")]
 
 
 def test_nvidia_other_http_status_does_not_count_as_403_429(monkeypatch):
