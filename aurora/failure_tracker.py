@@ -92,9 +92,8 @@ class FailureTracker:
             state.update(consecutive_failures=0, alerting=False, last_success_at=now)
             state["_last_alert_monotonic"] = None
             snapshot = {k: v for k, v in state.items() if not k.startswith("_")}
-        if previous > 0:
-            self._append({"event": "recovered", "at": now, "component": component,
-                          "previous_consecutive_failures": previous, **snapshot})
+        self._append({"event": "recovered", "at": now, "component": component,
+                      "previous_consecutive_failures": previous, **snapshot})
         if was_alerting:
             self._send({"kind": "recovered", "component": component,
                         "previous_consecutive_failures": previous})
