@@ -20,6 +20,8 @@ def _safe_catalog_error_text(error: BaseException) -> str:
     return _CATALOG_SECRET_PATTERN.sub("***REDACTED***", f"{type(error).__name__}: {error}")[:300]
 
 
+from aurora.failure_tracker import report_failure, report_success
+
 from .director import DirectorPlanError
 from .director_handoff_store import DirectorHandoff, DirectorHandoffRejected, DirectorHandoffStore
 from .director_eligibility import DirectorEligibilityError, DirectorEligibilityStore
@@ -1137,6 +1139,7 @@ class DirectorRuntime:
                 )
                 self.model_discovery.activate_free_discovered(provider_id="nvidia_api")
         except Exception as exc:
+            report_failure("model_catalog_refresh", exc)
             # Catalog refresh is advisory, but its failure must never be silent.
             self._model_catalog_refresh_consecutive_failures += 1
             failures = self._model_catalog_refresh_consecutive_failures
@@ -1193,6 +1196,7 @@ class DirectorRuntime:
                         "Unable to publish durable NVIDIA catalog refresh recovery event (%s)", type(exc).__name__
                     )
             self._model_catalog_refresh_consecutive_failures = 0
+            report_success("model_catalog_refresh")
 
     def _worker_for(self, mission_id: str, slot: int = 0) -> TaskWorker:
         key = f"{mission_id}:{slot}"
@@ -1220,8 +1224,10 @@ class DirectorRuntime:
             events = self.store.events(mission_id)
             tasks = {item.task.task_id: item for item in self.store.list_tasks(mission_id)}
             self.observability.record_mission_events(events, task_results=tasks)
-        except Exception:
+            report_success("observability_record")
+        except Exception as exc:
             # Observability is never allowed to alter authoritative mission state.
+            report_failure("observability_record", exc)
             return
 
     def _record_worker_result(self, mission_id: str, cycle: WorkerCycle) -> None:
