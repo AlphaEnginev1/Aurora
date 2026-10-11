@@ -14,6 +14,14 @@ from aurora.failure_tracker import FailureTracker, set_tracker
 from aurora.orchestration.director_runtime import DirectorRuntime
 
 
+
+def test_success_without_prior_failure_does_not_journal_false_recovery(tmp_path):
+    journal = tmp_path / "failures.jsonl"
+    tracker = FailureTracker(journal_path=str(journal))
+    tracker.record_success("healthy_component")
+    assert tracker.snapshot()["healthy_component"]["consecutive_failures"] == 0
+    assert not journal.exists()
+
 def test_failure_counter_alerts_and_recovery_are_recorded(tmp_path):
     alerts = []
     tracker = FailureTracker(alert_threshold=2, alert_cooldown_seconds=900,
