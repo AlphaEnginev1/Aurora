@@ -15,6 +15,7 @@ import urllib.error
 import urllib.request
 
 from aurora.autonomy.internet import InternetPolicyError
+from aurora.failure_tracker import report_failure, report_success
 
 from ..audit import now_utc
 from ..errors import (
@@ -131,6 +132,8 @@ class NVIDIAAPIProvider:
                 with urllib.request.urlopen(req, timeout=self.timeout) as response:
                     raw = json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
+            if exc.code in {403, 429}:
+                report_failure("provider_http_403_429", RuntimeError(f"NVIDIA HTTP status {exc.code}"))
             # Keep response bodies and request headers out of logs/errors: they may
             # contain provider diagnostics or credential-adjacent information.
             message = f"NVIDIA HTTP request failed with status {exc.code}"
@@ -171,6 +174,7 @@ class NVIDIAAPIProvider:
                 context=context,
             ) from None
 
+        report_success("provider_http_403_429")
         content = _extract_content(raw, context)
         usage = _extract_usage(raw, context)
         reported_model = _extract_reported_model(raw, context)
