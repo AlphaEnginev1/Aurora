@@ -2,8 +2,10 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from aurora.alerts import ExternalAlertSink
-from aurora.alert_monitor import MonitorState, run_check
+from aurora.alert_monitor import MonitorState, fetch_health, run_check
 
 
 def test_alert_sink_requires_proxy_and_allowlisted_telegram(monkeypatch, tmp_path):
@@ -106,3 +108,14 @@ def test_monitor_state_persists_cooldown(tmp_path):
     reloaded = MonitorState(tmp_path / "state.json")
     assert not reloaded.alert("disk_high", payload, sent.append, cooldown_seconds=100, now=1060)
     assert len(sent) == 1
+
+
+
+@pytest.mark.parametrize("url", [
+    "https://example.com/api/dashboard/health",
+    "http://192.0.2.10/api/dashboard/health",
+    "http://user:password@127.0.0.1:8787/api/dashboard/health",
+])
+def test_health_fetch_rejects_non_loopback_or_credentialed_urls_before_network(url):
+    with pytest.raises(ValueError, match="loopback|without credentials"):
+        fetch_health(url)
