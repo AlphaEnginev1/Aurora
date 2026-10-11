@@ -58,3 +58,20 @@ Read-only inventory of branch refs and compare results against `main`. No branch
 3. Reconcile useful code into small topic branches based on current main; never merge whole stale branches blindly.
 4. Only then propose deleting redundant refs, and only after confirming there are no open PRs or unique artifacts.
 5. Retry branch-protection/ruleset verification with an authorized GitHub permission; current result is inconclusive.
+
+## Additional runtime/Phase 1 comparisons
+
+| Branch | Compare status | Ahead | Behind | Preliminary classification |
+|---|---:|---:|---:|---|
+| `runtime/universal-workbench-v1` | behind | 0 | 472 | Head is in main history; stale-ref candidate |
+| `runtime/universal-workbench-v14-full-acceptance` | behind | 0 | 322 | Head is in main history; stale-ref candidate |
+| `runtime/autonomous-capability-engine` | diverged | 10 | 1252 | Preserve 10 unique commits; inspect six changed files |
+| `runtime/autonomous-skill-evolution` | diverged | 5 | 1262 | Preserve five unique commits; inspect five changed files |
+| `runtime/governed-computer-operator` | diverged | 3 | 1251 | Preserve three unique commits; inspect three changed files |
+| `runtime/governed-web-discovery` | diverged | 3 | 1254 | Preserve three unique commits; inspect three changed files |
+| `runtime/live-research-discovery` | diverged | 5 | 948 | Preserve five unique commits; inspect three changed files |
+| `runtime/research-discovery-e2e` | diverged | 3 | 953 | Preserve three unique commits; inspect one changed file |
+| `phase1/autonomy-runtime-integration-v1` | behind | 0 | 2 | Head is in main history; stale-ref candidate |
+| `verification/aurora-core-e2e-v1` | behind | 0 | 926 | Head is in main history; stale-ref candidate |
+
+A branch with `ahead=0` is an ancestor of current main according to the compare API; it does not represent code missing from main. Diverged runtime branches require content-level comparison before any unique commits are cherry-picked. The inventory is still partial: only the branches listed in the tables have had ancestry comparisons completed.
