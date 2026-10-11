@@ -8,6 +8,8 @@ from pathlib import Path
 from threading import Event, Thread
 import signal
 
+from aurora.failure_tracker import configure_logging
+
 from .factory import build_director_runtime
 from aurora.dashboard.conversation_api import DashboardConversationAPI
 from aurora.dashboard.http_server import DashboardHTTPError, create_dashboard_server
@@ -65,6 +67,7 @@ def main() -> int:
         help="Dashboard HTTP port.",
     )
     args = parser.parse_args()
+    configure_logging()
 
     proxy_host = os.getenv("AURORA_EGRESS_PROXY_HOST")
     if not proxy_host:

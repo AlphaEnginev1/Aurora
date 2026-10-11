@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import logging
 from pathlib import Path
 import re
 import uuid
@@ -15,7 +16,10 @@ from .gateway import DashboardGateway, DashboardGatewayError
 from .provider_settings import DashboardProviderSettingsError, ProviderSettingsService
 from .update_service import DashboardUpdateError, DashboardUpdateService
 from .health import DashboardHealthService
+from aurora.failure_tracker import get_tracker
 from aurora.workbench.github_auth import GitHubOAuthError, GitHubOAuthService
+
+logger = logging.getLogger("aurora.dashboard")
 
 
 class DashboardHTTPError(RuntimeError):
@@ -101,7 +105,9 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 self._require_token()
                 if self.health_service is None:
                     raise DashboardHTTPError("dashboard health service is not configured")
-                self._json(200, self.health_service.health())
+                health_payload = dict(self.health_service.health())
+                health_payload["runtime_failures"] = get_tracker().snapshot()
+                self._json(200, health_payload)
                 return
             if path == "/api/github/status":
                 self._json(200, self._github_oauth().public())
@@ -160,6 +166,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         except (DashboardGatewayError, DashboardConversationAPIError, DashboardHTTPError, DashboardProviderSettingsError, DashboardUpdateError, GitHubOAuthError) as exc:
             self._json(400, {"error": str(exc)})
         except Exception as exc:
+            logger.error("dashboard request failed: %s %s (%s)", self.command, self.path.split("?", 1)[0], type(exc).__name__)
             self._json(500, {"error": "internal dashboard error", "type": type(exc).__name__})
 
     def do_POST(self) -> None:
