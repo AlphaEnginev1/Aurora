@@ -15,7 +15,7 @@ import urllib.error
 import urllib.request
 
 from aurora.autonomy.internet import InternetPolicyError
-from aurora.failure_tracker import report_failure, report_success
+from aurora.failure_tracker import get_tracker, report_failure, report_success
 
 from ..audit import now_utc
 from ..errors import (
@@ -174,7 +174,9 @@ class NVIDIAAPIProvider:
                 context=context,
             ) from None
 
-        report_success("provider_http_403_429")
+        previous_http_state = get_tracker().snapshot().get("provider_http_403_429", {})
+        if previous_http_state.get("consecutive_failures", 0):
+            report_success("provider_http_403_429")
         content = _extract_content(raw, context)
         usage = _extract_usage(raw, context)
         reported_model = _extract_reported_model(raw, context)
