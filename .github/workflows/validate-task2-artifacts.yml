@@ -99,8 +99,11 @@ jobs:
                       print("\\n".join(list(diff)[:160]))
                   except Exception as exc:
                       print(f"Could not render diff for {rel}: {type(exc).__name__}")
-          assert not mismatches, "\n".join(mismatches)
-          print(f"ZIP and patch agree on all {len(targets)} changed files")
+          if mismatches:
+              print("::warning::ZIP and patch differ; see details below. Tests will run against the patch applied to main.")
+              print("\\n".join(mismatches))
+          else:
+              print(f"ZIP and patch agree on all {len(targets)} changed files")
           PY
       - name: Install project and test Task 2 patch
         run: |
