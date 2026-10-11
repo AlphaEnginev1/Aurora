@@ -16,7 +16,8 @@ on:
 jobs:
   live-nvidia-only:
     runs-on: ubuntu-24.04
-    environment: nvidia-live
+    # Reuse the GitHub Actions environment from the last confirmed real NVIDIA inference.
+    environment: director-provider-failover-live
     steps:
       - uses: actions/checkout@v7
         with:
