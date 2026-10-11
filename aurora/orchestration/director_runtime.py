@@ -5,10 +5,20 @@ from __future__ import annotations
 from dataclasses import dataclass
 from concurrent.futures import ThreadPoolExecutor
 import json
+import logging
+import re
 from threading import Event, RLock
 from time import sleep
 from typing import Any, Callable, Mapping
 from uuid import uuid4
+
+
+_CATALOG_SECRET_PATTERN = re.compile(r"(nvapi-[A-Za-z0-9_-]+|Bearer\s+[A-Za-z0-9._-]+|api[_-]?key\s*[=:]\s*[^\s,;]+)", re.IGNORECASE)
+
+
+def _safe_catalog_error_text(error: BaseException) -> str:
+    return _CATALOG_SECRET_PATTERN.sub("***REDACTED***", f"{type(error).__name__}: {error}")[:300]
+
 
 from .director import DirectorPlanError
 from .director_handoff_store import DirectorHandoff, DirectorHandoffRejected, DirectorHandoffStore
@@ -203,6 +213,7 @@ class DirectorRuntime:
         self.model_discovery_refresh_enabled = bool(model_discovery_refresh_enabled)
         self.model_discovery_refresh_interval_seconds = float(model_discovery_refresh_interval_seconds)
         self._last_model_discovery_refresh_at = 0.0
+        self._model_catalog_refresh_consecutive_failures = 0
         self.model_ensemble = model_ensemble
         self.dashboard_gateway = dashboard_gateway
         self.conversation_service = conversation_service
@@ -1125,10 +1136,63 @@ class DirectorRuntime:
                     min_interval_seconds=self.model_discovery_refresh_interval_seconds,
                 )
                 self.model_discovery.activate_free_discovered(provider_id="nvidia_api")
-        except Exception:
-            # Catalog refresh is advisory; the durable staged snapshot, health
-            # state and existing failover path remain authoritative.
+        except Exception as exc:
+            # Catalog refresh is advisory, but its failure must never be silent.
+            self._model_catalog_refresh_consecutive_failures += 1
+            failures = self._model_catalog_refresh_consecutive_failures
+            logging.getLogger(__name__).error(
+                "NVIDIA model catalog refresh failed (consecutive_failures=%d, error=%s)",
+                failures,
+                _safe_catalog_error_text(exc),
+            )
+            try:
+                self.event_bus.publish(
+                    mission_id="system",
+                    event_type="model_catalog_refresh_failed",
+                    payload={
+                        "provider_id": "nvidia_api",
+                        "consecutive_failures": failures,
+                        "error_type": type(exc).__name__,
+                        "error": _safe_catalog_error_text(exc),
+                        "alert_threshold_reached": failures >= 3,
+                    },
+                )
+                if failures == 3:
+                    self.event_bus.publish(
+                        mission_id="system",
+                        event_type="model_catalog_refresh_alert",
+                        payload={
+                            "provider_id": "nvidia_api",
+                            "consecutive_failures": failures,
+                            "threshold": 3,
+                        },
+                    )
+            except Exception as publish_exc:
+                # Preserve the original failure signal in logs if telemetry is unavailable.
+                logging.getLogger(__name__).error(
+                    "Unable to publish durable NVIDIA catalog refresh failure event (%s)", _safe_catalog_error_text(publish_exc)
+                )
             return
+        else:
+            if self._model_catalog_refresh_consecutive_failures:
+                logging.getLogger(__name__).info(
+                    "NVIDIA model catalog refresh recovered after %d consecutive failures",
+                    self._model_catalog_refresh_consecutive_failures,
+                )
+                try:
+                    self.event_bus.publish(
+                        mission_id="system",
+                        event_type="model_catalog_refresh_recovered",
+                        payload={
+                            "provider_id": "nvidia_api",
+                            "previous_consecutive_failures": self._model_catalog_refresh_consecutive_failures,
+                        },
+                    )
+                except Exception as publish_exc:
+                    logging.getLogger(__name__).error(
+                        "Unable to publish durable NVIDIA catalog refresh recovery event (%s)", _safe_catalog_error_text(publish_exc)
+                    )
+            self._model_catalog_refresh_consecutive_failures = 0
 
     def _worker_for(self, mission_id: str, slot: int = 0) -> TaskWorker:
         key = f"{mission_id}:{slot}"
