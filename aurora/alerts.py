@@ -82,7 +82,7 @@ class ExternalAlertSink:
                 raise AlertConfigurationError("SMTP requires username and password environment variables")
             if not os.getenv("AURORA_ALERT_SMTP_FROM") or not os.getenv("AURORA_ALERT_SMTP_TO"):
                 raise AlertConfigurationError("SMTP requires from and to addresses")
-            if "465" not in os.getenv("AURORA_ALERT_SMTP_PORT", "465"):
+            if int(os.getenv("AURORA_ALERT_SMTP_PORT", "465")) != 465:
                 raise AlertConfigurationError("SMTP alerts must use implicit TLS on proxy-allowed port 465")
 
     def _require_host(self, host: str) -> None:
