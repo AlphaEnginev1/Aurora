@@ -29,5 +29,9 @@ jobs:
           python-version: "3.12"
       - name: Install Aurora test dependencies
         run: python -m pip install --upgrade pip pytest && python -m pip install -e .
+      - name: Report missing NVIDIA credential
+        if: ${{ env.NVIDIA_API_KEY == '' }}
+        run: echo "::warning::NVIDIA_API_KEY Actions secret is not configured; live inference was NOT executed."
       - name: Run real NVIDIA catalog, inference and reserve acceptance
+        if: ${{ env.NVIDIA_API_KEY != '' }}
         run: python -m pytest -q -s tests/e2e/test_live_multi_provider_resilience.py -m live
