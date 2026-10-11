@@ -75,6 +75,7 @@ jobs:
           git -C /tmp/task2-base apply "$GITHUB_WORKSPACE/aurora-fase1-tarea2.patch"
           python - <<'PY'
           from pathlib import Path
+          import difflib
           targets = Path("/tmp/task2-targets.txt").read_text(encoding="utf-8").splitlines()
           root = Path("/tmp/task2-zip-root.txt").read_text(encoding="utf-8")
           archive_root = Path("/tmp/task2-zip") / root
@@ -87,6 +88,17 @@ jobs:
                   mismatches.append(f"{rel}: missing patched={patched.is_file()} zip={archived.is_file()}")
               elif patched.read_bytes() != archived.read_bytes():
                   mismatches.append(f"{rel}: contents differ between patch result and ZIP")
+                  try:
+                      diff = difflib.unified_diff(
+                          patched.read_text(encoding="utf-8", errors="replace").splitlines(),
+                          archived.read_text(encoding="utf-8", errors="replace").splitlines(),
+                          fromfile=f"patch-result/{rel}",
+                          tofile=f"zip/{rel}",
+                          lineterm="",
+                      )
+                      print("\\n".join(list(diff)[:160]))
+                  except Exception as exc:
+                      print(f"Could not render diff for {rel}: {type(exc).__name__}")
           assert not mismatches, "\n".join(mismatches)
           print(f"ZIP and patch agree on all {len(targets)} changed files")
           PY
