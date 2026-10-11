@@ -150,9 +150,9 @@ def run_check(*, health_fetcher: Callable[[], dict[str, Any]] = fetch_health,
     if health is not None:
         components = health.get("components", [])
         model_component = next((item for item in components if item.get("key") == "models"), {})
-        if model_component.get("status") in {"CRITICAL", "DEGRADED"} and (
-            "no enabled healthy" in str(model_component.get("reason", "")).lower()
-            or "0 enabled" in str(model_component.get("reason", "")).lower()
+        model_reason = str(model_component.get("reason", "")).lower()
+        if model_component.get("status") != "HEALTHY" and (
+            "no enabled healthy" in model_reason or "0 enabled" in model_reason
         ):
             conditions["no_models_available"] = {
                 "kind": "no_models_available", "component": "model_layer",
