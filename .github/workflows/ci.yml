@@ -8,6 +8,14 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
+      - name: Verify canonical NVIDIA Actions environment
+        run: |
+          for workflow in .github/workflows/live-multi-provider-resilience.yml .github/workflows/live-nvidia-learning.yml; do
+            if ! grep -Eq '^[[:space:]]*environment:[[:space:]]*director-provider-failover-live[[:space:]]*$' "$workflow"; then
+              echo "NVIDIA live workflow uses a non-canonical GitHub Actions environment: $workflow" >&2
+              exit 1
+            fi
+          done
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
