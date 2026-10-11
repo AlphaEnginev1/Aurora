@@ -4,6 +4,7 @@ import json, os
 from pathlib import Path
 from aurora.failure_tracker import report_failure
 from aurora.autonomy.acquisition import AcquisitionManager
+from aurora.autonomy.runtime_bindings import build_autonomy_runtime_bindings
 from aurora.autonomy.mission_manager import AutonomousMissionManager
 from aurora.autonomy.broker import CapabilityBroker
 from aurora.autonomy.capability_runtime import CapabilityRuntime
@@ -780,4 +781,15 @@ def build_director_runtime(*, inference_policy_path: str | Path, autonomy_policy
     # delegates to this exact DirectorRuntime, preserving durable mission/task
     # identity, ownership, event bus, and terminal-state semantics.
     runtime.autonomous_mission_manager = AutonomousMissionManager(runtime)
+    runtime.autonomy_controllers = build_autonomy_runtime_bindings(
+        director_service=service,
+        router=service.planner.router,
+        workbench=runtime.workbench,
+        research_service=research_service,
+        skill_learning=skill_learning,
+    )
+    runtime.autonomous_computer_use = runtime.autonomy_controllers["computer_use"]
+    runtime.autonomous_software_engineer = runtime.autonomy_controllers["software_engineer"]
+    runtime.autonomous_discovery_loop = runtime.autonomy_controllers["discovery_loop"]
+    runtime.recursive_self_improvement = runtime.autonomy_controllers["recursive_self_improvement"]
     return runtime
