@@ -1,0 +1,33 @@
+name: NVIDIA live inference acceptance
+
+on:
+  push:
+    branches:
+      - phase1/autonomy-runtime-integration-v1
+    paths:
+      - ".github/workflows/nvidia-live-acceptance.yml"
+      - "aurora/inference/**"
+      - "config/inference-policy.json"
+      - "tests/e2e/test_live_multi_provider_resilience.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  nvidia-live-inference:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+      AURORA_NVIDIA_ONLY_LIVE: "1"
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install Aurora test dependencies
+        run: python -m pip install --upgrade pip pytest && python -m pip install -e .
+      - name: Run real NVIDIA catalog, inference and reserve acceptance
+        run: python -m pytest -q -s tests/e2e/test_live_multi_provider_resilience.py -m live
