@@ -16,7 +16,8 @@ on:
 jobs:
   live-nvidia-learning:
     runs-on: ubuntu-24.04
-    environment: nvidia-live
+    # Canonical NVIDIA credentials environment shared with Live NVIDIA Free-Model Gate.
+    environment: director-provider-failover-live
     steps:
       - uses: actions/checkout@v7
         with:
