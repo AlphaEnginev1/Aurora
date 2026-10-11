@@ -8,7 +8,8 @@ from pathlib import Path
 from threading import Event, Thread
 import signal
 
-from aurora.failure_tracker import configure_logging
+from aurora.failure_tracker import FailureTracker, configure_logging, set_tracker
+from aurora.alerts import AlertConfigurationError, build_alert_sink
 
 from .factory import build_director_runtime
 from aurora.dashboard.conversation_api import DashboardConversationAPI
@@ -68,6 +69,16 @@ def main() -> int:
     )
     args = parser.parse_args()
     configure_logging()
+    alert_channel = os.getenv("AURORA_ALERT_CHANNEL", "disabled").strip().lower()
+    try:
+        alert_sink = build_alert_sink() if alert_channel != "disabled" else None
+    except (AlertConfigurationError, OSError, ValueError) as exc:
+        parser.error(f"external alert configuration is invalid: {type(exc).__name__}")
+    set_tracker(FailureTracker(
+        alert_threshold=int(os.getenv("AURORA_FAILURE_ALERT_THRESHOLD", "3")),
+        alert_cooldown_seconds=float(os.getenv("AURORA_FAILURE_ALERT_COOLDOWN_SECONDS", "900")),
+        alert_sink=alert_sink,
+    ))
 
     proxy_host = os.getenv("AURORA_EGRESS_PROXY_HOST")
     if not proxy_host:

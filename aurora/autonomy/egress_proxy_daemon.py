@@ -14,7 +14,10 @@ def main() -> int:
     hosts = frozenset(str(x).strip().lower() for x in policy.get("allowed_hosts", []) if str(x).strip())
     if not hosts:
         raise SystemExit("network policy has no allowed_hosts")
-    asyncio.run(_serve(EgressProxy(EgressProxyPolicy(hosts)), args.host, args.port))
+    ports = frozenset(int(value) for value in policy.get("allowed_ports", [443]))
+    if not ports or any(port < 1 or port > 65535 for port in ports):
+        raise SystemExit("network policy has invalid allowed_ports")
+    asyncio.run(_serve(EgressProxy(EgressProxyPolicy(hosts, allowed_ports=ports)), args.host, args.port))
     return 0
 
 async def _serve(proxy: EgressProxy, host: str, port: int) -> None:
