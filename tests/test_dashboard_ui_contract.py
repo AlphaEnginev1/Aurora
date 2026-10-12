@@ -1,4 +1,6 @@
 from pathlib import Path
+import shutil
+import subprocess
 
 UI_DIR = Path(__file__).parents[1] / "aurora" / "dashboard" / "ui"
 
@@ -123,3 +125,17 @@ def test_home_chat_attachments_and_live_roadmap_office_contract():
     assert "state.pendingAttachments" in js
     assert "mission_id" in js
     assert '$("attach-file").addEventListener' in js
+
+
+
+def test_dashboard_javascript_syntax_when_node_is_available():
+    node = shutil.which("node")
+    if node is None:
+        return
+    result = subprocess.run(
+        [node, "--check", str(UI_DIR / "app.js")],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
