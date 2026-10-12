@@ -277,11 +277,30 @@ class TaskEngine:
                 research_trust_state=research_trust_state,
             )
             return self._learn_from_result(result)
+        capability_result = None if isinstance(result, TaskResult) else result
+        if capability_result is not None:
+            execution = getattr(capability_result, "execution", capability_result)
+            reported_status = getattr(execution, "status", None)
+            if reported_status is not None:
+                status_value = getattr(reported_status, "value", reported_status)
+                if str(status_value).strip().lower() != TaskStatus.SUCCEEDED.value:
+                    error = getattr(execution, "error", None) or (
+                        f"capability execution reported non-success status: {status_value}"
+                    )
+                    failed_result = DelegatedTaskResult(
+                        task,
+                        TaskStatus.FAILED,
+                        capability_result=capability_result,
+                        error=str(error),
+                        trusted_research_artifact_ids=trusted_artifacts,
+                        research_trust_state=research_trust_state,
+                    )
+                    return self._learn_from_result(failed_result)
         result = DelegatedTaskResult(
             task,
             TaskStatus.SUCCEEDED,
             model_result=result if isinstance(result, TaskResult) else None,
-            capability_result=None if isinstance(result, TaskResult) else result,
+            capability_result=capability_result,
             trusted_research_artifact_ids=trusted_artifacts,
             research_trust_state=research_trust_state,
         )
