@@ -19,7 +19,7 @@ def test_live_openrouter_free_router_inference():
         raise AssertionError("LIVE OpenRouter gate requires OPENROUTER_API_KEY")
 
     engine = build_orchestration_engine("config/inference-policy.json")
-    response = engine.router.generate(
+    response = engine._router.generate(
         InferenceRequest(
             messages=[{
                 "role": "user",
