@@ -100,9 +100,12 @@ def test_launcher_loads_persistent_environment_before_starting_runtime() -> None
     assert script.index("aurora_load_local_env") < script.index('nohup env')
 
 
-def test_restart_script_checks_pid_command_before_stopping() -> None:
+def test_restart_script_cleans_orphaned_aurora_daemons_before_starting() -> None:
     script = (ROOT / "scripts" / "restart-local.sh").read_text(encoding="utf-8")
-    assert '"/proc/$pid/cmdline"' in script
-    assert '[[ "$actual" != "$EXPECTED"* ]]' in script
+    assert "find_module_pids()" in script
+    assert 'args[1:3] != ["-m", module]' in script
+    assert 'stop_module "aurora.orchestration.daemon" "--dashboard"' in script
+    assert 'stop_module "aurora.autonomy.egress_proxy_daemon" ""' in script
     assert 'kill -TERM "$pid"' in script
+    assert 'rm -f -- "$RUNTIME/aurora.pid" "$RUNTIME/egress-proxy.pid"' in script
     assert 'exec bash "$ROOT/scripts/launch-local.sh"' in script
