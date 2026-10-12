@@ -1,6 +1,13 @@
 name: Live OpenRouter Free Inference
 
 on:
+  pull_request:
+    paths:
+      - ".github/workflows/live-free-api-provider.yml"
+      - "aurora/inference/providers/**"
+      - "aurora/orchestration/factory.py"
+      - "config/free-model-policy.json"
+      - "tests/e2e/test_live_openrouter_inference.py"
   workflow_dispatch:
 
 permissions:
