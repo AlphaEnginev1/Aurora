@@ -526,7 +526,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
-@media (max-width: 680px) {
+@media (max-width: 760px) {
   .topbar {
     gap: 12px;
     padding: 12px 14px;
