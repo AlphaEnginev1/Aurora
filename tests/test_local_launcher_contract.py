@@ -16,6 +16,8 @@ def test_local_launcher_starts_proxy_and_dashboard():
         "OPENROUTER_API_KEY",
         "AURORA_DIRECTOR_PROVIDER",
         "OPENROUTER_MODEL_ID",
+        "scripts/local-env.sh",
+        "aurora_load_local_env",
         ".aurora-runtime",
         "aurora.pid",
         "process_matches",
