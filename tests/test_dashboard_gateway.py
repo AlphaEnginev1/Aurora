@@ -3,6 +3,7 @@ from pathlib import Path
 
 from aurora.dashboard.gateway import DashboardGateway, DashboardGatewayError
 from aurora.inference.model_performance import ModelPerformanceStore
+from aurora.inference.discovery import DiscoveredModelCandidate, ModelCandidateStore
 from aurora.inference.models import ModelSpec
 from aurora.inference.providers.registry import ProviderRegistry
 from aurora.inference.registry import ModelRegistry
@@ -244,3 +245,45 @@ def test_dashboard_model_activity_is_unknown_without_router_and_live_with_router
     assert activity["active_count"] == 1
     assert activity["active_executions"][0]["model_id"] == "model/research"
     assert "prompt" not in activity["active_executions"][0]
+
+
+
+def test_dashboard_snapshot_includes_unregistered_discovery_candidates_without_metadata_leak(tmp_path: Path):
+    gateway = _gateway(tmp_path)
+    candidate_store = ModelCandidateStore(tmp_path / "model-candidates.db")
+    candidate_store.upsert(
+        DiscoveredModelCandidate(
+            candidate_id="candidate-llama",
+            provider_id="nvidia_api",
+            model=ModelSpec(
+                "nvidia/test-llama",
+                "nvidia_api",
+                "https://example.invalid/v1",
+                capabilities=("reasoning",),
+                specialties=("research",),
+                context_window=131072,
+                pricing_tier="free",
+            ),
+            metadata={"private_note": "must not reach the dashboard"},
+            discovered_at="2026-10-12T10:00:00+00:00",
+            state="discovered",
+        )
+    )
+    gateway.model_candidate_store = candidate_store
+    class EmptyRouter:
+        def active_executions(self):
+            return ()
+
+    gateway.model_router = EmptyRouter()
+
+    snapshot = gateway.snapshot()
+    candidates = snapshot["model_candidates"]
+    assert candidates["state"] == "authoritative"
+    assert candidates["candidate_count"] == 1
+    assert candidates["candidates"][0]["model_id"] == "nvidia/test-llama"
+    assert candidates["candidates"][0]["state"] == "discovered"
+    assert "metadata" not in candidates["candidates"][0]
+    activity = snapshot["model_activity"]
+    assert activity["state"] == "authoritative"
+    assert "eligible_model_ids" in activity
+    assert activity["eligibility_state"] == "unknown"

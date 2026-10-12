@@ -279,6 +279,7 @@ def test_router_exposes_only_live_inference_executions_and_clears_them():
         [ModelSpec("model/live", "fake", "https://example.invalid", capabilities=("reasoning",))],
         provider_registry=registry,
     )
+    observer_router = ModelRouter([])
 
     def execute():
         try:
@@ -296,7 +297,7 @@ def test_router_exposes_only_live_inference_executions_and_clears_them():
     worker.start()
     try:
         assert entered.wait(timeout=2), "provider call did not start"
-        active = router.active_executions()
+        active = observer_router.active_executions()
         assert len(active) == 1
         assert active[0]["model_id"] == "model/live"
         assert active[0]["provider"] == "fake"

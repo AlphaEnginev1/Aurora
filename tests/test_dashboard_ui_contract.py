@@ -1,4 +1,6 @@
 from pathlib import Path
+import shutil
+import subprocess
 
 UI_DIR = Path(__file__).parents[1] / "aurora" / "dashboard" / "ui"
 
@@ -102,12 +104,16 @@ def test_home_chat_attachments_and_live_roadmap_office_contract():
     assert 'id="roadmap-room-engineering"' in html
     assert 'id="roadmap-director-models"' in html
     assert 'id="roadmap-model-count"' in html
+    assert 'id="roadmap-candidate-count"' in html
+    assert ".floorplan-model-station[data-model-state=\"candidate\"]" in css
     assert ".floorplan-model-station[data-model-state=\"working\"]" in css
     assert ".floorplan-central-corridor" in css
     assert "roadmapSelectedModelId" in js
     assert "roadmapModelCatalog" in js
     assert "model_activity" in js
     assert "active_executions" in js
+    assert "model_candidates" in js
+    assert 'state.activeView === "roadmap"' in js
     assert "loadRoadmapDetails" in js
     assert 'state.apiBase + "/agents/"' in js
     assert "current_tasks" in js
@@ -119,3 +125,17 @@ def test_home_chat_attachments_and_live_roadmap_office_contract():
     assert "state.pendingAttachments" in js
     assert "mission_id" in js
     assert '$("attach-file").addEventListener' in js
+
+
+
+def test_dashboard_javascript_syntax_when_node_is_available():
+    node = shutil.which("node")
+    if node is None:
+        return
+    result = subprocess.run(
+        [node, "--check", str(UI_DIR / "app.js")],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr

@@ -60,6 +60,8 @@
 
   function setView(view) {
     state.activeView = view;
+    if (state.refreshTimer) window.clearTimeout(state.refreshTimer);
+    state.refreshTimer = null;
     document.querySelectorAll("[data-view-panel]").forEach(function (panel) {
       panel.classList.toggle("active", panel.getAttribute("data-view-panel") === view);
     });
@@ -78,6 +80,8 @@
         button.classList.toggle("active", button.getAttribute("data-nav-target") === view);
       }
     });
+    scheduleRefresh();
+    if (view === "roadmap") loadSnapshot({ quiet: true });
   }
 
   function setupNavigation() {
@@ -532,6 +536,29 @@
     }
 
     safeArray(data && data.models).forEach(function (model) { add(model, true); });
+    const candidateState = safeObject(data && data.model_candidates);
+    safeArray(candidateState.candidates).forEach(function (candidate) {
+      const id = roadmapValueId(candidate.model_id);
+      if (!id || catalog.has(id)) return;
+      add({
+        model_id: id,
+        provider: candidate.provider_id || "not reported",
+        endpoint: candidate.endpoint,
+        enabled: candidate.enabled,
+        healthy: candidate.healthy,
+        available: candidate.available,
+        capabilities: candidate.capabilities,
+        specialties: candidate.specialties,
+        context_window: candidate.context_window,
+        pricing_tier: candidate.pricing_tier,
+        quality_score: candidate.quality_score,
+        latency_score: candidate.latency_score,
+        cost_score: candidate.cost_score,
+        candidate_state: candidate.state,
+        candidate_id: candidate.candidate_id,
+        discovered_at: candidate.discovered_at
+      }, false);
+    });
     const org = safeObject(data && data.organization);
     safeArray(org.departments).forEach(function (department) {
       safeArray(department.model_preferences).forEach(function (model) { add(model, false); });
@@ -643,6 +670,15 @@
       return { key: "working", label: "INFERENCE RUNNING", executions: executions, busyAgents: [] };
     }
 
+    if (model.registered === false && model.candidate_state) {
+      if (model.candidate_state === "rejected") {
+        return { key: "unavailable", label: "REJECTED · GOVERNANCE", executions: [], busyAgents: [] };
+      }
+      const candidateLabel = model.candidate_state === "synced"
+        ? "SYNCED FLAG · NOT IN REGISTRY"
+        : "STAGED · NOT ROUTABLE";
+      return { key: "candidate", label: candidateLabel, executions: [], busyAgents: [] };
+    }
     if (model.registered === false || model.configured_only) {
       return { key: "unknown", label: "NOT IN CATALOG", executions: [], busyAgents: [] };
     }
@@ -651,6 +687,10 @@
     }
     if (model.available === false || model.healthy === false) {
       return { key: "unavailable", label: "UNAVAILABLE", executions: [], busyAgents: [] };
+    }
+    const eligibleModelIds = safeArray(activity.eligible_model_ids);
+    if (activity.eligibility_state === "authoritative" && !eligibleModelIds.includes(modelId)) {
+      return { key: "unavailable", label: "NOT ROUTABLE NOW", executions: [], busyAgents: [] };
     }
 
     const roles = context.agents.filter(function (agent) {
@@ -800,7 +840,7 @@
     });
 
     if (context.unassignedModelIds.length) {
-      extras.push('<section class="floorplan-room floorplan-unassigned-room"><header class="floorplan-room-header"><div><span>RESERVE POOL</span><h3>Unassigned / reserve models</h3><p>Registered models not referenced by a department or Director policy.</p></div><strong class="floorplan-room-count">' +
+      extras.push('<section class="floorplan-room floorplan-unassigned-room"><header class="floorplan-room-header"><div><span>RESERVE / DISCOVERY POOL</span><h3>Unassigned, reserve & staged models</h3><p>Registered reserve models and discovery candidates without a department preference. Candidates are not routable until promoted.</p></div><strong class="floorplan-room-count">' +
         context.unassignedModelIds.length + ' models</strong></header><div class="floorplan-model-grid">' +
         context.unassignedModelIds.map(function (id) { return roadmapModelStation(id, null, context); }).join("") +
         '</div></section>');
@@ -816,6 +856,11 @@
     const activeExecutions = safeArray(activity.active_executions);
     $("roadmap-department-count").textContent = String(context.groups.length);
     $("roadmap-model-count").textContent = String(registeredCount);
+    const candidateRows = safeArray(safeObject(data.model_candidates).candidates);
+    const registeredIds = new Set(safeArray(data.models).map(roadmapValueId));
+    $("roadmap-candidate-count").textContent = safeObject(data.model_candidates).state === "authoritative"
+      ? String(candidateRows.filter(function (candidate) { return !registeredIds.has(roadmapValueId(candidate.model_id)); }).length)
+      : "—";
     $("roadmap-active-count").textContent = activity.state === "authoritative" ? String(activeExecutions.length) : "—";
     $("roadmap-delivery-count").textContent = String(state.roadmapDeliveryCount);
     $("roadmap-mailbox-total").textContent = String(state.roadmapDeliveryCount);
@@ -906,10 +951,16 @@
         }).join("")
       : '<p>No model-performance rows have been recorded for this model.</p>';
     const provider = String(model.provider || "not recorded");
-    const modelReadiness = model.registered === false
-      ? "Configured reference · not in registry"
-      : (model.enabled === false ? "Disabled" :
-        (model.available === false || model.healthy === false ? "Unavailable / unhealthy" : "Enabled in model registry"));
+    const eligibleModelIds = safeArray(activity.eligible_model_ids);
+    const routeEligibility = activity.eligibility_state === "authoritative"
+      ? (eligibleModelIds.includes(modelId) ? "Eligible now" : "Not eligible now")
+      : "Unknown";
+    const modelReadiness = model.candidate_state
+      ? ("Discovery candidate · " + model.candidate_state + " · not in active model registry")
+      : (model.registered === false
+        ? "Configured reference · not in registry"
+        : (model.enabled === false ? "Disabled" :
+          (model.available === false || model.healthy === false ? "Unavailable / unhealthy" : "Enabled in model registry")));
     const usageDetail = activityRows.length
       ? activityRows.join("")
       : (currentTaskRows.length
@@ -933,7 +984,8 @@
       roadmapCell("MODEL ID", modelId, model.registered === false ? '<p>Not present in the canonical model registry; shown because Aurora references it in configuration.</p>' : '') +
       roadmapCell("PROVIDER", provider, model.endpoint ? '<p>Endpoint: ' + esc(model.endpoint) + '</p>' : '<p>Endpoint not exposed by the model record.</p>') +
       roadmapCell("REGISTRY / HEALTH", modelReadiness, '<p>Enabled: ' + esc(String(model.enabled)) + ' · Healthy: ' + esc(String(model.healthy)) +
-        ' · Available: ' + esc(String(model.available)) + '</p>') +
+        ' · Available: ' + esc(String(model.available)) + ' · Router: ' + esc(routeEligibility) + '</p>' +
+        (model.candidate_state ? '<p>Candidate state: ' + esc(model.candidate_state) + ' · discovered ' + esc(dateText(model.discovered_at)) + '</p>' : '')) +
       roadmapCell("WHERE ASSIGNED", assignedDepartments.map(function (group) {
         return group.department.name || group.department.department_id || "Department";
       }).join(" · ") || (context.directorModelIds.includes(modelId) ? "Director policy" : "Not assigned to a department"),
@@ -1728,7 +1780,10 @@ async function testProvider(provider) {
   function scheduleRefresh() {
     if (state.refreshTimer) window.clearTimeout(state.refreshTimer);
     if (document.hidden) return;
-    state.refreshTimer = window.setTimeout(function () { loadSnapshot({ quiet: true }); }, state.retryDelay);
+    const refreshInterval = state.activeView === "roadmap"
+      ? 2000
+      : state.retryDelay;
+    state.refreshTimer = window.setTimeout(function () { loadSnapshot({ quiet: true }); }, refreshInterval);
   }
 
   document.addEventListener("visibilitychange", function () {

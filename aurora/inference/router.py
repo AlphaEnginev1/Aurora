@@ -21,6 +21,10 @@ from .providers.registry import ProviderRegistry, ProviderRegistryError, default
 
 logger = logging.getLogger(__name__)
 
+# Shared process-wide journal also observes ephemeral reserve-pool ModelRouter instances.
+_ACTIVE_EXECUTION_LOCK = RLock()
+_ACTIVE_EXECUTIONS: dict[str, dict[str, object]] = {}
+
 
 class ModelRoutingError(RuntimeError):
     """Raised when no configured model can satisfy an inference request."""
@@ -59,15 +63,13 @@ class ModelRouter:
             self.model_registry = ModelRegistry.from_specs(self.models)
         else:
             self.models = list(self.model_registry.models)
-        self._active_execution_lock = RLock()
-        self._active_executions: dict[str, dict[str, object]] = {}
 
     def active_executions(self) -> tuple[dict[str, object], ...]:
-        """Return a secret-free snapshot of model calls executing right now."""
-        with self._active_execution_lock:
+        """Return a secret-free snapshot of model calls executing in this process."""
+        with _ACTIVE_EXECUTION_LOCK:
             records = [
                 dict(record)
-                for record in self._active_executions.values()
+                for record in _ACTIVE_EXECUTIONS.values()
             ]
         return tuple(sorted(records, key=lambda record: str(record.get("started_at", ""))))
 
@@ -92,12 +94,12 @@ class ModelRouter:
             "started_at": datetime.now(timezone.utc).isoformat(),
             "status": "running",
         }
-        with self._active_execution_lock:
-            self._active_executions[execution_id] = record
+        with _ACTIVE_EXECUTION_LOCK:
+            _ACTIVE_EXECUTIONS[execution_id] = record
 
     def _end_active_execution(self, execution_id: str) -> None:
-        with self._active_execution_lock:
-            self._active_executions.pop(execution_id, None)
+        with _ACTIVE_EXECUTION_LOCK:
+            _ACTIVE_EXECUTIONS.pop(execution_id, None)
 
     def _registered_models(self) -> list[ModelSpec]:
         if self.model_registry is not None:
