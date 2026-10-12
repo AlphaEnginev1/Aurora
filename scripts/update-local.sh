@@ -75,33 +75,37 @@ fi
 
 write_status "restarting" "$updated" "Restarting Aurora"
 
-if [[ -f "$AURORA_PID" ]]; then
+# Reuse the verified recovery path: stop orphaned daemons and the proxy,
+# then launch-local.sh validates that the new dashboard process stays alive.
+dashboard_process_matches() {
+  [[ -s "$AURORA_PID" ]] || return 1
+  local pid
+  local cmdline
   pid="$(cat "$AURORA_PID" 2>/dev/null || true)"
-  if [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
-    kill "$pid" 2>/dev/null || true
-    for _ in $(seq 1 20); do
-      if ! kill -0 "$pid" 2>/dev/null; then
-        break
-      fi
-      sleep 0.25
-    done
-  fi
-  if kill -0 "$pid" 2>/dev/null; then
-    write_status "blocked" "$updated" "Aurora process did not stop cleanly"
-    exit 2
-  fi
+  [[ "$pid" =~ ^[0-9]+$ ]] || return 1
+  kill -0 "$pid" 2>/dev/null || return 1
+  [[ -r "/proc/$pid/cmdline" ]] || return 1
+  cmdline="$(tr '\0' ' ' < "/proc/$pid/cmdline")"
+  [[ "$cmdline" == "$VENV/bin/python -m aurora.orchestration.daemon --dashboard" ]]
+}
+
+if ! bash "$ROOT/scripts/restart-local.sh"; then
+  write_status "failed" "$updated" "Aurora restart failed; inspect .aurora-runtime/update.log"
+  exit 1
 fi
-rm -f "$AURORA_PID"
 
-nohup bash "$ROOT/scripts/launch-local.sh" >>"$UPDATE_LOG" 2>&1 < /dev/null &
-
-for _ in $(seq 1 40); do
-  if curl -fsS --max-time 1 http://127.0.0.1:8787/ >/dev/null 2>&1; then
-    write_status "ready" "$updated" "Aurora updated and dashboard is ready"
-    exit 0
+# Do not accept the old server's HTTP response as proof of a successful
+# restart. restart-local.sh must finish successfully, then verify its PID.
+for _ in $(seq 1 10); do
+  if dashboard_process_matches && curl -fsS --max-time 2 http://127.0.0.1:8787/ >/dev/null 2>&1; then
+    sleep 1
+    if dashboard_process_matches && curl -fsS --max-time 2 http://127.0.0.1:8787/ >/dev/null 2>&1; then
+      write_status "ready" "$updated" "Aurora updated and dashboard is ready"
+      exit 0
+    fi
   fi
-  sleep 0.5
+  sleep 1
 done
 
-write_status "failed" "$updated" "Aurora restarted but dashboard did not become ready"
+write_status "failed" "$updated" "Aurora restart helper finished but dashboard did not remain ready"
 exit 1
