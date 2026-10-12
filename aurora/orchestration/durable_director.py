@@ -101,6 +101,8 @@ class DurableDirectorService:
                 payload={
                     "objective": plan.objective,
                     "model": plan.model,
+                    "provider": plan.provider,
+                    "planning_execution_id": plan.execution_id,
                     "task_ids": [task.task_id for task in validated],
                 },
             )
