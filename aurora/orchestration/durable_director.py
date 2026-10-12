@@ -94,6 +94,8 @@ class DurableDirectorService:
                 objective=plan.objective,
                 tasks=validated,
                 model=plan.model,
+                provider=plan.provider,
+                execution_id=plan.execution_id,
             )
         return MissionSubmission(mission_id=mission, plan=plan)
 

@@ -37,6 +37,8 @@ class DirectorPlan:
     objective: str
     tasks: tuple[DelegatedTask, ...]
     model: str
+    provider: str | None = None
+    execution_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -167,7 +169,7 @@ Rules:
         )
         tasks = self._normalize_organization_roles(tasks)
         self._validate_organization(tasks)
-        return DirectorPlan(objective=objective, tasks=tasks, model=response.model)
+        return DirectorPlan(objective=objective, tasks=tasks, model=response.model, provider=response.provider, execution_id=response.execution_id)
 
     _REVIEW_SYSTEM = """You are Aurora's Director reviewer.
 Review the current mission state and decide whether the objective is complete.

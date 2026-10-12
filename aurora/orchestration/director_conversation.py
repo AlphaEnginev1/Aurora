@@ -493,11 +493,17 @@ Keep responses useful and concise unless the human asks for depth."""
 
     @staticmethod
     def _mission_evidence(mission: Any) -> dict[str, Any]:
+        # Durable results wrap the submitted plan and persistent ID inside
+        # .submission. Retain compatibility with direct MissionResult callers.
+        submission = getattr(mission, "submission", None)
+        plan = getattr(submission, "plan", None) or getattr(mission, "plan", None)
+        mission_id = getattr(mission, "mission_id", None) or getattr(submission, "mission_id", None)
+        objective = getattr(mission, "objective", None) or getattr(plan, "objective", None) or ""
         tasks: list[dict[str, Any]] = []
         for item in tuple(getattr(mission, "tasks", ()) or ()):
             task = getattr(item, "task", None)
-            status = getattr(item, "status", "unknown")
-            value = getattr(status, "value", status)
+            task_status = getattr(item, "status", "unknown")
+            value = getattr(task_status, "value", task_status)
             tasks.append({
                 "task_id": getattr(task, "task_id", None),
                 "role": getattr(task, "role", None),
@@ -505,10 +511,27 @@ Keep responses useful and concise unless the human asks for depth."""
                 "error": getattr(item, "error", None),
                 "capability": getattr(task, "capability", None),
             })
-        success = bool(tasks) and all(item["status"] == "succeeded" for item in tasks)
+
+        failed = any(item["status"] == "failed" for item in tasks)
+        blocked = any(item["status"] == "blocked" for item in tasks)
+        mission_status = getattr(mission, "status", None)
+        mission_status = getattr(mission_status, "value", mission_status)
+        if failed:
+            status = "failed"
+        elif blocked:
+            status = "blocked"
+        elif tasks and all(item["status"] == "succeeded" for item in tasks):
+            status = str(mission_status) if mission_status in {"succeeded", "completed"} else "succeeded"
+        else:
+            status = str(mission_status) if mission_status else ("no_tasks" if not tasks else "failed")
+
         return {
-            "status": "succeeded" if success else ("failed" if tasks else "no_tasks"),
-            "objective": getattr(mission, "objective", ""),
+            "mission_id": mission_id,
+            "status": status,
+            "objective": objective,
+            "model": getattr(plan, "model", None),
+            "provider": getattr(plan, "provider", None),
+            "planning_execution_id": getattr(plan, "execution_id", None),
             "task_count": len(tasks),
             "tasks": tasks,
         }
