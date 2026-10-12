@@ -38,7 +38,7 @@ def test_dashboard_ui_assets_are_present():
     assert ".portrait-stage" in css
     assert ".right-rail" in css
     home = html[html.index('<section id="view-home"'):html.index('<section id="view-projects"')]
-    assert home.index('id="director-portrait"') < home.index('class="hero-copy"') < home.index('class="chat-surface"')
+    assert home.index('id="director-portrait"') < home.index('class="hero-copy"') < home.index('class="panel chat-surface chat-workspace"')
     assert "Aurora Director-centered refresh" in css
     assert "@media (max-width: 760px)" in css
     assert ".history-drawer" in css
