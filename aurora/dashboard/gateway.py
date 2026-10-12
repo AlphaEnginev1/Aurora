@@ -45,6 +45,7 @@ class DashboardGateway:
         skill_registry: SkillRegistry,
         model_registry: ModelRegistry,
         provider_registry: ProviderRegistry,
+        model_router: Any | None = None,
         task_store: DurableTaskStore,
         mission_memory: MissionMemory,
         model_performance: ModelPerformanceStore | None = None,
@@ -62,6 +63,7 @@ class DashboardGateway:
         self.skill_registry = skill_registry
         self.model_registry = model_registry
         self.provider_registry = provider_registry
+        self.model_router = model_router
         self.task_store = task_store
         self.mission_memory = mission_memory
         self.model_performance = model_performance
@@ -118,6 +120,7 @@ class DashboardGateway:
             },
             "providers": list(self.provider_registry.catalog),
             "models": list(self.model_registry.catalog),
+            "model_activity": self.model_activity(),
             "skills": [self._skill_summary(skill) for skill in self.skill_registry.skills.values()],
             "runtime": {
                 "mission_count": len(missions),
@@ -136,6 +139,47 @@ class DashboardGateway:
             "governance": self.governance(limit=50),
         }
         return snapshot
+
+    def model_activity(self) -> dict[str, Any]:
+        """Expose real in-flight inference calls from the canonical model router."""
+        now = _now()
+        router = self.model_router
+        active_reader = getattr(router, "active_executions", None)
+        if not callable(active_reader):
+            return {
+                "state": "unknown",
+                "reason": "the canonical ModelRouter activity tracker is not connected",
+                "captured_at": now,
+                "active_executions": [],
+            }
+        try:
+            active = active_reader()
+            safe_active = [
+                {
+                    key: value
+                    for key, value in dict(item).items()
+                    if key in {
+                        "execution_id", "request_id", "model_id", "provider", "role",
+                        "task_id", "mission_id", "project_id", "task_type", "started_at",
+                        "status",
+                    }
+                }
+                for item in active
+                if isinstance(item, Mapping)
+            ]
+        except Exception as exc:
+            return {
+                "state": "unknown",
+                "reason": f"model activity unavailable ({type(exc).__name__})",
+                "captured_at": now,
+                "active_executions": [],
+            }
+        return {
+            "state": "authoritative",
+            "captured_at": now,
+            "active_executions": safe_active,
+            "active_count": len(safe_active),
+        }
 
     def project(self, project_id: str, *, limit: int = 50) -> dict[str, Any]:
         self._validate_limit(limit, "limit")
