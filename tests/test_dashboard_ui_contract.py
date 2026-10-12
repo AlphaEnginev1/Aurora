@@ -57,3 +57,12 @@ def test_dashboard_ui_uses_gateway_endpoints_only():
     assert "AURORA_DASHBOARD_API_BASE" in js
     assert "sqlite" not in js.lower()
     assert "task_events" not in js
+
+
+def test_dashboard_bootstrap_initializers_are_defined():
+    js = (UI_DIR / "app.js").read_text(encoding="utf-8")
+
+    assert "function setupGitHubConnection()" in js
+    assert "async function loadGitHubStatus()" in js
+    assert "setupConversation();" in js
+    assert "loadSnapshot();" in js
