@@ -40,9 +40,11 @@ class OpenAIAPIProvider:
         spec: ModelSpec,
         api_key: str | None = None,
         timeout: float = 60.0,
+        provider_id: str = "openai",
     ) -> None:
         self.spec = spec
-        self.api_key = api_key or os.getenv("OPENAI_API_KEY")
+        self.provider_id = str(provider_id).strip().lower() or "openai"
+        self.api_key = api_key or (os.getenv("OPENROUTER_API_KEY") if self.provider_id == "openrouter" else os.getenv("OPENAI_API_KEY"))
         self.timeout = timeout
 
     def health(self) -> bool:

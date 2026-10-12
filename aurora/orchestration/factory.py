@@ -75,13 +75,17 @@ from .task_worker import WorkerPolicy
 
 def build_orchestration_engine(policy_path: str | Path) -> OrchestrationEngine:
     nvidia_key = os.getenv("NVIDIA_API_KEY")
+    openrouter_key = os.getenv("OPENROUTER_API_KEY", "").strip()
     provider_registry = default_provider_registry(
         nvidia_api_key=nvidia_key,
+        openrouter_api_key=openrouter_key or None,
+        include_openrouter=bool(openrouter_key),
     )
     model_registry = ModelRegistry.from_file(
         policy_path,
         provider_registry=provider_registry,
     )
+    _register_openrouter_free_model(model_registry, openrouter_key)
     policy_data = json.loads(Path(policy_path).read_text(encoding="utf-8"))
     cost_policy = os.getenv("AURORA_INFERENCE_COST_POLICY", str(policy_data.get("cost_policy", "free_only"))).strip().lower()
     if cost_policy != "free_only":
@@ -105,6 +109,25 @@ def build_orchestration_engine(policy_path: str | Path) -> OrchestrationEngine:
             cost_policy=cost_policy,
         )
     )
+
+def _register_openrouter_free_model(model_registry: ModelRegistry, api_key: str | None) -> None:
+    """Register OpenRouter's free router only when its local credential is present."""
+    if not str(api_key or "").strip() or "openrouter/free" in model_registry.ids:
+        return
+    model_registry.register(ModelSpec(
+        id="openrouter/free",
+        provider="openrouter",
+        endpoint="https://openrouter.ai/api/v1",
+        capabilities=("chat", "reasoning"),
+        context_window=200000,
+        enabled=True,
+        specialties=("reasoning", "planning", "coding", "general"),
+        quality_score=0.90,
+        latency_score=0.60,
+        cost_score=1.0,
+        pricing_tier="free",
+    ))
+
 
 def _apply_local_model_settings(router: ModelRouter, settings_store: OperatorSettingsStore) -> None:
     settings = settings_store.load()
@@ -175,6 +198,19 @@ def _build_director_provider(
     if director_provider_id in {"router", "inference_fabric", ""}:
         return None
 
+    if director_provider_id == "openrouter":
+        model = os.getenv("OPENROUTER_MODEL_ID", "openrouter/free").strip() or "openrouter/free"
+        key = os.getenv("OPENROUTER_API_KEY", "").strip()
+        if not key or router is None:
+            return None
+        if router.model_registry is None or model not in router.model_registry.ids:
+            raise RuntimeError("OpenRouter model is not registered in the free-only model catalog: " + model)
+        return BoundInferenceDirectorProvider(
+            router,
+            provider_id="openrouter",
+            model=model,
+        )
+
     if director_provider_id == "nvidia_api":
         model = str(configured.get("model", "")).strip()
         if not model:
@@ -204,8 +240,8 @@ def _build_director_provider(
             model=model,
         )
 
-    # Legacy/external provider values are deliberately ignored. Aurora always
-    # falls back to its internal router, whose only external provider is NVIDIA.
+    # Unsupported provider values are deliberately ignored; the canonical
+    # inference fabric remains the default unless an explicit provider is selected.
     return None
 
 def _build_director_provider_failover(
@@ -466,14 +502,18 @@ def build_director_service(*, inference_policy_path: str | Path, autonomy_policy
     settings_store = OperatorSettingsStore(settings_path(workspace_root))
     gateway = InternetGateway(InternetPolicy.from_file(network_policy_path))
     nvidia_key = settings_store.credential("nvidia_api") or os.getenv("NVIDIA_API_KEY")
+    openrouter_key = os.getenv("OPENROUTER_API_KEY", "").strip()
     provider_registry = default_provider_registry(
         nvidia_api_key=nvidia_key,
         network_gateway=gateway,
+        openrouter_api_key=openrouter_key or None,
+        include_openrouter=bool(openrouter_key),
     )
     model_registry = ModelRegistry.from_file(
         inference_policy_path,
         provider_registry=provider_registry,
     )
+    _register_openrouter_free_model(model_registry, openrouter_key)
     policy_data = json.loads(Path(inference_policy_path).read_text(encoding="utf-8"))
     cost_policy = os.getenv("AURORA_INFERENCE_COST_POLICY", str(policy_data.get("cost_policy", "free_only"))).strip().lower()
     if cost_policy != "free_only":

@@ -1,8 +1,8 @@
 {
   "version": 2,
   "mode": "free_only",
-  "reviewed_at": "2026-10-06",
-  "description": "NVIDIA-only free policy. NVIDIA's live Free Endpoint catalog is the authoritative eligibility source; checked-in NVIDIA models are seed metadata only and never a ceiling.",
+  "reviewed_at": "2026-10-12",
+  "description": "Free-only inference policy. NVIDIA's live Free Endpoint catalog remains authoritative; OpenRouter is enabled only for the official openrouter/free router and only when OPENROUTER_API_KEY is configured.",
   "providers": {
     "nvidia_api": {
       "models": {
@@ -90,6 +90,22 @@
         }
       },
       "dynamic_catalog": "free_endpoint"
+    },
+    "openrouter": {
+      "models": {
+        "openrouter/free": {
+          "tier": "free",
+          "rank": 1,
+          "specialties": [
+            "reasoning",
+            "planning",
+            "coding",
+            "general"
+          ],
+          "context_window": 200000
+        }
+      },
+      "notes": "Official OpenRouter free-model router; upstream model selection may vary."
     }
   }
 }

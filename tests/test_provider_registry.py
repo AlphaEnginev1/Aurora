@@ -154,6 +154,31 @@ def test_default_registry_constructs_nvidia_discovery_adapter():
     assert discovery.provider_id == "nvidia_api"
 
 
+def test_default_registry_can_opt_into_openrouter_without_openai_key():
+    registry = default_provider_registry(
+        nvidia_api_key="nvidia-test",
+        openai_api_key="must-not-be-used",
+        openrouter_api_key="openrouter-test",
+        include_openrouter=True,
+    )
+    assert "openrouter" in registry.ids
+    provider = registry.create(
+        ModelSpec(
+            "openrouter/free",
+            "openrouter",
+            "https://openrouter.ai/api/v1",
+            pricing_tier="free",
+        )
+    )
+    assert provider.provider_id == "openrouter"
+    assert provider.api_key == "openrouter-test"
+
+
+def test_openrouter_is_not_registered_without_explicit_opt_in():
+    registry = default_provider_registry(openrouter_api_key="openrouter-test")
+    assert "openrouter" not in registry.ids
+
+
 def test_default_registry_can_opt_into_external_providers():
     registry = default_provider_registry(
         nvidia_api_key="test-key",

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import urllib.error
 import urllib.request
 from typing import Any, Mapping
@@ -35,8 +36,13 @@ class ProviderSettingsService:
             settings = self.store.update_from_form(payload)
             router = self.runtime.director.planner.router
             nvidia_key = self.store.credential("nvidia_api")
+            openrouter_key = os.getenv("OPENROUTER_API_KEY", "").strip()
             router.nvidia_api_key = nvidia_key or None
-            router.provider_registry = default_provider_registry(nvidia_api_key=nvidia_key or None)
+            router.provider_registry = default_provider_registry(
+                nvidia_api_key=nvidia_key or None,
+                openrouter_api_key=openrouter_key or None,
+                include_openrouter=bool(openrouter_key),
+            )
 
             selected_model = str(settings["director"].get("model", "")).strip()
             provider_id = str(settings["director"].get("provider", "")).strip().lower()

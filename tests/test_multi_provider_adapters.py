@@ -55,6 +55,41 @@ def test_openai_adapter_preserves_identity_usage_and_request_shape(monkeypatch):
     assert captured["headers"]["Authorization"] == "Bearer SECRET-OPENAI"
 
 
+def test_openrouter_adapter_uses_openrouter_identity_and_endpoint(monkeypatch):
+    captured = {}
+
+    def fake_urlopen(request, timeout):
+        captured["url"] = request.full_url
+        captured["headers"] = dict(request.headers)
+        captured["body"] = json.loads(request.data)
+        return _Response({
+            "model": "nvidia/nemotron-3-super:free",
+            "choices": [{"message": {"content": "OpenRouter is connected."}}],
+            "usage": {"prompt_tokens": 3, "completion_tokens": 5, "total_tokens": 8},
+        })
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    provider = OpenAIAPIProvider(
+        ModelSpec("openrouter/free", "openrouter", "https://openrouter.ai/api/v1", pricing_tier="free"),
+        api_key="SECRET-OPENROUTER",
+        provider_id="openrouter",
+    )
+    response = provider.generate(
+        InferenceRequest(messages=[{"role": "user", "content": "Confirm connection."}]),
+        selected_model="openrouter/free",
+        execution_id="exec-openrouter",
+    )
+
+    assert captured["url"] == "https://openrouter.ai/api/v1/chat/completions"
+    assert captured["headers"]["Authorization"] == "Bearer SECRET-OPENROUTER"
+    assert captured["body"]["model"] == "openrouter/free"
+    assert response.provider == "openrouter"
+    assert response.content == "OpenRouter is connected."
+    assert response.execution_id == "exec-openrouter"
+    assert response.reported_model == "nvidia/nemotron-3-super:free"
+    assert response.usage.total_tokens == 8
+
+
 def test_openai_http_failure_is_typed_without_secret(monkeypatch):
     error = __import__("urllib.error", fromlist=["HTTPError"]).HTTPError(
         "https://api.openai.test/v1/chat/completions", 401, "unauthorized", {}, None
