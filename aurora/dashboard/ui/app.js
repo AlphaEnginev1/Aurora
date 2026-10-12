@@ -1157,17 +1157,36 @@ async function testProvider(provider) {
       '<p>Ask Aurora a question, describe a task, or attach documents for review.</p></div>';
   }
 
+  function chatTurnDisplay(turn) {
+    const content = String(turn.content || "");
+    const marker = "\n\nArchivos adjuntos recibidos mediante la entrada de artefactos de Aurora:";
+    const markerIndex = content.indexOf(marker);
+    if (turn.role !== "user" || markerIndex < 0) return { text: content, files: [] };
+    const block = content.slice(markerIndex + marker.length);
+    const files = block.split("\n").filter(function (line) {
+      return line.trim().startsWith("- ");
+    }).map(function (line) {
+      return line.trim().slice(2).replace(/\s+\(mission_id=[^)]+\)$/, "").trim();
+    }).filter(Boolean);
+    return { text: content.slice(0, markerIndex).trim(), files: files };
+  }
+
   function chatTurnsHtml(turns) {
     if (!turns.length) return chatWelcomeHtml();
     return turns.map(function (turn) {
       const role = turn.role === "user" ? "user" : "assistant";
       const label = role === "user" ? "Y" : "✦";
+      const display = chatTurnDisplay(turn);
+      const files = display.files.length
+        ? '<div class="chat-message-files">' + display.files.map(function (name) {
+            return '<span class="chat-message-file">▤ ' + esc(name) + '</span>';
+          }).join("") + '</div>'
+        : "";
       return '<article class="chat-message ' + role + '">' +
         '<div class="chat-message-avatar" aria-hidden="true">' + label + '</div>' +
-        '<div class="chat-message-body">' + esc(turn.content) + '</div></article>';
+        '<div class="chat-message-body">' + esc(display.text) + files + '</div></article>';
     }).join("");
   }
-
   async function loadConversationHistory() {
     const visibleBody = $("chat-messages");
     const drawerBody = $("chat-history-body");
@@ -1276,7 +1295,7 @@ async function testProvider(provider) {
     $("attach-file").disabled = true;
     if (state.avatarVoice) state.avatarVoice.setThinking();
     setChatStatus("Aurora is thinking…", false);
-    appendChatMessage("user", raw || "Please review the attached files.", attachments);
+    appendChatMessage("user", raw || "Revisa los archivos adjuntos.", attachments);
     const thinking = appendChatMessage("assistant", "Thinking…", [], "is-thinking");
 
     try {
