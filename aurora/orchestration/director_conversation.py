@@ -681,10 +681,13 @@ Keep responses useful and concise unless the human asks for depth."""
             status = "failed"
         elif blocked:
             status = "blocked"
+        elif mission_status:
+            # Report the durable terminal decision, including a final review block.
+            status = str(mission_status)
         elif tasks and all(item["status"] == "succeeded" for item in tasks):
-            status = str(mission_status) if mission_status in {"succeeded", "completed"} else "succeeded"
+            status = "succeeded"
         else:
-            status = str(mission_status) if mission_status else ("no_tasks" if not tasks else "failed")
+            status = "no_tasks" if not tasks else "failed"
 
         events = tuple(getattr(mission, "events", ()) or ())
         durable_events = [
