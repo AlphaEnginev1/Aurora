@@ -109,3 +109,17 @@ def test_restart_script_cleans_orphaned_aurora_daemons_before_starting() -> None
     assert 'kill -TERM "$pid"' in script
     assert 'rm -f -- "$RUNTIME/aurora.pid" "$RUNTIME/egress-proxy.pid"' in script
     assert 'exec bash "$ROOT/scripts/launch-local.sh"' in script
+
+
+def test_update_script_uses_verified_restart_helper() -> None:
+    script = (ROOT / "scripts" / "update-local.sh").read_text(encoding="utf-8")
+
+    restart_call = 'if ! bash "$ROOT/scripts/restart-local.sh"; then'
+    ready_status = 'write_status "ready" "$updated" "Aurora updated and dashboard is ready"'
+
+    assert restart_call in script
+    assert 'nohup bash "$ROOT/scripts/launch-local.sh"' not in script
+    assert "dashboard_process_matches()" in script
+    assert "Aurora restart failed; inspect .aurora-runtime/update.log" in script
+    assert script.index(restart_call) < script.index(ready_status)
+
