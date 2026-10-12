@@ -24,6 +24,8 @@
     roadmapHasBaseline: false,
     roadmapSeenCompletionEvents: new Set(),
     roadmapSelectedRole: null,
+    roadmapSelectedModelId: null,
+    roadmapContext: null,
     roadmapDeliveryCount: 0,
     roadmapDeliveryItems: []
   };
@@ -489,58 +491,87 @@
     return { key: "idle", label: "IDLE", task: null };
   }
 
-  function roadMapModelText(agent, profile, department) {
-    const identity = safeObject(profile && profile.identity);
-    const resolvedPreferences = safeArray(profile && profile.model_preferences);
-    if (resolvedPreferences.length) {
-      const model = resolvedPreferences[0];
-      if (typeof model === "string") return model;
-      return model.model_id || model.id || "preferred model";
-    }
-    const choices = safeArray(identity.model_preferences);
-    if (choices.length) {
-      const model = choices[0];
-      if (typeof model === "string") return model;
-      return model.model_id || model.id || "preferred model";
-    }
-    const fallback = safeArray(agent.model_preferences);
-    if (fallback.length) return String(fallback[0]);
-    const departmentModels = safeArray(department && department.model_preferences);
-    return departmentModels.length ? String(departmentModels[0]) : "No model preference recorded";
+  function roadmapValueId(value) {
+    if (typeof value === "string") return value.trim();
+    if (!value || typeof value !== "object") return "";
+    return String(
+      value.model_id || value.id || value.selected_model || value.model || value.name || ""
+    ).trim();
   }
 
-  function roadMapAgentCard(agent, department) {
-    const role = String(agent.role || agent.agent_id || "unknown");
+  function roadmapAgentModelIds(agent) {
+    const role = String(agent.role || agent.agent_id || "");
     const profile = state.roadmapProfiles[role];
-    const status = roadMapStatus(profile);
-    const selected = state.roadmapSelectedRole === role;
-    const modelName = roadMapModelText(agent, profile, department);
-    const task = status.task;
-    const taskLine = task
-      ? (task.task_id || "Task") + " · " + (task.objective || task.status || "runtime task")
-      : "No current task recorded";
-    return '<button class="office-agent-card' + (selected ? ' selected' : '') + '" type="button" data-office-agent="' + esc(role) + '" data-status="' + status.key + '" aria-label="Inspect ' + esc(role) + ', ' + esc(status.label) + '">' +
-      '<div class="office-agent-head"><span class="office-agent-name">' + esc(role) + '</span><span class="office-status-wrap"><i class="office-status-led" aria-hidden="true"></i>' + esc(status.label) + '</span></div>' +
-      '<div class="office-workstation">' +
-        '<div class="office-worker" aria-hidden="true"><span class="worker-head"></span><span class="worker-hair"></span><span class="worker-body"></span><span class="worker-arm"></span><span class="worker-leg left"></span><span class="worker-leg right"></span></div>' +
-        '<div class="office-monitor" aria-hidden="true"><div class="office-monitor-screen"><span class="monitor-line"></span><span class="monitor-line"></span><span class="monitor-line"></span></div><span class="office-monitor-stand"></span></div>' +
-        '<div class="office-desk-top" aria-hidden="true"></div><div class="office-desk-leg" aria-hidden="true"></div><i class="office-desk-light" aria-hidden="true"></i><div class="office-floorline" aria-hidden="true"></div>' +
-      '</div>' +
-      '<div class="office-model"><strong>MODEL</strong> · ' + esc(modelName) + '</div>' +
-      '<div class="office-task">' + esc(taskLine) + '</div>' +
-    '</button>';
+    const values = safeArray(profile && profile.model_preferences).concat(
+      safeArray(agent.model_preferences)
+    );
+    return Array.from(new Set(values.map(roadmapValueId).filter(Boolean)));
   }
 
-  function renderRoadmap(data) {
-    if (!data) return;
+  function roadmapModelCatalog(data) {
+    const catalog = new Map();
+    function add(raw, registered) {
+      const id = roadmapValueId(raw);
+      if (!id) return;
+      const existing = catalog.get(id);
+      if (existing) {
+        if (registered) existing.registered = true;
+        if ((!existing.provider || existing.provider === "not specified") && raw && typeof raw === "object" && raw.provider) {
+          existing.provider = raw.provider;
+        }
+        if (raw && typeof raw === "object") Object.assign(existing, raw, { model_id: id, registered: existing.registered || registered });
+        return;
+      }
+      const details = raw && typeof raw === "object" ? raw : {};
+      catalog.set(id, Object.assign({
+        model_id: id,
+        provider: details.provider || (registered ? "not specified" : "not in model registry"),
+        registered: Boolean(registered),
+        configured_only: !registered
+      }, details, { model_id: id, registered: Boolean(registered) }));
+    }
+
+    safeArray(data && data.models).forEach(function (model) { add(model, true); });
+    const org = safeObject(data && data.organization);
+    safeArray(org.departments).forEach(function (department) {
+      safeArray(department.model_preferences).forEach(function (model) { add(model, false); });
+    });
+    safeArray(org.agents).forEach(function (agent) {
+      safeArray(agent.model_preferences).forEach(function (model) { add(model, false); });
+      const role = String(agent.role || agent.agent_id || "");
+      safeArray(state.roadmapProfiles[role] && state.roadmapProfiles[role].model_preferences)
+        .forEach(function (model) { add(model, false); });
+    });
+    safeArray(safeObject(data && data.director).configured_models).forEach(function (model) { add(model, false); });
+    const activity = safeObject(data && data.model_activity);
+    safeArray(activity.active_executions).forEach(function (execution) {
+      const id = roadmapValueId(execution.model_id || execution.selected_model || execution.model);
+      if (id) add({ model_id: id, provider: execution.provider || "not reported" }, false);
+    });
+    return catalog;
+  }
+
+  function roadmapDepartmentSlot(name) {
+    const key = String(name || "").toLowerCase().replace(/[_-]+/g, " ");
+    if (/research|discovery|science/.test(key)) return "research";
+    if (/engineering|software|develop|coding|computer/.test(key)) return "engineering";
+    if (/data|knowledge|memory|retrieval/.test(key)) return "data";
+    if (/quality|review|test|audit|verification/.test(key)) return "quality";
+    if (/operations|orchestrat|runtime|support|delivery/.test(key)) return "operations";
+    if (/security|governance|policy|compliance/.test(key)) return "security";
+    if (/learning|skill|evaluation|evolution/.test(key)) return "learning";
+    if (/tooling|tools|integration|capability|workbench/.test(key)) return "tooling";
+    return null;
+  }
+
+  function roadmapBuildContext(data) {
     const org = safeObject(data.organization);
     const agents = safeArray(org.agents);
     const departments = safeArray(org.departments);
-    const grid = $("roadmap-office-grid");
-    if (!grid) return;
-
+    const modelsById = roadmapModelCatalog(data);
     const groups = [];
     const assignedRoles = new Set();
+
     departments.forEach(function (department) {
       const members = agents.filter(function (agent) {
         return safeArray(department.agent_ids).includes(agent.agent_id) ||
@@ -548,8 +579,9 @@
           String(agent.department || "").toLowerCase() === String(department.department_id || "").toLowerCase();
       });
       members.forEach(function (agent) { assignedRoles.add(String(agent.role || agent.agent_id)); });
-      if (members.length || !agents.length) groups.push({ department: department, agents: members });
+      groups.push({ department: department, agents: members, modelIds: [] });
     });
+
     agents.filter(function (agent) {
       return !assignedRoles.has(String(agent.role || agent.agent_id));
     }).forEach(function (agent) {
@@ -558,121 +590,368 @@
         return String(item.department.department_id || item.department.name || "unassigned") === key;
       });
       if (!group) {
-        group = { department: { department_id: key, name: key, mission: "Department metadata not available.", model_preferences: [] }, agents: [] };
+        group = {
+          department: {
+            department_id: key, mission: "Department metadata not available.",
+            agent_ids: [], model_preferences: [], allowed_capabilities: []
+          },
+          agents: [], modelIds: []
+        };
         groups.push(group);
       }
       group.agents.push(agent);
     });
 
-    if (!agents.length) {
-      grid.innerHTML = '<div class="empty-state">No agents are currently registered in Aurora organization state.</div>';
-      $("roadmap-department-count").textContent = String(departments.length);
-      $("roadmap-active-count").textContent = "0";
-      $("roadmap-live-state").className = "roadmap-live-badge unknown";
-      $("roadmap-live-state").innerHTML = '<span class="roadmap-live-dot"></span> NO AGENTS REGISTERED';
-      return;
-    }
-    if (!state.roadmapSelectedRole) state.roadmapSelectedRole = String(agents[0].role || agents[0].agent_id);
-
-    let activeCount = 0;
-    let knownCount = 0;
+    const assignedModelIds = new Set();
     groups.forEach(function (group) {
+      const ids = safeArray(group.department.model_preferences).map(roadmapValueId);
       group.agents.forEach(function (agent) {
-        const role = String(agent.role || agent.agent_id || "unknown");
-        const status = roadMapStatus(state.roadmapProfiles[role]);
-        if (status.key === "working") activeCount += 1;
-        if (status.key !== "unknown") knownCount += 1;
+        ids.push.apply(ids, roadmapAgentModelIds(agent));
+      });
+      group.modelIds = Array.from(new Set(ids.filter(function (id) { return modelsById.has(id); })));
+      group.modelIds.forEach(function (id) { assignedModelIds.add(id); });
+    });
+
+    const directorModelIds = Array.from(new Set(
+      safeArray(safeObject(data.director).configured_models).map(roadmapValueId).filter(function (id) {
+        return modelsById.has(id);
+      })
+    ));
+    directorModelIds.forEach(function (id) { assignedModelIds.add(id); });
+
+    return {
+      snapshot: data,
+      agents: agents,
+      groups: groups,
+      modelsById: modelsById,
+      assignedModelIds: assignedModelIds,
+      directorModelIds: directorModelIds,
+      unassignedModelIds: Array.from(modelsById.keys()).filter(function (id) {
+        return !assignedModelIds.has(id);
+      }).sort()
+    };
+  }
+
+  function roadMapModelStatus(model, context) {
+    const modelId = roadmapValueId(model);
+    const activity = safeObject(safeObject(context.snapshot).model_activity);
+    const allExecutions = safeArray(activity.active_executions);
+    const executions = allExecutions.filter(function (item) {
+      return roadmapValueId(item.model_id || item.selected_model || item.model) === modelId;
+    });
+    if (executions.length) {
+      return { key: "working", label: "INFERENCE RUNNING", executions: executions, busyAgents: [] };
+    }
+
+    if (model.registered === false || model.configured_only) {
+      return { key: "unknown", label: "NOT IN CATALOG", executions: [], busyAgents: [] };
+    }
+    if (model.enabled === false) {
+      return { key: "unavailable", label: "DISABLED", executions: [], busyAgents: [] };
+    }
+    if (model.available === false || model.healthy === false) {
+      return { key: "unavailable", label: "UNAVAILABLE", executions: [], busyAgents: [] };
+    }
+
+    const roles = context.agents.filter(function (agent) {
+      return roadmapAgentModelIds(agent).includes(modelId);
+    });
+    const busyAgents = roles.filter(function (agent) {
+      const profile = state.roadmapProfiles[String(agent.role || agent.agent_id || "")];
+      return safeArray(profile && profile.current_tasks).some(function (task) {
+        return String(task.status || "").toLowerCase() === "running";
       });
     });
-    $("roadmap-department-count").textContent = String(groups.length);
-    $("roadmap-active-count").textContent = String(activeCount);
+    if (busyAgents.length) {
+      return {
+        key: "busy",
+        label: "AGENT TASK ACTIVE · MODEL UNCONFIRMED",
+        executions: [],
+        busyAgents: busyAgents
+      };
+    }
+    if (activity.state !== "authoritative") {
+      return { key: "unknown", label: "USAGE UNKNOWN", executions: [], busyAgents: [] };
+    }
+    return { key: "ready", label: "READY · NOT EXECUTING", executions: [], busyAgents: [] };
+  }
+
+  function roadmapModelStation(modelId, group, context) {
+    const model = context.modelsById.get(modelId) || { model_id: modelId, registered: false };
+    const modelRoles = context.agents.filter(function (agent) {
+      return roadmapAgentModelIds(agent).includes(modelId);
+    });
+    const groupRoles = group
+      ? group.agents.filter(function (agent) { return roadmapAgentModelIds(agent).includes(modelId); })
+      : [];
+    const status = roadMapModelStatus(model, context);
+    const selected = state.roadmapSelectedModelId === modelId;
+    const provider = model.provider || "provider not recorded";
+    const roleNames = modelRoles.map(function (agent) { return String(agent.role || agent.agent_id); });
+    const roomRoles = groupRoles.map(function (agent) { return String(agent.role || agent.agent_id); });
+    const roleText = roomRoles.length
+      ? roomRoles.join(" · ")
+      : (modelRoles.length ? modelRoles.map(function (agent) { return String(agent.role || agent.agent_id); }).join(" · ") : "Unassigned model");
+    return '<button class="floorplan-model-station' + (selected ? ' selected' : '') +
+        '" type="button" data-roadmap-model="' + esc(modelId) + '" data-model-state="' + esc(status.key) +
+        '" data-agent-roles="' + esc(JSON.stringify(roomRoles.length ? roomRoles : roleNames)) +
+        '" aria-pressed="' + String(selected) + '" aria-label="Inspect model ' + esc(modelId) + ', ' + esc(status.label) + '">' +
+      '<span class="floorplan-workstation-art" aria-hidden="true">' +
+        '<span class="floorplan-desk-surface"></span><span class="floorplan-monitor"><i></i><i></i><i></i></span>' +
+        '<span class="floorplan-chair"></span><span class="floorplan-avatar"></span><i class="floorplan-status-led"></i>' +
+      '</span>' +
+      '<span class="floorplan-model-title"><strong>' + esc(modelId) + '</strong></span>' +
+      '<span class="floorplan-provider">' + esc(provider) + '</span>' +
+      '<span class="floorplan-model-status"><i></i>' + esc(status.label) + '</span>' +
+      '<span class="floorplan-model-roles">' + esc(roleText) + '</span>' +
+    '</button>';
+  }
+
+  function roadmapDepartmentMarkup(group, context) {
+    const department = group.department || {};
+    const name = department.name || department.department_id || "Unassigned";
+    const activeModels = group.modelIds.filter(function (id) {
+      return roadMapModelStatus(context.modelsById.get(id), context).key === "working";
+    }).length;
+    const agentPills = group.agents.length
+      ? group.agents.map(function (agent) {
+          const role = String(agent.role || agent.agent_id || "unknown");
+          const status = roadMapStatus(state.roadmapProfiles[role]);
+          return '<span class="floorplan-agent-pill" data-agent-state="' + esc(status.key) + '">' +
+            '<i></i>' + esc(role) + '</span>';
+        }).join("")
+      : '<span class="floorplan-muted">No agents registered in this department.</span>';
+    const stations = group.modelIds.length
+      ? group.modelIds.map(function (id) { return roadmapModelStation(id, group, context); }).join("")
+      : '<div class="floorplan-empty-room">No model preference is registered for this department.</div>';
+    return '<header class="floorplan-room-header"><div><span>DEPARTMENT</span><h3>' + esc(name) +
+      '</h3><p>' + esc(department.mission || "Department mission not recorded.") + '</p></div>' +
+      '<strong class="floorplan-room-count">' + group.modelIds.length + ' models · ' + activeModels + ' active</strong></header>' +
+      '<div class="floorplan-agent-pills">' + agentPills + '</div>' +
+      '<div class="floorplan-model-grid">' + stations + '</div>';
+  }
+
+  function roadmapCell(label, value, detail, className) {
+    return '<section class="model-inspector-cell' + (className ? ' ' + className : '') + '">' +
+      '<span>' + esc(label) + '</span><strong>' + esc(value || "Not reported") + '</strong>' +
+      (detail ? '<p>' + detail + '</p>' : '') + '</section>';
+  }
+
+  function renderRoadmap(data) {
+    if (!data) return;
+    const context = roadmapBuildContext(data);
+    state.roadmapContext = context;
+    const slotOrder = ["research", "engineering", "data", "quality", "operations", "security", "learning", "tooling"];
+    const slotGroups = new Map();
+    const overflowGroups = [];
+
+    context.groups.forEach(function (group) {
+      const department = group.department || {};
+      const key = roadmapDepartmentSlot(department.department_id || department.name || "");
+      if (key && !slotGroups.has(key)) slotGroups.set(key, group);
+      else overflowGroups.push(group);
+    });
+    overflowGroups.slice().forEach(function (group) {
+      const free = slotOrder.find(function (key) { return !slotGroups.has(key); });
+      if (free) {
+        slotGroups.set(free, group);
+        overflowGroups.splice(overflowGroups.indexOf(group), 1);
+      }
+    });
+
+    slotOrder.forEach(function (slot) {
+      const node = $("roadmap-room-" + slot);
+      if (!node) return;
+      const group = slotGroups.get(slot);
+      if (!group) {
+        node.hidden = true;
+        node.innerHTML = "";
+        return;
+      }
+      node.hidden = false;
+      node.innerHTML = roadmapDepartmentMarkup(group, context);
+    });
+
+    const directorModels = $("roadmap-director-models");
+    if (directorModels) {
+      directorModels.innerHTML = context.directorModelIds.length
+        ? context.directorModelIds.map(function (id) {
+            return '<button class="floorplan-director-model-chip" type="button" data-roadmap-model="' + esc(id) +
+              '" data-model-state="' + esc(roadMapModelStatus(context.modelsById.get(id), context).key) + '">' +
+              esc(id) + '</button>';
+          }).join("")
+        : '<span class="floorplan-muted">No Director model exposed by current policy.</span>';
+    }
+
+    const extras = [];
+    overflowGroups.forEach(function (group) {
+      const department = group.department || {};
+      extras.push('<section class="floorplan-room floorplan-extra-department"><header class="floorplan-room-header"><div><span>ADDITIONAL DEPARTMENT</span><h3>' +
+        esc(department.name || department.department_id || "Unassigned") + '</h3><p>' +
+        esc(department.mission || "Department mission not recorded.") + '</p></div><strong class="floorplan-room-count">' +
+        group.modelIds.length + ' models</strong></header><div class="floorplan-agent-pills">' +
+        (group.agents.length ? group.agents.map(function (agent) {
+          const role = String(agent.role || agent.agent_id || "unknown");
+          return '<span class="floorplan-agent-pill"><i></i>' + esc(role) + '</span>';
+        }).join("") : '<span class="floorplan-muted">No agents registered.</span>') +
+        '</div><div class="floorplan-model-grid">' +
+        (group.modelIds.length ? group.modelIds.map(function (id) { return roadmapModelStation(id, group, context); }).join("") :
+          '<div class="floorplan-empty-room">No model preference recorded.</div>') + '</div></section>');
+    });
+
+    if (context.unassignedModelIds.length) {
+      extras.push('<section class="floorplan-room floorplan-unassigned-room"><header class="floorplan-room-header"><div><span>RESERVE POOL</span><h3>Unassigned / reserve models</h3><p>Registered models not referenced by a department or Director policy.</p></div><strong class="floorplan-room-count">' +
+        context.unassignedModelIds.length + ' models</strong></header><div class="floorplan-model-grid">' +
+        context.unassignedModelIds.map(function (id) { return roadmapModelStation(id, null, context); }).join("") +
+        '</div></section>');
+    }
+    const extraTarget = $("roadmap-office-grid");
+    if (extraTarget) {
+      extraTarget.innerHTML = extras.join("");
+      extraTarget.hidden = !extras.length;
+    }
+
+    const registeredCount = safeArray(data.models).length;
+    const activity = safeObject(data.model_activity);
+    const activeExecutions = safeArray(activity.active_executions);
+    $("roadmap-department-count").textContent = String(context.groups.length);
+    $("roadmap-model-count").textContent = String(registeredCount);
+    $("roadmap-active-count").textContent = activity.state === "authoritative" ? String(activeExecutions.length) : "—";
     $("roadmap-delivery-count").textContent = String(state.roadmapDeliveryCount);
     $("roadmap-mailbox-total").textContent = String(state.roadmapDeliveryCount);
 
     const liveBadge = $("roadmap-live-state");
-    if (knownCount === agents.length) {
-      liveBadge.className = "roadmap-live-badge healthy";
-      liveBadge.innerHTML = '<span class="roadmap-live-dot"></span> LIVE TASK STATE';
-    } else {
-      liveBadge.className = "roadmap-live-badge unknown";
-      liveBadge.innerHTML = '<span class="roadmap-live-dot"></span> ' + esc(knownCount ? "PARTIAL TASK STATE" : "WAITING FOR LIVE STATE");
+    if (liveBadge) {
+      liveBadge.className = "roadmap-live-badge " + (activity.state === "authoritative" ? "healthy" : "unknown");
+      liveBadge.innerHTML = '<span class="roadmap-live-dot"></span> ' +
+        esc(activity.state === "authoritative" ? "LIVE MODEL ACTIVITY" : "MODEL ACTIVITY UNKNOWN");
     }
     $("roadmap-last-update").textContent = "Snapshot · " + dateText(data.generated_at);
+    const activityNote = $("roadmap-data-note");
+    if (activityNote) {
+      activityNote.textContent = activity.state === "authoritative"
+        ? "Green LEDs are direct in-flight ModelRouter executions. Ready/idle means no inference call was active in this snapshot; agent task state is shown separately."
+        : "Aurora has not exposed authoritative live model execution telemetry. Model availability may be known, but active-use status remains unknown.";
+    }
 
-    grid.innerHTML = groups.map(function (group) {
-      const department = group.department || {};
-      const name = department.name || department.department_id || "Unassigned";
-      const working = group.agents.filter(function (agent) {
-        return roadMapStatus(state.roadmapProfiles[String(agent.role || agent.agent_id)]).key === "working";
-      }).length;
-      const memberCards = group.agents.map(function (agent) {
-        return roadMapAgentCard(agent, department);
-      }).join("");
-      return '<section class="office-department" data-office-department="' + esc(department.department_id || name) + '">' +
-        '<header class="office-department-header"><div><h3>' + esc(name) + '</h3><p>' + esc(department.mission || "No department mission recorded.") + '</p></div>' +
-        '<span class="office-department-count">' + working + '/' + group.agents.length + ' working</span></header>' +
-        memberCards + '</section>';
-    }).join("");
-
-    grid.querySelectorAll("[data-office-agent]").forEach(function (button) {
+    const modelIds = Array.from(context.modelsById.keys()).sort();
+    const activeModelId = activeExecutions.length ? roadmapValueId(activeExecutions[0].model_id || activeExecutions[0].selected_model) : "";
+    if (!state.roadmapSelectedModelId || !context.modelsById.has(state.roadmapSelectedModelId)) {
+      state.roadmapSelectedModelId = (activeModelId && context.modelsById.has(activeModelId)) ? activeModelId : (modelIds[0] || null);
+    }
+    document.querySelectorAll("[data-roadmap-model]").forEach(function (button) {
+      button.classList.toggle("selected", button.getAttribute("data-roadmap-model") === state.roadmapSelectedModelId);
+      button.setAttribute("aria-pressed", String(button.getAttribute("data-roadmap-model") === state.roadmapSelectedModelId));
       button.addEventListener("click", function () {
-        state.roadmapSelectedRole = button.getAttribute("data-office-agent");
+        state.roadmapSelectedModelId = button.getAttribute("data-roadmap-model");
         renderRoadmap(state.snapshot);
-        renderRoadmapInspector(state.roadmapSelectedRole);
-      });
+      }, { once: true });
     });
-    renderRoadmapInspector(state.roadmapSelectedRole);
+
+    renderRoadmapInspector(state.roadmapSelectedModelId);
     renderRoadmapDeliveries();
   }
 
-  function renderRoadmapInspector(role) {
+  function renderRoadmapInspector(modelId) {
     const title = $("roadmap-inspector-title");
     const body = $("roadmap-inspector-body");
     const led = $("roadmap-inspector-led");
-    if (!title || !body) return;
-    const snapshotAgents = safeArray(safeObject(safeObject(state.snapshot).organization).agents);
-    const fallback = snapshotAgents.find(function (agent) {
-      return String(agent.role || agent.agent_id) === String(role);
-    }) || {};
-    const profile = state.roadmapProfiles[String(role)];
-    const identity = safeObject(profile && profile.identity);
-    const base = Object.keys(identity).length ? identity : fallback;
-    const statusInfo = roadMapStatus(profile);
-    const prefs = safeArray(profile && profile.model_preferences);
-    const rawPrefs = safeArray(identity.model_preferences);
-    const selectedModel = prefs.length ? prefs[0] : (rawPrefs.length ? rawPrefs[0] : null);
-    const selectedModelName = selectedModel
-      ? (typeof selectedModel === "string" ? selectedModel : (selectedModel.model_id || selectedModel.id || "preferred model"))
-      : (safeArray(base.model_preferences)[0] || "No model preference recorded");
-    const provider = selectedModel && typeof selectedModel === "object" ? (selectedModel.provider || "provider not specified") : "not supplied by the model registry";
-    const otherModelNames = prefs.slice(1).map(function (model) {
-      return typeof model === "string" ? model : (model.model_id || model.id || "model");
+    const context = state.roadmapContext || (state.snapshot ? roadmapBuildContext(state.snapshot) : null);
+    if (!title || !body || !led || !context || !modelId) {
+      if (title) title.textContent = "Select an AI model";
+      if (body) body.innerHTML = '<div class="empty-state">No model is available to inspect in the current authoritative snapshot.</div>';
+      if (led) led.className = "workstation-led unknown";
+      return;
+    }
+
+    const model = context.modelsById.get(modelId) || { model_id: modelId, registered: false };
+    const status = roadMapModelStatus(model, context);
+    const activeExecutions = status.executions || [];
+    const activity = safeObject(context.snapshot.model_activity);
+    const assignedAgents = context.agents.filter(function (agent) {
+      return roadmapAgentModelIds(agent).includes(modelId);
     });
-    const current = statusInfo.task;
-    const taskRows = safeArray(profile && profile.current_tasks);
-    const recent = safeArray(profile && profile.recent_executions);
-    const departmentName = base.department || fallback.department || "Unassigned";
-    title.textContent = role || "Select a workstation";
-    led.className = "workstation-led " + statusInfo.key;
-    led.setAttribute("aria-label", statusInfo.label);
+    const assignedDepartments = context.groups.filter(function (group) {
+      return group.modelIds.includes(modelId);
+    });
+    const currentTaskRows = [];
+    assignedAgents.forEach(function (agent) {
+      const role = String(agent.role || agent.agent_id || "unknown");
+      const profile = state.roadmapProfiles[role];
+      safeArray(profile && profile.current_tasks).filter(function (task) {
+        return String(task.status || "").toLowerCase() === "running";
+      }).forEach(function (task) {
+        currentTaskRows.push({ role: role, department: agent.department || "Unassigned", task: task });
+      });
+    });
+    const activityRows = activeExecutions.map(function (execution) {
+      const role = String(execution.role || "Director / runtime");
+      const task = safeArray(state.roadmapProfiles[role] && state.roadmapProfiles[role].current_tasks)
+        .find(function (item) { return String(item.task_id || "") === String(execution.task_id || ""); });
+      const what = task && task.objective
+        ? task.objective
+        : (execution.task_type || (execution.task_id ? "Task " + execution.task_id : "Director / live inference"));
+      return '<div class="model-work-row"><strong>' + esc(role) + ' · ' + esc(execution.task_id || execution.request_id || "request") +
+        '</strong><p>' + esc(what) + '</p><small>Started: ' + esc(dateText(execution.started_at)) +
+        (execution.project_id ? ' · project ' + esc(execution.project_id) : '') + '</small></div>';
+    });
+    const modelPerformance = safeArray(safeObject(context.snapshot.model_intelligence).performance)
+      .filter(function (row) { return String(row.model || "") === modelId; })
+      .slice(0, 4);
+    const performanceHtml = modelPerformance.length
+      ? modelPerformance.map(function (row) {
+          return '<div class="model-work-row"><strong>' + esc(row.task_type || row.skill_id || "Observed execution") +
+            ' · score ' + esc(row.score == null ? "unknown" : Number(row.score).toFixed(3)) + '</strong><p>' +
+            esc(row.evidence_state || "Evidence state not recorded") + ' · ' + esc(dateText(row.created_at)) + '</p></div>';
+        }).join("")
+      : '<p>No model-performance rows have been recorded for this model.</p>';
+    const provider = String(model.provider || "not recorded");
+    const modelReadiness = model.registered === false
+      ? "Configured reference · not in registry"
+      : (model.enabled === false ? "Disabled" :
+        (model.available === false || model.healthy === false ? "Unavailable / unhealthy" : "Enabled in model registry"));
+    const usageDetail = activityRows.length
+      ? activityRows.join("")
+      : (currentTaskRows.length
+        ? currentTaskRows.map(function (row) {
+            return '<div class="model-work-row"><strong>' + esc(row.role) + ' · ' +
+              esc(row.task.task_id || "running task") + '</strong><p>' + esc(row.task.objective || "Task running; selected model is not exposed by this task record.") +
+              '</p><small>Agent status confirms running task; this does not prove this model is executing.</small></div>';
+          }).join("")
+        : '<p>' + esc(activity.state === "authoritative"
+          ? "No in-flight inference call for this model was observed in the current snapshot."
+          : "Live model execution telemetry is not available, so current use cannot be verified.") + '</p>');
+
+    title.textContent = modelId;
+    led.className = "workstation-led " + status.key;
+    led.setAttribute("aria-label", status.label);
+    const statusLine = '<div class="model-inspector-status" data-model-state="' + esc(status.key) + '"><i></i><strong>' +
+      esc(status.label) + '</strong><span>' + esc(activeExecutions.length + " active call(s)") + '</span></div>';
     body.innerHTML =
-      '<div class="inspector-state"><i class="office-status-led" style="background:' +
-        (statusInfo.key === "working" ? "#48db86" : statusInfo.key === "unknown" ? "#777" : "#df5c66") +
-        ';box-shadow:none"></i><strong>' + esc(statusInfo.label) + '</strong></div>' +
-      '<div class="inspector-metric"><span>DEPARTMENT</span><strong>' + esc(departmentName) + '</strong><p>' + esc(base.department_mission || base.mission || "No mission description recorded.") + '</p></div>' +
-      '<div class="inspector-metric"><span>PREFERRED MODEL</span><strong>' + esc(selectedModelName) + '</strong><p>Provider: ' + esc(provider) + '</p>' +
-        (selectedModel && typeof selectedModel === "object" ? '<p>Registry: ' + esc(selectedModel.healthy ? "healthy" : "health not verified") + ' · available: ' + esc(String(selectedModel.available)) + '</p><p>Capabilities: ' + esc(safeArray(selectedModel.capabilities).join(", ") || "not listed") + '</p>' : '') +
-        (otherModelNames.length ? '<p>Other registered preferences: ' + esc(otherModelNames.join(", ")) + '</p>' : '') +
-        '<p>The task schema may not expose the model finally selected for a single execution; this field shows the registered preference.</p></div>' +
-      '<div class="inspector-metric"><span>WHAT IT WORKS ON</span><strong>' + esc(current ? (current.objective || current.task_id || "Runtime task") : "No running task reported") + '</strong><p>' +
-        esc(current ? ("Task " + (current.task_id || "—") + " · state " + (current.status || "unknown") + (current.mission_id ? " · mission " + current.mission_id : "")) : "Work status is read from Aurora's stored task records.") + '</p></div>' +
-      '<div class="inspector-metric"><span>ACTIVE TASK RECORDS</span><strong>' + esc(taskRows.length) + '</strong><p>' +
-        esc(taskRows.map(function (task) { return (task.task_id || "task") + " · " + (task.status || "unknown") + " · " + (task.objective || "no objective"); }).join(" | ") || "None") + '</p></div>' +
-      '<div class="inspector-metric"><span>RECENT EXECUTIONS</span><strong>' + esc(recent.length) + '</strong><p>' +
-        esc(recent.slice(0,5).map(function (task) { return (task.task_id || "task") + " · " + (task.status || "unknown"); }).join(" | ") || "No execution history returned.") + '</p></div>' +
-      '<div class="inspector-metric"><span>SKILLS / CAPABILITIES</span><strong>' + esc(safeArray(base.skill_ids).join(", ") || "No skills listed") + '</strong><p>' +
-        esc(safeArray(base.capabilities).join(", ") || "No capabilities listed") + '</p></div>' +
-      (profile && profile.__unavailable ? '<div class="inspector-metric"><span>LIVE DATA</span><strong>Unavailable</strong><p>' + esc(profile.error || "The agent detail endpoint did not return current data.") + '</p></div>' : "");
+      statusLine +
+      '<div class="model-inspector-grid">' +
+      roadmapCell("MODEL ID", modelId, model.registered === false ? '<p>Not present in the canonical model registry; shown because Aurora references it in configuration.</p>' : '') +
+      roadmapCell("PROVIDER", provider, model.endpoint ? '<p>Endpoint: ' + esc(model.endpoint) + '</p>' : '<p>Endpoint not exposed by the model record.</p>') +
+      roadmapCell("REGISTRY / HEALTH", modelReadiness, '<p>Enabled: ' + esc(String(model.enabled)) + ' · Healthy: ' + esc(String(model.healthy)) +
+        ' · Available: ' + esc(String(model.available)) + '</p>') +
+      roadmapCell("WHERE ASSIGNED", assignedDepartments.map(function (group) {
+        return group.department.name || group.department.department_id || "Department";
+      }).join(" · ") || (context.directorModelIds.includes(modelId) ? "Director policy" : "Not assigned to a department"),
+        '<p>' + esc(assignedAgents.map(function (agent) { return String(agent.role || agent.agent_id); }).join(", ") || "No agent model preference maps to this model.") + '</p>') +
+      roadmapCell("CURRENT WORK", activeExecutions.length ? "Executing now" :
+        (currentTaskRows.length ? "Assigned agent task in progress · model not attributed" :
+          (activity.state === "authoritative" ? "Not executing at snapshot time" : "Unknown")),
+        usageDetail, "model-inspector-wide") +
+      roadmapCell("CAPABILITIES", safeArray(model.capabilities).join(" · ") || "Not listed",
+        '<p>Specialties: ' + esc(safeArray(model.specialties).join(", ") || "Not listed") + '</p>') +
+      roadmapCell("CONTEXT WINDOW", model.context_window ? Number(model.context_window).toLocaleString() + " tokens" : "Not reported",
+        '<p>Pricing tier: ' + esc(model.pricing_tier || "not recorded") + '</p>') +
+      roadmapCell("MODEL SCORES", "Quality " + (model.quality_score == null ? "—" : Number(model.quality_score).toFixed(2)) +
+        " · Latency " + (model.latency_score == null ? "—" : Number(model.latency_score).toFixed(2)) +
+        " · Cost " + (model.cost_score == null ? "—" : Number(model.cost_score).toFixed(2)),
+        '<p>Scores are registry values, not proof of current use.</p>') +
+      roadmapCell("RECENT PERFORMANCE", modelPerformance.length + " recorded row(s)", performanceHtml, "model-inspector-wide") +
+      '</div>';
   }
 
   function renderRoadmapDeliveries() {
@@ -690,11 +969,15 @@
   }
 
   function triggerRoadmapDelivery(role) {
-    const scene = $("roadmap-scene");
-    const station = Array.from(document.querySelectorAll("[data-office-agent]")).find(function (item) {
-      return item.getAttribute("data-office-agent") === String(role);
+    const scene = $("roadmap-house");
+    const station = Array.from(document.querySelectorAll("[data-agent-roles]")).find(function (item) {
+      try {
+        return JSON.parse(item.getAttribute("data-agent-roles") || "[]").includes(String(role));
+      } catch (_) {
+        return false;
+      }
     });
-    const worker = station && station.querySelector(".office-worker");
+    const worker = station && station.querySelector(".floorplan-avatar");
     const mailbox = $("roadmap-mailbox-slot");
     if (!scene || !worker || !mailbox || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
     const sceneRect = scene.getBoundingClientRect();

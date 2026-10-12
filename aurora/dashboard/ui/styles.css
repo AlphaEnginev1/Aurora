@@ -2156,3 +2156,704 @@ body {
   background: #ff626c;
   box-shadow: 0 0 9px rgba(255,98,108,.45);
 }
+
+
+/* Aurora live top-down model floor plan */
+.roadmap-model-summary-row {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+.roadmap-live-floorplan {
+  position: relative;
+  grid-template-columns: minmax(0, 2fr) minmax(320px, .82fr);
+  align-items: start;
+  gap: 10px;
+}
+.live-floorplan-panel {
+  min-width: 0;
+  overflow: hidden;
+  padding: 12px;
+  border-color: rgba(30, 205, 237, .42);
+  background: #02080c;
+  box-shadow: inset 0 0 0 1px rgba(15, 115, 143, .12), 0 15px 40px rgba(0,0,0,.28);
+}
+.floorplan-blueprint-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 4px 12px;
+  border-bottom: 1px solid rgba(40, 203, 233, .2);
+}
+.floorplan-blueprint-title > div {
+  display: grid;
+  gap: 3px;
+}
+.floorplan-brand {
+  color: #c6f7ff;
+  font-size: 15px;
+  font-weight: 750;
+  letter-spacing: .13em;
+}
+.floorplan-subtitle {
+  color: #43cfe9;
+  font-size: 8px;
+  letter-spacing: .28em;
+}
+.floorplan-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 13px;
+  padding: 10px 4px;
+  color: #8ab3bd;
+  font-size: 8px;
+}
+.floorplan-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.floorplan-legend-led {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #3bcf8b;
+  box-shadow: 0 0 8px rgba(59,207,139,.45);
+}
+.floorplan-legend-led.ready { background:#35cce7; box-shadow:0 0 8px rgba(53,204,231,.4); }
+.floorplan-legend-led.busy { background:#e9b94f; box-shadow:0 0 8px rgba(233,185,79,.35); }
+.floorplan-legend-led.down { background:#ff596b; box-shadow:0 0 8px rgba(255,89,107,.35); }
+.floorplan-house {
+  position: relative;
+  padding: 8px;
+  border: 2px solid #177f96;
+  outline: 1px solid rgba(51,218,245,.22);
+  background:
+    linear-gradient(rgba(22,135,158,.07) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(22,135,158,.07) 1px, transparent 1px),
+    radial-gradient(ellipse at 50% 30%, rgba(14,76,95,.2), transparent 65%),
+    #030b10;
+  background-size: 18px 18px, 18px 18px, auto, auto;
+  box-shadow: inset 0 0 35px rgba(10,120,150,.08), 0 0 20px rgba(0,149,190,.06);
+}
+.floorplan-top-row {
+  display: grid;
+  grid-template-columns: minmax(0,1fr) minmax(175px,.92fr) minmax(0,1fr);
+  gap: 7px;
+  align-items: stretch;
+  padding-bottom: 7px;
+}
+.floorplan-room {
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid rgba(28,202,232,.57);
+  background:
+    linear-gradient(rgba(20,151,177,.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(20,151,177,.035) 1px, transparent 1px),
+    rgba(3,15,21,.97);
+  background-size: 12px 12px;
+  box-shadow: inset 0 0 0 1px rgba(21,123,148,.07), 0 0 8px rgba(0,135,164,.05);
+}
+#roadmap-scene [hidden] { display: none !important; }
+.floorplan-director-room {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 9px 9px 11px;
+  border: 1px solid rgba(84,222,248,.85);
+  background: linear-gradient(180deg, rgba(9,37,48,.98), rgba(2,12,17,.98));
+  text-align: center;
+  box-shadow: inset 0 0 18px rgba(22,172,201,.09), 0 0 12px rgba(0,189,227,.09);
+}
+.floorplan-room-label {
+  color: #9defff;
+  font-size: 8px;
+  letter-spacing: .15em;
+  font-weight: 800;
+}
+.floorplan-director-desk {
+  position: relative;
+  width: min(150px, 90%);
+  height: 48px;
+  margin: 12px auto 7px;
+}
+.floorplan-director-chair {
+  position: absolute;
+  width: 27px;
+  height: 13px;
+  left: calc(50% - 13px);
+  top: -7px;
+  border: 1px solid #527e8b;
+  border-radius: 12px 12px 6px 6px;
+  background: #1a3440;
+}
+.floorplan-director-console {
+  position: absolute;
+  inset: 6px 0 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid #368da2;
+  border-radius: 6px 6px 13px 13px;
+  background: linear-gradient(180deg,#254b5a,#0d2935);
+  box-shadow: inset 0 2px 5px rgba(135,238,255,.08);
+}
+.floorplan-director-console span {
+  width: 24px;
+  height: 16px;
+  border: 1px solid rgba(75,221,247,.52);
+  border-radius: 2px;
+  background: repeating-linear-gradient(180deg,rgba(78,219,243,.42) 0 1px,transparent 1px 4px),#04131b;
+}
+.floorplan-director-console span:nth-child(2) {
+  width: 34px;
+  height: 19px;
+  border-color: #56dff5;
+  box-shadow: 0 0 7px rgba(48,204,234,.13);
+}
+.floorplan-director-copy { display:grid; gap:3px; }
+.floorplan-director-copy strong {
+  color: #e6fcff;
+  font-size: 10px;
+  letter-spacing: .08em;
+}
+.floorplan-director-copy small { color: #719ca8; font-size: 8px; }
+.floorplan-director-models {
+  width: 100%;
+  margin-top: 8px;
+  padding: 7px;
+  border: 1px solid rgba(39,176,201,.26);
+  background: rgba(2,10,14,.82);
+  text-align: left;
+}
+.floorplan-tiny-label {
+  display: block;
+  margin-bottom: 5px;
+  color: #529bad;
+  font-size: 7px;
+  letter-spacing: .12em;
+}
+#roadmap-director-models { display:flex; flex-wrap:wrap; gap:4px; }
+.floorplan-director-model-chip {
+  max-width:100%;
+  padding:4px 5px;
+  border:1px solid rgba(34,198,225,.42);
+  border-radius:3px;
+  background:#071e27;
+  color:#b7f4ff;
+  font-size:7px;
+  overflow-wrap:anywhere;
+  cursor:pointer;
+}
+.floorplan-director-model-chip:hover,
+.floorplan-director-model-chip.selected {
+  border-color:#7ae9ff;
+  background:#0c3340;
+  color:#fff;
+}
+.floorplan-director-model-chip[data-model-state="working"] { border-color:#35d88f; color:#baffd8; }
+.floorplan-muted { color:#6b939d; font-size:8px; line-height:1.4; }
+.floorplan-mail-connector {
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:5px;
+  height:17px;
+  color:#30cce9;
+  font-size:10px;
+}
+.floorplan-mail-connector span { width:23px; height:1px; background:linear-gradient(90deg,transparent,#239bb5); }
+.floorplan-mail-connector span:last-child { background:linear-gradient(90deg,#239bb5,transparent); }
+.floorplan-mailbox {
+  width:100%;
+  min-width:0;
+  margin-top:0;
+  padding:7px;
+  border:1px solid rgba(32,176,201,.28);
+  background:#04131a;
+  text-align:left;
+}
+.floorplan-mailbox .mailbox-icon {
+  flex-basis:25px;
+  width:25px;
+  height:24px;
+  border-color:#347f92;
+  background:#0a2029;
+}
+.floorplan-mailbox .mailbox-icon::before { top:5px; height:8px; border-color:#438e9f; background:#112b34; }
+.floorplan-mailbox .mailbox-icon span { top:1px; left:8px; width:7px; }
+.floorplan-mailbox .eyebrow { color:#48cce4; font-size:6px; }
+.floorplan-mailbox strong { margin:3px 0; color:#d2f7ff; font-size:9px; }
+.floorplan-mailbox small { color:#6795a0; font-size:7px; }
+.floorplan-body-zones {
+  display:grid;
+  grid-template-columns:minmax(0,1fr) 35px minmax(0,1fr);
+  grid-template-rows:auto auto auto;
+  gap:7px;
+  align-items:stretch;
+}
+#roadmap-room-data { grid-column:1; grid-row:1; }
+#roadmap-room-quality { grid-column:3; grid-row:1; }
+#roadmap-room-operations { grid-column:1; grid-row:2; }
+#roadmap-room-security { grid-column:3; grid-row:2; }
+#roadmap-room-learning { grid-column:1; grid-row:3; }
+#roadmap-room-tooling { grid-column:3; grid-row:3; }
+.floorplan-central-corridor {
+  grid-column:2;
+  grid-row:1 / span 3;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:space-around;
+  padding:6px 2px;
+  border:1px dashed rgba(30,173,205,.35);
+  background:linear-gradient(180deg,rgba(5,28,37,.6),rgba(3,12,17,.86));
+  color:#2cbbd8;
+  font-size:6px;
+  letter-spacing:.07em;
+  text-align:center;
+}
+.floorplan-central-corridor > span { writing-mode:vertical-rl; transform:rotate(180deg); }
+.floorplan-routing-line { display:flex; flex-direction:column; gap:8px; align-items:center; }
+.floorplan-routing-line i { width:4px; height:4px; border-radius:50%; background:#34cbe5; box-shadow:0 0 7px rgba(52,203,229,.55); }
+.floorplan-central-corridor b { font-size:15px; font-weight:400; }
+.floorplan-central-corridor small { line-height:1.5; color:#5e8792; }
+.floorplan-room-header {
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-start;
+  gap:7px;
+  min-height:38px;
+  padding-bottom:7px;
+  border-bottom:1px solid rgba(38,178,202,.21);
+}
+.floorplan-room-header > div { min-width:0; }
+.floorplan-room-header > div > span {
+  color:#438b9b;
+  font-size:6px;
+  letter-spacing:.15em;
+}
+.floorplan-room-header h3 {
+  margin:3px 0 0;
+  color:#c8f6ff;
+  font-size:10px;
+  line-height:1.25;
+  letter-spacing:.035em;
+  overflow-wrap:anywhere;
+}
+.floorplan-room-header p {
+  margin:4px 0 0;
+  color:#5b8995;
+  font-size:7px;
+  line-height:1.35;
+  overflow-wrap:anywhere;
+}
+.floorplan-room-count {
+  flex:0 0 auto;
+  max-width:73px;
+  padding:4px;
+  border:1px solid rgba(37,174,199,.25);
+  color:#75cfe0;
+  font-size:7px;
+  font-weight:500;
+  line-height:1.3;
+  text-align:center;
+}
+.floorplan-agent-pills {
+  display:flex;
+  flex-wrap:wrap;
+  gap:4px;
+  padding:7px 0 2px;
+}
+.floorplan-agent-pill {
+  display:inline-flex;
+  align-items:center;
+  gap:4px;
+  padding:3px 4px;
+  border:1px solid rgba(32,133,155,.27);
+  border-radius:3px;
+  color:#7dabb5;
+  font-size:6px;
+  overflow-wrap:anywhere;
+}
+.floorplan-agent-pill i {
+  width:4px; height:4px; flex:0 0 auto; border-radius:50%;
+  background:#71808a;
+}
+.floorplan-agent-pill[data-agent-state="working"] i { background:#3cdb91; box-shadow:0 0 5px rgba(60,219,145,.6); }
+.floorplan-agent-pill[data-agent-state="queued"] i { background:#e7b850; }
+.floorplan-agent-pill[data-agent-state="failed"] i { background:#ff5d6b; }
+.floorplan-agent-pill[data-agent-state="unknown"] i { background:#76858c; }
+.floorplan-model-grid {
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:6px;
+  padding-top:6px;
+}
+.floorplan-model-station {
+  min-width:0;
+  display:flex;
+  flex-direction:column;
+  align-items:stretch;
+  padding:5px;
+  border:1px solid rgba(30,116,137,.34);
+  border-radius:4px;
+  background:rgba(6,20,27,.95);
+  color:#d5f7fd;
+  text-align:left;
+  cursor:pointer;
+  transition:background .15s ease,border-color .15s ease,box-shadow .15s ease;
+}
+.floorplan-model-station:hover {
+  border-color:rgba(69,224,250,.8);
+  background:#0a2833;
+}
+.floorplan-model-station.selected {
+  border-color:#9af0ff;
+  background:#0b2935;
+  box-shadow:inset 0 0 0 1px rgba(95,230,255,.21),0 0 10px rgba(23,195,226,.1);
+}
+.floorplan-workstation-art {
+  position:relative;
+  display:block;
+  height:46px;
+  margin-bottom:5px;
+  overflow:hidden;
+  border:1px solid rgba(29,88,105,.35);
+  border-radius:3px;
+  background:
+    linear-gradient(rgba(29,127,146,.05) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(29,127,146,.05) 1px,transparent 1px),
+    #041016;
+  background-size:8px 8px;
+}
+.floorplan-desk-surface {
+  position:absolute;
+  left:11%;
+  right:11%;
+  top:7px;
+  height:25px;
+  border:1px solid #3d7585;
+  border-radius:3px;
+  background:linear-gradient(180deg,#1b3d49,#0d242f);
+  box-shadow:inset 0 0 7px rgba(94,216,243,.06);
+}
+.floorplan-monitor {
+  position:absolute;
+  z-index:1;
+  width:29px;
+  height:15px;
+  left:calc(50% - 14px);
+  top:11px;
+  display:flex;
+  flex-direction:column;
+  gap:2px;
+  padding:3px;
+  border:1px solid #4a9daf;
+  border-radius:2px;
+  background:#031017;
+}
+.floorplan-monitor i { height:1px; width:85%; background:#2689a0; }
+.floorplan-monitor i:nth-child(2) { width:55%; }
+.floorplan-monitor i:nth-child(3) { width:72%; }
+.floorplan-chair {
+  position:absolute;
+  z-index:1;
+  width:15px;
+  height:8px;
+  left:calc(50% - 7px);
+  bottom:1px;
+  border:1px solid #477a88;
+  border-radius:5px 5px 2px 2px;
+  background:#173440;
+}
+.floorplan-avatar {
+  position:absolute;
+  z-index:2;
+  width:8px;
+  height:8px;
+  left:calc(50% - 3px);
+  bottom:8px;
+  border:1px solid #a8d9e0;
+  border-radius:50%;
+  background:#8caeb7;
+  box-shadow:0 0 3px rgba(140,220,232,.17);
+}
+.floorplan-avatar::after {
+  content:"";
+  position:absolute;
+  width:11px;
+  height:6px;
+  top:6px;
+  left:-3px;
+  border:1px solid #5b8e9b;
+  border-radius:5px 5px 2px 2px;
+  background:#2a5865;
+}
+.floorplan-status-led {
+  position:absolute;
+  z-index:4;
+  right:5px;
+  top:5px;
+  width:5px;
+  height:5px;
+  border-radius:50%;
+  background:#73828a;
+  box-shadow:none;
+}
+.floorplan-model-title {
+  display:block;
+  min-width:0;
+}
+.floorplan-model-title strong {
+  display:block;
+  color:#c9f4fc;
+  font-size:8px;
+  line-height:1.35;
+  overflow-wrap:anywhere;
+}
+.floorplan-provider {
+  display:block;
+  margin-top:2px;
+  color:#4d8997;
+  font-size:7px;
+  overflow-wrap:anywhere;
+}
+.floorplan-model-status {
+  display:flex;
+  align-items:flex-start;
+  gap:4px;
+  margin-top:5px;
+  color:#7ba7b1;
+  font-size:6px;
+  line-height:1.35;
+  overflow-wrap:anywhere;
+}
+.floorplan-model-status i {
+  flex:0 0 auto;
+  width:5px;
+  height:5px;
+  margin-top:1px;
+  border-radius:50%;
+  background:#35cce7;
+}
+.floorplan-model-roles {
+  display:block;
+  margin-top:4px;
+  padding-top:4px;
+  border-top:1px solid rgba(35,118,137,.16);
+  color:#62828b;
+  font-size:6px;
+  line-height:1.35;
+  overflow-wrap:anywhere;
+}
+.floorplan-model-station[data-model-state="working"] {
+  border-color:rgba(50,220,139,.52);
+  box-shadow:inset 0 0 9px rgba(38,196,116,.04);
+}
+.floorplan-model-station[data-model-state="working"] .floorplan-status-led,
+.floorplan-model-station[data-model-state="working"] .floorplan-model-status i {
+  background:#38e198;
+  box-shadow:0 0 8px rgba(56,225,152,.72);
+  animation: floorplan-live-pulse 1.4s ease-in-out infinite;
+}
+.floorplan-model-station[data-model-state="working"] .floorplan-monitor i:first-child { background:#4ce9a2; }
+.floorplan-model-station[data-model-state="ready"] .floorplan-status-led,
+.floorplan-model-station[data-model-state="ready"] .floorplan-model-status i { background:#35cce7; box-shadow:0 0 7px rgba(53,204,231,.4); }
+.floorplan-model-station[data-model-state="busy"] .floorplan-status-led,
+.floorplan-model-station[data-model-state="busy"] .floorplan-model-status i { background:#e9b94f; box-shadow:0 0 7px rgba(233,185,79,.35); }
+.floorplan-model-station[data-model-state="unavailable"] .floorplan-status-led,
+.floorplan-model-station[data-model-state="unavailable"] .floorplan-model-status i { background:#ff596b; box-shadow:0 0 7px rgba(255,89,107,.35); }
+.floorplan-model-station[data-model-state="unknown"] .floorplan-status-led,
+.floorplan-model-station[data-model-state="unknown"] .floorplan-model-status i { background:#7c8990; box-shadow:none; }
+.floorplan-empty-room {
+  grid-column:1/-1;
+  padding:15px 8px;
+  border:1px dashed rgba(39,150,170,.2);
+  color:#628b95;
+  font-size:8px;
+  line-height:1.5;
+}
+.floorplan-central-corridor { position:relative; }
+.floorplan-extra-grid {
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:7px;
+  margin-top:7px;
+}
+.floorplan-extra-department,
+.floorplan-unassigned-room { min-width:0; }
+.floorplan-entrance {
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:10px;
+  padding:9px 4px 2px;
+  color:#49cce7;
+  font-size:7px;
+  letter-spacing:.19em;
+  text-align:center;
+}
+.floorplan-entrance span {
+  width:18%;
+  height:1px;
+  background:linear-gradient(90deg,transparent,rgba(53,198,225,.58));
+}
+.floorplan-entrance span:last-child { background:linear-gradient(90deg,rgba(53,198,225,.58),transparent); }
+.floorplan-footnote {
+  padding:10px 3px 5px;
+  color:#628995;
+  font-size:8px;
+  line-height:1.55;
+}
+.floorplan-freshness {
+  padding:7px 3px 1px;
+  border-top:1px solid rgba(33,129,151,.16);
+  color:#4e8491;
+  font-size:8px;
+}
+.floorplan-inspector {
+  position:sticky;
+  top:78px;
+  max-height:calc(100vh - 100px);
+  overflow:auto;
+  padding:14px;
+  border-color:rgba(29,181,211,.32);
+  background:#03090d;
+}
+.floorplan-inspector .roadmap-inspector-header {
+  border-bottom-color:rgba(38,165,190,.24);
+}
+.floorplan-inspector .roadmap-inspector-header h2 {
+  color:#d0f7ff;
+  font-size:14px;
+}
+.floorplan-inspector .roadmap-inspector-body { padding-top:10px; }
+.model-inspector-status {
+  display:flex;
+  align-items:center;
+  gap:7px;
+  padding:9px;
+  margin-bottom:10px;
+  border:1px solid rgba(40,146,169,.3);
+  border-radius:4px;
+  background:#06161d;
+  color:#83bdc9;
+}
+.model-inspector-status > i {
+  flex:0 0 auto;
+  width:7px;
+  height:7px;
+  border-radius:50%;
+  background:#74878d;
+}
+.model-inspector-status strong { flex:1; font-size:8px; line-height:1.5; }
+.model-inspector-status span { color:#5c95a1; font-size:7px; white-space:nowrap; }
+.model-inspector-status[data-model-state="working"] {
+  border-color:rgba(54,221,147,.44);
+  color:#baffd8;
+}
+.model-inspector-status[data-model-state="working"] > i { background:#3ade96; box-shadow:0 0 9px rgba(58,222,150,.6); }
+.model-inspector-status[data-model-state="busy"] { border-color:rgba(233,185,79,.36); color:#f0d392; }
+.model-inspector-status[data-model-state="busy"] > i { background:#e9b94f; }
+.model-inspector-status[data-model-state="unavailable"] { border-color:rgba(255,89,107,.36); color:#ffa6b0; }
+.model-inspector-status[data-model-state="unavailable"] > i { background:#ff596b; }
+.model-inspector-status[data-model-state="ready"] > i { background:#35cce7; box-shadow:0 0 7px rgba(53,204,231,.36); }
+.model-inspector-grid {
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:6px;
+}
+.model-inspector-cell {
+  min-width:0;
+  padding:9px;
+  border:1px solid rgba(37,125,145,.22);
+  border-radius:4px;
+  background:#041117;
+}
+.model-inspector-cell > span {
+  display:block;
+  color:#4e98a8;
+  font-size:7px;
+  letter-spacing:.12em;
+}
+.model-inspector-cell > strong {
+  display:block;
+  margin-top:5px;
+  color:#c3f5ff;
+  font-size:10px;
+  line-height:1.5;
+  overflow-wrap:anywhere;
+}
+.model-inspector-cell > p,
+.model-inspector-cell .model-work-row p {
+  margin:6px 0 0;
+  color:#7197a0;
+  font-size:8px;
+  line-height:1.55;
+  overflow-wrap:anywhere;
+}
+.model-inspector-cell .model-work-row {
+  padding:7px 0;
+  border-bottom:1px solid rgba(35,119,137,.18);
+}
+.model-inspector-cell .model-work-row:last-child { border-bottom:0; }
+.model-work-row strong { color:#a9e9f5; font-size:8px; line-height:1.5; overflow-wrap:anywhere; }
+.model-work-row small { display:block; margin-top:4px; color:#4e8491; font-size:7px; line-height:1.5; }
+.model-inspector-cell.model-inspector-wide { grid-column:1/-1; }
+.floorplan-inspector .roadmap-delivery-section { border-top-color:rgba(38,165,190,.24); }
+.floorplan-inspector .roadmap-delivery-item { border-color:rgba(37,125,145,.22); background:#041117; }
+.floorplan-inspector .roadmap-delivery-item strong { color:#b6eef9; }
+.floorplan-inspector .roadmap-delivery-item span { color:#5f8993; }
+@keyframes floorplan-live-pulse {
+  0%,100% { opacity:.72; }
+  50% { opacity:1; }
+}
+@media (max-width: 1350px) {
+  .roadmap-live-floorplan { grid-template-columns:minmax(0,1.55fr) minmax(290px,.85fr); }
+  .floorplan-top-row { grid-template-columns:minmax(0,1fr) minmax(160px,.9fr) minmax(0,1fr); }
+  .floorplan-room { padding:6px; }
+  .floorplan-model-grid { gap:4px; }
+  .floorplan-model-station { padding:4px; }
+}
+@media (max-width: 980px) {
+  .roadmap-live-floorplan { grid-template-columns:minmax(0,1fr); }
+  .floorplan-inspector { position:relative; top:auto; max-height:none; }
+  .roadmap-model-summary-row { grid-template-columns:repeat(2,minmax(0,1fr)); }
+}
+@media (max-width: 640px) {
+  .floorplan-top-row { grid-template-columns:minmax(0,1fr); }
+  .floorplan-director-room { order:-1; }
+  .floorplan-body-zones { grid-template-columns:minmax(0,1fr); grid-template-rows:auto; }
+  #roadmap-room-data,
+  #roadmap-room-quality,
+  #roadmap-room-operations,
+  #roadmap-room-security,
+  #roadmap-room-learning,
+  #roadmap-room-tooling {
+    grid-column:1 !important;
+    grid-row:auto !important;
+  }
+  .floorplan-central-corridor {
+    grid-column:1;
+    grid-row:auto;
+    flex-direction:row;
+    min-height:26px;
+    padding:3px 8px;
+  }
+  .floorplan-central-corridor > span { writing-mode:initial; transform:none; }
+  .floorplan-routing-line { flex-direction:row; gap:5px; }
+  .floorplan-entrance { letter-spacing:.08em; font-size:6px; }
+  .floorplan-extra-grid { grid-template-columns:minmax(0,1fr); }
+  .floorplan-blueprint-title { align-items:flex-start; flex-direction:column; }
+  .model-inspector-grid { grid-template-columns:minmax(0,1fr); }
+  .model-inspector-cell.model-inspector-wide { grid-column:auto; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .floorplan-model-station[data-model-state="working"] .floorplan-status-led,
+  .floorplan-model-station[data-model-state="working"] .floorplan-model-status i {
+    animation:none !important;
+  }
+}

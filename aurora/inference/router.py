@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 import logging
+from datetime import datetime, timezone
+from threading import RLock
 from typing import TYPE_CHECKING, Mapping, Sequence
 
 if TYPE_CHECKING:
@@ -57,6 +59,45 @@ class ModelRouter:
             self.model_registry = ModelRegistry.from_specs(self.models)
         else:
             self.models = list(self.model_registry.models)
+        self._active_execution_lock = RLock()
+        self._active_executions: dict[str, dict[str, object]] = {}
+
+    def active_executions(self) -> tuple[dict[str, object], ...]:
+        """Return a secret-free snapshot of model calls executing right now."""
+        with self._active_execution_lock:
+            records = [
+                dict(record)
+                for record in self._active_executions.values()
+            ]
+        return tuple(sorted(records, key=lambda record: str(record.get("started_at", ""))))
+
+    def _begin_active_execution(
+        self,
+        *,
+        execution_id: str,
+        spec: ModelSpec,
+        request: InferenceRequest,
+    ) -> None:
+        metadata = request.metadata if isinstance(request.metadata, Mapping) else {}
+        record: dict[str, object] = {
+            "execution_id": execution_id,
+            "request_id": request.request_id,
+            "model_id": spec.id,
+            "provider": spec.provider,
+            "role": metadata.get("role"),
+            "task_id": metadata.get("task_id"),
+            "mission_id": metadata.get("mission_id"),
+            "project_id": metadata.get("project_id"),
+            "task_type": metadata.get("task_type"),
+            "started_at": datetime.now(timezone.utc).isoformat(),
+            "status": "running",
+        }
+        with self._active_execution_lock:
+            self._active_executions[execution_id] = record
+
+    def _end_active_execution(self, execution_id: str) -> None:
+        with self._active_execution_lock:
+            self._active_executions.pop(execution_id, None)
 
     def _registered_models(self) -> list[ModelSpec]:
         if self.model_registry is not None:
@@ -410,6 +451,11 @@ class ModelRouter:
             else:
                 import time
                 started = time.monotonic()
+                self._begin_active_execution(
+                    execution_id=execution_id,
+                    spec=spec,
+                    request=routing_request,
+                )
                 try:
                     response = provider.generate(
                         routing_request,
@@ -470,6 +516,8 @@ class ModelRouter:
                         routing_factors=dict(decision.factors),
                         routing_candidates=decision.candidates,
                     )
+                finally:
+                    self._end_active_execution(execution_id)
 
             remaining = [
                 model_id

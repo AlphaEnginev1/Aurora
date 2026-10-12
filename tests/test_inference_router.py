@@ -239,3 +239,75 @@ def test_router_retries_next_ranked_model_after_provider_failure():
     assert response.content == "ok"
     assert response.model == "model/b"
     assert attempts == ["model/a", "model/b"]
+
+
+
+def test_router_exposes_only_live_inference_executions_and_clears_them():
+    from threading import Event, Thread
+
+    from aurora.inference.models import InferenceResponse
+    from aurora.inference.providers.registry import ProviderRegistry, ProviderSpec
+
+    entered = Event()
+    release = Event()
+    outcomes = []
+
+    class BlockingProvider:
+        provider_id = "fake"
+
+        def __init__(self, spec):
+            self.spec = spec
+
+        def generate(self, request, *, selected_model=None, execution_id=""):
+            entered.set()
+            if not release.wait(timeout=3):
+                raise RuntimeError("test provider was not released")
+            return InferenceResponse(
+                model=selected_model,
+                provider="fake",
+                content="finished",
+                raw={},
+                request_id=request.request_id,
+                execution_id=execution_id,
+                selected_model=selected_model,
+            )
+
+    registry = ProviderRegistry((
+        ProviderSpec("fake", "Fake", ("chat", "reasoning"), True, BlockingProvider),
+    ))
+    router = ModelRouter(
+        [ModelSpec("model/live", "fake", "https://example.invalid", capabilities=("reasoning",))],
+        provider_registry=registry,
+    )
+
+    def execute():
+        try:
+            outcomes.append(router.generate(
+                InferenceRequest(
+                    messages=[{"role": "user", "content": "test"}],
+                    metadata={"role": "researcher", "task_id": "task-live-1"},
+                ),
+                capability="reasoning",
+            ))
+        except Exception as exc:
+            outcomes.append(exc)
+
+    worker = Thread(target=execute, daemon=True)
+    worker.start()
+    try:
+        assert entered.wait(timeout=2), "provider call did not start"
+        active = router.active_executions()
+        assert len(active) == 1
+        assert active[0]["model_id"] == "model/live"
+        assert active[0]["provider"] == "fake"
+        assert active[0]["role"] == "researcher"
+        assert active[0]["task_id"] == "task-live-1"
+        assert active[0]["status"] == "running"
+    finally:
+        release.set()
+        worker.join(timeout=3)
+
+    assert not worker.is_alive()
+    assert len(outcomes) == 1
+    assert isinstance(outcomes[0], InferenceResponse)
+    assert router.active_executions() == ()

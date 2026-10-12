@@ -775,6 +775,7 @@ def build_director_runtime(*, inference_policy_path: str | Path, autonomy_policy
         skill_registry=service.planner.skill_registry,
         model_registry=service.planner.router.model_registry,
         provider_registry=service.planner.router.provider_registry,
+        model_router=service.planner.router,
         task_store=store,
         mission_memory=memory,
         model_performance=ModelPerformanceStore(runtime_root/"model-performance.db"),
