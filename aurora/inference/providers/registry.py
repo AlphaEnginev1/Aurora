@@ -129,6 +129,8 @@ def default_provider_registry(
     network_gateway=None,
     anthropic_api_key: str | None = None,
     include_external: bool = False,
+    openrouter_api_key: str | None = None,
+    include_openrouter: bool = False,
 ) -> ProviderRegistry:
     """Build the canonical provider registry without coupling the router to vendors."""
 
@@ -144,6 +146,14 @@ def default_provider_registry(
         from .anthropic_api import AnthropicAPIProvider
         return AnthropicAPIProvider(model, api_key=anthropic_api_key)
 
+    def openrouter_factory(model: ModelSpec) -> InferenceProvider:
+        from .openai_api import OpenAIAPIProvider
+        return OpenAIAPIProvider(
+            model,
+            api_key=openrouter_api_key,
+            provider_id="openrouter",
+        )
+
     providers = [
         ProviderSpec(
             "nvidia_api",
@@ -154,6 +164,16 @@ def default_provider_registry(
             discovery_factory=lambda: _nvidia_discovery_factory(api_key=nvidia_api_key, gateway=network_gateway),
         ),
     ]
+    if include_openrouter:
+        providers.append(
+            ProviderSpec(
+                "openrouter",
+                "OpenRouter Free Router",
+                ("chat", "reasoning"),
+                True,
+                openrouter_factory,
+            )
+        )
     if include_external:
         providers.extend(
             [
