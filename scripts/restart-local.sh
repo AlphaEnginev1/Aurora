@@ -4,41 +4,63 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 PYTHON="$ROOT/.venv/bin/python"
-PID_FILE="$ROOT/.aurora-runtime/aurora.pid"
-EXPECTED="$PYTHON -m aurora.orchestration.daemon --dashboard"
+RUNTIME="$ROOT/.aurora-runtime"
+[[ -x "$PYTHON" ]] || { echo "Aurora virtual environment is missing: $PYTHON" >&2; exit 1; }
+mkdir -p "$RUNTIME"
 
-if [[ -f "$PID_FILE" ]]; then
-  pid="$(cat "$PID_FILE" 2>/dev/null || true)"
-  if [[ ! "$pid" =~ ^[0-9]+$ ]]; then
-    echo "Aurora PID file is invalid; refusing to stop any process." >&2
-    exit 1
-  fi
-  if kill -0 "$pid" 2>/dev/null; then
-    if [[ ! -r "/proc/$pid/cmdline" ]]; then
-      echo "Cannot verify the process in Aurora's PID file; refusing to stop it." >&2
-      exit 1
-    fi
-    actual="$(tr '\0' ' ' < "/proc/$pid/cmdline")"
-    if [[ "$actual" != "$EXPECTED"* ]]; then
-      echo "PID $pid does not match Aurora's dashboard daemon; refusing to stop it." >&2
-      exit 1
-    fi
-    echo "Deteniendo de forma controlada Aurora (PID $pid)..."
-    kill -TERM "$pid"
-    stopped=0
-    for _ in $(seq 1 120); do
-      if ! kill -0 "$pid" 2>/dev/null || [[ ! -s "/proc/$pid/cmdline" ]]; then
-        stopped=1
-        break
-      fi
-      sleep 0.1
-    done
-    if [[ "$stopped" -ne 1 ]]; then
-      echo "Aurora no terminó dentro del plazo; no se iniciará otra instancia." >&2
-      exit 1
-    fi
-  fi
-  rm -f -- "$PID_FILE"
-fi
+# Find only processes launched with this repository's venv and exact Aurora module.
+# This also catches orphaned instances missing from stale PID files.
+find_module_pids() {
+  "$PYTHON" - "$PYTHON" "$1" "$2" <<'PY'
+import pathlib
+import sys
 
+executable, module, required_arg = sys.argv[1:4]
+for entry in pathlib.Path("/proc").iterdir():
+    if not entry.name.isdigit():
+        continue
+    try:
+        args = [item.decode(errors="replace") for item in (entry / "cmdline").read_bytes().split(b"\0") if item]
+    except (OSError, PermissionError):
+        continue
+    if len(args) < 3 or args[0] != executable or args[1:3] != ["-m", module]:
+        continue
+    if required_arg and required_arg not in args[3:]:
+        continue
+    print(entry.name)
+PY
+}
+
+stop_module() {
+  local module="$1"
+  local required_arg="$2"
+  local pid
+  local remaining
+
+  mapfile -t pids < <(find_module_pids "$module" "$required_arg")
+  for pid in "${pids[@]}"; do
+    [[ "$pid" =~ ^[0-9]+$ ]] || continue
+    echo "Deteniendo instancia Aurora: $module (PID $pid)"
+    kill -TERM "$pid" 2>/dev/null || true
+  done
+
+  for _ in $(seq 1 120); do
+    remaining="$(find_module_pids "$module" "$required_arg")"
+    if [[ -z "$remaining" ]]; then
+      return 0
+    fi
+    sleep 0.1
+  done
+
+  remaining="$(find_module_pids "$module" "$required_arg")"
+  if [[ -n "$remaining" ]]; then
+    echo "Estas instancias no terminaron; no se iniciará otro proceso: $module (PID/s $remaining)" >&2
+    return 1
+  fi
+}
+
+stop_module "aurora.orchestration.daemon" "--dashboard"
+stop_module "aurora.autonomy.egress_proxy_daemon" ""
+
+rm -f -- "$RUNTIME/aurora.pid" "$RUNTIME/egress-proxy.pid"
 exec bash "$ROOT/scripts/launch-local.sh"
