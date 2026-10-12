@@ -879,14 +879,49 @@ async function testProvider(provider) {
     );
   }
 
+  function setChatStatus(message, error) {
+    const target = $("avatar-transcript");
+    if (target) {
+      target.textContent = message;
+      target.classList.toggle("error", !!error);
+    }
+    if (error && $("settings-message")) showSettingsMessage(message, true);
+  }
+
+  function renderAttachmentList() {
+    const target = $("attachment-list");
+    if (!target) return;
+    target.hidden = !state.pendingAttachments.length;
+    target.innerHTML = state.pendingAttachments.map(function (item, index) {
+      return '<div class="attachment-chip" title="' + esc(item.name) + '">' +
+        '<span aria-hidden="true">▤</span><span class="attachment-chip-name">' + esc(item.name) + '</span>' +
+        '<button class="attachment-chip-remove" type="button" data-remove-attachment="' + index + '" aria-label="Remove ' + esc(item.name) + '" title="Remove attachment">×</button></div>';
+    }).join("");
+    target.querySelectorAll("[data-remove-attachment]").forEach(function (button) {
+      button.addEventListener("click", function () {
+        const index = Number(button.getAttribute("data-remove-attachment"));
+        if (!Number.isInteger(index) || index < 0 || index >= state.pendingAttachments.length) return;
+        state.pendingAttachments.splice(index, 1);
+        renderAttachmentList();
+        setChatStatus(state.pendingAttachments.length
+          ? state.pendingAttachments.length + " attachment(s) ready."
+          : "Conversation ready. Your messages go to Aurora Director.", false);
+      });
+    });
+  }
+
   async function uploadAurora(files) {
     const selected = Array.from(files || []);
     if (!selected.length) return;
-    const button = $("upload-aurora");
+    const button = $("attach-file");
     button.disabled = true;
-    showSettingsMessage("Uploading " + selected.length + " file(s) to Aurora…", false);
+    setChatStatus("Uploading " + selected.length + " attachment(s) to Aurora…", false);
     try {
       for (const file of selected) {
+        if (!file.size) throw new Error(file.name + " is empty.");
+        if (file.size > 25 * 1024 * 1024) {
+          throw new Error(file.name + " exceeds the 25 MiB per-file limit.");
+        }
         const response = await fetch(state.apiBase + "/artifacts", {
           method: "POST",
           headers: {
@@ -896,12 +931,20 @@ async function testProvider(provider) {
           },
           body: await file.arrayBuffer()
         });
-        const data = await response.json();
-        if (!response.ok) throw new Error(data && data.error ? data.error : "upload failed");
+        let data = {};
+        try { data = await response.json(); } catch (_) {}
+        if (!response.ok) throw new Error(data && data.error ? data.error : "upload failed for " + file.name);
+        state.pendingAttachments.push({
+          name: file.name,
+          size: file.size,
+          mission_id: data.mission_id || "",
+          artifact: data.artifact || null
+        });
       }
-      showSettingsMessage("Uploaded " + selected.length + " file(s) to Aurora.", false);
+      renderAttachmentList();
+      setChatStatus(state.pendingAttachments.length + " attachment(s) ready. They'll be referenced in the next message.", false);
     } catch (error) {
-      showSettingsMessage("Upload failed: " + error.message, true);
+      setChatStatus("Attachment upload failed: " + error.message, true);
     } finally {
       button.disabled = false;
       $("aurora-file-input").value = "";
@@ -1036,12 +1079,6 @@ async function testProvider(provider) {
   function setupSettings() {
     $("settings-save").addEventListener("click", function () {
       saveSettings();
-    });
-    $("upload-aurora").addEventListener("click", function () {
-      $("aurora-file-input").click();
-    });
-    $("aurora-file-input").addEventListener("change", function () {
-      uploadAurora($("aurora-file-input").files);
     });
     $("update-aurora").addEventListener("click", function () {
       updateAurora();
