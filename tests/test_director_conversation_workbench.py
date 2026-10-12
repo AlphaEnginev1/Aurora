@@ -1,5 +1,5 @@
-from types import SimpleNamespace
 from pathlib import Path
+from types import SimpleNamespace
 
 from aurora.orchestration.director_conversation import DirectorConversationService
 from aurora.orchestration.director_provider import DirectorModelResponse, DirectorToolCall
@@ -141,3 +141,37 @@ def test_conversation_can_use_shared_workbench_directly(tmp_path: Path):
     assert workbench.requests[0].mission_id.startswith("conversation:")
     assert ("director_conversation", ("workbench",)) in provider.calls
     assert ("director_conversation_result", ()) in provider.calls
+
+
+def test_mission_evidence_includes_durable_identity_and_planning_metadata():
+    task = SimpleNamespace(
+        task=SimpleNamespace(
+            task_id="task-readonly-1",
+            role="operator",
+            capability="workbench:census",
+        ),
+        status=SimpleNamespace(value="succeeded"),
+        error=None,
+    )
+    plan = SimpleNamespace(
+        objective="Verify governed runtime",
+        model="nvidia/test-model",
+        provider="nvidia_api",
+        execution_id="planning-exec-123",
+    )
+    mission = SimpleNamespace(
+        submission=SimpleNamespace(mission_id="mission-durable-123", plan=plan),
+        status=SimpleNamespace(value="succeeded"),
+        tasks=(task,),
+    )
+
+    evidence = DirectorConversationService._mission_evidence(mission)
+
+    assert evidence["mission_id"] == "mission-durable-123"
+    assert evidence["status"] == "succeeded"
+    assert evidence["objective"] == "Verify governed runtime"
+    assert evidence["model"] == "nvidia/test-model"
+    assert evidence["provider"] == "nvidia_api"
+    assert evidence["planning_execution_id"] == "planning-exec-123"
+    assert evidence["task_count"] == 1
+    assert evidence["tasks"][0]["task_id"] == "task-readonly-1"
