@@ -1,24 +1,13 @@
-name: Live Free API Provider Inference
+name: Live OpenRouter Free Inference
 
 on:
   workflow_dispatch:
-    inputs:
-      provider:
-        description: "Provider to test with real inference"
-        required: true
-        type: choice
-        options:
-          - openrouter
-          - groq
-          - gemini
-          - cloudflare
-          - mistral
 
 permissions:
   contents: read
 
 jobs:
-  live-inference:
+  live-openrouter:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -32,20 +21,10 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e . pytest
-      - name: Run one real provider inference
+      - name: Run real OpenRouter free inference
         env:
-          AURORA_FREE_API_LIVE: "1"
-          AURORA_FREE_API_PROVIDER: ${{ inputs.provider }}
+          AURORA_OPENROUTER_LIVE: "1"
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           AURORA_INFERENCE_COST_POLICY: "free_only"
           AURORA_FREE_MODEL_POLICY: "config/free-model-policy.json"
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          AURORA_GROQ_FREE_TIER_CONFIRMED: ${{ vars.AURORA_GROQ_FREE_TIER_CONFIRMED }}
-          AURORA_GEMINI_FREE_TIER_CONFIRMED: ${{ vars.AURORA_GEMINI_FREE_TIER_CONFIRMED }}
-          AURORA_CLOUDFLARE_FREE_TIER_CONFIRMED: ${{ vars.AURORA_CLOUDFLARE_FREE_TIER_CONFIRMED }}
-          AURORA_MISTRAL_FREE_TIER_CONFIRMED: ${{ vars.AURORA_MISTRAL_FREE_TIER_CONFIRMED }}
-        run: python -m pytest -q -s tests/e2e/test_live_free_api_provider.py -m live
+        run: python -m pytest -q -s tests/e2e/test_live_openrouter_inference.py -m live
