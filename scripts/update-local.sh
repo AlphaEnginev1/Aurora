@@ -97,7 +97,13 @@ dashboard_process_matches() {
   [[ "${argv[3]}" == "--dashboard" ]]
 }
 
-if ! bash "$ROOT/scripts/restart-local.sh"; then
+# Keep the updater lock in this process only. The launched daemon is long-lived;
+# if it inherits fd 9, it can keep update.lock locked after this script exits and
+# make future update attempts silently return before writing a new status.
+if ! (
+  exec 9>&-
+  bash "$ROOT/scripts/restart-local.sh"
+); then
   write_status "failed" "$updated" "Aurora restart failed; inspect .aurora-runtime/update.log"
   exit 1
 fi
