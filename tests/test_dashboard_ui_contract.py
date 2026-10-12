@@ -97,7 +97,17 @@ def test_home_chat_attachments_and_live_roadmap_office_contract():
     assert 'id="roadmap-office-grid"' in html
     assert 'id="roadmap-inspector-body"' in html
     assert 'id="roadmap-mailbox-slot"' in html
-    assert ".office-agent-card[data-status=\"working\"]" in css
+    assert 'id="roadmap-house"' in html
+    assert 'id="roadmap-room-research"' in html
+    assert 'id="roadmap-room-engineering"' in html
+    assert 'id="roadmap-director-models"' in html
+    assert 'id="roadmap-model-count"' in html
+    assert ".floorplan-model-station[data-model-state=\"working\"]" in css
+    assert ".floorplan-central-corridor" in css
+    assert "roadmapSelectedModelId" in js
+    assert "roadmapModelCatalog" in js
+    assert "model_activity" in js
+    assert "active_executions" in js
     assert "loadRoadmapDetails" in js
     assert 'state.apiBase + "/agents/"' in js
     assert "current_tasks" in js
