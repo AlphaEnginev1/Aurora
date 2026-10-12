@@ -303,3 +303,33 @@ def test_explicit_mission_rejects_workbench_writes_before_runner_invocation(tmp_
         assert "read-only Workbench operations" in str(exc)
     else:
         raise AssertionError("explicit task graph must reject write capabilities")
+
+
+def test_mission_evidence_preserves_failed_or_blocked_durable_terminal_state():
+    task = SimpleNamespace(
+        task=SimpleNamespace(
+            task_id="task-1",
+            role="operator",
+            capability="workbench:census",
+            depends_on=(),
+        ),
+        status=SimpleNamespace(value="succeeded"),
+        error=None,
+        capability_result=None,
+        model_result=None,
+    )
+    plan = SimpleNamespace(
+        objective="Validate durable terminal state",
+        model="nvidia/test-model",
+        provider="nvidia_api",
+        execution_id="planning-exec",
+    )
+    for terminal_state in ("failed", "blocked"):
+        mission = SimpleNamespace(
+            submission=SimpleNamespace(mission_id=f"mission-{terminal_state}", plan=plan),
+            status=SimpleNamespace(value=terminal_state),
+            tasks=(task,),
+            events=(),
+        )
+        evidence = DirectorConversationService._mission_evidence(mission)
+        assert evidence["status"] == terminal_state
