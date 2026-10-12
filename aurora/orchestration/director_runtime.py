@@ -983,7 +983,11 @@ class DirectorRuntime:
                 source="director",
                 kind="mission_objective",
                 content=submission.plan.objective,
-                metadata={"model": submission.plan.model},
+                metadata={
+                    "model": submission.plan.model,
+                    "provider": submission.plan.provider,
+                    "planning_execution_id": submission.plan.execution_id,
+                },
             )
             self.memory.append(
                 mission_id=submission.mission_id,
