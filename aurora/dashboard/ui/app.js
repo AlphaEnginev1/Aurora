@@ -1223,14 +1223,61 @@ async function testProvider(provider) {
     $("chat-history").setAttribute("aria-hidden", "true");
   }
 
+  function appendChatMessage(role, text, files, extraClass) {
+    const target = $("chat-messages");
+    if (!target) return null;
+    const welcome = $("chat-welcome");
+    if (welcome) welcome.remove();
+    const item = document.createElement("article");
+    item.className = "chat-message " + role + (extraClass ? " " + extraClass : "");
+    const avatar = document.createElement("div");
+    avatar.className = "chat-message-avatar";
+    avatar.setAttribute("aria-hidden", "true");
+    avatar.textContent = role === "user" ? "Y" : "✦";
+    const body = document.createElement("div");
+    body.className = "chat-message-body";
+    body.textContent = text;
+    item.appendChild(avatar);
+    item.appendChild(body);
+    if (files && files.length) {
+      const fileList = document.createElement("div");
+      fileList.className = "chat-message-files";
+      files.forEach(function (file) {
+        const chip = document.createElement("span");
+        chip.className = "chat-message-file";
+        chip.textContent = "▤ " + file.name;
+        fileList.appendChild(chip);
+      });
+      body.appendChild(document.createElement("br"));
+      body.appendChild(fileList);
+    }
+    target.appendChild(item);
+    target.scrollTop = target.scrollHeight;
+    return item;
+  }
+
   async function sendConversationMessage(rawText) {
-    const content = String(rawText == null ? "" : rawText).trim();
-    if (!content || state.conversationInFlight) return;
+    const raw = String(rawText == null ? "" : rawText).trim();
+    const attachments = state.pendingAttachments.slice();
+    if ((!raw && !attachments.length) || state.conversationInFlight) return;
+
+    let content = raw || "Revisa los archivos adjuntos recibidos por Aurora y resume qué has podido extraer. Si no puedes acceder al contenido de algún archivo, indícalo explícitamente.";
+    if (attachments.length) {
+      content += "\n\nArchivos adjuntos recibidos mediante la entrada de artefactos de Aurora:";
+      attachments.forEach(function (item) {
+        content += "\n- " + item.name + (item.mission_id ? " (mission_id=" + item.mission_id + ")" : "");
+      });
+      content += "\nTen en cuenta estos artefactos para responder. No afirmes haber leído un archivo si no puedes acceder realmente a su contenido.";
+    }
+
     state.conversationInFlight = true;
     const send = $("director-send");
     send.disabled = true;
+    $("attach-file").disabled = true;
     if (state.avatarVoice) state.avatarVoice.setThinking();
-    $("avatar-transcript").textContent = "Aurora is thinking…";
+    setChatStatus("Aurora is thinking…", false);
+    appendChatMessage("user", raw || "Please review the attached files.", attachments);
+    const thinking = appendChatMessage("assistant", "Thinking…", [], "is-thinking");
 
     try {
       const sessionId = await ensureConversationSession();
@@ -1253,28 +1300,44 @@ async function testProvider(provider) {
       const data = await response.json();
       if (!data || typeof data.response_text !== "string") throw new Error("invalid Director response contract");
       $("director-message").value = "";
-      $("avatar-transcript").textContent = data.response_text;
+      $("director-message").style.height = "auto";
+      state.pendingAttachments = [];
+      renderAttachmentList();
+      setChatStatus("Aurora replied.", false);
 
       if (state.avatarVoice && state.avatarVoice.capabilities.speech_output) {
         try {
           state.avatarVoice.speak(data.response_text);
         } catch (_) {
-          // Voice output is optional; preserve the authoritative text response.
           state.avatarVoice.setIdle();
         }
       } else if (state.avatarVoice) {
         state.avatarVoice.setIdle();
       }
+      await loadConversationHistory();
     } catch (error) {
-      $("avatar-transcript").textContent = "Director conversation unavailable: " + error.message;
+      if (thinking && thinking.parentNode) thinking.remove();
+      appendChatMessage("assistant", "Director conversation unavailable: " + error.message);
+      setChatStatus("Director conversation failed: " + error.message, true);
       if (state.avatarVoice) state.avatarVoice.setDisconnected();
     } finally {
       state.conversationInFlight = false;
       send.disabled = false;
+      $("attach-file").disabled = false;
     }
   }
-
   function setupConversation() {
+    $("attach-file").addEventListener("click", function () {
+      $("aurora-file-input").click();
+    });
+    $("aurora-file-input").addEventListener("change", function () {
+      uploadAurora($("aurora-file-input").files);
+    });
+    $("director-message").addEventListener("input", function (event) {
+      const target = event.currentTarget;
+      target.style.height = "auto";
+      target.style.height = Math.min(target.scrollHeight, 180) + "px";
+    });
     $("director-send").addEventListener("click", function () {
       sendConversationMessage($("director-message").value);
     });
@@ -1384,8 +1447,10 @@ async function testProvider(provider) {
   setupAvatarVoice();
   setupSettings();
 
-  ensureConversationSession().catch(function (error) {
-    $("avatar-transcript").textContent = "Conversation service unavailable: " + error.message;
+  ensureConversationSession().then(function () {
+    return loadConversationHistory();
+  }).catch(function (error) {
+    setChatStatus("Conversation service unavailable: " + error.message, true);
     if (state.avatarVoice) state.avatarVoice.setDisconnected();
   });
 
