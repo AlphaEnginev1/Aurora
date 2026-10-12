@@ -102,12 +102,16 @@ def test_home_chat_attachments_and_live_roadmap_office_contract():
     assert 'id="roadmap-room-engineering"' in html
     assert 'id="roadmap-director-models"' in html
     assert 'id="roadmap-model-count"' in html
+    assert 'id="roadmap-candidate-count"' in html
+    assert ".floorplan-model-station[data-model-state=\"candidate\"]" in css
     assert ".floorplan-model-station[data-model-state=\"working\"]" in css
     assert ".floorplan-central-corridor" in css
     assert "roadmapSelectedModelId" in js
     assert "roadmapModelCatalog" in js
     assert "model_activity" in js
     assert "active_executions" in js
+    assert "model_candidates" in js
+    assert 'state.activeView === "roadmap"' in js
     assert "loadRoadmapDetails" in js
     assert 'state.apiBase + "/agents/"' in js
     assert "current_tasks" in js
