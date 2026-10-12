@@ -1334,7 +1334,8 @@ async function testProvider(provider) {
       $("director-message").style.height = "auto";
       state.pendingAttachments = [];
       renderAttachmentList();
-      setChatStatus("Aurora replied.", false);
+      $("avatar-transcript").textContent = data.response_text;
+      $("avatar-transcript").classList.remove("error");
 
       if (state.avatarVoice && state.avatarVoice.capabilities.speech_output) {
         try {
