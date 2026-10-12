@@ -133,5 +133,5 @@ def test_update_script_compares_dashboard_process_argv_without_flattening_proc_c
     assert '[[ "${argv[1]}" == "-m" ]]' in script
     assert '[[ "${argv[2]}" == "aurora.orchestration.daemon" ]]' in script
     assert '[[ "${argv[3]}" == "--dashboard" ]]' in script
-    assert 'cmdline="$(tr \'\\0\' \' \' < "/proc/$pid/cmdline")"' not in script
+    assert 'cmdline="$(tr' not in script
 
