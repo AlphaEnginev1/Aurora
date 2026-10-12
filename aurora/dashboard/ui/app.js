@@ -491,6 +491,12 @@
 
   function roadMapModelText(agent, profile, department) {
     const identity = safeObject(profile && profile.identity);
+    const resolvedPreferences = safeArray(profile && profile.model_preferences);
+    if (resolvedPreferences.length) {
+      const model = resolvedPreferences[0];
+      if (typeof model === "string") return model;
+      return model.model_id || model.id || "preferred model";
+    }
     const choices = safeArray(identity.model_preferences);
     if (choices.length) {
       const model = choices[0];
@@ -632,12 +638,16 @@
     const identity = safeObject(profile && profile.identity);
     const base = Object.keys(identity).length ? identity : fallback;
     const statusInfo = roadMapStatus(profile);
-    const prefs = safeArray(identity.model_preferences);
-    const selectedModel = prefs.length ? prefs[0] : null;
+    const prefs = safeArray(profile && profile.model_preferences);
+    const rawPrefs = safeArray(identity.model_preferences);
+    const selectedModel = prefs.length ? prefs[0] : (rawPrefs.length ? rawPrefs[0] : null);
     const selectedModelName = selectedModel
       ? (typeof selectedModel === "string" ? selectedModel : (selectedModel.model_id || selectedModel.id || "preferred model"))
       : (safeArray(base.model_preferences)[0] || "No model preference recorded");
-    const provider = selectedModel && typeof selectedModel === "object" ? (selectedModel.provider || "provider not specified") : "provider is not in the organization preference record";
+    const provider = selectedModel && typeof selectedModel === "object" ? (selectedModel.provider || "provider not specified") : "not supplied by the model registry";
+    const otherModelNames = prefs.slice(1).map(function (model) {
+      return typeof model === "string" ? model : (model.model_id || model.id || "model");
+    });
     const current = statusInfo.task;
     const taskRows = safeArray(profile && profile.current_tasks);
     const recent = safeArray(profile && profile.recent_executions);
@@ -651,7 +661,9 @@
         ';box-shadow:none"></i><strong>' + esc(statusInfo.label) + '</strong></div>' +
       '<div class="inspector-metric"><span>DEPARTMENT</span><strong>' + esc(departmentName) + '</strong><p>' + esc(base.department_mission || base.mission || "No mission description recorded.") + '</p></div>' +
       '<div class="inspector-metric"><span>PREFERRED MODEL</span><strong>' + esc(selectedModelName) + '</strong><p>Provider: ' + esc(provider) + '</p>' +
-        '<p>The current task schema may not expose the model finally selected for a single execution; this field shows the registered preference.</p></div>' +
+        (selectedModel && typeof selectedModel === "object" ? '<p>Registry: ' + esc(selectedModel.healthy ? "healthy" : "health not verified") + ' · available: ' + esc(String(selectedModel.available)) + '</p><p>Capabilities: ' + esc(safeArray(selectedModel.capabilities).join(", ") || "not listed") + '</p>' : '') +
+        (otherModelNames.length ? '<p>Other registered preferences: ' + esc(otherModelNames.join(", ")) + '</p>' : '') +
+        '<p>The task schema may not expose the model finally selected for a single execution; this field shows the registered preference.</p></div>' +
       '<div class="inspector-metric"><span>WHAT IT WORKS ON</span><strong>' + esc(current ? (current.objective || current.task_id || "Runtime task") : "No running task reported") + '</strong><p>' +
         esc(current ? ("Task " + (current.task_id || "—") + " · state " + (current.status || "unknown") + (current.mission_id ? " · mission " + current.mission_id : "")) : "Work status is read from Aurora's stored task records.") + '</p></div>' +
       '<div class="inspector-metric"><span>ACTIVE TASK RECORDS</span><strong>' + esc(taskRows.length) + '</strong><p>' +
