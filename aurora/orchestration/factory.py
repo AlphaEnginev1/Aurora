@@ -827,8 +827,23 @@ def build_director_runtime(*, inference_policy_path: str | Path, autonomy_policy
 
     # Route conversation missions through the canonical durable runtime so
     # each invocation retains a persistent mission ID and terminal task state.
-    def run_durable_conversation_mission(*, objective: str):
-        submission = runtime.submit_mission(objective=objective)
+    def run_durable_conversation_mission(
+        *,
+        objective: str,
+        tasks=None,
+        planning_model: str | None = None,
+        planning_provider: str | None = None,
+        planning_execution_id: str | None = None,
+    ):
+        submission_kwargs = {"objective": objective}
+        if tasks is not None:
+            submission_kwargs.update({
+                "tasks": tasks,
+                "planning_model": planning_model,
+                "planning_provider": planning_provider,
+                "planning_execution_id": planning_execution_id,
+            })
+        submission = runtime.submit_mission(**submission_kwargs)
         return runtime.run_until_terminal(submission)
 
     conversation_service.mission_runner = run_durable_conversation_mission
