@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Sequence
 from uuid import uuid4
 
 from .director import DirectorPlan, DirectorPlanner
 from .event_bus import DurableEventBus
-from .task_engine import TaskEngine
+from .task_engine import DelegatedTask, TaskEngine
 from .task_store import DurableTaskStore
 from .team_runtime import TeamCoordinator, TeamCoordinatorError
 
@@ -47,12 +48,30 @@ class DurableDirectorService:
         mission_id: str | None = None,
         context: list[dict] | None = None,
         model: str | None = None,
+        tasks: Sequence[DelegatedTask] | None = None,
+        planning_model: str | None = None,
+        planning_provider: str | None = None,
+        planning_execution_id: str | None = None,
     ) -> MissionSubmission:
-        plan = self.planner.plan(
-            objective=objective,
-            context=context,
-            model=model,
-        )
+        if not objective.strip():
+            raise DurableDirectorError("mission objective is empty")
+        if tasks is None:
+            plan = self.planner.plan(
+                objective=objective,
+                context=context,
+                model=model,
+            )
+        else:
+            # A provider may submit an explicit, declarative task graph. It is
+            # still untrusted input: TaskEngine validation and policy/team checks
+            # below are mandatory before anything is persisted or executed.
+            plan = DirectorPlan(
+                objective=objective.strip(),
+                tasks=tuple(tasks),
+                model=planning_model or "unknown",
+                provider=planning_provider,
+                execution_id=planning_execution_id,
+            )
         try:
             mission = mission_id or f"mission-{uuid4().hex}"
             team_state = None
@@ -82,6 +101,8 @@ class DurableDirectorService:
                 payload={
                     "objective": plan.objective,
                     "model": plan.model,
+                    "provider": plan.provider,
+                    "planning_execution_id": plan.execution_id,
                     "task_ids": [task.task_id for task in validated],
                 },
             )

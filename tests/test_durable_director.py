@@ -88,3 +88,43 @@ def test_durable_director_refuses_invalid_plan(tmp_path: Path):
 
     with pytest.raises(DurableDirectorError, match="could not be durably submitted"):
         service.submit_mission(objective="bad", mission_id="mission-bad")
+
+
+def test_durable_director_persists_explicit_validated_task_graph_and_planning_evidence(tmp_path: Path):
+    service, store, planner = make_service(tmp_path)
+    tasks = (
+        DelegatedTask("task-census", "operator", "Read-only Workbench operation census",
+                      capability="workbench:census"),
+        DelegatedTask("task-preflight", "operator", "Read-only Workbench operation preflight",
+                      capability="workbench:preflight", depends_on=("task-census",)),
+        DelegatedTask("task-file-list", "operator", "Read-only Workbench operation file:list",
+                      capability="workbench:file:list", args=(".",),
+                      depends_on=("task-preflight",)),
+    )
+
+    submission = service.submit_mission(
+        objective="Validación Durable de Aurora",
+        mission_id="mission-explicit-123",
+        tasks=tasks,
+        planning_model="nvidia/test-model",
+        planning_provider="nvidia_api",
+        planning_execution_id="conversation-planning-exec-123",
+    )
+
+    stored = store.list_tasks("mission-explicit-123")
+    assert planner.calls == []
+    assert submission.mission_id == "mission-explicit-123"
+    assert submission.plan.model == "nvidia/test-model"
+    assert submission.plan.provider == "nvidia_api"
+    assert submission.plan.execution_id == "conversation-planning-exec-123"
+    stored_by_id = {item.task.task_id: item for item in stored}
+    assert set(stored_by_id) == {"task-census", "task-preflight", "task-file-list"}
+    assert stored_by_id["task-preflight"].task.depends_on == ("task-census",)
+    assert stored_by_id["task-file-list"].task.depends_on == ("task-preflight",)
+    assert stored_by_id["task-file-list"].task.args == (".",)
+    submitted_event = next(
+        event for event in store.events("mission-explicit-123")
+        if event.event_type == "mission_submitted"
+    )
+    assert submitted_event.payload["provider"] == "nvidia_api"
+    assert submitted_event.payload["planning_execution_id"] == "conversation-planning-exec-123"

@@ -12,7 +12,13 @@ from uuid import uuid4
 
 from aurora.inference.models import InferenceRequest, InferenceResponse
 from aurora.inference.router import ModelRouter, ModelRoutingError
-from .director_provider import DirectorProvider, DirectorToolSpec, InferenceDirectorProvider
+from .director_provider import (
+    DirectorModelResponse,
+    DirectorProvider,
+    DirectorToolSpec,
+    InferenceDirectorProvider,
+)
+from .task_engine import DelegatedTask
 from aurora.workbench import UniversalWorkbench, WorkbenchRequest
 
 from .director_bootstrap import DirectorBootstrap, DirectorBootstrapError
@@ -79,14 +85,58 @@ Keep responses useful and concise unless the human asks for depth."""
 
     _RUN_MISSION_TOOL = DirectorToolSpec(
         name="run_mission",
-        description="Execute a real Aurora mission through governed Director planning and TaskEngine. Use this when the human explicitly asks Aurora to perform work.",
+        description=(
+            "Execute a real Aurora mission through the durable DirectorRuntime. "
+            "Use objective for a model-planned mission, or name/title plus a declarative "
+            "tasks array for an explicit task graph. Explicit tasks are read-only Workbench "
+            "operations and are still validated by TaskEngine and policy."
+        ),
         parameters={
             "type": "object",
-            "required": ["objective"],
-            "properties": {"objective": {"type": "string"}},
+            "properties": {
+                "objective": {"type": "string"},
+                "name": {"type": "string"},
+                "title": {"type": "string"},
+                "description": {"type": "string"},
+                "tasks": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 16,
+                    "items": {
+                        "type": "object",
+                        "required": ["id", "type", "operation"],
+                        "properties": {
+                            "id": {"type": "string"},
+                            "task_id": {"type": "string"},
+                            "title": {"type": "string"},
+                            "type": {"type": "string"},
+                            "tool": {"type": "string"},
+                            "operation": {"type": "string"},
+                            "name": {"type": "string"},
+                            "arguments": {"type": ["array", "object"]},
+                            "args": {"type": "array", "items": {"type": "string"}},
+                            "dependencies": {"type": "array", "items": {"type": "string"}},
+                            "depends_on": {"type": "array", "items": {"type": "string"}},
+                        },
+                        "additionalProperties": False,
+                    },
+                },
+            },
+            "anyOf": [
+                {"required": ["objective"]},
+                {"required": ["name"]},
+                {"required": ["title"]},
+                {"required": ["description"]},
+            ],
             "additionalProperties": False,
         },
     )
+
+    _EXPLICIT_READ_ONLY_WORKBENCH_OPERATIONS = frozenset({
+        "census",
+        "preflight",
+        "file:list",
+    })
 
     _WORKBENCH_TOOL = DirectorToolSpec(
         name="workbench",
@@ -383,16 +433,25 @@ Keep responses useful and concise unless the human asks for depth."""
             if call.name == self._RUN_MISSION_TOOL.name:
                 if self.mission_runner is None:
                     raise DirectorConversationError("run_mission is unavailable")
-                objective = arguments.get("objective")
-                if not isinstance(objective, str) or not objective.strip():
-                    raise DirectorConversationError("run_mission requires a non-empty objective")
+                objective, explicit_tasks = self._normalize_mission_tool_arguments(arguments)
                 try:
-                    mission = self.mission_runner(objective=objective.strip())
+                    if explicit_tasks is None:
+                        mission = self.mission_runner(objective=objective)
+                    else:
+                        # The conversation inference that emitted this declarative
+                        # task graph is the planning source; preserve its real metadata.
+                        mission = self.mission_runner(
+                            objective=objective,
+                            tasks=explicit_tasks,
+                            planning_model=getattr(response, "model", None),
+                            planning_provider=getattr(response, "provider", None),
+                            planning_execution_id=getattr(response, "execution_id", None),
+                        )
                     results.append(self._mission_evidence(mission))
                 except Exception as exc:
                     results.append({
                         "status": "failed",
-                        "objective": objective.strip(),
+                        "objective": objective,
                         "error": str(exc)[:4000],
                     })
                 continue
@@ -445,13 +504,102 @@ Keep responses useful and concise unless the human asks for depth."""
             *provider_messages,
             {"role": "user", "content": evidence_content},
         ]
-        return self.provider.generate(
+        final_response = self.provider.generate(
             messages=follow_up,
             model=model,
             role="director_conversation_result",
             tools=(),
         )
+        # Keep the exact execution receipt in the persisted assistant turn. The
+        # summarizing model may explain the result, but cannot omit the authoritative
+        # mission ID, task outcomes, errors, planning provenance, or event evidence.
+        if results:
+            evidence_suffix = json.dumps(results, ensure_ascii=False, sort_keys=True)
+            summary = str(getattr(final_response, "content", "") or "").rstrip()
+            content = (
+                (summary + "\n\n" if summary else "")
+                + "EVIDENCIA_AUTORITATIVA_DE_EJECUCION (JSON):\n"
+                + evidence_suffix
+            )
+            return DirectorModelResponse(
+                content=content,
+                model=str(getattr(final_response, "model", getattr(response, "model", "unknown"))),
+                provider=str(getattr(final_response, "provider", getattr(response, "provider", "unknown"))),
+                request_id=str(getattr(final_response, "request_id", getattr(response, "request_id", "unknown"))),
+                execution_id=str(getattr(final_response, "execution_id", getattr(response, "execution_id", "unknown"))),
+                tool_calls=(),
+            )
+        return final_response
 
+    @classmethod
+    def _normalize_mission_tool_arguments(
+        cls, arguments: dict[str, Any]
+    ) -> tuple[str, tuple[DelegatedTask, ...] | None]:
+        objective = (
+            arguments.get("objective")
+            or arguments.get("description")
+            or arguments.get("name")
+            or arguments.get("title")
+        )
+        if not isinstance(objective, str) or not objective.strip():
+            raise DirectorConversationError(
+                "run_mission requires objective, description, name, or title"
+            )
+        raw_tasks = arguments.get("tasks")
+        if raw_tasks is None:
+            return objective.strip(), None
+        if not isinstance(raw_tasks, list) or not raw_tasks or len(raw_tasks) > 16:
+            raise DirectorConversationError("explicit mission tasks must be a list of 1 to 16 tasks")
+
+        tasks: list[DelegatedTask] = []
+        for item in raw_tasks:
+            if not isinstance(item, dict):
+                raise DirectorConversationError("each explicit mission task must be an object")
+            task_id = item.get("id", item.get("task_id"))
+            task_type = item.get("type", item.get("tool"))
+            if item.get("type") is not None and item.get("tool") is not None and item["type"] != item["tool"]:
+                raise DirectorConversationError("explicit task type and tool disagree")
+            operation = item.get("operation", item.get("name"))
+            if item.get("operation") is not None and item.get("name") is not None and item["operation"] != item["name"]:
+                raise DirectorConversationError("explicit task operation and name disagree")
+            if not isinstance(task_id, str) or not task_id.strip():
+                raise DirectorConversationError("explicit task id is required")
+            if task_type != "workbench":
+                raise DirectorConversationError("explicit tasks must use the governed Workbench")
+            if not isinstance(operation, str) or operation not in cls._EXPLICIT_READ_ONLY_WORKBENCH_OPERATIONS:
+                raise DirectorConversationError(
+                    "explicit mission only allows read-only Workbench operations: census, preflight, file:list"
+                )
+            raw_arguments = item.get("arguments", item.get("args", []))
+            if isinstance(raw_arguments, dict):
+                if raw_arguments:
+                    raise DirectorConversationError("named Workbench task arguments are not supported")
+                task_args: tuple[str, ...] = ()
+            elif isinstance(raw_arguments, list) and all(isinstance(value, str) for value in raw_arguments):
+                task_args = tuple(raw_arguments)
+            else:
+                raise DirectorConversationError("WorkBench task arguments must be an empty object or string array")
+            if operation in {"census", "preflight"} and task_args:
+                raise DirectorConversationError(f"workbench:{operation} takes no arguments")
+            if operation == "file:list" and task_args != (".",):
+                raise DirectorConversationError("read-only workbench:file:list must be scoped to ['.']")
+            dependencies = item.get("dependencies", item.get("depends_on", []))
+            if item.get("dependencies") is not None and item.get("depends_on") is not None and item["dependencies"] != item["depends_on"]:
+                raise DirectorConversationError("explicit task dependencies disagree")
+            if not isinstance(dependencies, list) or not all(isinstance(dep, str) and dep.strip() for dep in dependencies):
+                raise DirectorConversationError("explicit task dependencies must be a string array")
+            task_title = item.get("title")
+            if task_title is not None and (not isinstance(task_title, str) or not task_title.strip()):
+                raise DirectorConversationError("explicit task title must be a non-empty string")
+            tasks.append(DelegatedTask(
+                task_id=task_id.strip(),
+                role="operator",
+                objective=(task_title.strip() if isinstance(task_title, str) else f"Read-only Workbench operation {operation}"),
+                capability=f"workbench:{operation}",
+                args=task_args,
+                depends_on=tuple(dependencies),
+            ))
+        return objective.strip(), tuple(tasks)
 
     @staticmethod
     def _workbench_evidence(result: Any) -> dict[str, Any]:
@@ -504,12 +652,25 @@ Keep responses useful and concise unless the human asks for depth."""
             task = getattr(item, "task", None)
             task_status = getattr(item, "status", "unknown")
             value = getattr(task_status, "value", task_status)
+            capability_result = getattr(item, "capability_result", None)
+            execution = getattr(capability_result, "execution", capability_result)
+            output = getattr(execution, "output", None)
+            model_result = getattr(item, "model_result", None)
+            if output is None and model_result is not None:
+                model_response = getattr(model_result, "response", None)
+                output = getattr(model_response, "content", None)
             tasks.append({
                 "task_id": getattr(task, "task_id", None),
                 "role": getattr(task, "role", None),
                 "status": str(value),
                 "error": getattr(item, "error", None),
                 "capability": getattr(task, "capability", None),
+                "depends_on": list(getattr(task, "depends_on", ()) or ()),
+                "result": DirectorConversationService._bound_evidence_value(output),
+                "artifact_id": getattr(execution, "artifact_id", None),
+                "receipt_id": getattr(execution, "receipt_id", None),
+                "provenance": getattr(execution, "provenance", None),
+                "correlation_id": getattr(execution, "correlation_id", None),
             })
 
         failed = any(item["status"] == "failed" for item in tasks)
@@ -520,11 +681,26 @@ Keep responses useful and concise unless the human asks for depth."""
             status = "failed"
         elif blocked:
             status = "blocked"
+        elif mission_status:
+            # Report the durable terminal decision, including a final review block.
+            status = str(mission_status)
         elif tasks and all(item["status"] == "succeeded" for item in tasks):
-            status = str(mission_status) if mission_status in {"succeeded", "completed"} else "succeeded"
+            status = "succeeded"
         else:
-            status = str(mission_status) if mission_status else ("no_tasks" if not tasks else "failed")
+            status = "no_tasks" if not tasks else "failed"
 
+        events = tuple(getattr(mission, "events", ()) or ())
+        durable_events = [
+            {
+                "event_id": getattr(event, "event_id", None),
+                "event_type": getattr(event, "event_type", None),
+                "task_id": getattr(event, "task_id", None),
+                "payload": DirectorConversationService._bound_evidence_value(
+                    getattr(event, "payload", None), max_chars=1200
+                ),
+            }
+            for event in events
+        ]
         return {
             "mission_id": mission_id,
             "status": status,
@@ -534,7 +710,27 @@ Keep responses useful and concise unless the human asks for depth."""
             "planning_execution_id": getattr(plan, "execution_id", None),
             "task_count": len(tasks),
             "tasks": tasks,
+            "persistence_evidence": {
+                "mission_id_present": bool(mission_id),
+                "task_ids_returned_by_runtime": [item["task_id"] for item in tasks],
+                "durable_event_count": len(durable_events),
+                "durable_events": durable_events,
+            },
         }
+
+    @staticmethod
+    def _bound_evidence_value(value: Any, *, max_chars: int = 4000) -> Any:
+        if value is None:
+            return None
+        try:
+            serialized = json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+            decoded = json.loads(serialized)
+        except (TypeError, ValueError):
+            serialized = str(value)
+            decoded = serialized
+        if len(serialized) <= max_chars:
+            return decoded
+        return {"truncated": True, "preview": serialized[:max_chars]}
 
     def set_provider(self, provider: DirectorProvider) -> None:
         if not getattr(provider, "provider_id", ""):

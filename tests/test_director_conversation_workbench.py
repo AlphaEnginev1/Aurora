@@ -175,3 +175,161 @@ def test_mission_evidence_includes_durable_identity_and_planning_metadata():
     assert evidence["planning_execution_id"] == "planning-exec-123"
     assert evidence["task_count"] == 1
     assert evidence["tasks"][0]["task_id"] == "task-readonly-1"
+
+
+def test_conversation_executes_native_explicit_readonly_tasks_and_returns_durable_evidence(tmp_path: Path):
+    service, _ = base_service(tmp_path)
+
+    class ExplicitTaskProvider:
+        provider_id = "nvidia_api"
+
+        def generate(self, *, messages, model, role, tools=()):
+            if role == "director_conversation":
+                return DirectorModelResponse(
+                    content="",
+                    model="nvidia/test-model",
+                    provider="nvidia_api",
+                    request_id="request-explicit-1",
+                    execution_id="conversation-planning-exec-123",
+                    tool_calls=(
+                        DirectorToolCall(
+                            call_id="call-explicit-1",
+                            name="run_mission",
+                            arguments={
+                                "name": "Validación Durable de Aurora",
+                                "tasks": [
+                                    {"id": "task-census", "type": "workbench",
+                                     "operation": "census", "arguments": {}},
+                                    {"id": "task-preflight", "type": "workbench",
+                                     "operation": "preflight", "dependencies": ["task-census"]},
+                                    {"id": "task-file-list", "type": "workbench",
+                                     "operation": "file:list", "arguments": ["."],
+                                     "dependencies": ["task-preflight"]},
+                                ],
+                            },
+                        ),
+                    ),
+                )
+            assert role == "director_conversation_result"
+            return DirectorModelResponse(
+                content="La misión ha terminado. Adjunto la evidencia real recibida del runtime.",
+                model="nvidia/test-model",
+                provider="nvidia_api",
+                request_id="request-explicit-2",
+                execution_id="conversation-summary-exec-456",
+            )
+
+    provider = ExplicitTaskProvider()
+    service.set_provider(provider)
+    captured = {}
+
+    def runner(*, objective, tasks, planning_model, planning_provider, planning_execution_id):
+        captured.update({
+            "objective": objective,
+            "tasks": tasks,
+            "planning_model": planning_model,
+            "planning_provider": planning_provider,
+            "planning_execution_id": planning_execution_id,
+        })
+        plan = SimpleNamespace(
+            objective=objective,
+            model=planning_model,
+            provider=planning_provider,
+            execution_id=planning_execution_id,
+        )
+        task_results = []
+        for task in tasks:
+            output = {"capability": task.capability, "read_only": True}
+            task_results.append(SimpleNamespace(
+                task=task,
+                status=SimpleNamespace(value="succeeded"),
+                error=None,
+                capability_result=SimpleNamespace(execution=SimpleNamespace(
+                    output=output,
+                    artifact_id=None,
+                    receipt_id=f"receipt-{task.task_id}",
+                    provenance=f"test:{task.capability}",
+                    correlation_id=f"corr-{task.task_id}",
+                )),
+            ))
+        return SimpleNamespace(
+            submission=SimpleNamespace(mission_id="mission-explicit-123", plan=plan),
+            status=SimpleNamespace(value="succeeded"),
+            tasks=tuple(task_results),
+            events=(
+                SimpleNamespace(event_id="event-1", event_type="mission_submitted", task_id=None),
+                SimpleNamespace(event_id="event-2", event_type="mission_finalized", task_id=None),
+            ),
+        )
+
+    service.mission_runner = runner
+    session = service.create_session()
+    response = service.send_message(
+        session_id=session.session_id,
+        user_input="Ejecuta la misión gobernada de validación de solo lectura.",
+    )
+
+    assert captured["objective"] == "Validación Durable de Aurora"
+    assert captured["planning_model"] == "nvidia/test-model"
+    assert captured["planning_provider"] == "nvidia_api"
+    assert captured["planning_execution_id"] == "conversation-planning-exec-123"
+    tasks = captured["tasks"]
+    assert [task.task_id for task in tasks] == ["task-census", "task-preflight", "task-file-list"]
+    assert [task.capability for task in tasks] == [
+        "workbench:census", "workbench:preflight", "workbench:file:list"
+    ]
+    assert tasks[1].depends_on == ("task-census",)
+    assert tasks[2].depends_on == ("task-preflight",)
+    assert tasks[2].args == (".",)
+    assert '"mission_id": "mission-explicit-123"' in response.response_text
+    assert '"planning_execution_id": "conversation-planning-exec-123"' in response.response_text
+    assert '"event_type": "mission_submitted"' in response.response_text
+    assert '"read_only": true' in response.response_text
+    assert "EVIDENCIA_AUTORITATIVA_DE_EJECUCION (JSON)" in response.response_text
+
+
+def test_explicit_mission_rejects_workbench_writes_before_runner_invocation(tmp_path: Path):
+    try:
+        DirectorConversationService._normalize_mission_tool_arguments({
+            "name": "Unsafe explicit task request",
+            "tasks": [{
+                "id": "write-task",
+                "type": "workbench",
+                "operation": "file:write",
+                "arguments": ["notes.txt", "changed"],
+            }],
+        })
+    except Exception as exc:
+        assert "read-only Workbench operations" in str(exc)
+    else:
+        raise AssertionError("explicit task graph must reject write capabilities")
+
+
+def test_mission_evidence_preserves_failed_or_blocked_durable_terminal_state():
+    task = SimpleNamespace(
+        task=SimpleNamespace(
+            task_id="task-1",
+            role="operator",
+            capability="workbench:census",
+            depends_on=(),
+        ),
+        status=SimpleNamespace(value="succeeded"),
+        error=None,
+        capability_result=None,
+        model_result=None,
+    )
+    plan = SimpleNamespace(
+        objective="Validate durable terminal state",
+        model="nvidia/test-model",
+        provider="nvidia_api",
+        execution_id="planning-exec",
+    )
+    for terminal_state in ("failed", "blocked"):
+        mission = SimpleNamespace(
+            submission=SimpleNamespace(mission_id=f"mission-{terminal_state}", plan=plan),
+            status=SimpleNamespace(value=terminal_state),
+            tasks=(task,),
+            events=(),
+        )
+        evidence = DirectorConversationService._mission_evidence(mission)
+        assert evidence["status"] == terminal_state

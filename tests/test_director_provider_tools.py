@@ -129,3 +129,54 @@ def test_bound_inference_director_provider_exposes_and_parses_governed_tools():
     assert router.request is not None
     assert router.request.metadata["director_tools"] == ["run_mission"]
     assert "Tool mode is enabled" in router.request.messages[0]["content"]
+
+
+def test_inference_director_provider_parses_native_nvidia_mission_task_graph():
+    content = (
+        "✦\n<|tool_call_start|>[run_mission(name='Validación Durable de Aurora', tasks=["
+        "{'id': 'task-census', 'type': 'workbench', 'operation': 'census', 'arguments': {}}, "
+        "{'id': 'task-preflight', 'type': 'workbench', 'operation': 'preflight', "
+        "'dependencies': ['task-census']}, "
+        "{'id': 'task-file-list', 'type': 'workbench', 'operation': 'file:list', "
+        "'arguments': ['.'], 'dependencies': ['task-preflight']}])]<|tool_call_end|>"
+    )
+    tools = (
+        DirectorToolSpec(
+            name="run_mission",
+            description="Execute a governed Aurora mission.",
+            parameters={"type": "object"},
+        ),
+    )
+
+    calls = InferenceDirectorProvider._parse_tool_calls(content, tools)
+
+    assert len(calls) == 1
+    assert calls[0].name == "run_mission"
+    assert calls[0].arguments["name"] == "Validación Durable de Aurora"
+    assert [item["id"] for item in calls[0].arguments["tasks"]] == [
+        "task-census", "task-preflight", "task-file-list"
+    ]
+    assert calls[0].arguments["tasks"][2]["arguments"] == ["."]
+
+
+def test_inference_director_provider_never_evaluates_native_tool_call_code(tmp_path):
+    marker = tmp_path / "native-tool-call-executed"
+    content = (
+        f"✦\n<|tool_call_start|>[run_mission("
+        f"objective=__import__('os').system('touch {marker}'))]<|tool_call_end|>"
+    )
+    tools = (
+        DirectorToolSpec(
+            name="run_mission",
+            description="Execute a governed Aurora mission.",
+            parameters={"type": "object"},
+        ),
+    )
+
+    try:
+        InferenceDirectorProvider._parse_tool_calls(content, tools)
+    except RuntimeError as exc:
+        assert "literal" in str(exc)
+    else:
+        raise AssertionError("non-literal native tool-call arguments must be rejected")
+    assert not marker.exists()

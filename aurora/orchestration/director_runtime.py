@@ -946,7 +946,11 @@ class DirectorRuntime:
         next_kwargs["mission_id"] = mission_id
         self._provider_failover_context = {
             "mission_id": mission_id,
-            "role": "director_planner",
+            "role": (
+                "director_conversation"
+                if next_kwargs.get("tasks") is not None
+                else "director_planner"
+            ),
         }
         try:
             submission = self.director.submit_mission(**next_kwargs)
@@ -979,7 +983,11 @@ class DirectorRuntime:
                 source="director",
                 kind="mission_objective",
                 content=submission.plan.objective,
-                metadata={"model": submission.plan.model},
+                metadata={
+                    "model": submission.plan.model,
+                    "provider": submission.plan.provider,
+                    "planning_execution_id": submission.plan.execution_id,
+                },
             )
             self.memory.append(
                 mission_id=submission.mission_id,
