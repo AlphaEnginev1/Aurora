@@ -25,7 +25,7 @@ def test_local_launcher_starts_proxy_and_dashboard():
         "Aurora dashboard did not become ready from its new daemon process.",
         "PROXY_READY",
         "DASHBOARD_READY",
-        "DAEMON_STARTED_PID=$!",
+        'DAEMON_STARTED_PID="$!"',
     ):
         assert marker in script
 
