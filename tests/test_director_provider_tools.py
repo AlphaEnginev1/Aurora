@@ -133,7 +133,7 @@ def test_bound_inference_director_provider_exposes_and_parses_governed_tools():
 
 def test_inference_director_provider_parses_native_nvidia_mission_task_graph():
     content = (
-        "✦\\n<|tool_call_start|>[run_mission(name='Validación Durable de Aurora', tasks=["
+        "✦\n<|tool_call_start|>[run_mission(name='Validación Durable de Aurora', tasks=["
         "{'id': 'task-census', 'type': 'workbench', 'operation': 'census', 'arguments': {}}, "
         "{'id': 'task-preflight', 'type': 'workbench', 'operation': 'preflight', "
         "'dependencies': ['task-census']}, "
@@ -162,7 +162,7 @@ def test_inference_director_provider_parses_native_nvidia_mission_task_graph():
 def test_inference_director_provider_never_evaluates_native_tool_call_code(tmp_path):
     marker = tmp_path / "native-tool-call-executed"
     content = (
-        f"✦\\n<|tool_call_start|>[run_mission("
+        f"✦\n<|tool_call_start|>[run_mission("
         f"objective=__import__('os').system('touch {marker}'))]<|tool_call_end|>"
     )
     tools = (
