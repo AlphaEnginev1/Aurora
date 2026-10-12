@@ -14,7 +14,12 @@ from typing import Any, Callable, Mapping
 
 from aurora.failure_tracker import report_failure
 
-from .director_provider import DirectorModelResponse, DirectorProvider, DirectorToolSpec
+from .director_provider import (
+    DirectorModelResponse,
+    DirectorProvider,
+    DirectorToolSpec,
+    InferenceDirectorProvider,
+)
 from aurora.inference.models import InferenceRequest
 from aurora.inference.router import ModelRouter
 from aurora.inference.provider_health import ProviderHealthStore, classify_failure
@@ -69,21 +74,32 @@ class BoundInferenceDirectorProvider:
         role: str,
         tools: tuple[DirectorToolSpec, ...] = (),
     ) -> DirectorModelResponse:
+        prompt_messages = list(messages)
+        if tools:
+            instruction = InferenceDirectorProvider._tool_instruction(tools)
+            if prompt_messages and prompt_messages[0].get("role") == "system":
+                prompt_messages[0] = {
+                    **prompt_messages[0],
+                    "content": str(prompt_messages[0].get("content", "")) + "\n\n" + instruction,
+                }
+            else:
+                prompt_messages.insert(0, {"role": "system", "content": instruction})
         request = InferenceRequest(
-            messages=messages,
+            messages=prompt_messages,
             model=self._model if self._model is not None else model,
             temperature=0.0,
             max_tokens=3000,
             metadata={"role": role, "director_tools": [tool.name for tool in tools]},
         )
         response = self._router.generate(request, capability="reasoning")
+        tool_calls = InferenceDirectorProvider._parse_tool_calls(response.content, tools)
         return DirectorModelResponse(
-            content=response.content,
+            content=response.content if not tool_calls else "",
             model=response.model,
             provider=response.provider,
             request_id=response.request_id,
             execution_id=response.execution_id,
-            tool_calls=(),
+            tool_calls=tool_calls,
         )
 
 
