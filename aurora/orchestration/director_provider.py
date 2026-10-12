@@ -1,6 +1,7 @@
 """Model-agnostic provider boundary for Aurora's Director role."""
 from __future__ import annotations
 
+import ast
 from dataclasses import dataclass
 import json
 import re
@@ -146,7 +147,87 @@ class InferenceDirectorProvider:
             payload = None
         if isinstance(payload, dict) and isinstance(payload.get("tool_calls"), list):
             return cls._build_tool_calls(payload["tool_calls"], tools)
+        native_call = cls._parse_native_tool_call(raw, tools)
+        if native_call is not None:
+            return native_call
         return cls._parse_structured_text_tool_call(raw, tools)
+
+    @classmethod
+    def _parse_native_tool_call(
+        cls,
+        raw: str,
+        tools: tuple[DirectorToolSpec, ...],
+    ) -> tuple[DirectorToolCall, ...] | None:
+        """Parse NVIDIA's visible tool-call envelope without evaluating code.
+
+        Supported shape:
+        <|tool_call_start|>[run_mission(name='...', tasks=[...])]<|tool_call_end|>
+        All arguments must be Python literals accepted by ast.literal_eval.
+        This parser never invokes the represented function.
+        """
+        start_token = "<|tool_call_start|>"
+        end_token = "<|tool_call_end|>"
+        if start_token not in raw and end_token not in raw:
+            return None
+        if raw.count(start_token) != 1 or raw.count(end_token) != 1:
+            raise RuntimeError("malformed NVIDIA tool-call envelope")
+        prefix, remainder = raw.split(start_token, 1)
+        expression, suffix = remainder.split(end_token, 1)
+        if prefix.strip() not in {"", "✦"} or suffix.strip():
+            raise RuntimeError("unexpected text outside NVIDIA tool-call envelope")
+        expression = expression.strip()
+        if expression.startswith("[") and expression.endswith("]"):
+            expression = expression[1:-1].strip()
+        try:
+            parsed = ast.parse(expression, mode="eval").body
+        except SyntaxError as exc:
+            raise RuntimeError("invalid NVIDIA tool-call syntax") from exc
+        if not isinstance(parsed, ast.Call) or not isinstance(parsed.func, ast.Name):
+            raise RuntimeError("NVIDIA tool call must be a simple named call")
+        if parsed.args:
+            raise RuntimeError("NVIDIA tool calls must use named arguments only")
+        name = parsed.func.id
+        if name not in {tool.name for tool in tools}:
+            raise RuntimeError(f"Director requested unregistered tool: {name}")
+        arguments: dict[str, Any] = {}
+        for keyword in parsed.keywords:
+            if keyword.arg is None:
+                raise RuntimeError("NVIDIA tool calls may not unpack keyword arguments")
+            if keyword.arg in arguments:
+                raise RuntimeError(f"duplicate NVIDIA tool-call argument: {keyword.arg}")
+            try:
+                value = ast.literal_eval(keyword.value)
+            except (ValueError, TypeError, SyntaxError) as exc:
+                raise RuntimeError(
+                    f"NVIDIA tool-call argument {keyword.arg!r} must be a literal"
+                ) from exc
+            if not cls._is_json_value(value):
+                raise RuntimeError(
+                    f"NVIDIA tool-call argument {keyword.arg!r} is not JSON-compatible"
+                )
+            arguments[keyword.arg] = value
+        return (
+            DirectorToolCall(
+                call_id=uuid4().hex,
+                name=name,
+                arguments=arguments,
+            ),
+        )
+
+    @staticmethod
+    def _is_json_value(value: Any) -> bool:
+        if value is None or isinstance(value, (str, bool, int)):
+            return True
+        if isinstance(value, float):
+            return value == value and abs(value) != float("inf")
+        if isinstance(value, list):
+            return all(InferenceDirectorProvider._is_json_value(item) for item in value)
+        if isinstance(value, dict):
+            return all(
+                isinstance(key, str) and InferenceDirectorProvider._is_json_value(item)
+                for key, item in value.items()
+            )
+        return False
 
     @classmethod
     def _parse_structured_text_tool_call(
