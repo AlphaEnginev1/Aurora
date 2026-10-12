@@ -123,3 +123,15 @@ def test_update_script_uses_verified_restart_helper() -> None:
     assert "Aurora restart failed; inspect .aurora-runtime/update.log" in script
     assert script.index(restart_call) < script.index(ready_status)
 
+
+def test_update_script_compares_dashboard_process_argv_without_flattening_proc_cmdline() -> None:
+    script = (ROOT / "scripts" / "update-local.sh").read_text(encoding="utf-8")
+
+    assert "mapfile -d '' -t argv < \"/proc/$pid/cmdline\"" in script
+    assert '[[ "${#argv[@]}" -eq 4 ]]' in script
+    assert '[[ "${argv[0]}" == "$VENV/bin/python" ]]' in script
+    assert '[[ "${argv[1]}" == "-m" ]]' in script
+    assert '[[ "${argv[2]}" == "aurora.orchestration.daemon" ]]' in script
+    assert '[[ "${argv[3]}" == "--dashboard" ]]' in script
+    assert 'cmdline="$(tr' not in script
+

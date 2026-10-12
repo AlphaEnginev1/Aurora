@@ -80,13 +80,21 @@ write_status "restarting" "$updated" "Restarting Aurora"
 dashboard_process_matches() {
   [[ -s "$AURORA_PID" ]] || return 1
   local pid
-  local cmdline
+  local -a argv=()
   pid="$(cat "$AURORA_PID" 2>/dev/null || true)"
   [[ "$pid" =~ ^[0-9]+$ ]] || return 1
   kill -0 "$pid" 2>/dev/null || return 1
   [[ -r "/proc/$pid/cmdline" ]] || return 1
-  cmdline="$(tr '\0' ' ' < "/proc/$pid/cmdline")"
-  [[ "$cmdline" == "$VENV/bin/python -m aurora.orchestration.daemon --dashboard" ]]
+
+  # /proc/PID/cmdline is NUL-delimited. Compare argv elements instead of
+  # flattening them into a string, which adds a trailing space and can make a
+  # healthy dashboard fail an exact-string readiness check.
+  mapfile -d '' -t argv < "/proc/$pid/cmdline"
+  [[ "${#argv[@]}" -eq 4 ]] || return 1
+  [[ "${argv[0]}" == "$VENV/bin/python" ]] || return 1
+  [[ "${argv[1]}" == "-m" ]] || return 1
+  [[ "${argv[2]}" == "aurora.orchestration.daemon" ]] || return 1
+  [[ "${argv[3]}" == "--dashboard" ]]
 }
 
 if ! bash "$ROOT/scripts/restart-local.sh"; then
