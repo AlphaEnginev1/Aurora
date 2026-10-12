@@ -476,6 +476,301 @@
       '<div class="decision-card"><span>ACTIVE POLICY</span><strong>' + esc(governance.active_policy ? "AVAILABLE" : "NOT CONFIGURED") + '</strong><em>governance boundary</em></div>';
   }
 
+  function roadMapStatus(profile) {
+    if (!profile || profile.__unavailable) return { key: "unknown", label: "STATE UNKNOWN", task: null };
+    const currentTasks = safeArray(profile.current_tasks);
+    const running = currentTasks.find(function (task) { return String(task.status || "").toLowerCase() === "running"; });
+    const pending = currentTasks.find(function (task) { return String(task.status || "").toLowerCase() === "pending"; });
+    const recent = safeArray(profile.recent_executions);
+    const failed = recent.find(function (task) { return String(task.status || "").toLowerCase() === "failed"; });
+    if (running) return { key: "working", label: "WORKING", task: running };
+    if (pending) return { key: "queued", label: "QUEUED", task: pending };
+    if (failed && failed.last_error) return { key: "failed", label: "IDLE · LAST FAILURE", task: failed };
+    return { key: "idle", label: "IDLE", task: null };
+  }
+
+  function roadMapModelText(agent, profile, department) {
+    const identity = safeObject(profile && profile.identity);
+    const choices = safeArray(identity.model_preferences);
+    if (choices.length) {
+      const model = choices[0];
+      if (typeof model === "string") return model;
+      return model.model_id || model.id || "preferred model";
+    }
+    const fallback = safeArray(agent.model_preferences);
+    if (fallback.length) return String(fallback[0]);
+    const departmentModels = safeArray(department && department.model_preferences);
+    return departmentModels.length ? String(departmentModels[0]) : "No model preference recorded";
+  }
+
+  function roadMapAgentCard(agent, department) {
+    const role = String(agent.role || agent.agent_id || "unknown");
+    const profile = state.roadmapProfiles[role];
+    const status = roadMapStatus(profile);
+    const selected = state.roadmapSelectedRole === role;
+    const modelName = roadMapModelText(agent, profile, department);
+    const task = status.task;
+    const taskLine = task
+      ? (task.task_id || "Task") + " · " + (task.objective || task.status || "runtime task")
+      : "No current task recorded";
+    return '<button class="office-agent-card' + (selected ? ' selected' : '') + '" type="button" data-office-agent="' + esc(role) + '" data-status="' + status.key + '" aria-label="Inspect ' + esc(role) + ', ' + esc(status.label) + '">' +
+      '<div class="office-agent-head"><span class="office-agent-name">' + esc(role) + '</span><span class="office-status-wrap"><i class="office-status-led" aria-hidden="true"></i>' + esc(status.label) + '</span></div>' +
+      '<div class="office-workstation">' +
+        '<div class="office-worker" aria-hidden="true"><span class="worker-head"></span><span class="worker-hair"></span><span class="worker-body"></span><span class="worker-arm"></span><span class="worker-leg left"></span><span class="worker-leg right"></span></div>' +
+        '<div class="office-monitor" aria-hidden="true"><div class="office-monitor-screen"><span class="monitor-line"></span><span class="monitor-line"></span><span class="monitor-line"></span></div><span class="office-monitor-stand"></span></div>' +
+        '<div class="office-desk-top" aria-hidden="true"></div><div class="office-desk-leg" aria-hidden="true"></div><i class="office-desk-light" aria-hidden="true"></i><div class="office-floorline" aria-hidden="true"></div>' +
+      '</div>' +
+      '<div class="office-model"><strong>MODEL</strong> · ' + esc(modelName) + '</div>' +
+      '<div class="office-task">' + esc(taskLine) + '</div>' +
+    '</button>';
+  }
+
+  function renderRoadmap(data) {
+    if (!data) return;
+    const org = safeObject(data.organization);
+    const agents = safeArray(org.agents);
+    const departments = safeArray(org.departments);
+    const grid = $("roadmap-office-grid");
+    if (!grid) return;
+
+    const groups = [];
+    const assignedRoles = new Set();
+    departments.forEach(function (department) {
+      const members = agents.filter(function (agent) {
+        return safeArray(department.agent_ids).includes(agent.agent_id) ||
+          safeArray(department.agent_ids).includes(agent.role) ||
+          String(agent.department || "").toLowerCase() === String(department.department_id || "").toLowerCase();
+      });
+      members.forEach(function (agent) { assignedRoles.add(String(agent.role || agent.agent_id)); });
+      if (members.length || !agents.length) groups.push({ department: department, agents: members });
+    });
+    agents.filter(function (agent) {
+      return !assignedRoles.has(String(agent.role || agent.agent_id));
+    }).forEach(function (agent) {
+      const key = String(agent.department || "unassigned");
+      let group = groups.find(function (item) {
+        return String(item.department.department_id || item.department.name || "unassigned") === key;
+      });
+      if (!group) {
+        group = { department: { department_id: key, name: key, mission: "Department metadata not available.", model_preferences: [] }, agents: [] };
+        groups.push(group);
+      }
+      group.agents.push(agent);
+    });
+
+    if (!agents.length) {
+      grid.innerHTML = '<div class="empty-state">No agents are currently registered in Aurora organization state.</div>';
+      $("roadmap-department-count").textContent = String(departments.length);
+      $("roadmap-active-count").textContent = "0";
+      $("roadmap-live-state").className = "roadmap-live-badge unknown";
+      $("roadmap-live-state").innerHTML = '<span class="roadmap-live-dot"></span> NO AGENTS REGISTERED';
+      return;
+    }
+    if (!state.roadmapSelectedRole) state.roadmapSelectedRole = String(agents[0].role || agents[0].agent_id);
+
+    let activeCount = 0;
+    let knownCount = 0;
+    groups.forEach(function (group) {
+      group.agents.forEach(function (agent) {
+        const role = String(agent.role || agent.agent_id || "unknown");
+        const status = roadMapStatus(state.roadmapProfiles[role]);
+        if (status.key === "working") activeCount += 1;
+        if (status.key !== "unknown") knownCount += 1;
+      });
+    });
+    $("roadmap-department-count").textContent = String(groups.length);
+    $("roadmap-active-count").textContent = String(activeCount);
+    $("roadmap-delivery-count").textContent = String(state.roadmapDeliveryCount);
+    $("roadmap-mailbox-total").textContent = String(state.roadmapDeliveryCount);
+
+    const liveBadge = $("roadmap-live-state");
+    if (knownCount === agents.length) {
+      liveBadge.className = "roadmap-live-badge healthy";
+      liveBadge.innerHTML = '<span class="roadmap-live-dot"></span> LIVE TASK STATE';
+    } else {
+      liveBadge.className = "roadmap-live-badge unknown";
+      liveBadge.innerHTML = '<span class="roadmap-live-dot"></span> ' + esc(knownCount ? "PARTIAL TASK STATE" : "WAITING FOR LIVE STATE");
+    }
+    $("roadmap-last-update").textContent = "Snapshot · " + dateText(data.generated_at);
+
+    grid.innerHTML = groups.map(function (group) {
+      const department = group.department || {};
+      const name = department.name || department.department_id || "Unassigned";
+      const working = group.agents.filter(function (agent) {
+        return roadMapStatus(state.roadmapProfiles[String(agent.role || agent.agent_id)]).key === "working";
+      }).length;
+      const memberCards = group.agents.map(function (agent) {
+        return roadMapAgentCard(agent, department);
+      }).join("");
+      return '<section class="office-department" data-office-department="' + esc(department.department_id || name) + '">' +
+        '<header class="office-department-header"><div><h3>' + esc(name) + '</h3><p>' + esc(department.mission || "No department mission recorded.") + '</p></div>' +
+        '<span class="office-department-count">' + working + '/' + group.agents.length + ' working</span></header>' +
+        memberCards + '</section>';
+    }).join("");
+
+    grid.querySelectorAll("[data-office-agent]").forEach(function (button) {
+      button.addEventListener("click", function () {
+        state.roadmapSelectedRole = button.getAttribute("data-office-agent");
+        renderRoadmap(state.snapshot);
+        renderRoadmapInspector(state.roadmapSelectedRole);
+      });
+    });
+    renderRoadmapInspector(state.roadmapSelectedRole);
+    renderRoadmapDeliveries();
+  }
+
+  function renderRoadmapInspector(role) {
+    const title = $("roadmap-inspector-title");
+    const body = $("roadmap-inspector-body");
+    const led = $("roadmap-inspector-led");
+    if (!title || !body) return;
+    const snapshotAgents = safeArray(safeObject(safeObject(state.snapshot).organization).agents);
+    const fallback = snapshotAgents.find(function (agent) {
+      return String(agent.role || agent.agent_id) === String(role);
+    }) || {};
+    const profile = state.roadmapProfiles[String(role)];
+    const identity = safeObject(profile && profile.identity);
+    const base = Object.keys(identity).length ? identity : fallback;
+    const statusInfo = roadMapStatus(profile);
+    const prefs = safeArray(identity.model_preferences);
+    const selectedModel = prefs.length ? prefs[0] : null;
+    const selectedModelName = selectedModel
+      ? (typeof selectedModel === "string" ? selectedModel : (selectedModel.model_id || selectedModel.id || "preferred model"))
+      : (safeArray(base.model_preferences)[0] || "No model preference recorded");
+    const provider = selectedModel && typeof selectedModel === "object" ? (selectedModel.provider || "provider not specified") : "provider is not in the organization preference record";
+    const current = statusInfo.task;
+    const taskRows = safeArray(profile && profile.current_tasks);
+    const recent = safeArray(profile && profile.recent_executions);
+    const departmentName = base.department || fallback.department || "Unassigned";
+    title.textContent = role || "Select a workstation";
+    led.className = "workstation-led " + statusInfo.key;
+    led.setAttribute("aria-label", statusInfo.label);
+    body.innerHTML =
+      '<div class="inspector-state"><i class="office-status-led" style="background:' +
+        (statusInfo.key === "working" ? "#48db86" : statusInfo.key === "unknown" ? "#777" : "#df5c66") +
+        ';box-shadow:none"></i><strong>' + esc(statusInfo.label) + '</strong></div>' +
+      '<div class="inspector-metric"><span>DEPARTMENT</span><strong>' + esc(departmentName) + '</strong><p>' + esc(base.department_mission || base.mission || "No mission description recorded.") + '</p></div>' +
+      '<div class="inspector-metric"><span>PREFERRED MODEL</span><strong>' + esc(selectedModelName) + '</strong><p>Provider: ' + esc(provider) + '</p>' +
+        '<p>The current task schema may not expose the model finally selected for a single execution; this field shows the registered preference.</p></div>' +
+      '<div class="inspector-metric"><span>WHAT IT WORKS ON</span><strong>' + esc(current ? (current.objective || current.task_id || "Runtime task") : "No running task reported") + '</strong><p>' +
+        esc(current ? ("Task " + (current.task_id || "—") + " · state " + (current.status || "unknown") + (current.mission_id ? " · mission " + current.mission_id : "")) : "Work status is read from Aurora's stored task records.") + '</p></div>' +
+      '<div class="inspector-metric"><span>ACTIVE TASK RECORDS</span><strong>' + esc(taskRows.length) + '</strong><p>' +
+        esc(taskRows.map(function (task) { return (task.task_id || "task") + " · " + (task.status || "unknown") + " · " + (task.objective || "no objective"); }).join(" | ") || "None") + '</p></div>' +
+      '<div class="inspector-metric"><span>RECENT EXECUTIONS</span><strong>' + esc(recent.length) + '</strong><p>' +
+        esc(recent.slice(0,5).map(function (task) { return (task.task_id || "task") + " · " + (task.status || "unknown"); }).join(" | ") || "No execution history returned.") + '</p></div>' +
+      '<div class="inspector-metric"><span>SKILLS / CAPABILITIES</span><strong>' + esc(safeArray(base.skill_ids).join(", ") || "No skills listed") + '</strong><p>' +
+        esc(safeArray(base.capabilities).join(", ") || "No capabilities listed") + '</p></div>' +
+      (profile && profile.__unavailable ? '<div class="inspector-metric"><span>LIVE DATA</span><strong>Unavailable</strong><p>' + esc(profile.error || "The agent detail endpoint did not return current data.") + '</p></div>' : "");
+  }
+
+  function renderRoadmapDeliveries() {
+    const target = $("roadmap-deliveries-list");
+    if (!target) return;
+    if (!state.roadmapDeliveryItems.length) {
+      target.innerHTML = '<div class="empty-state">No new completion events observed during this session. Older history is not animated retroactively.</div>';
+      return;
+    }
+    target.innerHTML = state.roadmapDeliveryItems.slice(0,8).map(function (item) {
+      return '<div class="roadmap-delivery-item"><strong>' + esc(item.role) + ' → Director Inbox</strong><span>' +
+        esc(item.event.task_id || item.event.event_type || "Completion event") + ' · ' +
+        esc(item.event.event_type || "completion") + ' · ' + esc(dateText(item.event.created_at)) + '</span></div>';
+    }).join("");
+  }
+
+  function triggerRoadmapDelivery(role) {
+    const scene = $("roadmap-scene");
+    const station = Array.from(document.querySelectorAll("[data-office-agent]")).find(function (item) {
+      return item.getAttribute("data-office-agent") === String(role);
+    });
+    const worker = station && station.querySelector(".office-worker");
+    const mailbox = $("roadmap-mailbox-slot");
+    if (!scene || !worker || !mailbox || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const sceneRect = scene.getBoundingClientRect();
+    const sourceRect = worker.getBoundingClientRect();
+    const targetRect = mailbox.getBoundingClientRect();
+    const actor = document.createElement("div");
+    actor.className = "office-delivery-actor";
+    actor.setAttribute("aria-hidden", "true");
+    actor.innerHTML = '<span class="worker-head"></span><span class="worker-hair"></span><span class="worker-body"></span><span class="delivery-package"></span>';
+    const startX = sourceRect.left + sourceRect.width / 2 - sceneRect.left - 15;
+    const startY = sourceRect.top + sourceRect.height / 2 - sceneRect.top - 18;
+    const endX = targetRect.left + targetRect.width / 2 - sceneRect.left - 15;
+    const endY = targetRect.top + targetRect.height / 2 - sceneRect.top - 18;
+    actor.style.left = startX + "px";
+    actor.style.top = startY + "px";
+    scene.appendChild(actor);
+    window.requestAnimationFrame(function () {
+      actor.style.transform = "translate(" + (endX - startX) + "px," + (endY - startY) + "px) scale(.74)";
+      actor.style.opacity = "0";
+    });
+    window.setTimeout(function () { actor.remove(); }, 1500);
+    mailbox.classList.add("mail-received");
+    window.setTimeout(function () { mailbox.classList.remove("mail-received"); }, 1200);
+  }
+
+  async function loadRoadmapDetails() {
+    if (state.roadmapInFlight || state.activeView !== "roadmap" || !state.snapshot) return;
+    const agents = safeArray(safeObject(state.snapshot.organization).agents);
+    if (!agents.length) {
+      renderRoadmap(state.snapshot);
+      return;
+    }
+    state.roadmapInFlight = true;
+    try {
+      const fresh = await Promise.all(agents.map(async function (agent) {
+        const role = String(agent.role || agent.agent_id || "");
+        try {
+          const response = await fetch(state.apiBase + "/agents/" + encodeURIComponent(role), {
+            headers: { Accept: "application/json", "Cache-Control": "no-cache" },
+            cache: "no-store"
+          });
+          if (!response.ok) throw new Error("agent detail " + response.status);
+          return { role: role, profile: await response.json() };
+        } catch (error) {
+          return { role: role, profile: { __unavailable: true, error: error.message } };
+        }
+      }));
+      const completed = [];
+      const currentKeys = new Set();
+      fresh.forEach(function (record) {
+        state.roadmapProfiles[record.role] = record.profile;
+        safeArray(record.profile.events).forEach(function (event) {
+          const type = String(event.event_type || "").toLowerCase();
+          if (!/(complete|completed|succeed|succeeded|finish|finished|deliver|delivered)/.test(type)) return;
+          const key = record.role + ":" + String(event.event_id || (event.task_id + ":" + type + ":" + event.created_at));
+          currentKeys.add(key);
+          if (state.roadmapHasBaseline && !state.roadmapSeenCompletionEvents.has(key)) {
+            completed.push({ role: record.role, event: event });
+          }
+        });
+      });
+      currentKeys.forEach(function (key) { state.roadmapSeenCompletionEvents.add(key); });
+      const firstPass = !state.roadmapHasBaseline;
+      state.roadmapHasBaseline = true;
+      if (!firstPass && completed.length) {
+        completed.slice(-8).forEach(function (item) {
+          state.roadmapDeliveryCount += 1;
+          state.roadmapDeliveryItems.unshift(item);
+        });
+      }
+      renderRoadmap(state.snapshot);
+      if (!firstPass && completed.length) {
+        const roles = Array.from(new Set(completed.slice(-4).map(function (item) { return item.role; })));
+        window.setTimeout(function () { roles.forEach(triggerRoadmapDelivery); }, 90);
+      }
+    } finally {
+      state.roadmapInFlight = false;
+    }
+  }
+
+  function renderRoadmapError(error) {
+    const badge = $("roadmap-live-state");
+    if (!badge) return;
+    badge.className = "roadmap-live-badge unknown";
+    badge.innerHTML = '<span class="roadmap-live-dot"></span> LIVE STATE UNAVAILABLE';
+    $("roadmap-last-update").textContent = error && error.message ? error.message : "Refresh to retry";
+  }
+
   function showSettingsMessage(message, error) {
     const target = $("settings-message");
     if (!target) return;
