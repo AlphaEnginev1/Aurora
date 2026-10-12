@@ -2142,3 +2142,17 @@ body {
   }
   .office-delivery-actor { transition: none !important; }
 }
+
+
+.chat-status.error {
+  color: #ff898f;
+}
+.office-agent-card[data-status="queued"] .office-status-led,
+.office-agent-card[data-status="queued"] .office-desk-light {
+  background: #e4bd53;
+  box-shadow: 0 0 8px rgba(228,189,83,.38);
+}
+.office-agent-card[data-status="failed"] .office-status-led {
+  background: #ff626c;
+  box-shadow: 0 0 9px rgba(255,98,108,.45);
+}
