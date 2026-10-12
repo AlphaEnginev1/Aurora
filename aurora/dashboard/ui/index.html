@@ -159,52 +159,87 @@
             </div>
           </div>
 
-          <div class="roadmap-summary-row">
+          <div class="roadmap-summary-row roadmap-model-summary-row">
             <div class="roadmap-summary-card"><span>DEPARTMENTS</span><strong id="roadmap-department-count">—</strong></div>
-            <div class="roadmap-summary-card"><span>WORKING NOW</span><strong id="roadmap-active-count">—</strong></div>
+            <div class="roadmap-summary-card"><span>MODELS IN CATALOG</span><strong id="roadmap-model-count">—</strong></div>
+            <div class="roadmap-summary-card"><span>ACTIVE MODEL CALLS</span><strong id="roadmap-active-count">—</strong></div>
             <div class="roadmap-summary-card"><span>DELIVERIES OBSERVED THIS SESSION</span><strong id="roadmap-delivery-count">0</strong></div>
           </div>
 
-          <div id="roadmap-scene" class="roadmap-layout">
-            <section class="panel office-floorplan" aria-label="Live virtual office">
-              <div class="office-floorplan-topline">
-                <span class="eyebrow">OPERATIONS FLOOR</span>
-                <span class="office-key"><i class="key-led key-led-working"></i> Working <i class="key-led key-led-idle"></i> Idle / no running task</span>
-              </div>
-              <div class="office-director-zone">
-                <div class="director-office-card">
-                  <div class="director-office-avatar" aria-hidden="true">
-                    <span class="director-avatar-head"></span><span class="director-avatar-body"></span><span class="director-avatar-shoulder"></span>
-                  </div>
-                  <div class="director-office-copy">
-                    <span class="eyebrow">DIRECTOR</span>
-                    <h2>Aurora</h2>
-                    <p>Coordination · review · decisions</p>
-                  </div>
+          <div id="roadmap-scene" class="roadmap-layout roadmap-live-floorplan">
+            <section class="panel live-floorplan-panel" aria-label="Live Aurora model and department floor plan">
+              <div class="floorplan-blueprint-title">
+                <div>
+                  <span class="floorplan-brand">AURORA // AGENT OFFICE</span>
+                  <span class="floorplan-subtitle">LIVE DEPARTMENT FLOOR PLAN</span>
                 </div>
-                <div class="office-mail-route" aria-hidden="true"><span></span><small>DELIVERY ROUTE</small><span></span></div>
-                <div id="roadmap-mailbox-slot" class="director-mailbox" aria-label="Director work delivery mailbox">
-                  <div class="mailbox-icon" aria-hidden="true"><span></span></div>
-                  <div><span class="eyebrow">DIRECTOR INBOX</span><strong>Work deliveries</strong><small><b id="roadmap-mailbox-total">0</b> new delivery animation(s) observed</small></div>
+                <span id="roadmap-live-state" class="roadmap-live-badge unknown"><span class="roadmap-live-dot"></span> MODEL ACTIVITY UNKNOWN</span>
+              </div>
+              <div class="floorplan-legend">
+                <span><i class="floorplan-legend-led working"></i> Inference running</span>
+                <span><i class="floorplan-legend-led ready"></i> Ready / idle</span>
+                <span><i class="floorplan-legend-led busy"></i> Agent task, model unconfirmed</span>
+                <span><i class="floorplan-legend-led down"></i> Disabled / unavailable</span>
+              </div>
+              <div class="floorplan-house" id="roadmap-house">
+                <div class="floorplan-top-row">
+                  <section id="roadmap-room-research" class="floorplan-room floorplan-room-top" data-floorplan-slot="research" hidden></section>
+                  <section class="floorplan-director-room" aria-label="Aurora Director office">
+                    <div class="floorplan-room-label">DIRECTOR OFFICE</div>
+                    <div class="floorplan-director-desk" aria-hidden="true">
+                      <div class="floorplan-director-chair"></div>
+                      <div class="floorplan-director-console"><span></span><span></span><span></span></div>
+                    </div>
+                    <div class="floorplan-director-copy">
+                      <strong>AURORA DIRECTOR</strong>
+                      <small>Coordination · routing · decisions</small>
+                    </div>
+                    <div class="floorplan-director-models">
+                      <span class="floorplan-tiny-label">CONFIGURED ROUTING</span>
+                      <div id="roadmap-director-models"><span class="floorplan-muted">No Director model exposed by current policy.</span></div>
+                    </div>
+                    <div class="floorplan-mail-connector" aria-hidden="true"><span></span><b>↓</b><span></span></div>
+                    <div id="roadmap-mailbox-slot" class="director-mailbox floorplan-mailbox" aria-label="Director work delivery mailbox">
+                      <div class="mailbox-icon" aria-hidden="true"><span></span></div>
+                      <div><span class="eyebrow">DIRECTOR INBOX</span><strong>Work deliveries</strong><small><b id="roadmap-mailbox-total">0</b> new delivery animations observed</small></div>
+                    </div>
+                  </section>
+                  <section id="roadmap-room-engineering" class="floorplan-room floorplan-room-top" data-floorplan-slot="engineering" hidden></section>
                 </div>
+
+                <div class="floorplan-body-zones">
+                  <section id="roadmap-room-data" class="floorplan-room" data-floorplan-slot="data" hidden></section>
+                  <div class="floorplan-central-corridor" aria-label="Model routing corridor">
+                    <span>MODEL</span><span>ROUTING</span>
+                    <div class="floorplan-routing-line"><i></i><i></i><i></i></div>
+                    <b>↓</b>
+                    <small>LIVE<br>FLOW</small>
+                    <b>↓</b>
+                  </div>
+                  <section id="roadmap-room-quality" class="floorplan-room" data-floorplan-slot="quality" hidden></section>
+                  <section id="roadmap-room-operations" class="floorplan-room" data-floorplan-slot="operations" hidden></section>
+                  <section id="roadmap-room-security" class="floorplan-room" data-floorplan-slot="security" hidden></section>
+                  <section id="roadmap-room-learning" class="floorplan-room" data-floorplan-slot="learning" hidden></section>
+                  <section id="roadmap-room-tooling" class="floorplan-room" data-floorplan-slot="tooling" hidden></section>
+                </div>
+
+                <div id="roadmap-office-grid" class="floorplan-extra-grid" aria-live="polite" hidden></div>
+                <div class="floorplan-entrance" aria-hidden="true"><span></span><strong>ENTRANCE // AURORA MISSION FLOW</strong><span></span></div>
               </div>
-              <div class="office-floor-label"><span>DEPARTMENTS & MODEL WORKSTATIONS</span><span>Selected workstation opens its live details →</span></div>
-              <div id="roadmap-office-grid" class="office-department-grid" aria-live="polite">
-                <div class="empty-state">Loading authoritative department and task state…</div>
-              </div>
-              <div class="office-groundnote" id="roadmap-data-note">Worker lights and movement are driven by task records and events returned by Aurora. Missing runtime signals remain unknown.</div>
+              <div class="floorplan-footnote" id="roadmap-data-note">Green lights are backed by live ModelRouter calls. Model preferences and agent task status are shown separately and never treated as proof that a model is executing.</div>
+              <div class="roadmap-freshness floorplan-freshness" id="roadmap-last-update">Awaiting first snapshot</div>
             </section>
 
-            <aside class="panel roadmap-inspector-panel" aria-label="Department workstation details">
+            <aside class="panel roadmap-inspector-panel floorplan-inspector" aria-label="Selected AI model details">
               <div class="roadmap-inspector-header">
                 <div>
-                  <div class="eyebrow">WORKSTATION INSPECTOR</div>
-                  <h2 id="roadmap-inspector-title">Select a workstation</h2>
+                  <div class="eyebrow">MODEL INSPECTOR</div>
+                  <h2 id="roadmap-inspector-title">Select an AI model</h2>
                 </div>
                 <span id="roadmap-inspector-led" class="workstation-led unknown" aria-label="Unknown state"></span>
               </div>
               <div id="roadmap-inspector-body" class="roadmap-inspector-body">
-                <div class="empty-state">Select a department member to inspect its preferred model, responsibilities and live task state.</div>
+                <div class="empty-state">Select a model workstation in the floor plan to inspect its provider, assignments, current execution, availability and performance.</div>
               </div>
               <div class="roadmap-delivery-section">
                 <div class="panel-head">
@@ -213,8 +248,7 @@
                 <div id="roadmap-deliveries-list" class="roadmap-deliveries-list"><div class="empty-state">No new deliveries observed during this session.</div></div>
               </div>
             </aside>
-          </div>
-        </section>
+          </div>        </section>
 
         <section id="view-projects" class="view" data-view-panel="projects" aria-label="Projects">
           <div class="view-header">
