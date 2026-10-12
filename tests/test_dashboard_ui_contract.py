@@ -70,3 +70,42 @@ def test_dashboard_bootstrap_initializers_are_defined():
     assert "async function loadGitHubStatus()" in js
     assert "setupConversation();" in js
     assert "loadSnapshot();" in js
+
+
+def test_home_chat_attachments_and_live_roadmap_office_contract():
+    html = (UI_DIR / "index.html").read_text(encoding="utf-8")
+    css = (UI_DIR / "styles.css").read_text(encoding="utf-8")
+    js = (UI_DIR / "app.js").read_text(encoding="utf-8")
+
+    # The overview now lives on the left of a full-size centre chat.
+    assert 'class="home-grid home-grid-redesigned"' in html
+    assert 'class="home-sidebar"' in html
+    assert 'id="chat-messages"' in html
+    assert 'id="chat-composer"' not in html  # the composer is styled by class and has existing controls
+    assert 'id="upload-aurora"' not in html
+    assert 'id="attach-file"' in html
+    assert html.count('id="aurora-file-input"') == 1
+    assert 'id="chat-history-body"' in html
+    assert 'background: #000 !important' in css
+    assert ".chat-composer" in css
+    assert ".chat-message" in css
+
+    # Roadmap is a live view backed by per-agent endpoint data, not hard-coded statuses.
+    assert '<section id="view-roadmap" class="view" data-view-panel="roadmap"' in html
+    assert 'data-nav-target="roadmap"' in html
+    assert html.index('data-nav-target="home"') < html.index('data-nav-target="roadmap"')
+    assert 'id="roadmap-office-grid"' in html
+    assert 'id="roadmap-inspector-body"' in html
+    assert 'id="roadmap-mailbox-slot"' in html
+    assert ".office-agent-card[data-status=\"working\"]" in css
+    assert "loadRoadmapDetails" in js
+    assert 'state.apiBase + "/agents/"' in js
+    assert "current_tasks" in js
+    assert "roadmapSeenCompletionEvents" in js
+    assert "triggerRoadmapDelivery" in js
+
+    # Attachments must go through Aurora's governed intake endpoint.
+    assert 'state.apiBase + "/artifacts"' in js
+    assert "state.pendingAttachments" in js
+    assert "mission_id" in js
+    assert '$("attach-file").addEventListener' in js
