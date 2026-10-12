@@ -269,6 +269,11 @@ def test_dashboard_snapshot_includes_unregistered_discovery_candidates_without_m
         )
     )
     gateway.model_candidate_store = candidate_store
+    class EmptyRouter:
+        def active_executions(self):
+            return ()
+
+    gateway.model_router = EmptyRouter()
 
     snapshot = gateway.snapshot()
     candidates = snapshot["model_candidates"]
