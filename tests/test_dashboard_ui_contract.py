@@ -142,3 +142,24 @@ def test_dashboard_javascript_syntax_when_node_is_available():
         text=True,
     )
     assert result.returncode == 0, result.stderr
+
+def test_dashboard_navigation_and_home_overview_swap_sides():
+    html = (UI_DIR / "index.html").read_text(encoding="utf-8")
+    css = (UI_DIR / "styles.css").read_text(encoding="utf-8")
+
+    shell_start = html.index('<div class="workspace-shell">')
+    main_start = html.index('<main class="workspace">', shell_start)
+    nav_start = html.index('<nav class="right-rail" aria-label="Aurora navigation">', shell_start)
+    shell_end = html.index('</main>', main_start)
+    assert nav_start < main_start < shell_end
+
+    # The navigation occupies the narrow first desktop grid column.
+    assert 'grid-template-columns: 78px minmax(0, 1fr)' in css
+    # On the Home view, the chat stays in column one and the same overview
+    # panels move to column two without changing their DOM or styling.
+    assert '.home-grid.home-grid-redesigned > .home-sidebar {\n  grid-column: 2;\n  grid-row: 1;' in css
+    assert '.home-grid.home-grid-redesigned > .chat-workspace {\n  grid-column: 1;\n  grid-row: 1;' in css
+    # Keep the existing stacked layout on narrow screens.
+    assert '@media (max-width: 980px)' in css
+    assert 'grid-column: auto;\n    grid-row: auto;' in css
+
