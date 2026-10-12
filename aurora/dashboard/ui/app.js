@@ -17,7 +17,15 @@
     github: null,
     health: null,
     healthTimer: null,
-    healthInFlight: false
+    healthInFlight: false,
+    pendingAttachments: [],
+    roadmapProfiles: {},
+    roadmapInFlight: false,
+    roadmapHasBaseline: false,
+    roadmapSeenCompletionEvents: new Set(),
+    roadmapSelectedRole: null,
+    roadmapDeliveryCount: 0,
+    roadmapDeliveryItems: []
   };
 
   const $ = (id) => document.getElementById(id);
@@ -59,6 +67,10 @@
     if (view === "settings") loadSettings().catch(function (error) {
       showSettingsMessage("Settings unavailable: " + error.message, true);
     });
+    if (view === "roadmap") {
+      renderRoadmap(state.snapshot);
+      loadRoadmapDetails().catch(function (error) { renderRoadmapError(error); });
+    }
     document.querySelectorAll("[data-nav-target]").forEach(function (button) {
       if (button.classList.contains("rail-button")) {
         button.classList.toggle("active", button.getAttribute("data-nav-target") === view);
@@ -150,6 +162,10 @@
       return Math.max(max, Number(event.event_id) || 0);
     }, 0);
     $("freshness").textContent = "Live · snapshot " + dateText(data.generated_at) + (newest ? " · event #" + newest : "");
+    renderRoadmap(data);
+    if (state.activeView === "roadmap") {
+      loadRoadmapDetails().catch(function (error) { renderRoadmapError(error); });
+    }
   }
 
   async function loadHealth() {
