@@ -17,7 +17,15 @@
     github: null,
     health: null,
     healthTimer: null,
-    healthInFlight: false
+    healthInFlight: false,
+    pendingAttachments: [],
+    roadmapProfiles: {},
+    roadmapInFlight: false,
+    roadmapHasBaseline: false,
+    roadmapSeenCompletionEvents: new Set(),
+    roadmapSelectedRole: null,
+    roadmapDeliveryCount: 0,
+    roadmapDeliveryItems: []
   };
 
   const $ = (id) => document.getElementById(id);
@@ -59,6 +67,10 @@
     if (view === "settings") loadSettings().catch(function (error) {
       showSettingsMessage("Settings unavailable: " + error.message, true);
     });
+    if (view === "roadmap") {
+      renderRoadmap(state.snapshot);
+      loadRoadmapDetails().catch(function (error) { renderRoadmapError(error); });
+    }
     document.querySelectorAll("[data-nav-target]").forEach(function (button) {
       if (button.classList.contains("rail-button")) {
         button.classList.toggle("active", button.getAttribute("data-nav-target") === view);
@@ -150,6 +162,10 @@
       return Math.max(max, Number(event.event_id) || 0);
     }, 0);
     $("freshness").textContent = "Live · snapshot " + dateText(data.generated_at) + (newest ? " · event #" + newest : "");
+    renderRoadmap(data);
+    if (state.activeView === "roadmap") {
+      loadRoadmapDetails().catch(function (error) { renderRoadmapError(error); });
+    }
   }
 
   async function loadHealth() {
@@ -460,6 +476,313 @@
       '<div class="decision-card"><span>ACTIVE POLICY</span><strong>' + esc(governance.active_policy ? "AVAILABLE" : "NOT CONFIGURED") + '</strong><em>governance boundary</em></div>';
   }
 
+  function roadMapStatus(profile) {
+    if (!profile || profile.__unavailable) return { key: "unknown", label: "STATE UNKNOWN", task: null };
+    const currentTasks = safeArray(profile.current_tasks);
+    const running = currentTasks.find(function (task) { return String(task.status || "").toLowerCase() === "running"; });
+    const pending = currentTasks.find(function (task) { return String(task.status || "").toLowerCase() === "pending"; });
+    const recent = safeArray(profile.recent_executions);
+    const failed = recent.find(function (task) { return String(task.status || "").toLowerCase() === "failed"; });
+    if (running) return { key: "working", label: "WORKING", task: running };
+    if (pending) return { key: "queued", label: "QUEUED", task: pending };
+    if (failed && failed.last_error) return { key: "failed", label: "IDLE · LAST FAILURE", task: failed };
+    return { key: "idle", label: "IDLE", task: null };
+  }
+
+  function roadMapModelText(agent, profile, department) {
+    const identity = safeObject(profile && profile.identity);
+    const resolvedPreferences = safeArray(profile && profile.model_preferences);
+    if (resolvedPreferences.length) {
+      const model = resolvedPreferences[0];
+      if (typeof model === "string") return model;
+      return model.model_id || model.id || "preferred model";
+    }
+    const choices = safeArray(identity.model_preferences);
+    if (choices.length) {
+      const model = choices[0];
+      if (typeof model === "string") return model;
+      return model.model_id || model.id || "preferred model";
+    }
+    const fallback = safeArray(agent.model_preferences);
+    if (fallback.length) return String(fallback[0]);
+    const departmentModels = safeArray(department && department.model_preferences);
+    return departmentModels.length ? String(departmentModels[0]) : "No model preference recorded";
+  }
+
+  function roadMapAgentCard(agent, department) {
+    const role = String(agent.role || agent.agent_id || "unknown");
+    const profile = state.roadmapProfiles[role];
+    const status = roadMapStatus(profile);
+    const selected = state.roadmapSelectedRole === role;
+    const modelName = roadMapModelText(agent, profile, department);
+    const task = status.task;
+    const taskLine = task
+      ? (task.task_id || "Task") + " · " + (task.objective || task.status || "runtime task")
+      : "No current task recorded";
+    return '<button class="office-agent-card' + (selected ? ' selected' : '') + '" type="button" data-office-agent="' + esc(role) + '" data-status="' + status.key + '" aria-label="Inspect ' + esc(role) + ', ' + esc(status.label) + '">' +
+      '<div class="office-agent-head"><span class="office-agent-name">' + esc(role) + '</span><span class="office-status-wrap"><i class="office-status-led" aria-hidden="true"></i>' + esc(status.label) + '</span></div>' +
+      '<div class="office-workstation">' +
+        '<div class="office-worker" aria-hidden="true"><span class="worker-head"></span><span class="worker-hair"></span><span class="worker-body"></span><span class="worker-arm"></span><span class="worker-leg left"></span><span class="worker-leg right"></span></div>' +
+        '<div class="office-monitor" aria-hidden="true"><div class="office-monitor-screen"><span class="monitor-line"></span><span class="monitor-line"></span><span class="monitor-line"></span></div><span class="office-monitor-stand"></span></div>' +
+        '<div class="office-desk-top" aria-hidden="true"></div><div class="office-desk-leg" aria-hidden="true"></div><i class="office-desk-light" aria-hidden="true"></i><div class="office-floorline" aria-hidden="true"></div>' +
+      '</div>' +
+      '<div class="office-model"><strong>MODEL</strong> · ' + esc(modelName) + '</div>' +
+      '<div class="office-task">' + esc(taskLine) + '</div>' +
+    '</button>';
+  }
+
+  function renderRoadmap(data) {
+    if (!data) return;
+    const org = safeObject(data.organization);
+    const agents = safeArray(org.agents);
+    const departments = safeArray(org.departments);
+    const grid = $("roadmap-office-grid");
+    if (!grid) return;
+
+    const groups = [];
+    const assignedRoles = new Set();
+    departments.forEach(function (department) {
+      const members = agents.filter(function (agent) {
+        return safeArray(department.agent_ids).includes(agent.agent_id) ||
+          safeArray(department.agent_ids).includes(agent.role) ||
+          String(agent.department || "").toLowerCase() === String(department.department_id || "").toLowerCase();
+      });
+      members.forEach(function (agent) { assignedRoles.add(String(agent.role || agent.agent_id)); });
+      if (members.length || !agents.length) groups.push({ department: department, agents: members });
+    });
+    agents.filter(function (agent) {
+      return !assignedRoles.has(String(agent.role || agent.agent_id));
+    }).forEach(function (agent) {
+      const key = String(agent.department || "unassigned");
+      let group = groups.find(function (item) {
+        return String(item.department.department_id || item.department.name || "unassigned") === key;
+      });
+      if (!group) {
+        group = { department: { department_id: key, name: key, mission: "Department metadata not available.", model_preferences: [] }, agents: [] };
+        groups.push(group);
+      }
+      group.agents.push(agent);
+    });
+
+    if (!agents.length) {
+      grid.innerHTML = '<div class="empty-state">No agents are currently registered in Aurora organization state.</div>';
+      $("roadmap-department-count").textContent = String(departments.length);
+      $("roadmap-active-count").textContent = "0";
+      $("roadmap-live-state").className = "roadmap-live-badge unknown";
+      $("roadmap-live-state").innerHTML = '<span class="roadmap-live-dot"></span> NO AGENTS REGISTERED';
+      return;
+    }
+    if (!state.roadmapSelectedRole) state.roadmapSelectedRole = String(agents[0].role || agents[0].agent_id);
+
+    let activeCount = 0;
+    let knownCount = 0;
+    groups.forEach(function (group) {
+      group.agents.forEach(function (agent) {
+        const role = String(agent.role || agent.agent_id || "unknown");
+        const status = roadMapStatus(state.roadmapProfiles[role]);
+        if (status.key === "working") activeCount += 1;
+        if (status.key !== "unknown") knownCount += 1;
+      });
+    });
+    $("roadmap-department-count").textContent = String(groups.length);
+    $("roadmap-active-count").textContent = String(activeCount);
+    $("roadmap-delivery-count").textContent = String(state.roadmapDeliveryCount);
+    $("roadmap-mailbox-total").textContent = String(state.roadmapDeliveryCount);
+
+    const liveBadge = $("roadmap-live-state");
+    if (knownCount === agents.length) {
+      liveBadge.className = "roadmap-live-badge healthy";
+      liveBadge.innerHTML = '<span class="roadmap-live-dot"></span> LIVE TASK STATE';
+    } else {
+      liveBadge.className = "roadmap-live-badge unknown";
+      liveBadge.innerHTML = '<span class="roadmap-live-dot"></span> ' + esc(knownCount ? "PARTIAL TASK STATE" : "WAITING FOR LIVE STATE");
+    }
+    $("roadmap-last-update").textContent = "Snapshot · " + dateText(data.generated_at);
+
+    grid.innerHTML = groups.map(function (group) {
+      const department = group.department || {};
+      const name = department.name || department.department_id || "Unassigned";
+      const working = group.agents.filter(function (agent) {
+        return roadMapStatus(state.roadmapProfiles[String(agent.role || agent.agent_id)]).key === "working";
+      }).length;
+      const memberCards = group.agents.map(function (agent) {
+        return roadMapAgentCard(agent, department);
+      }).join("");
+      return '<section class="office-department" data-office-department="' + esc(department.department_id || name) + '">' +
+        '<header class="office-department-header"><div><h3>' + esc(name) + '</h3><p>' + esc(department.mission || "No department mission recorded.") + '</p></div>' +
+        '<span class="office-department-count">' + working + '/' + group.agents.length + ' working</span></header>' +
+        memberCards + '</section>';
+    }).join("");
+
+    grid.querySelectorAll("[data-office-agent]").forEach(function (button) {
+      button.addEventListener("click", function () {
+        state.roadmapSelectedRole = button.getAttribute("data-office-agent");
+        renderRoadmap(state.snapshot);
+        renderRoadmapInspector(state.roadmapSelectedRole);
+      });
+    });
+    renderRoadmapInspector(state.roadmapSelectedRole);
+    renderRoadmapDeliveries();
+  }
+
+  function renderRoadmapInspector(role) {
+    const title = $("roadmap-inspector-title");
+    const body = $("roadmap-inspector-body");
+    const led = $("roadmap-inspector-led");
+    if (!title || !body) return;
+    const snapshotAgents = safeArray(safeObject(safeObject(state.snapshot).organization).agents);
+    const fallback = snapshotAgents.find(function (agent) {
+      return String(agent.role || agent.agent_id) === String(role);
+    }) || {};
+    const profile = state.roadmapProfiles[String(role)];
+    const identity = safeObject(profile && profile.identity);
+    const base = Object.keys(identity).length ? identity : fallback;
+    const statusInfo = roadMapStatus(profile);
+    const prefs = safeArray(profile && profile.model_preferences);
+    const rawPrefs = safeArray(identity.model_preferences);
+    const selectedModel = prefs.length ? prefs[0] : (rawPrefs.length ? rawPrefs[0] : null);
+    const selectedModelName = selectedModel
+      ? (typeof selectedModel === "string" ? selectedModel : (selectedModel.model_id || selectedModel.id || "preferred model"))
+      : (safeArray(base.model_preferences)[0] || "No model preference recorded");
+    const provider = selectedModel && typeof selectedModel === "object" ? (selectedModel.provider || "provider not specified") : "not supplied by the model registry";
+    const otherModelNames = prefs.slice(1).map(function (model) {
+      return typeof model === "string" ? model : (model.model_id || model.id || "model");
+    });
+    const current = statusInfo.task;
+    const taskRows = safeArray(profile && profile.current_tasks);
+    const recent = safeArray(profile && profile.recent_executions);
+    const departmentName = base.department || fallback.department || "Unassigned";
+    title.textContent = role || "Select a workstation";
+    led.className = "workstation-led " + statusInfo.key;
+    led.setAttribute("aria-label", statusInfo.label);
+    body.innerHTML =
+      '<div class="inspector-state"><i class="office-status-led" style="background:' +
+        (statusInfo.key === "working" ? "#48db86" : statusInfo.key === "unknown" ? "#777" : "#df5c66") +
+        ';box-shadow:none"></i><strong>' + esc(statusInfo.label) + '</strong></div>' +
+      '<div class="inspector-metric"><span>DEPARTMENT</span><strong>' + esc(departmentName) + '</strong><p>' + esc(base.department_mission || base.mission || "No mission description recorded.") + '</p></div>' +
+      '<div class="inspector-metric"><span>PREFERRED MODEL</span><strong>' + esc(selectedModelName) + '</strong><p>Provider: ' + esc(provider) + '</p>' +
+        (selectedModel && typeof selectedModel === "object" ? '<p>Registry: ' + esc(selectedModel.healthy ? "healthy" : "health not verified") + ' · available: ' + esc(String(selectedModel.available)) + '</p><p>Capabilities: ' + esc(safeArray(selectedModel.capabilities).join(", ") || "not listed") + '</p>' : '') +
+        (otherModelNames.length ? '<p>Other registered preferences: ' + esc(otherModelNames.join(", ")) + '</p>' : '') +
+        '<p>The task schema may not expose the model finally selected for a single execution; this field shows the registered preference.</p></div>' +
+      '<div class="inspector-metric"><span>WHAT IT WORKS ON</span><strong>' + esc(current ? (current.objective || current.task_id || "Runtime task") : "No running task reported") + '</strong><p>' +
+        esc(current ? ("Task " + (current.task_id || "—") + " · state " + (current.status || "unknown") + (current.mission_id ? " · mission " + current.mission_id : "")) : "Work status is read from Aurora's stored task records.") + '</p></div>' +
+      '<div class="inspector-metric"><span>ACTIVE TASK RECORDS</span><strong>' + esc(taskRows.length) + '</strong><p>' +
+        esc(taskRows.map(function (task) { return (task.task_id || "task") + " · " + (task.status || "unknown") + " · " + (task.objective || "no objective"); }).join(" | ") || "None") + '</p></div>' +
+      '<div class="inspector-metric"><span>RECENT EXECUTIONS</span><strong>' + esc(recent.length) + '</strong><p>' +
+        esc(recent.slice(0,5).map(function (task) { return (task.task_id || "task") + " · " + (task.status || "unknown"); }).join(" | ") || "No execution history returned.") + '</p></div>' +
+      '<div class="inspector-metric"><span>SKILLS / CAPABILITIES</span><strong>' + esc(safeArray(base.skill_ids).join(", ") || "No skills listed") + '</strong><p>' +
+        esc(safeArray(base.capabilities).join(", ") || "No capabilities listed") + '</p></div>' +
+      (profile && profile.__unavailable ? '<div class="inspector-metric"><span>LIVE DATA</span><strong>Unavailable</strong><p>' + esc(profile.error || "The agent detail endpoint did not return current data.") + '</p></div>' : "");
+  }
+
+  function renderRoadmapDeliveries() {
+    const target = $("roadmap-deliveries-list");
+    if (!target) return;
+    if (!state.roadmapDeliveryItems.length) {
+      target.innerHTML = '<div class="empty-state">No new completion events observed during this session. Older history is not animated retroactively.</div>';
+      return;
+    }
+    target.innerHTML = state.roadmapDeliveryItems.slice(0,8).map(function (item) {
+      return '<div class="roadmap-delivery-item"><strong>' + esc(item.role) + ' → Director Inbox</strong><span>' +
+        esc(item.event.task_id || item.event.event_type || "Completion event") + ' · ' +
+        esc(item.event.event_type || "completion") + ' · ' + esc(dateText(item.event.created_at)) + '</span></div>';
+    }).join("");
+  }
+
+  function triggerRoadmapDelivery(role) {
+    const scene = $("roadmap-scene");
+    const station = Array.from(document.querySelectorAll("[data-office-agent]")).find(function (item) {
+      return item.getAttribute("data-office-agent") === String(role);
+    });
+    const worker = station && station.querySelector(".office-worker");
+    const mailbox = $("roadmap-mailbox-slot");
+    if (!scene || !worker || !mailbox || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const sceneRect = scene.getBoundingClientRect();
+    const sourceRect = worker.getBoundingClientRect();
+    const targetRect = mailbox.getBoundingClientRect();
+    const actor = document.createElement("div");
+    actor.className = "office-delivery-actor";
+    actor.setAttribute("aria-hidden", "true");
+    actor.innerHTML = '<span class="worker-head"></span><span class="worker-hair"></span><span class="worker-body"></span><span class="delivery-package"></span>';
+    const startX = sourceRect.left + sourceRect.width / 2 - sceneRect.left - 15;
+    const startY = sourceRect.top + sourceRect.height / 2 - sceneRect.top - 18;
+    const endX = targetRect.left + targetRect.width / 2 - sceneRect.left - 15;
+    const endY = targetRect.top + targetRect.height / 2 - sceneRect.top - 18;
+    actor.style.left = startX + "px";
+    actor.style.top = startY + "px";
+    scene.appendChild(actor);
+    window.requestAnimationFrame(function () {
+      actor.style.transform = "translate(" + (endX - startX) + "px," + (endY - startY) + "px) scale(.74)";
+      actor.style.opacity = "0";
+    });
+    window.setTimeout(function () { actor.remove(); }, 1500);
+    mailbox.classList.add("mail-received");
+    window.setTimeout(function () { mailbox.classList.remove("mail-received"); }, 1200);
+  }
+
+  async function loadRoadmapDetails() {
+    if (state.roadmapInFlight || state.activeView !== "roadmap" || !state.snapshot) return;
+    const agents = safeArray(safeObject(state.snapshot.organization).agents);
+    if (!agents.length) {
+      renderRoadmap(state.snapshot);
+      return;
+    }
+    state.roadmapInFlight = true;
+    try {
+      const fresh = await Promise.all(agents.map(async function (agent) {
+        const role = String(agent.role || agent.agent_id || "");
+        try {
+          const response = await fetch(state.apiBase + "/agents/" + encodeURIComponent(role), {
+            headers: { Accept: "application/json", "Cache-Control": "no-cache" },
+            cache: "no-store"
+          });
+          if (!response.ok) throw new Error("agent detail " + response.status);
+          return { role: role, profile: await response.json() };
+        } catch (error) {
+          return { role: role, profile: { __unavailable: true, error: error.message } };
+        }
+      }));
+      const completed = [];
+      const currentKeys = new Set();
+      fresh.forEach(function (record) {
+        state.roadmapProfiles[record.role] = record.profile;
+        safeArray(record.profile.events).forEach(function (event) {
+          const type = String(event.event_type || "").toLowerCase();
+          if (!/(complete|completed|succeed|succeeded|finish|finished|deliver|delivered)/.test(type)) return;
+          const key = record.role + ":" + String(event.event_id || (event.task_id + ":" + type + ":" + event.created_at));
+          currentKeys.add(key);
+          if (state.roadmapHasBaseline && !state.roadmapSeenCompletionEvents.has(key)) {
+            completed.push({ role: record.role, event: event });
+          }
+        });
+      });
+      currentKeys.forEach(function (key) { state.roadmapSeenCompletionEvents.add(key); });
+      const firstPass = !state.roadmapHasBaseline;
+      state.roadmapHasBaseline = true;
+      if (!firstPass && completed.length) {
+        completed.slice(-8).forEach(function (item) {
+          state.roadmapDeliveryCount += 1;
+          state.roadmapDeliveryItems.unshift(item);
+        });
+      }
+      renderRoadmap(state.snapshot);
+      if (!firstPass && completed.length) {
+        const roles = Array.from(new Set(completed.slice(-4).map(function (item) { return item.role; })));
+        window.setTimeout(function () { roles.forEach(triggerRoadmapDelivery); }, 90);
+      }
+    } finally {
+      state.roadmapInFlight = false;
+    }
+  }
+
+  function renderRoadmapError(error) {
+    const badge = $("roadmap-live-state");
+    if (!badge) return;
+    badge.className = "roadmap-live-badge unknown";
+    badge.innerHTML = '<span class="roadmap-live-dot"></span> LIVE STATE UNAVAILABLE';
+    $("roadmap-last-update").textContent = error && error.message ? error.message : "Refresh to retry";
+  }
+
   function showSettingsMessage(message, error) {
     const target = $("settings-message");
     if (!target) return;
@@ -568,14 +891,49 @@ async function testProvider(provider) {
     );
   }
 
+  function setChatStatus(message, error) {
+    const target = $("chat-status");
+    if (target) {
+      target.textContent = message;
+      target.classList.toggle("error", !!error);
+    }
+    if (error && $("settings-message")) showSettingsMessage(message, true);
+  }
+
+  function renderAttachmentList() {
+    const target = $("attachment-list");
+    if (!target) return;
+    target.hidden = !state.pendingAttachments.length;
+    target.innerHTML = state.pendingAttachments.map(function (item, index) {
+      return '<div class="attachment-chip" title="' + esc(item.name) + '">' +
+        '<span aria-hidden="true">▤</span><span class="attachment-chip-name">' + esc(item.name) + '</span>' +
+        '<button class="attachment-chip-remove" type="button" data-remove-attachment="' + index + '" aria-label="Remove ' + esc(item.name) + '" title="Remove attachment">×</button></div>';
+    }).join("");
+    target.querySelectorAll("[data-remove-attachment]").forEach(function (button) {
+      button.addEventListener("click", function () {
+        const index = Number(button.getAttribute("data-remove-attachment"));
+        if (!Number.isInteger(index) || index < 0 || index >= state.pendingAttachments.length) return;
+        state.pendingAttachments.splice(index, 1);
+        renderAttachmentList();
+        setChatStatus(state.pendingAttachments.length
+          ? state.pendingAttachments.length + " attachment(s) ready."
+          : "Conversation ready. Your messages go to Aurora Director.", false);
+      });
+    });
+  }
+
   async function uploadAurora(files) {
     const selected = Array.from(files || []);
     if (!selected.length) return;
-    const button = $("upload-aurora");
+    const button = $("attach-file");
     button.disabled = true;
-    showSettingsMessage("Uploading " + selected.length + " file(s) to Aurora…", false);
+    setChatStatus("Uploading " + selected.length + " attachment(s) to Aurora…", false);
     try {
       for (const file of selected) {
+        if (!file.size) throw new Error(file.name + " is empty.");
+        if (file.size > 25 * 1024 * 1024) {
+          throw new Error(file.name + " exceeds the 25 MiB per-file limit.");
+        }
         const response = await fetch(state.apiBase + "/artifacts", {
           method: "POST",
           headers: {
@@ -585,12 +943,20 @@ async function testProvider(provider) {
           },
           body: await file.arrayBuffer()
         });
-        const data = await response.json();
-        if (!response.ok) throw new Error(data && data.error ? data.error : "upload failed");
+        let data = {};
+        try { data = await response.json(); } catch (_) {}
+        if (!response.ok) throw new Error(data && data.error ? data.error : "upload failed for " + file.name);
+        state.pendingAttachments.push({
+          name: file.name,
+          size: file.size,
+          mission_id: data.mission_id || "",
+          artifact: data.artifact || null
+        });
       }
-      showSettingsMessage("Uploaded " + selected.length + " file(s) to Aurora.", false);
+      renderAttachmentList();
+      setChatStatus(state.pendingAttachments.length + " attachment(s) ready. They'll be referenced in the next message.", false);
     } catch (error) {
-      showSettingsMessage("Upload failed: " + error.message, true);
+      setChatStatus("Attachment upload failed: " + error.message, true);
     } finally {
       button.disabled = false;
       $("aurora-file-input").value = "";
@@ -726,12 +1092,6 @@ async function testProvider(provider) {
     $("settings-save").addEventListener("click", function () {
       saveSettings();
     });
-    $("upload-aurora").addEventListener("click", function () {
-      $("aurora-file-input").click();
-    });
-    $("aurora-file-input").addEventListener("change", function () {
-      uploadAurora($("aurora-file-input").files);
-    });
     $("update-aurora").addEventListener("click", function () {
       updateAurora();
     });
@@ -802,9 +1162,51 @@ async function testProvider(provider) {
     return data.session_id;
   }
 
+  function chatWelcomeHtml() {
+    return '<div class="chat-welcome" id="chat-welcome">' +
+      '<div class="chat-welcome-symbol" aria-hidden="true">✳</div>' +
+      '<h3>Ready when you are.</h3>' +
+      '<p>Ask Aurora a question, describe a task, or attach documents for review.</p></div>';
+  }
+
+  function chatTurnDisplay(turn) {
+    const content = String(turn.content || "");
+    const marker = "\n\nArchivos adjuntos recibidos mediante la entrada de artefactos de Aurora:";
+    const markerIndex = content.indexOf(marker);
+    if (turn.role !== "user" || markerIndex < 0) return { text: content, files: [] };
+    const block = content.slice(markerIndex + marker.length);
+    const files = block.split("\n").filter(function (line) {
+      return line.trim().startsWith("- ");
+    }).map(function (line) {
+      return line.trim().slice(2).replace(/\s+\(mission_id=[^)]+\)$/, "").trim();
+    }).filter(Boolean);
+    return { text: content.slice(0, markerIndex).trim(), files: files };
+  }
+
+  function chatTurnsHtml(turns) {
+    if (!turns.length) return chatWelcomeHtml();
+    return turns.map(function (turn) {
+      const role = turn.role === "user" ? "user" : "assistant";
+      const label = role === "user" ? "Y" : "✦";
+      const display = chatTurnDisplay(turn);
+      const files = display.files.length
+        ? '<div class="chat-message-files">' + display.files.map(function (name) {
+            return '<span class="chat-message-file">▤ ' + esc(name) + '</span>';
+          }).join("") + '</div>'
+        : "";
+      return '<article class="chat-message ' + role + '">' +
+        '<div class="chat-message-avatar" aria-hidden="true">' + label + '</div>' +
+        '<div class="chat-message-body">' + esc(display.text) + files + '</div></article>';
+    }).join("");
+  }
   async function loadConversationHistory() {
-    const body = $("chat-history-body");
-    body.innerHTML = '<div class="empty-state">Loading durable conversation…</div>';
+    const visibleBody = $("chat-messages");
+    const drawerBody = $("chat-history-body");
+    if (visibleBody) {
+      visibleBody.setAttribute("aria-busy", "true");
+      visibleBody.innerHTML = '<div class="empty-state">Loading saved conversation…</div>';
+    }
+    if (drawerBody) drawerBody.innerHTML = '<div class="empty-state">Loading durable conversation…</div>';
     try {
       const sessionId = await ensureConversationSession();
       const response = await fetch(
@@ -814,23 +1216,33 @@ async function testProvider(provider) {
       if (!response.ok) throw new Error("history " + response.status);
       const data = await response.json();
       const turns = safeArray(data.turns);
-      if (!turns.length) {
-        body.innerHTML = '<div class="empty-state">No conversation turns yet.</div>';
-        return;
+      if (visibleBody) {
+        visibleBody.innerHTML = chatTurnsHtml(turns);
+        visibleBody.scrollTop = visibleBody.scrollHeight;
+        visibleBody.setAttribute("aria-busy", "false");
       }
-      body.innerHTML = "";
-      turns.forEach(function (turn) {
-        const item = document.createElement("article");
-        item.className = "history-turn " + (turn.role === "user" ? "user" : "assistant");
-        item.innerHTML = '<div class="role">' + esc(String(turn.role || "assistant").toUpperCase()) + "</div><p>" + esc(turn.content) + "</p>";
-        body.appendChild(item);
-      });
-      body.scrollTop = body.scrollHeight;
+      if (drawerBody) {
+        if (!turns.length) {
+          drawerBody.innerHTML = '<div class="empty-state">No conversation turns yet.</div>';
+        } else {
+          drawerBody.innerHTML = "";
+          turns.forEach(function (turn) {
+            const item = document.createElement("article");
+            item.className = "history-turn " + (turn.role === "user" ? "user" : "assistant");
+            item.innerHTML = '<div class="role">' + esc(String(turn.role || "assistant").toUpperCase()) + "</div><p>" + esc(turn.content) + "</p>";
+            drawerBody.appendChild(item);
+          });
+        }
+        drawerBody.scrollTop = drawerBody.scrollHeight;
+      }
     } catch (error) {
-      body.innerHTML = '<div class="empty-state">Conversation history unavailable: ' + esc(error.message) + "</div>";
+      if (visibleBody) {
+        visibleBody.innerHTML = '<div class="chat-message assistant"><div class="chat-message-avatar" aria-hidden="true">!</div><div class="chat-message-body">Conversation history unavailable: ' + esc(error.message) + "</div></div>";
+        visibleBody.setAttribute("aria-busy", "false");
+      }
+      if (drawerBody) drawerBody.innerHTML = '<div class="empty-state">Conversation history unavailable: ' + esc(error.message) + "</div>";
     }
   }
-
   function openHistory() {
     $("chat-history").classList.add("open");
     $("chat-history").setAttribute("aria-hidden", "false");
@@ -842,14 +1254,61 @@ async function testProvider(provider) {
     $("chat-history").setAttribute("aria-hidden", "true");
   }
 
+  function appendChatMessage(role, text, files, extraClass) {
+    const target = $("chat-messages");
+    if (!target) return null;
+    const welcome = $("chat-welcome");
+    if (welcome) welcome.remove();
+    const item = document.createElement("article");
+    item.className = "chat-message " + role + (extraClass ? " " + extraClass : "");
+    const avatar = document.createElement("div");
+    avatar.className = "chat-message-avatar";
+    avatar.setAttribute("aria-hidden", "true");
+    avatar.textContent = role === "user" ? "Y" : "✦";
+    const body = document.createElement("div");
+    body.className = "chat-message-body";
+    body.textContent = text;
+    item.appendChild(avatar);
+    item.appendChild(body);
+    if (files && files.length) {
+      const fileList = document.createElement("div");
+      fileList.className = "chat-message-files";
+      files.forEach(function (file) {
+        const chip = document.createElement("span");
+        chip.className = "chat-message-file";
+        chip.textContent = "▤ " + file.name;
+        fileList.appendChild(chip);
+      });
+      body.appendChild(document.createElement("br"));
+      body.appendChild(fileList);
+    }
+    target.appendChild(item);
+    target.scrollTop = target.scrollHeight;
+    return item;
+  }
+
   async function sendConversationMessage(rawText) {
-    const content = String(rawText == null ? "" : rawText).trim();
-    if (!content || state.conversationInFlight) return;
+    const raw = String(rawText == null ? "" : rawText).trim();
+    const attachments = state.pendingAttachments.slice();
+    if ((!raw && !attachments.length) || state.conversationInFlight) return;
+
+    let content = raw || "Revisa los archivos adjuntos recibidos por Aurora y resume qué has podido extraer. Si no puedes acceder al contenido de algún archivo, indícalo explícitamente.";
+    if (attachments.length) {
+      content += "\n\nArchivos adjuntos recibidos mediante la entrada de artefactos de Aurora:";
+      attachments.forEach(function (item) {
+        content += "\n- " + item.name + (item.mission_id ? " (mission_id=" + item.mission_id + ")" : "");
+      });
+      content += "\nTen en cuenta estos artefactos para responder. No afirmes haber leído un archivo si no puedes acceder realmente a su contenido.";
+    }
+
     state.conversationInFlight = true;
     const send = $("director-send");
     send.disabled = true;
+    $("attach-file").disabled = true;
     if (state.avatarVoice) state.avatarVoice.setThinking();
-    $("avatar-transcript").textContent = "Aurora is thinking…";
+    setChatStatus("Aurora is thinking…", false);
+    appendChatMessage("user", raw || "Revisa los archivos adjuntos.", attachments);
+    const thinking = appendChatMessage("assistant", "Thinking…", [], "is-thinking");
 
     try {
       const sessionId = await ensureConversationSession();
@@ -872,7 +1331,12 @@ async function testProvider(provider) {
       const data = await response.json();
       if (!data || typeof data.response_text !== "string") throw new Error("invalid Director response contract");
       $("director-message").value = "";
+      $("director-message").style.height = "auto";
+      state.pendingAttachments = [];
+      renderAttachmentList();
       $("avatar-transcript").textContent = data.response_text;
+      $("avatar-transcript").classList.remove("error");
+      setChatStatus("Aurora replied.", false);
 
       if (state.avatarVoice && state.avatarVoice.capabilities.speech_output) {
         try {
@@ -884,16 +1348,30 @@ async function testProvider(provider) {
       } else if (state.avatarVoice) {
         state.avatarVoice.setIdle();
       }
+      await loadConversationHistory();
     } catch (error) {
-      $("avatar-transcript").textContent = "Director conversation unavailable: " + error.message;
+      if (thinking && thinking.parentNode) thinking.remove();
+      appendChatMessage("assistant", "Director conversation unavailable: " + error.message);
+      setChatStatus("Director conversation failed: " + error.message, true);
       if (state.avatarVoice) state.avatarVoice.setDisconnected();
     } finally {
       state.conversationInFlight = false;
       send.disabled = false;
+      $("attach-file").disabled = false;
     }
   }
-
   function setupConversation() {
+    $("attach-file").addEventListener("click", function () {
+      $("aurora-file-input").click();
+    });
+    $("aurora-file-input").addEventListener("change", function () {
+      uploadAurora($("aurora-file-input").files);
+    });
+    $("director-message").addEventListener("input", function (event) {
+      const target = event.currentTarget;
+      target.style.height = "auto";
+      target.style.height = Math.min(target.scrollHeight, 180) + "px";
+    });
     $("director-send").addEventListener("click", function () {
       sendConversationMessage($("director-message").value);
     });
@@ -932,11 +1410,13 @@ async function testProvider(provider) {
       onState: function (nextState) {
         if (nextState === adapterApi.STATES.ERROR) {
           $("avatar-transcript").textContent = "Avatar presentation unavailable; text output remains active.";
+          setChatStatus("Avatar presentation unavailable; text output remains active.", false);
         }
       },
       onTranscript: function (payload) {
         if (payload.final) {
           $("avatar-transcript").textContent = "Transcribed: " + payload.text + " · sending to Director";
+          setChatStatus("Voice input transcribed · sending to Aurora.", false);
           sendConversationMessage(payload.text);
         }
       }
@@ -946,12 +1426,14 @@ async function testProvider(provider) {
       if (!state.avatarVoice.capabilities.speech_input) {
         state.avatarVoice.setState(adapterApi.STATES.ERROR);
         $("avatar-transcript").textContent = "Speech input is unavailable; use text conversation.";
+        setChatStatus("Speech input is unavailable; use text conversation.", false);
         return;
       }
       try {
         await state.avatarVoice.startListening();
       } catch (_) {
         $("avatar-transcript").textContent = "Microphone unavailable; use text conversation.";
+        setChatStatus("Microphone unavailable; use text conversation.", false);
       }
     });
     $("avatar-stop").addEventListener("click", function () {
@@ -1003,8 +1485,10 @@ async function testProvider(provider) {
   setupAvatarVoice();
   setupSettings();
 
-  ensureConversationSession().catch(function (error) {
-    $("avatar-transcript").textContent = "Conversation service unavailable: " + error.message;
+  ensureConversationSession().then(function () {
+    return loadConversationHistory();
+  }).catch(function (error) {
+    setChatStatus("Conversation service unavailable: " + error.message, true);
     if (state.avatarVoice) state.avatarVoice.setDisconnected();
   });
 

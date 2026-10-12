@@ -3,9 +3,9 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="theme-color" content="#050b10">
+  <meta name="theme-color" content="#000000">
   <meta name="color-scheme" content="dark">
-  <title>Aurora Control Center</title>
+  <title>Aurora · Director Control Center</title>
   <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
@@ -21,7 +21,7 @@
       <div class="topbar-meta">
         <span id="system-status" class="status-pill unknown">SYSTEM UNKNOWN</span>
         <span id="freshness">No snapshot</span>
-        <button id="refresh" class="ghost-button" type="button">Refresh</button><button id="upload-aurora" class="ghost-button update-button" type="button">Upload to Aurora</button><input id="aurora-file-input" type="file" multiple hidden><button id="update-aurora" class="ghost-button update-button" type="button">Update Aurora</button>
+        <button id="refresh" class="ghost-button" type="button">Refresh</button><button id="update-aurora" class="ghost-button update-button" type="button">Update Aurora</button>
       </div>
     </header>
 
@@ -37,63 +37,38 @@
             <div class="header-state"><span class="signal-dot"></span> DIRECTOR ONLINE</div>
           </div>
 
-          <div class="home-grid">
-            <section class="panel hero-panel">
-              <div id="director-portrait" class="portrait-stage" aria-label="Aurora Director profile" data-avatar-state="IDLE">
-                <div class="portrait-aura"></div>
-                <div class="portrait-ring ring-a"></div>
-                <div class="portrait-ring ring-b"></div>
-                <div class="portrait-visual">
-                  <img id="director-portrait-image" class="portrait-image" alt="Aurora Director portrait" hidden>
-                  <div class="portrait-placeholder" id="portrait-placeholder">
-                    <span>A</span>
-                    <small>DIRECTOR PROFILE</small>
-                  </div>
-                </div>
-                <div class="portrait-caption">
-                  <span class="portrait-name">AURORA</span>
-                  <span id="avatar-voice-status" class="avatar-voice-status">IDLE</span>
-                </div>
-              </div>
-
-              <div class="hero-copy">
-                <div class="eyebrow">DIRECTOR CORE</div>
-                <h2 id="director-name">Aurora Director</h2>
-                <p id="director-readiness">Awaiting authoritative dashboard state.</p>
-                <div class="hero-metrics">
-                  <div><span>Model</span><strong id="director-model">—</strong></div>
-                  <div><span>Context</span><strong id="director-context">—</strong></div>
-                  <div><span>Projects</span><strong id="project-count">0</strong></div>
-                </div>
-              </div>
-
-              <div class="chat-surface">
-                <div class="chat-head">
-                  <div>
-                    <div class="eyebrow">DIRECTOR CONVERSATION</div>
-                    <strong>Talk to Aurora</strong>
-                  </div>
-                  <button id="chat-expand" class="text-button" type="button">Expand history ↗</button>
-                </div>
-                <div class="chat-stream">
-                  <p id="avatar-transcript" class="chat-transcript">Text conversation remains available when voice is unavailable.</p>
-                </div>
-                <div class="director-chat">
-                  <label for="director-message">Message</label>
-                  <textarea id="director-message" rows="2" maxlength="8000" placeholder="Escribe una orden, pregunta o decisión para Aurora…"></textarea>
-                  <div class="chat-actions">
-                    <div class="chat-actions-left">
-                      <button id="avatar-listen" class="ghost-button" type="button">Speak</button>
-                      <button id="avatar-stop" class="ghost-button" type="button">Stop</button>
+          <div class="home-grid home-grid-redesigned">
+            <aside class="home-sidebar" aria-label="Aurora overview">
+              <section class="panel director-profile-panel">
+                <div id="director-portrait" class="portrait-stage portrait-stage-compact" aria-label="Aurora Director profile" data-avatar-state="IDLE">
+                  <div class="portrait-aura"></div>
+                  <div class="portrait-ring ring-a"></div>
+                  <div class="portrait-ring ring-b"></div>
+                  <div class="portrait-visual">
+                    <img id="director-portrait-image" class="portrait-image" alt="Aurora Director portrait" hidden>
+                    <div class="portrait-placeholder" id="portrait-placeholder">
+                      <span>✦</span>
+                      <small>DIRECTOR</small>
                     </div>
-                    <button id="director-send" class="primary-button" type="button">Send</button>
+                  </div>
+                  <div class="portrait-caption">
+                    <span class="portrait-name">AURORA</span>
+                    <span id="avatar-voice-status" class="avatar-voice-status">IDLE</span>
                   </div>
                 </div>
-              </div>
-            </section>
+                <div class="hero-copy">
+                  <div class="eyebrow">DIRECTOR CORE</div>
+                  <h2 id="director-name">Aurora Director</h2>
+                  <p id="director-readiness">Awaiting authoritative dashboard state.</p>
+                  <div class="hero-metrics">
+                    <div><span>Model</span><strong id="director-model">—</strong></div>
+                    <div><span>Context</span><strong id="director-context">—</strong></div>
+                    <div><span>Projects</span><strong id="project-count">0</strong></div>
+                  </div>
+                </div>
+              </section>
 
-            <aside class="info-column">
-              <div class="panel info-panel">
+              <section class="panel info-panel">
                 <div class="panel-head">
                   <div>
                     <div class="eyebrow">SYSTEM PULSE</div>
@@ -101,14 +76,14 @@
                   </div>
                 </div>
                 <div class="pulse-grid">
-                  <div class="pulse-card"><span>PROJECTS</span><strong id="pulse-projects">0</strong><em>active</em></div>
+                  <div class="pulse-card"><span>PROJECTS</span><strong id="pulse-projects">0</strong><em>registered</em></div>
                   <div class="pulse-card"><span>TASKS</span><strong id="pulse-tasks">0</strong><em>total</em></div>
                   <div class="pulse-card"><span>RESEARCH</span><strong id="pulse-research">—</strong><em>state</em></div>
                   <div class="pulse-card"><span>MODELS</span><strong id="pulse-models">0</strong><em>registered</em></div>
                 </div>
-              </div>
+              </section>
 
-              <div class="panel priority-panel">
+              <section class="panel priority-panel">
                 <div class="panel-head">
                   <div>
                     <div class="eyebrow">PRIORITY STREAM</div>
@@ -117,9 +92,9 @@
                   <button class="text-button" data-nav-target="projects" type="button">Open all</button>
                 </div>
                 <div id="projects-list" class="stack-list compact-list" aria-live="polite"></div>
-              </div>
+              </section>
 
-              <div class="panel decision-panel">
+              <section class="panel decision-panel">
                 <div class="panel-head">
                   <div>
                     <div class="eyebrow">GOVERNANCE</div>
@@ -127,6 +102,115 @@
                   </div>
                 </div>
                 <div id="decision-summary" class="decision-summary"></div>
+              </section>
+            </aside>
+
+            <section class="panel chat-surface chat-workspace" aria-label="Conversation with Aurora">
+              <header class="chat-head chat-workspace-head">
+                <div class="chat-heading-copy">
+                  <div class="eyebrow">AURORA DIRECTOR</div>
+                  <h2>What can I help with?</h2>
+                  <p>Research, planning, projects and decisions — in one conversation.</p>
+                </div>
+                <div class="chat-heading-actions">
+                  <span class="chat-session-indicator"><span class="chat-session-dot"></span> DIRECT</span>
+                  <button id="chat-expand" class="text-button" type="button" title="Open saved conversation history">History ↗</button>
+                </div>
+              </header>
+
+              <div id="chat-messages" class="chat-messages" role="log" aria-live="polite" aria-label="Chat messages">
+                <div class="chat-welcome" id="chat-welcome">
+                  <div class="chat-welcome-symbol" aria-hidden="true">✳</div>
+                  <h3>Ready when you are.</h3>
+                  <p>Ask Aurora a question, describe a task, or attach documents for review.</p>
+                </div>
+              </div>
+
+              <div class="chat-composer-wrap">
+                <p id="chat-status" class="chat-status" role="status" aria-live="polite">Conversation ready. Your messages go to Aurora Director.</p>
+                <p id="avatar-transcript" class="avatar-transcript-buffer" hidden aria-hidden="true"></p>
+                <div id="attachment-list" class="attachment-list" aria-live="polite" hidden></div>
+                <div class="chat-composer">
+                  <button id="attach-file" class="attach-button" type="button" aria-label="Attach files" title="Attach files">+</button>
+                  <input id="aurora-file-input" type="file" multiple hidden aria-label="Choose files to attach">
+                  <textarea id="director-message" class="chat-input" rows="1" maxlength="8000" placeholder="Message Aurora…" aria-label="Message Aurora"></textarea>
+                  <div class="chat-composer-tools">
+                    <button id="avatar-listen" class="chat-tool-button" type="button" aria-label="Use voice input" title="Voice input">♩</button>
+                    <button id="avatar-stop" class="chat-tool-button" type="button" aria-label="Stop voice" title="Stop voice">■</button>
+                    <button id="director-send" class="send-button" type="button" aria-label="Send message" title="Send message"><span aria-hidden="true">↑</span></button>
+                  </div>
+                </div>
+                <div class="chat-composer-footnote">Attach files with + · Up to 25 MB per file · Enter to send, Shift+Enter for a new line</div>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <section id="view-roadmap" class="view" data-view-panel="roadmap" aria-label="Roadmap and live department office">
+          <div class="view-header roadmap-view-header">
+            <div>
+              <div class="eyebrow">AURORA // LIVE ORGANIZATION</div>
+              <h1>Roadmap Office</h1>
+              <p>Real departments, runtime tasks, model preferences and recorded work deliveries.</p>
+            </div>
+            <div class="roadmap-header-signals">
+              <span id="roadmap-live-state" class="roadmap-live-badge unknown"><span class="roadmap-live-dot"></span> WAITING FOR LIVE STATE</span>
+              <span id="roadmap-last-update" class="roadmap-freshness">Awaiting first snapshot</span>
+            </div>
+          </div>
+
+          <div class="roadmap-summary-row">
+            <div class="roadmap-summary-card"><span>DEPARTMENTS</span><strong id="roadmap-department-count">—</strong></div>
+            <div class="roadmap-summary-card"><span>WORKING NOW</span><strong id="roadmap-active-count">—</strong></div>
+            <div class="roadmap-summary-card"><span>DELIVERIES OBSERVED THIS SESSION</span><strong id="roadmap-delivery-count">0</strong></div>
+          </div>
+
+          <div id="roadmap-scene" class="roadmap-layout">
+            <section class="panel office-floorplan" aria-label="Live virtual office">
+              <div class="office-floorplan-topline">
+                <span class="eyebrow">OPERATIONS FLOOR</span>
+                <span class="office-key"><i class="key-led key-led-working"></i> Working <i class="key-led key-led-idle"></i> Idle / no running task</span>
+              </div>
+              <div class="office-director-zone">
+                <div class="director-office-card">
+                  <div class="director-office-avatar" aria-hidden="true">
+                    <span class="director-avatar-head"></span><span class="director-avatar-body"></span><span class="director-avatar-shoulder"></span>
+                  </div>
+                  <div class="director-office-copy">
+                    <span class="eyebrow">DIRECTOR</span>
+                    <h2>Aurora</h2>
+                    <p>Coordination · review · decisions</p>
+                  </div>
+                </div>
+                <div class="office-mail-route" aria-hidden="true"><span></span><small>DELIVERY ROUTE</small><span></span></div>
+                <div id="roadmap-mailbox-slot" class="director-mailbox" aria-label="Director work delivery mailbox">
+                  <div class="mailbox-icon" aria-hidden="true"><span></span></div>
+                  <div><span class="eyebrow">DIRECTOR INBOX</span><strong>Work deliveries</strong><small><b id="roadmap-mailbox-total">0</b> new delivery animation(s) observed</small></div>
+                </div>
+              </div>
+              <div class="office-floor-label"><span>DEPARTMENTS & MODEL WORKSTATIONS</span><span>Selected workstation opens its live details →</span></div>
+              <div id="roadmap-office-grid" class="office-department-grid" aria-live="polite">
+                <div class="empty-state">Loading authoritative department and task state…</div>
+              </div>
+              <div class="office-groundnote" id="roadmap-data-note">Worker lights and movement are driven by task records and events returned by Aurora. Missing runtime signals remain unknown.</div>
+            </section>
+
+            <aside class="panel roadmap-inspector-panel" aria-label="Department workstation details">
+              <div class="roadmap-inspector-header">
+                <div>
+                  <div class="eyebrow">WORKSTATION INSPECTOR</div>
+                  <h2 id="roadmap-inspector-title">Select a workstation</h2>
+                </div>
+                <span id="roadmap-inspector-led" class="workstation-led unknown" aria-label="Unknown state"></span>
+              </div>
+              <div id="roadmap-inspector-body" class="roadmap-inspector-body">
+                <div class="empty-state">Select a department member to inspect its preferred model, responsibilities and live task state.</div>
+              </div>
+              <div class="roadmap-delivery-section">
+                <div class="panel-head">
+                  <div><div class="eyebrow">DIRECTOR MAILBOX</div><h3>Recent work signals</h3></div>
+                </div>
+                <div id="roadmap-deliveries-list" class="roadmap-deliveries-list"><div class="empty-state">No new deliveries observed during this session.</div></div>
               </div>
             </aside>
           </div>
@@ -340,8 +424,8 @@
       </main>
 
       <nav class="right-rail" aria-label="Aurora navigation">
-        <div class="rail-brand">A</div>
         <button class="rail-button active" data-nav-target="home" type="button" aria-label="Home"><span class="rail-glyph">⌂</span><small>HOME</small></button>
+        <button class="rail-button" data-nav-target="roadmap" type="button" aria-label="Roadmap office"><span class="rail-glyph">⌘</span><small>ROADMAP</small></button>
         <button class="rail-button" data-nav-target="projects" type="button" aria-label="Projects"><span class="rail-glyph">◇</span><small>PROJECTS</small></button>
         <button class="rail-button" data-nav-target="tasks" type="button" aria-label="Tasks"><span class="rail-glyph">≡</span><small>TASKS</small></button>
         <button class="rail-button" data-nav-target="research" type="button" aria-label="Research"><span class="rail-glyph">⌁</span><small>RESEARCH</small></button>
