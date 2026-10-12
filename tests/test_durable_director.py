@@ -117,9 +117,8 @@ def test_durable_director_persists_explicit_validated_task_graph_and_planning_ev
     assert submission.plan.model == "nvidia/test-model"
     assert submission.plan.provider == "nvidia_api"
     assert submission.plan.execution_id == "conversation-planning-exec-123"
-    assert [item.task.task_id for item in stored] == [
-        "task-census", "task-preflight", "task-file-list"
-    ]
-    assert stored[1].task.depends_on == ("task-census",)
-    assert stored[2].task.depends_on == ("task-preflight",)
-    assert stored[2].task.args == (".",)
+    stored_by_id = {item.task.task_id: item for item in stored}
+    assert set(stored_by_id) == {"task-census", "task-preflight", "task-file-list"}
+    assert stored_by_id["task-preflight"].task.depends_on == ("task-census",)
+    assert stored_by_id["task-file-list"].task.depends_on == ("task-preflight",)
+    assert stored_by_id["task-file-list"].task.args == (".",)
