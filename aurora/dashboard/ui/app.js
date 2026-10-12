@@ -892,7 +892,7 @@ async function testProvider(provider) {
   }
 
   function setChatStatus(message, error) {
-    const target = $("avatar-transcript");
+    const target = $("chat-status");
     if (target) {
       target.textContent = message;
       target.classList.toggle("error", !!error);
@@ -1336,6 +1336,7 @@ async function testProvider(provider) {
       renderAttachmentList();
       $("avatar-transcript").textContent = data.response_text;
       $("avatar-transcript").classList.remove("error");
+      setChatStatus("Aurora replied.", false);
 
       if (state.avatarVoice && state.avatarVoice.capabilities.speech_output) {
         try {
@@ -1408,11 +1409,13 @@ async function testProvider(provider) {
       onState: function (nextState) {
         if (nextState === adapterApi.STATES.ERROR) {
           $("avatar-transcript").textContent = "Avatar presentation unavailable; text output remains active.";
+          setChatStatus("Avatar presentation unavailable; text output remains active.", false);
         }
       },
       onTranscript: function (payload) {
         if (payload.final) {
           $("avatar-transcript").textContent = "Transcribed: " + payload.text + " · sending to Director";
+          setChatStatus("Voice input transcribed · sending to Aurora.", false);
           sendConversationMessage(payload.text);
         }
       }
@@ -1422,12 +1425,14 @@ async function testProvider(provider) {
       if (!state.avatarVoice.capabilities.speech_input) {
         state.avatarVoice.setState(adapterApi.STATES.ERROR);
         $("avatar-transcript").textContent = "Speech input is unavailable; use text conversation.";
+        setChatStatus("Speech input is unavailable; use text conversation.", false);
         return;
       }
       try {
         await state.avatarVoice.startListening();
       } catch (_) {
         $("avatar-transcript").textContent = "Microphone unavailable; use text conversation.";
+        setChatStatus("Microphone unavailable; use text conversation.", false);
       }
     });
     $("avatar-stop").addEventListener("click", function () {
