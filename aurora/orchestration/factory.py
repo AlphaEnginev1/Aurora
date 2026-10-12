@@ -763,7 +763,6 @@ def build_director_runtime(*, inference_policy_path: str | Path, autonomy_policy
         bootstrap=bootstrap,
         db_path=runtime_root/"conversations.db",
         provider=service.planner.provider,
-        mission_runner=service.run_mission,
         workbench=service.task_engine.orchestration._workbench,
     )
 
@@ -825,6 +824,14 @@ def build_director_runtime(*, inference_policy_path: str | Path, autonomy_policy
     # delegates to this exact DirectorRuntime, preserving durable mission/task
     # identity, ownership, event bus, and terminal-state semantics.
     runtime.autonomous_mission_manager = AutonomousMissionManager(runtime)
+
+    # Route conversation missions through the canonical durable runtime so
+    # each invocation retains a persistent mission ID and terminal task state.
+    def run_durable_conversation_mission(*, objective: str):
+        submission = runtime.submit_mission(objective=objective)
+        return runtime.run_until_terminal(submission)
+
+    conversation_service.mission_runner = run_durable_conversation_mission
     runtime.autonomy_controllers = build_autonomy_runtime_bindings(
         director_service=service,
         router=service.planner.router,
