@@ -109,6 +109,9 @@ def test_home_chat_attachments_and_live_roadmap_office_contract():
     assert ".floorplan-model-station[data-model-state=\"working\"]" in css
     assert ".floorplan-central-corridor" in css
     assert "roadmapSelectedModelId" in js
+    assert "roadmapSelectedStationKey" in js
+    assert "data-roadmap-station-key" in js
+    assert 'button.getAttribute("data-roadmap-station-key") === state.roadmapSelectedStationKey' in js
     assert "roadmapModelCatalog" in js
     assert "model_activity" in js
     assert "active_executions" in js
