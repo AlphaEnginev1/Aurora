@@ -14,6 +14,7 @@
     conversationInFlight: false,
     activeView: "home",
     settings: null,
+    github: null,
     health: null,
     healthTimer: null,
     healthInFlight: false
@@ -651,6 +652,76 @@ async function testProvider(provider) {
     }
   }
 
+  function renderGitHubStatus(data) {
+    state.github = data;
+    const badge = $("github-status-badge");
+    const description = $("github-status-text");
+    const connect = $("github-connect");
+    const disconnect = $("github-disconnect");
+    if (!badge || !description || !connect || !disconnect) return;
+
+    const configured = data.configured === true;
+    const connected = data.connected === true;
+    badge.textContent = connected ? "CONNECTED" : (configured ? "DISCONNECTED" : "NOT CONFIGURED");
+    badge.className = "badge" + (connected ? " success" : "");
+    if (connected) {
+      description.textContent = "Connected to GitHub as " + String(data.login || data.name || "GitHub account") + ".";
+    } else if (configured) {
+      description.textContent = "Connect Aurora to your GitHub account so the Director and Workbench can use the authorized connection.";
+    } else {
+      description.textContent = "GitHub OAuth is not configured. Set AURORA_GITHUB_OAUTH_CLIENT_ID and AURORA_GITHUB_OAUTH_CLIENT_SECRET in the local runtime environment.";
+    }
+    connect.disabled = !configured;
+    connect.textContent = connected ? "Reconnect GitHub" : "Connect GitHub";
+    disconnect.disabled = !connected;
+  }
+
+  async function loadGitHubStatus() {
+    const response = await fetch("/api/github/status", {
+      headers: { Accept: "application/json" }
+    });
+    if (!response.ok) throw new Error("GitHub status " + response.status);
+    const data = await response.json();
+    if (!data || typeof data.connected !== "boolean" || typeof data.configured !== "boolean") {
+      throw new Error("invalid GitHub status contract");
+    }
+    renderGitHubStatus(data);
+    return data;
+  }
+
+  function setupGitHubConnection() {
+    const connect = $("github-connect");
+    const disconnect = $("github-disconnect");
+    if (connect) {
+      connect.addEventListener("click", function () {
+        window.location.assign("/api/github/oauth/start");
+      });
+    }
+    if (disconnect) {
+      disconnect.addEventListener("click", async function () {
+        disconnect.disabled = true;
+        try {
+          const response = await fetch("/api/github/disconnect", {
+            headers: { Accept: "application/json" }
+          });
+          let payload = {};
+          try {
+            payload = await response.json();
+          } catch (_) {}
+          if (!response.ok) {
+            throw new Error(payload && payload.error ? payload.error : "GitHub disconnect " + response.status);
+          }
+          await loadGitHubStatus();
+          showSettingsMessage("GitHub disconnected.", false);
+        } catch (error) {
+          showSettingsMessage("GitHub disconnect failed: " + error.message, true);
+        } finally {
+          disconnect.disabled = !(state.github && state.github.connected === true);
+        }
+      });
+    }
+  }
+
   function setupSettings() {
     $("settings-save").addEventListener("click", function () {
       saveSettings();
@@ -923,7 +994,10 @@ async function testProvider(provider) {
 
   setupNavigation();
   setupGitHubConnection();
-  loadGitHubStatus().catch(function () {});
+  loadGitHubStatus().catch(function (error) {
+    const status = $("github-status-text");
+    if (status) status.textContent = "GitHub status unavailable: " + error.message;
+  });
   setupConversation();
   setupAvatarPortrait();
   setupAvatarVoice();
