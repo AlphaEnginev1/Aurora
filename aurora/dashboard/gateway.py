@@ -46,6 +46,7 @@ class DashboardGateway:
         model_registry: ModelRegistry,
         provider_registry: ProviderRegistry,
         model_router: Any | None = None,
+        model_candidate_store: Any | None = None,
         task_store: DurableTaskStore,
         mission_memory: MissionMemory,
         model_performance: ModelPerformanceStore | None = None,
@@ -64,6 +65,7 @@ class DashboardGateway:
         self.model_registry = model_registry
         self.provider_registry = provider_registry
         self.model_router = model_router
+        self.model_candidate_store = model_candidate_store
         self.task_store = task_store
         self.mission_memory = mission_memory
         self.model_performance = model_performance
@@ -121,6 +123,7 @@ class DashboardGateway:
             "providers": list(self.provider_registry.catalog),
             "models": list(self.model_registry.catalog),
             "model_activity": self.model_activity(),
+            "model_candidates": self.model_candidates(),
             "skills": [self._skill_summary(skill) for skill in self.skill_registry.skills.values()],
             "runtime": {
                 "mission_count": len(missions),
@@ -174,11 +177,81 @@ class DashboardGateway:
                 "captured_at": now,
                 "active_executions": [],
             }
+        eligible_reader = getattr(router, "available", None)
+        eligible_model_ids: list[str] = []
+        eligibility_state = "unknown"
+        if callable(eligible_reader):
+            try:
+                eligible_model_ids = sorted({
+                    str(getattr(model, "id", "")).strip()
+                    for model in eligible_reader()
+                    if str(getattr(model, "id", "")).strip()
+                })
+                eligibility_state = "authoritative"
+            except Exception:
+                eligibility_state = "unknown"
         return {
             "state": "authoritative",
             "captured_at": now,
             "active_executions": safe_active,
             "active_count": len(safe_active),
+            "eligible_model_ids": eligible_model_ids,
+            "eligibility_state": eligibility_state,
+        }
+
+    def model_candidates(self, *, limit: int = 500) -> dict[str, Any]:
+        """Return governed discovery candidates not present in the active model catalog."""
+        now = _now()
+        reader = getattr(self.model_candidate_store, "list", None)
+        if not callable(reader):
+            return {
+                "state": "unknown",
+                "reason": "model candidate store is not connected",
+                "captured_at": now,
+                "candidate_count": None,
+                "candidates": [],
+            }
+        try:
+            staged = reader(limit=limit)
+            registered_ids = set(self.model_registry.ids)
+            candidates: list[dict[str, Any]] = []
+            for item in staged:
+                model = getattr(item, "model", None)
+                model_id = str(getattr(model, "id", "") or "").strip()
+                if not model_id or model_id in registered_ids:
+                    continue
+                candidates.append({
+                    "candidate_id": str(getattr(item, "candidate_id", "") or ""),
+                    "provider_id": str(getattr(item, "provider_id", "") or getattr(model, "provider", "") or ""),
+                    "state": str(getattr(item, "state", "unknown") or "unknown"),
+                    "discovered_at": str(getattr(item, "discovered_at", "") or ""),
+                    "model_id": model_id,
+                    "endpoint": str(getattr(model, "endpoint", "") or ""),
+                    "enabled": bool(getattr(model, "enabled", False)),
+                    "healthy": bool(getattr(model, "healthy", False)),
+                    "available": bool(getattr(model, "available", False)),
+                    "capabilities": list(getattr(model, "capabilities", ()) or ()),
+                    "specialties": list(getattr(model, "specialties", ()) or ()),
+                    "context_window": getattr(model, "context_window", None),
+                    "pricing_tier": str(getattr(model, "pricing_tier", "unknown") or "unknown"),
+                    "quality_score": getattr(model, "quality_score", None),
+                    "latency_score": getattr(model, "latency_score", None),
+                    "cost_score": getattr(model, "cost_score", None),
+                })
+        except Exception as exc:
+            return {
+                "state": "unknown",
+                "reason": f"model candidates unavailable ({type(exc).__name__})",
+                "captured_at": now,
+                "candidate_count": None,
+                "candidates": [],
+            }
+        return {
+            "state": "authoritative",
+            "captured_at": now,
+            "candidate_count": len(candidates),
+            "at_limit": len(staged) >= limit,
+            "candidates": candidates,
         }
 
     def project(self, project_id: str, *, limit: int = 50) -> dict[str, Any]:
