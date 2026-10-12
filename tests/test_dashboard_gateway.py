@@ -211,3 +211,36 @@ def test_dashboard_limits_are_bounded(tmp_path: Path):
         assert "between 1 and 1000" in str(exc)
     else:
         raise AssertionError("expected oversized snapshot request to fail")
+
+
+
+def test_dashboard_model_activity_is_unknown_without_router_and_live_with_router(tmp_path: Path):
+    gateway = _gateway(tmp_path)
+
+    missing = gateway.snapshot()["model_activity"]
+    assert missing["state"] == "unknown"
+    assert missing["active_executions"] == []
+
+    class ActivityRouter:
+        def active_executions(self):
+            return ({
+                "execution_id": "execution-1",
+                "request_id": "request-1",
+                "model_id": "model/research",
+                "provider": "nvidia_api",
+                "role": "researcher",
+                "task_id": "task-1",
+                "mission_id": "mission-1",
+                "project_id": "project-a",
+                "task_type": "research",
+                "started_at": "2026-10-12T10:00:00+00:00",
+                "status": "running",
+                "prompt": "must never be exposed",
+            },)
+
+    gateway.model_router = ActivityRouter()
+    activity = gateway.snapshot()["model_activity"]
+    assert activity["state"] == "authoritative"
+    assert activity["active_count"] == 1
+    assert activity["active_executions"][0]["model_id"] == "model/research"
+    assert "prompt" not in activity["active_executions"][0]
