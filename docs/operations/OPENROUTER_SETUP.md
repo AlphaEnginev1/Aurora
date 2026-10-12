@@ -10,6 +10,8 @@ Do not paste API keys into chat, commits, screenshots, or dashboard logs. In the
 export OPENROUTER_API_KEY='YOUR_OPENROUTER_KEY'
 export AURORA_DIRECTOR_PROVIDER=openrouter
 export OPENROUTER_MODEL_ID=openrouter/free
+# If Aurora is already running, stop its current daemon so it inherits the new environment:
+if [[ -f .aurora-runtime/aurora.pid ]]; then kill "$(cat .aurora-runtime/aurora.pid)" 2>/dev/null || true; rm -f .aurora-runtime/aurora.pid; fi
 bash scripts/launch-local.sh
 ```
 
