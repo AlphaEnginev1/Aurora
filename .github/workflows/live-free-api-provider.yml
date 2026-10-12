@@ -7,7 +7,9 @@ on:
       - "aurora/inference/providers/**"
       - "aurora/orchestration/factory.py"
       - "config/free-model-policy.json"
+      - "config/network-policy.json"
       - "tests/e2e/test_live_openrouter_inference.py"
+      - "tests/test_openrouter_network_policy.py"
   workflow_dispatch:
 
 permissions:
