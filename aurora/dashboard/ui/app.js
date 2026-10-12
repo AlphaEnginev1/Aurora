@@ -1150,9 +1150,32 @@ async function testProvider(provider) {
     return data.session_id;
   }
 
+  function chatWelcomeHtml() {
+    return '<div class="chat-welcome" id="chat-welcome">' +
+      '<div class="chat-welcome-symbol" aria-hidden="true">✳</div>' +
+      '<h3>Ready when you are.</h3>' +
+      '<p>Ask Aurora a question, describe a task, or attach documents for review.</p></div>';
+  }
+
+  function chatTurnsHtml(turns) {
+    if (!turns.length) return chatWelcomeHtml();
+    return turns.map(function (turn) {
+      const role = turn.role === "user" ? "user" : "assistant";
+      const label = role === "user" ? "Y" : "✦";
+      return '<article class="chat-message ' + role + '">' +
+        '<div class="chat-message-avatar" aria-hidden="true">' + label + '</div>' +
+        '<div class="chat-message-body">' + esc(turn.content) + '</div></article>';
+    }).join("");
+  }
+
   async function loadConversationHistory() {
-    const body = $("chat-history-body");
-    body.innerHTML = '<div class="empty-state">Loading durable conversation…</div>';
+    const visibleBody = $("chat-messages");
+    const drawerBody = $("chat-history-body");
+    if (visibleBody) {
+      visibleBody.setAttribute("aria-busy", "true");
+      visibleBody.innerHTML = '<div class="empty-state">Loading saved conversation…</div>';
+    }
+    if (drawerBody) drawerBody.innerHTML = '<div class="empty-state">Loading durable conversation…</div>';
     try {
       const sessionId = await ensureConversationSession();
       const response = await fetch(
@@ -1162,23 +1185,33 @@ async function testProvider(provider) {
       if (!response.ok) throw new Error("history " + response.status);
       const data = await response.json();
       const turns = safeArray(data.turns);
-      if (!turns.length) {
-        body.innerHTML = '<div class="empty-state">No conversation turns yet.</div>';
-        return;
+      if (visibleBody) {
+        visibleBody.innerHTML = chatTurnsHtml(turns);
+        visibleBody.scrollTop = visibleBody.scrollHeight;
+        visibleBody.setAttribute("aria-busy", "false");
       }
-      body.innerHTML = "";
-      turns.forEach(function (turn) {
-        const item = document.createElement("article");
-        item.className = "history-turn " + (turn.role === "user" ? "user" : "assistant");
-        item.innerHTML = '<div class="role">' + esc(String(turn.role || "assistant").toUpperCase()) + "</div><p>" + esc(turn.content) + "</p>";
-        body.appendChild(item);
-      });
-      body.scrollTop = body.scrollHeight;
+      if (drawerBody) {
+        if (!turns.length) {
+          drawerBody.innerHTML = '<div class="empty-state">No conversation turns yet.</div>';
+        } else {
+          drawerBody.innerHTML = "";
+          turns.forEach(function (turn) {
+            const item = document.createElement("article");
+            item.className = "history-turn " + (turn.role === "user" ? "user" : "assistant");
+            item.innerHTML = '<div class="role">' + esc(String(turn.role || "assistant").toUpperCase()) + "</div><p>" + esc(turn.content) + "</p>";
+            drawerBody.appendChild(item);
+          });
+        }
+        drawerBody.scrollTop = drawerBody.scrollHeight;
+      }
     } catch (error) {
-      body.innerHTML = '<div class="empty-state">Conversation history unavailable: ' + esc(error.message) + "</div>";
+      if (visibleBody) {
+        visibleBody.innerHTML = '<div class="chat-message assistant"><div class="chat-message-avatar" aria-hidden="true">!</div><div class="chat-message-body">Conversation history unavailable: ' + esc(error.message) + "</div></div>";
+        visibleBody.setAttribute("aria-busy", "false");
+      }
+      if (drawerBody) drawerBody.innerHTML = '<div class="empty-state">Conversation history unavailable: ' + esc(error.message) + "</div>";
     }
   }
-
   function openHistory() {
     $("chat-history").classList.add("open");
     $("chat-history").setAttribute("aria-hidden", "false");
