@@ -2160,7 +2160,7 @@ body {
 
 /* Aurora live top-down model floor plan */
 .roadmap-model-summary-row {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 .roadmap-live-floorplan {
   position: relative;
@@ -2668,6 +2668,15 @@ body {
 .floorplan-model-station[data-model-state="unavailable"] .floorplan-model-status i { background:#ff596b; box-shadow:0 0 7px rgba(255,89,107,.35); }
 .floorplan-model-station[data-model-state="unknown"] .floorplan-status-led,
 .floorplan-model-station[data-model-state="unknown"] .floorplan-model-status i { background:#7c8990; box-shadow:none; }
+.floorplan-model-station[data-model-state="candidate"] {
+  border-color:rgba(235,184,77,.45);
+  background:rgba(28,23,10,.92);
+}
+.floorplan-model-station[data-model-state="candidate"] .floorplan-status-led,
+.floorplan-model-station[data-model-state="candidate"] .floorplan-model-status i {
+  background:#e9b94f;
+  box-shadow:0 0 7px rgba(233,185,79,.4);
+}
 .floorplan-empty-room {
   grid-column:1/-1;
   padding:15px 8px;
@@ -2812,6 +2821,7 @@ body {
   50% { opacity:1; }
 }
 @media (max-width: 1350px) {
+  .roadmap-model-summary-row { grid-template-columns:repeat(3,minmax(0,1fr)); }
   .roadmap-live-floorplan { grid-template-columns:minmax(0,1.55fr) minmax(290px,.85fr); }
   .floorplan-top-row { grid-template-columns:minmax(0,1fr) minmax(160px,.9fr) minmax(0,1fr); }
   .floorplan-room { padding:6px; }
