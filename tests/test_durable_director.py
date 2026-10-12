@@ -122,3 +122,9 @@ def test_durable_director_persists_explicit_validated_task_graph_and_planning_ev
     assert stored_by_id["task-preflight"].task.depends_on == ("task-census",)
     assert stored_by_id["task-file-list"].task.depends_on == ("task-preflight",)
     assert stored_by_id["task-file-list"].task.args == (".",)
+    submitted_event = next(
+        event for event in store.events("mission-explicit-123")
+        if event.event_type == "mission_submitted"
+    )
+    assert submitted_event.payload["provider"] == "nvidia_api"
+    assert submitted_event.payload["planning_execution_id"] == "conversation-planning-exec-123"
