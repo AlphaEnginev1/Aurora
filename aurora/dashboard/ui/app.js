@@ -25,6 +25,7 @@
     roadmapSeenCompletionEvents: new Set(),
     roadmapSelectedRole: null,
     roadmapSelectedModelId: null,
+    roadmapSelectedStationKey: null,
     roadmapContext: null,
     roadmapDeliveryCount: 0,
     roadmapDeliveryItems: []
@@ -716,6 +717,10 @@
     return { key: "ready", label: "READY · NOT EXECUTING", executions: [], busyAgents: [] };
   }
 
+  function roadmapStationKey(modelId, placement) {
+    return String(placement || "reserve") + "::" + String(modelId);
+  }
+
   function roadmapModelStation(modelId, group, context) {
     const model = context.modelsById.get(modelId) || { model_id: modelId, registered: false };
     const modelRoles = context.agents.filter(function (agent) {
@@ -725,7 +730,11 @@
       ? group.agents.filter(function (agent) { return roadmapAgentModelIds(agent).includes(modelId); })
       : [];
     const status = roadMapModelStatus(model, context);
-    const selected = state.roadmapSelectedModelId === modelId;
+    const placement = group
+      ? (group.department.department_id || group.department.name || "department")
+      : "reserve";
+    const stationKey = roadmapStationKey(modelId, placement);
+    const selected = state.roadmapSelectedStationKey === stationKey;
     const provider = model.provider || "provider not recorded";
     const roleNames = modelRoles.map(function (agent) { return String(agent.role || agent.agent_id); });
     const roomRoles = groupRoles.map(function (agent) { return String(agent.role || agent.agent_id); });
@@ -733,7 +742,8 @@
       ? roomRoles.join(" · ")
       : (modelRoles.length ? modelRoles.map(function (agent) { return String(agent.role || agent.agent_id); }).join(" · ") : "Unassigned model");
     return '<button class="floorplan-model-station' + (selected ? ' selected' : '') +
-        '" type="button" data-roadmap-model="' + esc(modelId) + '" data-model-state="' + esc(status.key) +
+        '" type="button" data-roadmap-model="' + esc(modelId) + '" data-roadmap-station-key="' + esc(stationKey) +
+        '" data-model-state="' + esc(status.key) +
         '" data-agent-roles="' + esc(JSON.stringify(roomRoles.length ? roomRoles : roleNames)) +
         '" aria-pressed="' + String(selected) + '" aria-label="Inspect model ' + esc(modelId) + ', ' + esc(status.label) + '">' +
       '<span class="floorplan-workstation-art" aria-hidden="true">' +
@@ -816,9 +826,12 @@
     if (directorModels) {
       directorModels.innerHTML = context.directorModelIds.length
         ? context.directorModelIds.map(function (id) {
-            return '<button class="floorplan-director-model-chip" type="button" data-roadmap-model="' + esc(id) +
-              '" data-model-state="' + esc(roadMapModelStatus(context.modelsById.get(id), context).key) + '">' +
-              esc(id) + '</button>';
+            const stationKey = roadmapStationKey(id, "director");
+            const selected = state.roadmapSelectedStationKey === stationKey;
+            return '<button class="floorplan-director-model-chip' + (selected ? ' selected' : '') +
+              '" type="button" data-roadmap-model="' + esc(id) + '" data-roadmap-station-key="' + esc(stationKey) +
+              '" data-model-state="' + esc(roadMapModelStatus(context.modelsById.get(id), context).key) +
+              '" aria-pressed="' + String(selected) + '">' + esc(id) + '</button>';
           }).join("")
         : '<span class="floorplan-muted">No Director model exposed by current policy.</span>';
     }
@@ -883,12 +896,39 @@
     const activeModelId = activeExecutions.length ? roadmapValueId(activeExecutions[0].model_id || activeExecutions[0].selected_model) : "";
     if (!state.roadmapSelectedModelId || !context.modelsById.has(state.roadmapSelectedModelId)) {
       state.roadmapSelectedModelId = (activeModelId && context.modelsById.has(activeModelId)) ? activeModelId : (modelIds[0] || null);
+      state.roadmapSelectedStationKey = null;
     }
-    document.querySelectorAll("[data-roadmap-model]").forEach(function (button) {
-      button.classList.toggle("selected", button.getAttribute("data-roadmap-model") === state.roadmapSelectedModelId);
-      button.setAttribute("aria-pressed", String(button.getAttribute("data-roadmap-model") === state.roadmapSelectedModelId));
+
+    // A single model ID may be assigned to multiple departments. Select one
+    // rendered workstation occurrence, not every tile sharing that model ID.
+    const modelButtons = Array.from(document.querySelectorAll("[data-roadmap-model]"));
+    let selectedButton = modelButtons.find(function (button) {
+      return button.getAttribute("data-roadmap-station-key") === state.roadmapSelectedStationKey;
+    });
+    if (!selectedButton) {
+      selectedButton = modelButtons.find(function (button) {
+        return button.getAttribute("data-roadmap-model") === state.roadmapSelectedModelId;
+      }) || modelButtons.find(function (button) {
+        return button.getAttribute("data-roadmap-model") === activeModelId;
+      }) || modelButtons.find(function (button) {
+        return button.classList.contains("floorplan-model-station");
+      }) || modelButtons[0] || null;
+      state.roadmapSelectedStationKey = selectedButton
+        ? selectedButton.getAttribute("data-roadmap-station-key")
+        : null;
+      if (selectedButton) {
+        state.roadmapSelectedModelId = selectedButton.getAttribute("data-roadmap-model");
+      }
+    }
+
+    modelButtons.forEach(function (button) {
+      const isSelected = Boolean(state.roadmapSelectedStationKey) &&
+        button.getAttribute("data-roadmap-station-key") === state.roadmapSelectedStationKey;
+      button.classList.toggle("selected", isSelected);
+      button.setAttribute("aria-pressed", String(isSelected));
       button.addEventListener("click", function () {
         state.roadmapSelectedModelId = button.getAttribute("data-roadmap-model");
+        state.roadmapSelectedStationKey = button.getAttribute("data-roadmap-station-key");
         renderRoadmap(state.snapshot);
       }, { once: true });
     });
