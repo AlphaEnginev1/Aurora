@@ -1,4 +1,5 @@
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -569,3 +570,31 @@ def test_verified_research_teaches_model_routing(tmp_path):
     assert "Verified research knowledge authorized for this task." in (
         orchestration.calls[0][1][0]["content"]
     )
+
+
+def test_task_engine_propagates_failed_workbench_status_instead_of_marking_success(tmp_path):
+    class FailedWorkbenchOrchestration:
+        def run_capability_task(self, **kwargs):
+            return SimpleNamespace(
+                execution=SimpleNamespace(
+                    status="failed",
+                    error="workbench preflight refused the operation",
+                    output={"ready": False},
+                    receipt_id="receipt-failed",
+                )
+            )
+
+        def run_task(self, **kwargs):
+            raise AssertionError("Workbench capability must use the governed capability path")
+
+    task = DelegatedTask(
+        "preflight",
+        "operator",
+        "Verify governed Workbench readiness",
+        capability="workbench:preflight",
+    )
+    result = TaskEngine(FailedWorkbenchOrchestration(), tmp_path).execute_one(task)
+
+    assert result.status is TaskStatus.FAILED
+    assert result.error == "workbench preflight refused the operation"
+    assert result.capability_result.execution.output == {"ready": False}
