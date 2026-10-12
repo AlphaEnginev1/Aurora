@@ -3,6 +3,8 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
+source "$ROOT/scripts/local-env.sh"
+aurora_load_local_env || exit 1
 VENV="$ROOT/.venv"
 RUNTIME="$ROOT/.aurora-runtime"
 mkdir -p "$RUNTIME"
