@@ -692,6 +692,9 @@ Keep responses useful and concise unless the human asks for depth."""
                 "event_id": getattr(event, "event_id", None),
                 "event_type": getattr(event, "event_type", None),
                 "task_id": getattr(event, "task_id", None),
+                "payload": DirectorConversationService._bound_evidence_value(
+                    getattr(event, "payload", None), max_chars=1200
+                ),
             }
             for event in events
         ]
