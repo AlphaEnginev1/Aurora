@@ -19,6 +19,7 @@ from aurora.inference.models import InferenceRequest, ModelSpec
 from aurora.inference.free_policy import is_free_model
 from aurora.inference.discovery import ModelCandidateStore, ModelDiscoveryService
 from aurora.inference.autonomous_discovery import AutonomousDiscoveryRefreshService
+from aurora.inference.providers.catalog import ProviderCatalog
 from aurora.inference.providers.registry import default_provider_registry
 from aurora.inference.model_performance import ModelPerformanceStore
 from aurora.inference.provider_health import ProviderHealthStore
@@ -74,12 +75,25 @@ from .team_runtime import TeamCoordinator
 from .task_worker import WorkerPolicy
 
 def build_orchestration_engine(policy_path: str | Path) -> OrchestrationEngine:
-    nvidia_key = os.getenv("NVIDIA_API_KEY")
-    openrouter_key = os.getenv("OPENROUTER_API_KEY", "").strip()
+    catalog = ProviderCatalog()
+
+    def environment_credential(provider_id: str) -> str:
+        metadata = catalog.resolve(provider_id)
+        env_name = metadata.get("credential_env")
+        return os.getenv(env_name, "").strip() if isinstance(env_name, str) else ""
+
+    nvidia_key = environment_credential("nvidia_api")
+    openai_key = environment_credential("openai")
+    anthropic_key = environment_credential("anthropic")
+    openrouter_key = environment_credential("openrouter")
     provider_registry = default_provider_registry(
-        nvidia_api_key=nvidia_key,
+        nvidia_api_key=nvidia_key or None,
+        openai_api_key=openai_key or None,
+        anthropic_api_key=anthropic_key or None,
         openrouter_api_key=openrouter_key or None,
+        include_external=bool(openai_key or anthropic_key),
         include_openrouter=bool(openrouter_key),
+        catalog=catalog,
     )
     model_registry = ModelRegistry.from_file(
         policy_path,
@@ -501,13 +515,32 @@ def build_director_service(*, inference_policy_path: str | Path, autonomy_policy
 ) -> DirectorService:
     settings_store = OperatorSettingsStore(settings_path(workspace_root))
     gateway = InternetGateway(InternetPolicy.from_file(network_policy_path))
-    nvidia_key = settings_store.credential("nvidia_api") or os.getenv("NVIDIA_API_KEY")
-    openrouter_key = os.getenv("OPENROUTER_API_KEY", "").strip()
+    catalog = ProviderCatalog()
+    stored_settings = settings_store.load()
+
+    def configured_credential(provider_id: str) -> str:
+        config = stored_settings.get("providers", {}).get(provider_id, {})
+        if isinstance(config, Mapping) and config.get("enabled", True) is False:
+            return ""
+        stored = settings_store.credential(provider_id)
+        metadata = catalog.resolve(provider_id)
+        env_name = metadata.get("credential_env")
+        environment = os.getenv(env_name, "").strip() if isinstance(env_name, str) else ""
+        return stored or environment
+
+    nvidia_key = configured_credential("nvidia_api")
+    openai_key = configured_credential("openai")
+    anthropic_key = configured_credential("anthropic")
+    openrouter_key = configured_credential("openrouter")
     provider_registry = default_provider_registry(
-        nvidia_api_key=nvidia_key,
+        nvidia_api_key=nvidia_key or None,
+        openai_api_key=openai_key or None,
+        anthropic_api_key=anthropic_key or None,
         network_gateway=gateway,
         openrouter_api_key=openrouter_key or None,
+        include_external=bool(openai_key or anthropic_key),
         include_openrouter=bool(openrouter_key),
+        catalog=catalog,
     )
     model_registry = ModelRegistry.from_file(
         inference_policy_path,
