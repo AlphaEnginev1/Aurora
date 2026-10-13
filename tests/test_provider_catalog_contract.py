@@ -148,3 +148,73 @@ def test_catalog_never_contains_credentials_or_secret_values():
     for provider in catalog["providers"].values():
         assert "api_key" not in provider
         assert "secret" not in provider
+
+
+
+def test_provider_catalog_reader_loads_from_repository_and_resolves_entries():
+    from aurora.inference.providers.catalog import ProviderCatalog
+
+    catalog = ProviderCatalog(CATALOG_PATH)
+    assert "nvidia_api" in catalog.provider_ids
+    assert "openrouter" in catalog.provider_ids
+    assert catalog.resolve("nvidia_api")["base_url"] == "https://integrate.api.nvidia.com/v1"
+    assert all("api_key" not in item for item in catalog.providers)
+
+
+def test_provider_catalog_rejects_unknown_provider_ids(tmp_path: Path):
+    import pytest
+    from aurora.inference.providers.catalog import ProviderCatalog, ProviderCatalogError
+
+    catalog = ProviderCatalog(CATALOG_PATH)
+    with pytest.raises(ProviderCatalogError, match="not in catalog"):
+        catalog.resolve("not_configured")
+
+
+def test_provider_catalog_rejects_invalid_schema(tmp_path: Path):
+    import pytest
+    from aurora.inference.providers.catalog import ProviderCatalog, ProviderCatalogError
+
+    path = tmp_path / "providers.json"
+    path.write_text('{"schema_version": 99, "providers": {}}', encoding="utf-8")
+    with pytest.raises(ProviderCatalogError, match="schema_version must be 1"):
+        ProviderCatalog(path)
+
+
+def test_default_registry_is_catalog_driven_and_keeps_activation_gates():
+    from aurora.inference.providers.catalog import ProviderCatalog
+    from aurora.inference.providers.registry import default_provider_registry
+
+    catalog = ProviderCatalog(CATALOG_PATH)
+    default = default_provider_registry(nvidia_api_key="nvidia-test", catalog=catalog)
+    external = default_provider_registry(
+        nvidia_api_key="nvidia-test",
+        openai_api_key="openai-test",
+        anthropic_api_key="anthropic-test",
+        include_external=True,
+        catalog=catalog,
+    )
+    openrouter = default_provider_registry(
+        nvidia_api_key="nvidia-test",
+        openrouter_api_key="openrouter-test",
+        include_openrouter=True,
+        catalog=catalog,
+    )
+
+    assert default.ids == ("nvidia_api",)
+    assert external.ids == ("anthropic", "nvidia_api", "openai")
+    assert openrouter.ids == ("nvidia_api", "openrouter")
+
+
+def test_registry_fails_closed_for_unapproved_catalog_adapter(tmp_path: Path):
+    import pytest
+    from aurora.inference.providers.catalog import ProviderCatalog
+    from aurora.inference.providers.registry import ProviderRegistryError, default_provider_registry
+
+    data = json.loads(CATALOG_PATH.read_text(encoding="utf-8"))
+    data["providers"]["nvidia_api"]["adapter"] = "arbitrary_python_import"
+    path = tmp_path / "providers.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    catalog = ProviderCatalog(path)
+
+    with pytest.raises(ProviderRegistryError, match="unapproved adapter"):
+        default_provider_registry(nvidia_api_key="nvidia-test", catalog=catalog)
