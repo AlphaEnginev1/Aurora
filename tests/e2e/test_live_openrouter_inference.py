@@ -49,6 +49,42 @@ def test_live_openrouter_free_router_inference():
     else:
         print("AURORA_OPENROUTER_QUOTA status=quota_fields_unavailable")
 
+    # Check the authenticated model-list endpoint as connection evidence before
+    # considering a generation. A free quota exhaustion is a provider/account
+    # state, not a broken base URL, and should not generate futile chat requests.
+    models_request = urllib.request.Request(
+        "https://openrouter.ai/api/v1/models?limit=10",
+        headers={"Authorization": f"Bearer {key}", "Accept": "application/json"},
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(models_request, timeout=15) as models_response:
+            models_payload = json.loads(models_response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        raise AssertionError(
+            f"OpenRouter authenticated model-list check failed with HTTP {exc.code}; key was not printed"
+        ) from None
+    except (TimeoutError, OSError, UnicodeDecodeError, json.JSONDecodeError):
+        raise AssertionError("OpenRouter authenticated model-list check could not be completed safely") from None
+    model_rows = models_payload.get("data") if isinstance(models_payload, dict) else None
+    if not isinstance(model_rows, list):
+        raise AssertionError("OpenRouter authenticated model-list response was not a data list")
+    print(f"AURORA_OPENROUTER_CONNECTION status=success listed_models={len(model_rows)}")
+
+    if isinstance(free_quota, dict):
+        remaining = free_quota.get("remaining")
+        try:
+            quota_exhausted = remaining is not None and float(remaining) <= 0
+        except (TypeError, ValueError):
+            quota_exhausted = False
+        if quota_exhausted:
+            raise AssertionError(
+                "OpenRouter connection is authenticated but free inference is blocked: "
+                f"daily allowance exhausted (used={free_quota.get('used')}, "
+                f"limit={free_quota.get('limit')}, remaining={remaining}). "
+                "No chat request was sent; wait for quota reset or use explicitly authorized allowance."
+            )
+
     engine = build_orchestration_engine("config/inference-policy.json")
     response = engine._router.generate(
         InferenceRequest(
