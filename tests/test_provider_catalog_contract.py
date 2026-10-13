@@ -211,10 +211,15 @@ def test_registry_fails_closed_for_unapproved_catalog_adapter(tmp_path: Path):
     from aurora.inference.providers.registry import ProviderRegistryError, default_provider_registry
 
     data = json.loads(CATALOG_PATH.read_text(encoding="utf-8"))
-    data["providers"]["nvidia_api"]["adapter"] = "arbitrary_python_import"
+    data["providers"]["openai"]["adapter"] = "arbitrary_python_import"
     path = tmp_path / "providers.json"
     path.write_text(json.dumps(data), encoding="utf-8")
     catalog = ProviderCatalog(path)
 
     with pytest.raises(ProviderRegistryError, match="unapproved adapter"):
-        default_provider_registry(nvidia_api_key="nvidia-test", catalog=catalog)
+        default_provider_registry(
+            nvidia_api_key="nvidia-test",
+            openai_api_key="openai-test",
+            include_external=True,
+            catalog=catalog,
+        )
