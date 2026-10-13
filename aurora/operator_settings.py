@@ -10,26 +10,42 @@ from typing import Any, Mapping
 from urllib.parse import urlparse
 
 
-NVIDIA_ENDPOINT = "https://integrate.api.nvidia.com/v1"
+_FALLBACK_NVIDIA_ENDPOINT = "https://integrate.api.nvidia.com/v1"
+
+
+def _load_default_provider_endpoints() -> dict[str, str]:
+    """Read endpoint defaults from the canonical provider catalog.
+
+    A minimal NVIDIA fallback keeps old installations importable only when the
+    catalog file is absent. If the file exists but is malformed, fail closed
+    instead of silently reintroducing a second hard-coded provider catalog.
+    """
+    catalog_path = Path(__file__).resolve().parents[1] / "config" / "providers.json"
+    if not catalog_path.exists():
+        return {"nvidia_api": _FALLBACK_NVIDIA_ENDPOINT}
+    try:
+        raw = json.loads(catalog_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise RuntimeError("canonical provider catalog is unreadable") from exc
+    providers = raw.get("providers") if isinstance(raw, Mapping) else None
+    if not isinstance(providers, Mapping):
+        raise RuntimeError("canonical provider catalog has no providers mapping")
+    endpoints: dict[str, str] = {}
+    for raw_id, metadata in providers.items():
+        provider_id = str(raw_id).strip().lower()
+        if not provider_id or not isinstance(metadata, Mapping):
+            raise RuntimeError("canonical provider catalog contains an invalid provider entry")
+        endpoint = metadata.get("base_url", "")
+        if not isinstance(endpoint, str):
+            raise RuntimeError(f"canonical provider endpoint must be a string: {provider_id}")
+        endpoints[provider_id] = endpoint.strip().rstrip("/")
+    endpoints.setdefault("nvidia_api", _FALLBACK_NVIDIA_ENDPOINT)
+    return endpoints
+
+
+DEFAULT_PROVIDER_ENDPOINTS = _load_default_provider_endpoints()
+NVIDIA_ENDPOINT = DEFAULT_PROVIDER_ENDPOINTS["nvidia_api"] or _FALLBACK_NVIDIA_ENDPOINT
 DEFAULT_NVIDIA_MODEL = "nvidia/nemotron-3-ultra-550b-a55b"
-DEFAULT_PROVIDER_ENDPOINTS = {
-    "nvidia_api": NVIDIA_ENDPOINT,
-    "openai": "https://api.openai.com/v1",
-    "anthropic": "https://api.anthropic.com/v1",
-    "gemini": "https://generativelanguage.googleapis.com/v1beta/openai/",
-    "xai": "https://api.x.ai/v1",
-    "openrouter": "https://openrouter.ai/api/v1",
-    "groq": "https://api.groq.com/openai/v1",
-    "deepseek": "https://api.deepseek.com/v1",
-    "mistral": "https://api.mistral.ai/v1",
-    "together_ai": "https://api.together.xyz/v1",
-    "fireworks_ai": "https://api.fireworks.ai/inference/v1",
-    "perplexity": "https://api.perplexity.ai",
-    "cohere": "https://api.cohere.ai/compatibility/v1",
-    "ollama": "http://127.0.0.1:11434/v1",
-    "lm_studio": "http://127.0.0.1:1234/v1",
-    "custom_openai_compatible": "",
-}
 
 DEFAULT_SETTINGS: dict[str, Any] = {
     "director": {
