@@ -20,7 +20,7 @@ ADAPTER_MODULES = {
     "openai_api": ROOT / "aurora" / "inference" / "providers" / "openai_api.py",
     "anthropic_api": ROOT / "aurora" / "inference" / "providers" / "anthropic_api.py",
 }
-VALID_REGISTRY_MODES = {"default", "credential_gated", "catalog_only"}
+VALID_REGISTRY_MODES = {"default", "include_external", "include_openrouter", "catalog_only"}
 LOCAL_HTTP_PROVIDERS = {"ollama", "lm_studio"}
 
 
@@ -132,8 +132,12 @@ def test_registry_modes_match_current_runtime_wiring():
     } == {"nvidia_api"}
     assert {
         provider_id for provider_id, item in providers.items()
-        if item["registry_mode"] == "credential_gated"
-    } == {"openai", "anthropic", "openrouter"}
+        if item["registry_mode"] == "include_external"
+    } == {"openai", "anthropic"}
+    assert {
+        provider_id for provider_id, item in providers.items()
+        if item["registry_mode"] == "include_openrouter"
+    } == {"openrouter"}
 
 
 def test_catalog_never_contains_credentials_or_secret_values():
