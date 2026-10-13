@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace as dataclass_replace
 import os
 from typing import TYPE_CHECKING, Callable, Mapping
+from urllib.parse import urlparse
 
 if TYPE_CHECKING:
     from ..discovery import ModelDiscoveryProvider
@@ -160,6 +161,29 @@ def default_provider_registry(
             if provider_id not in known_ids:
                 raise ProviderRegistryError(
                     f"endpoint override references unknown provider: {provider_id}"
+                )
+            try:
+                parsed = urlparse(endpoint)
+                hostname = (parsed.hostname or "").lower()
+                _ = parsed.port
+            except ValueError:
+                raise ProviderRegistryError(
+                    f"provider endpoint override is not a valid URL: {provider_id}"
+                ) from None
+            if (
+                not parsed.hostname
+                or parsed.username is not None
+                or parsed.password is not None
+                or parsed.query
+                or parsed.fragment
+            ):
+                raise ProviderRegistryError(
+                    f"provider endpoint override contains credentials or URL parameters: {provider_id}"
+                )
+            local_http = parsed.scheme == "http" and hostname in {"127.0.0.1", "localhost", "::1"}
+            if parsed.scheme != "https" and not local_http:
+                raise ProviderRegistryError(
+                    f"provider endpoint override must use HTTPS (HTTP is allowed only for loopback): {provider_id}"
                 )
             endpoint_overrides[provider_id] = endpoint.rstrip("/")
 
