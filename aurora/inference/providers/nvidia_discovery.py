@@ -50,7 +50,7 @@ class NVIDIAModelDiscoveryProvider:
                 NVIDIAFreeEndpointCatalogProvider(
                     url=os.getenv(
                         "NVIDIA_FREE_CATALOG_URL",
-                        "https://build.nvidia.com/models?pageSize=200",
+                        "https://build.nvidia.com/models?pageSize=96",
                     ),
                     gateway=self.gateway,
                 ).discover()
@@ -164,7 +164,7 @@ class NVIDIAModelDiscoveryProvider:
                 metadata["free_endpoint_catalog"] = True
                 metadata["free_endpoint_catalog_source"] = os.getenv(
                     "NVIDIA_FREE_CATALOG_URL",
-                    "https://build.nvidia.com/models?pageSize=200",
+                    "https://build.nvidia.com/models?pageSize=96",
                 )
             candidates.append(
                 DiscoveredModelCandidate(
