@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 from typing import TYPE_CHECKING, Callable
 
 if TYPE_CHECKING:
@@ -134,27 +135,47 @@ def default_provider_registry(
     include_openrouter: bool = False,
     catalog: ProviderCatalog | None = None,
 ) -> ProviderRegistry:
-    """Build the active registry from the validated provider catalog.
+    """Build the active registry from validated catalog metadata and credentials.
 
-    The catalog decides provider metadata and activation gates. Python retains
-    an explicit allow-list of adapter implementations; catalog data can never
-    trigger dynamic imports or arbitrary code execution.
+    Catalog entries decide the adapter and activation gate. Python uses an
+    explicit adapter allow-list; catalog data cannot import or execute code.
+    Credential-gated adapters are only registered when explicitly opted in
+    and a credential is available, avoiding misleading configured-but-unauthenticated
+    providers in the live registry.
     """
     try:
         provider_catalog = catalog or ProviderCatalog()
     except ProviderCatalogError as exc:
         raise ProviderRegistryError(f"provider catalog is invalid: {exc}") from exc
 
+    explicit_keys = {
+        "nvidia_api": nvidia_api_key,
+        "openai": openai_api_key,
+        "anthropic": anthropic_api_key,
+        "openrouter": openrouter_api_key,
+    }
+
+    def configured_key(provider_id: str, metadata: dict[str, object]) -> str | None:
+        explicit = explicit_keys.get(provider_id)
+        if isinstance(explicit, str) and explicit.strip():
+            return explicit.strip()
+        env_name = metadata.get("credential_env")
+        if isinstance(env_name, str) and env_name:
+            return os.getenv(env_name, "").strip() or None
+        return None
+
     providers: list[ProviderSpec] = []
     for provider_id in provider_catalog.provider_ids:
         metadata = provider_catalog.resolve(provider_id)
         mode = metadata["registry_mode"]
+        provider_api_key = configured_key(provider_id, metadata)
+
         if mode == "default":
             should_register = True
         elif mode == "include_external":
-            should_register = bool(include_external)
+            should_register = bool(include_external and provider_api_key)
         elif mode == "include_openrouter":
-            should_register = bool(include_openrouter)
+            should_register = bool(include_openrouter and provider_api_key)
         elif mode == "catalog_only":
             should_register = False
         else:
@@ -177,7 +198,7 @@ def default_provider_registry(
                 )
             endpoint = metadata["base_url"]
             discovery_factory = (
-                lambda api_key=nvidia_api_key, gateway=network_gateway, base_url=endpoint:
+                lambda api_key=provider_api_key, gateway=network_gateway, base_url=endpoint:
                     _nvidia_discovery_factory(
                         api_key=api_key,
                         gateway=gateway,
@@ -189,7 +210,7 @@ def default_provider_registry(
             if provider_id != "nvidia_api":
                 raise ProviderRegistryError("nvidia_api adapter can only serve nvidia_api")
 
-            def factory(model: ModelSpec, api_key=nvidia_api_key, gateway=network_gateway) -> InferenceProvider:
+            def factory(model: ModelSpec, api_key=provider_api_key, gateway=network_gateway) -> InferenceProvider:
                 from .nvidia_api import NVIDIAAPIProvider
                 return NVIDIAAPIProvider(model, api_key=api_key, gateway=gateway)
 
@@ -199,10 +220,6 @@ def default_provider_registry(
                 raise ProviderRegistryError(
                     f"provider ID override does not match catalog entry: {provider_id}"
                 )
-            if provider_id_override == "openrouter":
-                provider_api_key = openrouter_api_key
-            else:
-                provider_api_key = openai_api_key
 
             def factory(
                 model: ModelSpec,
@@ -218,7 +235,7 @@ def default_provider_registry(
             if provider_id != "anthropic":
                 raise ProviderRegistryError("anthropic_api adapter can only serve anthropic")
 
-            def factory(model: ModelSpec, api_key=anthropic_api_key) -> InferenceProvider:
+            def factory(model: ModelSpec, api_key=provider_api_key) -> InferenceProvider:
                 from .anthropic_api import AnthropicAPIProvider
                 return AnthropicAPIProvider(model, api_key=api_key)
 
