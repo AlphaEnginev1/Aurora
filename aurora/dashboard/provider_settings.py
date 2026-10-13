@@ -65,8 +65,57 @@ class ProviderSettingsService:
                 openrouter_api_key=openrouter_key or None,
                 include_external=bool(openai_key or anthropic_key),
                 include_openrouter=bool(openrouter_key),
+                catalog=self.catalog,
             )
 
+            # The model registry validates providers when models are registered.
+            # Rebind it to the freshly built provider registry and drop models
+            # whose credentials/provider are no longer active.
+            current_models = [
+                model for model in router.model_registry.models
+                if model.provider in router.provider_registry.ids
+            ]
+            router.model_registry = type(router.model_registry).from_specs(
+                current_models,
+                provider_registry=router.provider_registry,
+            )
+
+            if openrouter_key:
+                from aurora.orchestration.factory import _register_openrouter_free_model
+
+                openrouter_config = configured_providers.get("openrouter", {})
+                endpoint = (
+                    str(openrouter_config.get("base_url", "")).strip()
+                    if isinstance(openrouter_config, Mapping)
+                    else ""
+                ) or str(self.catalog.resolve("openrouter")["base_url"])
+                _register_openrouter_free_model(
+                    router.model_registry,
+                    openrouter_key,
+                    endpoint=endpoint,
+                )
+                existing_openrouter = next(
+                    (model for model in router.model_registry.models if model.id == "openrouter/free"),
+                    None,
+                )
+                if existing_openrouter is not None and existing_openrouter.endpoint != endpoint.rstrip("/"):
+                    router.model_registry.replace(ModelSpec(
+                        id=existing_openrouter.id,
+                        provider=existing_openrouter.provider,
+                        endpoint=endpoint.rstrip("/"),
+                        capabilities=existing_openrouter.capabilities,
+                        context_window=existing_openrouter.context_window,
+                        enabled=existing_openrouter.enabled,
+                        specialties=existing_openrouter.specialties,
+                        quality_score=existing_openrouter.quality_score,
+                        latency_score=existing_openrouter.latency_score,
+                        cost_score=existing_openrouter.cost_score,
+                        healthy=existing_openrouter.healthy,
+                        available=existing_openrouter.available,
+                        pricing_tier=existing_openrouter.pricing_tier,
+                    ))
+
+            router.models = list(router.model_registry.models)
             selected_model = str(settings["director"].get("model", "")).strip()
             provider_id = str(settings["director"].get("provider", "")).strip().lower()
             if provider_id not in {"router", "nvidia_api"}:
