@@ -70,8 +70,8 @@ class ProviderCatalog:
     def providers(self) -> tuple[dict[str, Any], ...]:
         """Return metadata copies in stable ID order; never include credentials."""
         return tuple(
-            {"provider_id": provider_id, **dict(self._providers[provider_id])}
-            for provider_id in sorted(self._providers)
+            {"provider_id": provider_id, **dict(entry)}
+            for provider_id, entry in self._providers.items()
         )
 
     def resolve(self, provider_id: str) -> dict[str, Any]:
