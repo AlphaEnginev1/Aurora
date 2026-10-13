@@ -58,6 +58,20 @@ class ProviderSettingsService:
             openai_key = configured_key("openai")
             anthropic_key = configured_key("anthropic")
             openrouter_key = configured_key("openrouter")
+            provider_endpoints: dict[str, str] = {}
+            for configured_provider_id in self.catalog.provider_ids:
+                configured = configured_providers.get(configured_provider_id, {})
+                saved_endpoint = (
+                    str(configured.get("base_url", "")).strip()
+                    if isinstance(configured, Mapping)
+                    else ""
+                )
+                catalog_endpoint = str(
+                    self.catalog.resolve(configured_provider_id).get("base_url", "")
+                ).strip()
+                endpoint = saved_endpoint or catalog_endpoint
+                if endpoint:
+                    provider_endpoints[configured_provider_id] = endpoint
             router.nvidia_api_key = nvidia_key or None
             router.provider_registry = default_provider_registry(
                 nvidia_api_key=nvidia_key or None,
@@ -67,6 +81,7 @@ class ProviderSettingsService:
                 include_external=bool(openai_key or anthropic_key),
                 include_openrouter=bool(openrouter_key),
                 catalog=self.catalog,
+                provider_endpoints=provider_endpoints,
             )
 
             # The model registry validates providers when models are registered.
