@@ -2,6 +2,7 @@
 from __future__ import annotations
 import json, os
 from pathlib import Path
+from typing import Mapping
 from aurora.failure_tracker import report_failure
 from aurora.autonomy.acquisition import AcquisitionManager
 from aurora.autonomy.runtime_bindings import build_autonomy_runtime_bindings
