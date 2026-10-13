@@ -396,15 +396,22 @@ def test_provider_connection_probe_rejects_endpoint_with_embedded_credentials(tm
 
     runtime = Runtime(router(tmp_path))
     store = OperatorSettingsStore(tmp_path / "operator-settings.json")
-    store.save({
+    # Simulate a legacy or manually edited settings file. Current saves reject
+    # embedded URL credentials; this also verifies the connection-test defense-in-depth.
+    store.path.write_text(json.dumps({
         "providers": {
+            "nvidia_api": {
+                "api_key": "",
+                "base_url": "https://integrate.api.nvidia.com/v1",
+                "enabled": True,
+            },
             "openai": {
                 "api_key": "stored-key",
                 "base_url": "https://someone:password@api.openai.com/v1",
                 "enabled": True,
             },
         },
-    })
+    }), encoding="utf-8")
     monkeypatch.setattr(
         provider_settings_module,
         "_urlopen",
