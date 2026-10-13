@@ -229,7 +229,7 @@
     },
     "cohere": {
       "name": "Cohere",
-      "base_url": "https://api.cohere.com/compatibility/v1",
+      "base_url": "https://api.cohere.ai/compatibility/v1",
       "protocol": "openai_compatible",
       "adapter": null,
       "adapter_available": false,
