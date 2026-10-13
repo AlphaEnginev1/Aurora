@@ -411,3 +411,74 @@ def test_provider_connection_probe_rejects_endpoint_with_embedded_credentials(tm
 
     with pytest.raises(DashboardProviderSettingsError, match="without embedded credentials"):
         ProviderSettingsService(store, runtime).test_provider("openai")
+
+
+
+def test_openrouter_connection_probe_uses_saved_endpoint_and_bearer_key(tmp_path: Path, monkeypatch):
+    from aurora.dashboard import provider_settings as provider_settings_module
+    from aurora.dashboard.provider_settings import ProviderSettingsService
+    from aurora.operator_settings import OperatorSettingsStore
+
+    runtime = Runtime(router(tmp_path))
+    store = OperatorSettingsStore(tmp_path / "operator-settings.json")
+    store.save({
+        "providers": {
+            "openrouter": {
+                "api_key": "openrouter-credential-secret",
+                "base_url": "https://openrouter-proxy.example/api/v1",
+                "enabled": True,
+            },
+        },
+    })
+    captured = {}
+
+    class Response:
+        status = 200
+        def __enter__(self):
+            return self
+        def __exit__(self, *_args):
+            return False
+        def read(self):
+            return json.dumps({"data": [{"id": "openrouter/free"}]}).encode()
+
+    def fake_urlopen(request):
+        captured["url"] = request.full_url
+        captured["authorization"] = request.get_header("Authorization")
+        return Response()
+
+    monkeypatch.setattr(provider_settings_module, "_urlopen", fake_urlopen)
+    result = ProviderSettingsService(store, runtime).test_provider("openrouter")
+
+    assert captured["url"] == "https://openrouter-proxy.example/api/v1/models?limit=10"
+    assert captured["authorization"] == "Bearer openrouter-credential-secret"
+    assert result["ok"] is True
+    assert result["provider"] == "openrouter"
+    assert result["models"] == ["openrouter/free"]
+    assert "openrouter-credential-secret" not in str(result)
+
+
+def test_provider_connection_probe_reports_auth_failure_without_secret(tmp_path: Path, monkeypatch):
+    import pytest
+    from aurora.dashboard import provider_settings as provider_settings_module
+    from aurora.dashboard.provider_settings import DashboardProviderSettingsError, ProviderSettingsService
+    from aurora.operator_settings import OperatorSettingsStore
+
+    runtime = Runtime(router(tmp_path))
+    store = OperatorSettingsStore(tmp_path / "operator-settings.json")
+    store.save({
+        "providers": {
+            "openai": {
+                "api_key": "must-not-leak-this",
+                "base_url": "https://api.openai.com/v1",
+                "enabled": True,
+            },
+        },
+    })
+
+    def reject(_request):
+        raise DashboardProviderSettingsError("401 provider response")
+
+    monkeypatch.setattr(provider_settings_module, "_urlopen", reject)
+    with pytest.raises(DashboardProviderSettingsError, match="401 provider response") as exc:
+        ProviderSettingsService(store, runtime).test_provider("openai")
+    assert "must-not-leak-this" not in str(exc.value)
