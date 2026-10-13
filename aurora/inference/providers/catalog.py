@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import sys
 from pathlib import Path
 from typing import Any, Mapping
 from urllib.parse import urlparse
@@ -44,7 +45,14 @@ def default_catalog_path() -> Path:
     configured = os.getenv("AURORA_PROVIDER_CATALOG", "").strip()
     if configured:
         return Path(configured).expanduser().resolve()
-    return Path(__file__).resolve().parents[3] / "config" / "providers.json"
+    repository_path = Path(__file__).resolve().parents[3] / "config" / "providers.json"
+    if repository_path.is_file():
+        return repository_path
+    installed_path = Path(sys.prefix) / "config" / "providers.json"
+    if installed_path.is_file():
+        return installed_path
+    # Return the primary expected location so the error identifies it clearly.
+    return repository_path
 
 
 class ProviderCatalog:
@@ -128,7 +136,7 @@ class ProviderCatalog:
                 raise ProviderCatalogError(f"adapter_available must be boolean: {provider_id}")
             if adapter_available != (adapter is not None):
                 raise ProviderCatalogError(f"adapter metadata is inconsistent: {provider_id}")
-            if registry_mode not in VALID_REGISTRY_MODES:
+            if not isinstance(registry_mode, str) or registry_mode not in VALID_REGISTRY_MODES:
                 raise ProviderCatalogError(f"invalid registry_mode for provider: {provider_id}")
             if not isinstance(default_enabled, bool):
                 raise ProviderCatalogError(f"runtime_enabled_by_default must be boolean: {provider_id}")
