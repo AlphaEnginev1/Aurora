@@ -32,7 +32,9 @@ def test_dashboard_ui_assets_are_present():
     assert 'id="credential-inventory"' in html
     assert 'id="credential-refresh"' in html
     assert 'id="nvidia-key"' not in html
-    assert '<option value="nvidia_api">NVIDIA NIM</option>' in html
+    provider_js = (UI_DIR / "provider_credentials.js").read_text(encoding="utf-8")
+    assert "data.provider_catalog" in provider_js
+    assert "provider.provider_id" in provider_js
     assert '<script src="./provider_credentials.js" defer></script>' in html
     assert 'id="chat-expand"' in html
     assert '<section id="view-health" class="view"' in html
