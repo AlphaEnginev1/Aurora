@@ -32,7 +32,7 @@ The live branch endpoint returned **232 refs including `main`**, i.e. **231 non-
 | `feature/provider-credentials-settings` / #216 | Large 76-commit provider-settings/NVIDIA catalog changes; PR remains open. Branch is not the same as current main. The OpenRouter quota probe reports 51 used / 50 allowed and prevents another chat generation. | Keep open; do not merge blindly or run OpenRouter live inference until allowance returns. |
 | `review/claude-fase1-tarea2` / #192 | Artifact/upload PR containing ZIP/PATCH material. | Preserve archives and inspect differences before closing or merging. |
 | `review/opus-fase1-tarea2` | Divergent branch with ZIP/PATCH material; no deletion performed. | Preserve pending content comparison against Claude artifacts and main. |
-| `fix/live-free-api-model-override` / #185 | One unique commit; PR remains open and is significantly behind main. | Review the exact single commit on current main before deciding. |
+| `fix/live-free-api-model-override` / #185 | Closed unmerged on 2026-10-13; branch retained. Its `model_id` input targeted a superseded multi-provider workflow and does not fit current `openrouter/free`-only main. | Do not merge; reconsider only with a revised, approved workflow contract. |
 | `feat/free-multi-provider-inference` / #183 | 39 commits ahead in the compare snapshot, 15 changed files; provider/registry/policy changes. | Do not merge the branch wholesale: review selectively against the current NVIDIA-first, free-only contract. |
 | `feat/openrouter-canonical-main-20261012` / #200 | Divergent ancestry despite PR #200 already merged. | Treat as a squash-merge residue; do not merge/reapply changes blindly. |
 | `fix/openrouter-egress-policy-20261012` / #201 | Divergent ancestry although PR #201 already merged. | Treat as squash-merge residue; preserve branch until cleanup policy is approved. |
@@ -42,7 +42,7 @@ The live branch endpoint returned **232 refs including `main`**, i.e. **231 non-
 ### Next safe steps for branch cleanup
 
 1. For each of the 87 heads with commits ahead of main, compare file-level changes and open PR/artifact references; separate genuine unique code from squash-merge residue.
-2. Review open PRs #183, #185, #192 and #216 against current main; do not merge broad divergent branches as a cleanup shortcut.
+2. Review open PRs #183, #192 and #216 against current main; do not merge broad divergent branches as a cleanup shortcut. PR #185 is closed unmerged; its branch is retained.
 3. Verify uploaded ZIP/PATCH artifacts have been extracted/compared before considering any branch removal.
 4. Only after that review, propose a deletion list separately. This audit does **not** authorize deleting branches.
 
