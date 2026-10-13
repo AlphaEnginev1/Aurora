@@ -95,6 +95,11 @@ def build_orchestration_engine(policy_path: str | Path) -> OrchestrationEngine:
         include_external=bool(openai_key or anthropic_key),
         include_openrouter=bool(openrouter_key),
         catalog=catalog,
+        provider_endpoints={
+            provider_id: str(catalog.resolve(provider_id).get("base_url", "")).strip()
+            for provider_id in catalog.provider_ids
+            if str(catalog.resolve(provider_id).get("base_url", "")).strip()
+        },
     )
     model_registry = ModelRegistry.from_file(
         policy_path,
@@ -538,6 +543,21 @@ def build_director_service(*, inference_policy_path: str | Path, autonomy_policy
         environment = os.getenv(env_name, "").strip() if isinstance(env_name, str) else ""
         return stored or environment
 
+    def configured_endpoint(provider_id: str) -> str:
+        config = stored_settings.get("providers", {}).get(provider_id, {})
+        saved_endpoint = (
+            str(config.get("base_url", "")).strip()
+            if isinstance(config, Mapping)
+            else ""
+        )
+        return saved_endpoint or str(catalog.resolve(provider_id).get("base_url", "")).strip()
+
+    provider_endpoints = {
+        provider_id: endpoint
+        for provider_id in catalog.provider_ids
+        if (endpoint := configured_endpoint(provider_id))
+    }
+
     nvidia_key = configured_credential("nvidia_api")
     openai_key = configured_credential("openai")
     anthropic_key = configured_credential("anthropic")
@@ -551,6 +571,7 @@ def build_director_service(*, inference_policy_path: str | Path, autonomy_policy
         include_external=bool(openai_key or anthropic_key),
         include_openrouter=bool(openrouter_key),
         catalog=catalog,
+        provider_endpoints=provider_endpoints,
     )
     model_registry = ModelRegistry.from_file(
         inference_policy_path,
