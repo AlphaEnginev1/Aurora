@@ -170,10 +170,10 @@ def test_saved_openrouter_key_is_applied_to_runtime_registry(tmp_path: Path, mon
     service = ProviderSettingsService(store, runtime)
 
     result = service.save_and_apply({})
-    router = runtime.director.planner.router
-    registry = router.provider_registry
+    live_router = runtime.director.planner.router
+    registry = live_router.provider_registry
     assert "openrouter" in registry.ids
-    registered_model = router.model_registry.resolve("openrouter/free")
+    registered_model = live_router.model_registry.resolve("openrouter/free")
     assert registered_model.endpoint == "https://openrouter-proxy.example/api/v1"
     provider = registry.create(registered_model)
     assert provider.api_key == "openrouter-saved-key"
