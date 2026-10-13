@@ -190,12 +190,12 @@ def test_openai_and_anthropic_saved_keys_register_only_configured_adapters(tmp_p
         "providers": {
             "openai": {
                 "api_key": "openai-saved-key",
-                "base_url": "https://api.openai.com/v1",
+                "base_url": "https://openai-proxy.example/v1",
                 "enabled": True,
             },
             "anthropic": {
                 "api_key": "anthropic-saved-key",
-                "base_url": "https://api.anthropic.com/v1",
+                "base_url": "https://anthropic-proxy.example/v1",
                 "enabled": True,
             },
         },
@@ -209,6 +209,8 @@ def test_openai_and_anthropic_saved_keys_register_only_configured_adapters(tmp_p
     anthropic = registry.create(ModelSpec("claude-test", "anthropic", "https://api.anthropic.com/v1"))
     assert openai.api_key == "openai-saved-key"
     assert anthropic.api_key == "anthropic-saved-key"
+    assert openai.spec.endpoint == "https://openai-proxy.example/v1"
+    assert anthropic.spec.endpoint == "https://anthropic-proxy.example/v1"
 
 
 def test_router_mode_can_save_provider_key_without_treating_router_as_model(tmp_path: Path, monkeypatch):
