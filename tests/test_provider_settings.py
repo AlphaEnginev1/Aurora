@@ -524,3 +524,130 @@ def test_provider_http_status_diagnostics_are_specific_and_body_safe(monkeypatch
         with pytest.raises(DashboardProviderSettingsError, match=expected) as exc:
             provider_settings_module._urlopen(request)
         assert "private provider response body must not leak" not in str(exc.value)
+
+
+
+def test_live_inference_probe_uses_only_a_discovered_free_nvidia_model(tmp_path: Path):
+    from types import SimpleNamespace
+    from aurora.dashboard.provider_settings import ProviderSettingsService
+    from aurora.inference.models import ModelSpec
+    from aurora.operator_settings import OperatorSettingsStore
+
+    runtime = Runtime(router(tmp_path))
+    store = OperatorSettingsStore(tmp_path / "operator-settings.json")
+    store.save({
+        "providers": {
+            "nvidia_api": {
+                "api_key": "nvidia-live-test-secret",
+                "enabled": True,
+                "base_url": "https://integrate.api.nvidia.com/v1",
+            },
+        },
+    })
+
+    discovered = ModelSpec(
+        id="nvidia/test-free-model",
+        provider="nvidia_api",
+        endpoint="https://integrate.api.nvidia.com/v1",
+        capabilities=("chat", "reasoning"),
+        enabled=False,
+        pricing_tier="free",
+    )
+
+    class Discovery:
+        def discover_and_stage(self, provider_id):
+            assert provider_id == "nvidia_api"
+            return (SimpleNamespace(model=discovered),)
+
+    runtime.model_discovery = Discovery()
+    captured = {}
+
+    class FakeAdapter:
+        def generate(self, request, *, selected_model, execution_id):
+            captured["request"] = request
+            captured["selected_model"] = selected_model
+            captured["execution_id"] = execution_id
+            return SimpleNamespace(
+                content="AURORA SETTINGS LIVE INFERENCE OK",
+                telemetry=SimpleNamespace(duration_ms=17),
+            )
+
+    runtime.director.planner.router.provider_registry.create = lambda model: FakeAdapter()
+    result = ProviderSettingsService(store, runtime).test_inference("nvidia_api")
+
+    assert result["ok"] is True
+    assert result["inference_verified"] is True
+    assert result["model"] == "nvidia/test-free-model"
+    assert result["discovered_free_models"] == ["nvidia/test-free-model"]
+    assert result["latency_ms"] == 17
+    assert captured["selected_model"] == "nvidia/test-free-model"
+    assert captured["request"].max_tokens == 32
+    assert captured["execution_id"] == result["execution_id"]
+    assert "nvidia-live-test-secret" not in str(result)
+
+
+def test_live_inference_probe_uses_openrouter_free_and_returns_real_success_evidence(tmp_path: Path):
+    from types import SimpleNamespace
+    from aurora.dashboard.provider_settings import ProviderSettingsService
+    from aurora.inference.providers.registry import default_provider_registry
+    from aurora.operator_settings import OperatorSettingsStore
+
+    runtime = Runtime(router(tmp_path))
+    store = OperatorSettingsStore(tmp_path / "operator-settings.json")
+    store.save({
+        "providers": {
+            "openrouter": {
+                "api_key": "openrouter-live-test-secret",
+                "base_url": "https://openrouter.ai/api/v1",
+                "enabled": True,
+            },
+        },
+    })
+    runtime.director.planner.router.provider_registry = default_provider_registry(
+        nvidia_api_key="nvidia-test",
+        openrouter_api_key="openrouter-live-test-secret",
+        include_openrouter=True,
+    )
+    captured = {}
+
+    class FakeAdapter:
+        def generate(self, request, *, selected_model, execution_id):
+            captured["request"] = request
+            captured["selected_model"] = selected_model
+            return SimpleNamespace(
+                content="AURORA SETTINGS LIVE INFERENCE OK",
+                telemetry=SimpleNamespace(duration_ms=23),
+            )
+
+    runtime.director.planner.router.provider_registry.create = lambda model: FakeAdapter()
+    result = ProviderSettingsService(store, runtime).test_inference("openrouter")
+
+    assert result["ok"] is True
+    assert result["inference_verified"] is True
+    assert result["model"] == "openrouter/free"
+    assert result["response_non_empty"] is True
+    assert result["latency_ms"] == 23
+    assert captured["selected_model"] == "openrouter/free"
+    assert captured["request"].model == "openrouter/free"
+    assert "openrouter-live-test-secret" not in str(result)
+
+
+def test_live_inference_probe_refuses_unverified_paid_provider_routes(tmp_path: Path):
+    import pytest
+    from aurora.dashboard.provider_settings import DashboardProviderSettingsError, ProviderSettingsService
+    from aurora.operator_settings import OperatorSettingsStore
+
+    runtime = Runtime(router(tmp_path))
+    store = OperatorSettingsStore(tmp_path / "operator-settings.json")
+    store.save({
+        "providers": {
+            "openai": {
+                "api_key": "openai-test-key",
+                "base_url": "https://api.openai.com/v1",
+                "enabled": True,
+            },
+        },
+    })
+
+    with pytest.raises(DashboardProviderSettingsError, match="free-model policy"):
+        ProviderSettingsService(store, runtime).test_inference("openai")
