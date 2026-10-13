@@ -7,11 +7,6 @@ on:
         description: "Optional NVIDIA reasoning model override"
         required: false
         type: string
-      nvidia_endpoint:
-        description: "NVIDIA-compatible /v1 endpoint"
-        required: false
-        default: "https://integrate.api.nvidia.com/v1"
-        type: string
 
 jobs:
   live-nvidia-only:
@@ -40,7 +35,6 @@ jobs:
         env:
           NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
           NVIDIA_MODEL_ID: ${{ inputs.nvidia_model_id }}
-          NVIDIA_API_ENDPOINT: ${{ inputs.nvidia_endpoint }}
           AURORA_NVIDIA_ONLY_LIVE: "1"
           AURORA_INFERENCE_COST_POLICY: "free_only"
           AURORA_FREE_MODEL_POLICY: "config/free-model-policy.json"
