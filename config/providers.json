@@ -1,0 +1,303 @@
+{
+  "schema_version": 1,
+  "description": "Declarative provider metadata. This file contains no credentials. registry_mode describes the current runtime wiring; catalog_only entries are selectable/storable but are not inference-ready.",
+  "providers": {
+    "nvidia_api": {
+      "name": "NVIDIA NIM API",
+      "base_url": "https://integrate.api.nvidia.com/v1",
+      "protocol": "openai_compatible",
+      "adapter": "nvidia_api",
+      "adapter_available": true,
+      "registry_mode": "default",
+      "runtime_enabled_by_default": true,
+      "credential_env": "NVIDIA_API_KEY",
+      "auth_required": true,
+      "capabilities": [
+        "chat",
+        "reasoning"
+      ],
+      "discovery": {
+        "enabled": true,
+        "adapter": "nvidia"
+      }
+    },
+    "openrouter": {
+      "name": "OpenRouter",
+      "base_url": "https://openrouter.ai/api/v1",
+      "protocol": "openai_compatible",
+      "adapter": "openai_api",
+      "provider_id_override": "openrouter",
+      "adapter_available": true,
+      "registry_mode": "credential_gated",
+      "runtime_enabled_by_default": false,
+      "credential_env": "OPENROUTER_API_KEY",
+      "auth_required": true,
+      "capabilities": [
+        "chat",
+        "reasoning"
+      ],
+      "discovery": {
+        "enabled": false,
+        "adapter": null
+      }
+    },
+    "openai": {
+      "name": "OpenAI API",
+      "base_url": "https://api.openai.com/v1",
+      "protocol": "openai_compatible",
+      "adapter": "openai_api",
+      "adapter_available": true,
+      "registry_mode": "credential_gated",
+      "runtime_enabled_by_default": false,
+      "credential_env": "OPENAI_API_KEY",
+      "auth_required": true,
+      "capabilities": [
+        "chat",
+        "reasoning",
+        "tool_use",
+        "image"
+      ],
+      "discovery": {
+        "enabled": false,
+        "adapter": null
+      }
+    },
+    "anthropic": {
+      "name": "Anthropic API",
+      "base_url": "https://api.anthropic.com/v1",
+      "protocol": "anthropic_messages",
+      "adapter": "anthropic_api",
+      "adapter_available": true,
+      "registry_mode": "credential_gated",
+      "runtime_enabled_by_default": false,
+      "credential_env": "ANTHROPIC_API_KEY",
+      "auth_required": true,
+      "capabilities": [
+        "chat",
+        "reasoning",
+        "tool_use",
+        "image"
+      ],
+      "discovery": {
+        "enabled": false,
+        "adapter": null
+      }
+    },
+    "gemini": {
+      "name": "Google Gemini",
+      "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
+      "protocol": "openai_compatible",
+      "adapter": null,
+      "adapter_available": false,
+      "registry_mode": "catalog_only",
+      "runtime_enabled_by_default": false,
+      "credential_env": "GEMINI_API_KEY",
+      "auth_required": true,
+      "capabilities": [
+        "chat"
+      ],
+      "discovery": {
+        "enabled": false,
+        "adapter": null
+      }
+    },
+    "xai": {
+      "name": "xAI / Grok",
+      "base_url": "https://api.x.ai/v1",
+      "protocol": "openai_compatible",
+      "adapter": null,
+      "adapter_available": false,
+      "registry_mode": "catalog_only",
+      "runtime_enabled_by_default": false,
+      "credential_env": "XAI_API_KEY",
+      "auth_required": true,
+      "capabilities": [
+        "chat"
+      ],
+      "discovery": {
+        "enabled": false,
+        "adapter": null
+      }
+    },
+    "groq": {
+      "name": "Groq",
+      "base_url": "https://api.groq.com/openai/v1",
+      "protocol": "openai_compatible",
+      "adapter": null,
+      "adapter_available": false,
+      "registry_mode": "catalog_only",
+      "runtime_enabled_by_default": false,
+      "credential_env": "GROQ_API_KEY",
+      "auth_required": true,
+      "capabilities": [
+        "chat"
+      ],
+      "discovery": {
+        "enabled": false,
+        "adapter": null
+      }
+    },
+    "deepseek": {
+      "name": "DeepSeek",
+      "base_url": "https://api.deepseek.com/v1",
+      "protocol": "openai_compatible",
+      "adapter": null,
+      "adapter_available": false,
+      "registry_mode": "catalog_only",
+      "runtime_enabled_by_default": false,
+      "credential_env": "DEEPSEEK_API_KEY",
+      "auth_required": true,
+      "capabilities": [
+        "chat"
+      ],
+      "discovery": {
+        "enabled": false,
+        "adapter": null
+      }
+    },
+    "mistral": {
+      "name": "Mistral",
+      "base_url": "https://api.mistral.ai/v1",
+      "protocol": "openai_compatible",
+      "adapter": null,
+      "adapter_available": false,
+      "registry_mode": "catalog_only",
+      "runtime_enabled_by_default": false,
+      "credential_env": "MISTRAL_API_KEY",
+      "auth_required": true,
+      "capabilities": [
+        "chat"
+      ],
+      "discovery": {
+        "enabled": false,
+        "adapter": null
+      }
+    },
+    "together_ai": {
+      "name": "Together AI",
+      "base_url": "https://api.together.xyz/v1",
+      "protocol": "openai_compatible",
+      "adapter": null,
+      "adapter_available": false,
+      "registry_mode": "catalog_only",
+      "runtime_enabled_by_default": false,
+      "credential_env": "TOGETHER_API_KEY",
+      "auth_required": true,
+      "capabilities": [
+        "chat"
+      ],
+      "discovery": {
+        "enabled": false,
+        "adapter": null
+      }
+    },
+    "fireworks_ai": {
+      "name": "Fireworks AI",
+      "base_url": "https://api.fireworks.ai/inference/v1",
+      "protocol": "openai_compatible",
+      "adapter": null,
+      "adapter_available": false,
+      "registry_mode": "catalog_only",
+      "runtime_enabled_by_default": false,
+      "credential_env": "FIREWORKS_API_KEY",
+      "auth_required": true,
+      "capabilities": [
+        "chat"
+      ],
+      "discovery": {
+        "enabled": false,
+        "adapter": null
+      }
+    },
+    "perplexity": {
+      "name": "Perplexity",
+      "base_url": "https://api.perplexity.ai",
+      "protocol": "openai_compatible",
+      "adapter": null,
+      "adapter_available": false,
+      "registry_mode": "catalog_only",
+      "runtime_enabled_by_default": false,
+      "credential_env": "PERPLEXITY_API_KEY",
+      "auth_required": true,
+      "capabilities": [
+        "chat"
+      ],
+      "discovery": {
+        "enabled": false,
+        "adapter": null
+      }
+    },
+    "cohere": {
+      "name": "Cohere",
+      "base_url": "https://api.cohere.com/compatibility/v1",
+      "protocol": "openai_compatible",
+      "adapter": null,
+      "adapter_available": false,
+      "registry_mode": "catalog_only",
+      "runtime_enabled_by_default": false,
+      "credential_env": "COHERE_API_KEY",
+      "auth_required": true,
+      "capabilities": [
+        "chat"
+      ],
+      "discovery": {
+        "enabled": false,
+        "adapter": null
+      }
+    },
+    "ollama": {
+      "name": "Ollama (local)",
+      "base_url": "http://127.0.0.1:11434/v1",
+      "protocol": "openai_compatible",
+      "adapter": null,
+      "adapter_available": false,
+      "registry_mode": "catalog_only",
+      "runtime_enabled_by_default": false,
+      "credential_env": null,
+      "auth_required": false,
+      "capabilities": [
+        "chat"
+      ],
+      "discovery": {
+        "enabled": false,
+        "adapter": null
+      }
+    },
+    "lm_studio": {
+      "name": "LM Studio (local)",
+      "base_url": "http://127.0.0.1:1234/v1",
+      "protocol": "openai_compatible",
+      "adapter": null,
+      "adapter_available": false,
+      "registry_mode": "catalog_only",
+      "runtime_enabled_by_default": false,
+      "credential_env": null,
+      "auth_required": false,
+      "capabilities": [
+        "chat"
+      ],
+      "discovery": {
+        "enabled": false,
+        "adapter": null
+      }
+    },
+    "custom_openai_compatible": {
+      "name": "Custom OpenAI-compatible endpoint",
+      "base_url": "",
+      "protocol": "openai_compatible",
+      "adapter": null,
+      "adapter_available": false,
+      "registry_mode": "catalog_only",
+      "runtime_enabled_by_default": false,
+      "credential_env": null,
+      "auth_required": true,
+      "capabilities": [
+        "chat"
+      ],
+      "discovery": {
+        "enabled": false,
+        "adapter": null
+      }
+    }
+  }
+}
