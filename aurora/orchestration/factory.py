@@ -100,7 +100,11 @@ def build_orchestration_engine(policy_path: str | Path) -> OrchestrationEngine:
         policy_path,
         provider_registry=provider_registry,
     )
-    _register_openrouter_free_model(model_registry, openrouter_key)
+    _register_openrouter_free_model(
+        model_registry,
+        openrouter_key,
+        endpoint=str(catalog.resolve("openrouter")["base_url"]),
+    )
     policy_data = json.loads(Path(policy_path).read_text(encoding="utf-8"))
     cost_policy = os.getenv("AURORA_INFERENCE_COST_POLICY", str(policy_data.get("cost_policy", "free_only"))).strip().lower()
     if cost_policy != "free_only":
@@ -125,14 +129,19 @@ def build_orchestration_engine(policy_path: str | Path) -> OrchestrationEngine:
         )
     )
 
-def _register_openrouter_free_model(model_registry: ModelRegistry, api_key: str | None) -> None:
+def _register_openrouter_free_model(
+    model_registry: ModelRegistry,
+    api_key: str | None,
+    *,
+    endpoint: str = "https://openrouter.ai/api/v1",
+) -> None:
     """Register OpenRouter's free router only when its local credential is present."""
     if not str(api_key or "").strip() or "openrouter/free" in model_registry.ids:
         return
     model_registry.register(ModelSpec(
         id="openrouter/free",
         provider="openrouter",
-        endpoint="https://openrouter.ai/api/v1",
+        endpoint=str(endpoint).rstrip("/"),
         capabilities=("chat", "reasoning"),
         context_window=200000,
         enabled=True,
@@ -547,7 +556,17 @@ def build_director_service(*, inference_policy_path: str | Path, autonomy_policy
         inference_policy_path,
         provider_registry=provider_registry,
     )
-    _register_openrouter_free_model(model_registry, openrouter_key)
+    openrouter_config = stored_settings.get("providers", {}).get("openrouter", {})
+    openrouter_endpoint = (
+        str(openrouter_config.get("base_url", "")).strip()
+        if isinstance(openrouter_config, Mapping)
+        else ""
+    ) or str(catalog.resolve("openrouter")["base_url"])
+    _register_openrouter_free_model(
+        model_registry,
+        openrouter_key,
+        endpoint=openrouter_endpoint,
+    )
     policy_data = json.loads(Path(inference_policy_path).read_text(encoding="utf-8"))
     cost_policy = os.getenv("AURORA_INFERENCE_COST_POLICY", str(policy_data.get("cost_policy", "free_only"))).strip().lower()
     if cost_policy != "free_only":
