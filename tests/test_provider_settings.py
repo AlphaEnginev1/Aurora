@@ -239,6 +239,11 @@ def test_settings_rebinds_live_discovery_to_new_provider_and_model_registries(tm
         router=old_router,
         health_store=None,
     )
+    runtime.dashboard_gateway = SimpleNamespace(
+        provider_registry=old_router.provider_registry,
+        model_registry=old_router.model_registry,
+        model_router=old_router,
+    )
 
     store = OperatorSettingsStore(tmp_path / "operator-settings.json")
     store.save({
@@ -260,6 +265,9 @@ def test_settings_rebinds_live_discovery_to_new_provider_and_model_registries(tm
     assert runtime.autonomous_discovery_refresh.discovery is runtime.model_discovery
     assert runtime.autonomous_discovery_refresh.router is live_router
     assert runtime.autonomous_discovery_refresh.health_store is live_router.health_store
+    assert runtime.dashboard_gateway.provider_registry is live_router.provider_registry
+    assert runtime.dashboard_gateway.model_registry is live_router.model_registry
+    assert runtime.dashboard_gateway.model_router is live_router
 
 
 def test_openai_connection_probe_verifies_auth_and_redacts_the_secret(tmp_path: Path, monkeypatch):
