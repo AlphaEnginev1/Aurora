@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace as dataclass_replace
 import os
 import urllib.error
 import urllib.request
 from typing import Any, Mapping
 from urllib.parse import urlparse
 
-from aurora.inference.models import ModelSpec
+from aurora.inference.models import InferenceRequest, ModelSpec, new_execution_id
 from aurora.inference.free_policy import is_free_model
 from aurora.inference.providers.catalog import ProviderCatalog
 from aurora.inference.providers.registry import default_provider_registry
@@ -352,6 +353,142 @@ class ProviderSettingsService:
         }
 
 
+    def test_inference(self, provider_id: str) -> dict[str, Any]:
+        """Run one minimal real completion using an explicitly free provider route.
+
+        This is intentionally narrower than the connection test. It never submits
+        a paid OpenAI/Anthropic model, and it does not claim a full Director mission
+        has been verified.
+        """
+        provider_id = str(provider_id).strip().lower()
+        if provider_id not in {"nvidia_api", "openrouter"}:
+            raise DashboardProviderSettingsError(
+                "Live inference checks are currently enabled only for NVIDIA Free Endpoint "
+                "models and OpenRouter's official free router. Other providers can be "
+                "connection-tested, but must not be invoked without a verified free-model policy."
+            )
+
+        try:
+            metadata = self.catalog.resolve(provider_id)
+        except ValueError:
+            raise DashboardProviderSettingsError("provider is not present in the validated catalog") from None
+
+        settings = self.store.load()
+        configs = settings.get("providers", {})
+        config = configs.get(provider_id, {}) if isinstance(configs, Mapping) else {}
+        if isinstance(config, Mapping) and config.get("enabled", True) is False:
+            raise DashboardProviderSettingsError(f"{provider_id} is disabled in Settings")
+
+        key = self.store.credential(provider_id)
+        env_name = metadata.get("credential_env")
+        if not key and isinstance(env_name, str) and env_name:
+            key = os.getenv(env_name, "").strip()
+        if metadata.get("auth_required") is True and not key:
+            raise DashboardProviderSettingsError(f"{provider_id} API key is not configured")
+
+        router = self.runtime.director.planner.router
+        registry = getattr(router, "provider_registry", None)
+        if registry is None or provider_id not in registry.ids:
+            raise DashboardProviderSettingsError(
+                f"{provider_id} is not active in the runtime registry; save its credential and reload Settings"
+            )
+
+        discovered_models: list[str] = []
+        if provider_id == "nvidia_api":
+            discovery = getattr(self.runtime, "model_discovery", None)
+            if discovery is None:
+                raise DashboardProviderSettingsError("NVIDIA model discovery is not available in the current runtime")
+            try:
+                candidates = tuple(discovery.discover_and_stage("nvidia_api"))
+            except Exception as exc:
+                raise DashboardProviderSettingsError(
+                    f"NVIDIA free-model discovery failed ({type(exc).__name__}); check endpoint, network policy and API-key access"
+                ) from None
+            eligible = [
+                candidate for candidate in candidates
+                if getattr(candidate, "model", None) is not None
+                and getattr(candidate.model, "provider", None) == "nvidia_api"
+                and str(getattr(candidate.model, "pricing_tier", "")).lower() == "free"
+                and str(getattr(candidate.model, "id", "")).strip()
+            ]
+            discovered_models = [candidate.model.id for candidate in eligible]
+            if not eligible:
+                raise DashboardProviderSettingsError(
+                    "NVIDIA discovery returned no eligible free models; no inference request was sent"
+                )
+            model = dataclass_replace(eligible[0].model, enabled=True, pricing_tier="free")
+        else:
+            endpoint = (
+                str(config.get("base_url", "")).strip()
+                if isinstance(config, Mapping)
+                else ""
+            ) or str(metadata.get("base_url", "")).strip()
+            if not endpoint:
+                raise DashboardProviderSettingsError("OpenRouter endpoint is not configured")
+            model = ModelSpec(
+                id="openrouter/free",
+                provider="openrouter",
+                endpoint=endpoint.rstrip("/"),
+                capabilities=("chat", "reasoning"),
+                context_window=200000,
+                enabled=True,
+                pricing_tier="free",
+            )
+
+        request = InferenceRequest(
+            messages=[{
+                "role": "user",
+                "content": "Reply with exactly: AURORA SETTINGS LIVE INFERENCE OK",
+            }],
+            model=model.id,
+            temperature=0,
+            max_tokens=32,
+        )
+        execution_id = new_execution_id()
+        try:
+            adapter = registry.create(model)
+            response = adapter.generate(
+                request,
+                selected_model=model.id,
+                execution_id=execution_id,
+            )
+        except Exception as exc:
+            status_code = getattr(exc, "status_code", None)
+            if isinstance(status_code, int):
+                raise DashboardProviderSettingsError(
+                    f"{provider_id} live inference failed: {_http_status_message(status_code)}"
+                ) from None
+            if type(exc).__name__ in {"ProviderTimeoutError", "TimeoutError"}:
+                raise DashboardProviderSettingsError(
+                    f"{provider_id} live inference timed out; verify network/egress connectivity"
+                ) from None
+            if type(exc).__name__ == "ProviderTransportError":
+                raise DashboardProviderSettingsError(
+                    f"{provider_id} live inference transport failed; verify DNS, TLS, proxy and network policy"
+                ) from None
+            raise DashboardProviderSettingsError(
+                f"{provider_id} live inference failed ({type(exc).__name__}); credential value and provider response body were omitted"
+            ) from None
+
+        content = getattr(response, "content", None)
+        if not isinstance(content, str) or not content.strip():
+            raise DashboardProviderSettingsError(
+                f"{provider_id} returned an empty response; live inference was not verified"
+            )
+        telemetry = getattr(response, "telemetry", None)
+        return {
+            "provider": provider_id,
+            "ok": True,
+            "inference_verified": True,
+            "model": model.id,
+            "response_non_empty": True,
+            "latency_ms": getattr(telemetry, "duration_ms", None),
+            "discovered_free_models": discovered_models[:10],
+            "request_id": request.request_id,
+            "execution_id": execution_id,
+        }
+
+
 def _rebind_runtime_discovery(runtime, router) -> None:
     """Keep all long-lived discovery services on the router's current registries.
 
@@ -384,29 +521,29 @@ def _rebind_runtime_discovery(runtime, router) -> None:
         gateway.model_router = router
 
 
+def _http_status_message(status_code: int) -> str:
+    """Describe common HTTP failures without exposing provider response bodies."""
+    if status_code == 401:
+        return "authentication rejected (HTTP 401); verify this provider's API key"
+    if status_code == 403:
+        return "access denied (HTTP 403); verify account permissions and endpoint access"
+    if status_code == 404:
+        return "endpoint or model-list route not found (HTTP 404); verify the base URL"
+    if status_code == 408:
+        return "request timed out (HTTP 408)"
+    if status_code == 429:
+        return "rate limit or quota reached (HTTP 429); retry after the provider cooldown"
+    if 500 <= status_code <= 599:
+        return f"provider service unavailable (HTTP {status_code}); retry later"
+    return f"provider returned HTTP {status_code}"
+
+
 def _urlopen(request: urllib.request.Request):
     try:
         return urllib.request.urlopen(request, timeout=20)
     except urllib.error.HTTPError as exc:
-        # Never forward the response body or headers: providers can return
-        # diagnostics containing request metadata. Preserve only a classified
-        # status so the operator can distinguish bad credentials, bad endpoints,
-        # throttling, and provider-side outages.
-        if exc.code == 401:
-            detail = "authentication rejected (HTTP 401); verify this provider's API key"
-        elif exc.code == 403:
-            detail = "access denied (HTTP 403); verify account permissions and endpoint access"
-        elif exc.code == 404:
-            detail = "endpoint or model-list route not found (HTTP 404); verify the base URL"
-        elif exc.code == 408:
-            detail = "request timed out (HTTP 408)"
-        elif exc.code == 429:
-            detail = "rate limit or quota reached (HTTP 429); retry after the provider cooldown"
-        elif 500 <= exc.code <= 599:
-            detail = f"provider service unavailable (HTTP {exc.code}); retry later"
-        else:
-            detail = f"provider returned HTTP {exc.code}"
-        raise DashboardProviderSettingsError(detail) from None
+        # Never forward response bodies or headers: they can contain request metadata.
+        raise DashboardProviderSettingsError(_http_status_message(exc.code)) from None
     except (urllib.error.URLError, TimeoutError, OSError):
         raise DashboardProviderSettingsError(
             "provider connection failed (DNS, TLS, proxy, or network error)"
