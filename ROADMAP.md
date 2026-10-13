@@ -223,7 +223,7 @@ Implemented boundary:
         -> critical-decision ensemble
         -> adversarial specialist review
 
-The remaining acceptance step is the dedicated LIVE gate against the real free Gemini tier and the current NVIDIA Free Endpoint catalog. The implementation dynamically discovers served models and joins them with the official NVIDIA catalog rather than using a fixed model allowlist. Paid-provider credentials are neither required nor part of the canonical runtime.
+The remaining acceptance step is the dedicated manual LIVE gate on the current canonical main: discover the current official NVIDIA Free Endpoint catalog, prove one real primary inference, then prove a different eligible NVIDIA reserve returns a real response after a clearly labelled controlled primary failure. The controlled reserve drill is implemented by PR #221 but has not yet been executed manually. Gemini is not part of the active NVIDIA-only provider registry; historical Gemini-to-NVIDIA acceptance is retained only as evidence for its older topology. Paid-provider credentials are neither required nor part of the canonical runtime.
 
 Acceptance artifact:
 
