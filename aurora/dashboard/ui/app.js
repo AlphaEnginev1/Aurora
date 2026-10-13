@@ -1172,12 +1172,12 @@
     $("director-provider").value = String(director.provider || "router");
     $("director-model").value = String(director.model || "");
     $("director-endpoint").value = String(director.endpoint || "https://integrate.api.nvidia.com/v1");
-    $("nvidia-endpoint").value = String(
+    if ($("nvidia-endpoint")) $("nvidia-endpoint").value = String(
       safeObject(providers.nvidia_api).base_url || "https://integrate.api.nvidia.com/v1"
     );
 
     const nvidiaPresent = !!safeObject(providers.nvidia_api).api_key_present;
-    $("nvidia-status").textContent = nvidiaPresent ? "CONNECTED" : "NOT CONNECTED";
+    if ($("nvidia-status")) $("nvidia-status").textContent = nvidiaPresent ? "CONNECTED" : "NOT CONNECTED";
     $("settings-state").innerHTML =
       '<span class="signal-dot"></span> ' +
       esc(String(data.runtime && data.runtime.director_provider || director.provider || "unknown").toUpperCase());
@@ -1205,11 +1205,11 @@ async function loadSettings() {
       },
       providers: {
         nvidia_api: {
-          base_url: $("nvidia-endpoint").value.trim()
+          base_url: $("nvidia-endpoint") ? $("nvidia-endpoint").value.trim() : "https://integrate.api.nvidia.com/v1"
         }
       }
     };
-    const nvidiaKey = $("nvidia-key").value.trim();
+    const nvidiaKey = $("nvidia-key") ? $("nvidia-key").value.trim() : "";
     if (nvidiaKey) payload.providers.nvidia_api.api_key = nvidiaKey;
 
     const button = $("settings-save");
@@ -1223,7 +1223,7 @@ async function loadSettings() {
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data && data.error ? data.error : "settings " + response.status);
-      $("nvidia-key").value = "";
+      if ($("nvidia-key")) $("nvidia-key").value = "";
       renderSettings(data);
       showSettingsMessage("NVIDIA-only configuration saved and applied.", false);
     } catch (error) {
