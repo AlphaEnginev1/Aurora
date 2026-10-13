@@ -23,6 +23,7 @@ class InferenceProvider(Protocol):
         ...
 
 
+from .catalog import ProviderCatalog, ProviderCatalogError
 from .anthropic_api import AnthropicAPIProvider
 from .openai_api import OpenAIAPIProvider
 from .registry import (
@@ -36,6 +37,8 @@ from .registry import (
 
 __all__ = [
     "InferenceProvider",
+    "ProviderCatalog",
+    "ProviderCatalogError",
     "OpenAIAPIProvider",
     "AnthropicAPIProvider",
     "DiscoveryFactory",
