@@ -22,7 +22,13 @@ def test_live_nvidia_only_catalog_and_inference(tmp_path: Path):
     if not key:
         raise AssertionError("LIVE-NVIDIA-only gate requires NVIDIA_API_KEY")
 
-    registry = default_provider_registry(nvidia_api_key=key)
+    endpoint = os.getenv(
+        "NVIDIA_API_ENDPOINT", "https://integrate.api.nvidia.com/v1"
+    ).strip().rstrip("/") or "https://integrate.api.nvidia.com/v1"
+    registry = default_provider_registry(
+        nvidia_api_key=key,
+        provider_endpoints={"nvidia_api": endpoint},
+    )
     assert registry.ids == ("nvidia_api",)
 
     model_registry = ModelRegistry.from_file(
@@ -74,7 +80,7 @@ def test_live_nvidia_only_catalog_and_inference(tmp_path: Path):
         )
     print(
         "AURORA_NVIDIA_CATALOG "
-        f"discovered={len(discovered)} activated={len(activated)} "
+        f"endpoint={endpoint} discovered={len(discovered)} activated={len(activated)} "
         f"reasoning_free_candidates={len(candidate_ids)} models={list(candidate_ids)!r}"
     )
 

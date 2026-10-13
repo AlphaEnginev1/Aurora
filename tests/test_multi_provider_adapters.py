@@ -171,3 +171,51 @@ def test_anthropic_http_failure_is_typed(monkeypatch):
     with pytest.raises(ProviderHTTPError) as caught:
         provider.generate(InferenceRequest(messages=[]))
     assert caught.value.status_code == 429
+
+
+
+def test_openrouter_http_diagnostics_classify_free_limit_without_leaking_body(monkeypatch):
+    import io
+
+    private_body = "account-private-marker-must-not-escape"
+    error_body = json.dumps({
+        "error": {
+            "code": "free-models-per-day",
+            "message": f"Free model daily limit reached; {private_body}",
+        }
+    }).encode()
+    error = __import__("urllib.error", fromlist=["HTTPError"]).HTTPError(
+        "https://openrouter.ai/api/v1/chat/completions",
+        429,
+        "too many requests",
+        {"Retry-After": "2"},
+        io.BytesIO(error_body),
+    )
+    monkeypatch.setattr(
+        "urllib.request.urlopen",
+        lambda request, timeout: (_ for _ in ()).throw(error),
+    )
+    provider = OpenAIAPIProvider(
+        ModelSpec(
+            "openrouter/free",
+            "openrouter",
+            "https://openrouter.ai/api/v1",
+            pricing_tier="free",
+        ),
+        api_key="SECRET-OPENROUTER",
+        provider_id="openrouter",
+    )
+
+    with pytest.raises(ProviderHTTPError) as caught:
+        provider.generate(
+            InferenceRequest(messages=[{"role": "user", "content": "test"}]),
+            selected_model="openrouter/free",
+        )
+
+    assert caught.value.status_code == 429
+    assert caught.value.failure_reason == "free_tier_limit"
+    assert caught.value.provider_code == "free-models-per-day"
+    assert caught.value.retry_after_seconds == 2.0
+    assert caught.value.retryable is True
+    assert private_body not in str(caught.value)
+    assert "SECRET-OPENROUTER" not in str(caught.value)

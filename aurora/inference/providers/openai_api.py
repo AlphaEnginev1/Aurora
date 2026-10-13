@@ -18,6 +18,7 @@ from ..errors import (
     ProviderResponseError,
     ProviderTimeoutError,
     ProviderTransportError,
+    provider_http_diagnostics,
 )
 from ..models import (
     InferenceRequest,
@@ -97,10 +98,23 @@ class OpenAIAPIProvider:
             with urllib.request.urlopen(req, timeout=self.timeout) as response:
                 raw = json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
+            diagnostics = provider_http_diagnostics(exc)
+            provider_name = "OpenRouter" if self.provider_id == "openrouter" else "OpenAI"
+            message = (
+                f"{provider_name} HTTP request failed with status {exc.code}; "
+                f"reason={diagnostics['failure_reason']}"
+            )
+            if diagnostics["provider_code"]:
+                message += f"; provider_code={diagnostics['provider_code']}"
+            if diagnostics["retry_after_seconds"] is not None:
+                message += f"; retry_after_seconds={diagnostics['retry_after_seconds']}"
             raise ProviderHTTPError(
-                f"OpenAI HTTP request failed with status {exc.code}",
+                message,
                 context=context,
                 status_code=exc.code,
+                provider_code=diagnostics["provider_code"],
+                failure_reason=diagnostics["failure_reason"],
+                retry_after_seconds=diagnostics["retry_after_seconds"],
             ) from None
         except (TimeoutError, socket.timeout):
             raise ProviderTimeoutError("OpenAI inference request timed out", context=context) from None
