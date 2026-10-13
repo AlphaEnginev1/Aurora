@@ -10,6 +10,7 @@ if TYPE_CHECKING:
 
 from ..models import ModelSpec
 from . import InferenceProvider
+from .catalog import ProviderCatalog, ProviderCatalogError
 
 
 class ProviderRegistryError(RuntimeError):
@@ -131,77 +132,127 @@ def default_provider_registry(
     include_external: bool = False,
     openrouter_api_key: str | None = None,
     include_openrouter: bool = False,
+    catalog: ProviderCatalog | None = None,
 ) -> ProviderRegistry:
-    """Build the canonical provider registry without coupling the router to vendors."""
+    """Build the active registry from the validated provider catalog.
 
-    def nvidia_factory(model: ModelSpec) -> InferenceProvider:
-        from .nvidia_api import NVIDIAAPIProvider
-        return NVIDIAAPIProvider(model, api_key=nvidia_api_key, gateway=network_gateway)
+    The catalog decides provider metadata and activation gates. Python retains
+    an explicit allow-list of adapter implementations; catalog data can never
+    trigger dynamic imports or arbitrary code execution.
+    """
+    try:
+        provider_catalog = catalog or ProviderCatalog()
+    except ProviderCatalogError as exc:
+        raise ProviderRegistryError(f"provider catalog is invalid: {exc}") from exc
 
-    def openai_factory(model: ModelSpec) -> InferenceProvider:
-        from .openai_api import OpenAIAPIProvider
-        return OpenAIAPIProvider(model, api_key=openai_api_key)
+    providers: list[ProviderSpec] = []
+    for provider_id in provider_catalog.provider_ids:
+        metadata = provider_catalog.resolve(provider_id)
+        mode = metadata["registry_mode"]
+        if mode == "default":
+            should_register = True
+        elif mode == "include_external":
+            should_register = bool(include_external)
+        elif mode == "include_openrouter":
+            should_register = bool(include_openrouter)
+        elif mode == "catalog_only":
+            should_register = False
+        else:
+            raise ProviderRegistryError(f"unsupported registry mode in catalog: {provider_id}")
 
-    def anthropic_factory(model: ModelSpec) -> InferenceProvider:
-        from .anthropic_api import AnthropicAPIProvider
-        return AnthropicAPIProvider(model, api_key=anthropic_api_key)
+        if not should_register:
+            continue
+        if not metadata["adapter_available"] or not metadata["adapter"]:
+            raise ProviderRegistryError(
+                f"provider {provider_id} is enabled for runtime but has no implemented adapter"
+            )
 
-    def openrouter_factory(model: ModelSpec) -> InferenceProvider:
-        from .openai_api import OpenAIAPIProvider
-        return OpenAIAPIProvider(
-            model,
-            api_key=openrouter_api_key,
-            provider_id="openrouter",
-        )
+        adapter = metadata["adapter"]
+        discovery_factory = None
+        discovery = metadata["discovery"]
+        if discovery["enabled"]:
+            if provider_id != "nvidia_api" or discovery["adapter"] != "nvidia":
+                raise ProviderRegistryError(
+                    f"unsupported discovery adapter declared for provider: {provider_id}"
+                )
+            endpoint = metadata["base_url"]
+            discovery_factory = (
+                lambda api_key=nvidia_api_key, gateway=network_gateway, base_url=endpoint:
+                    _nvidia_discovery_factory(
+                        api_key=api_key,
+                        gateway=gateway,
+                        base_url=base_url,
+                    )
+            )
 
-    providers = [
-        ProviderSpec(
-            "nvidia_api",
-            "NVIDIA NIM API",
-            ("chat", "reasoning"),
-            True,
-            nvidia_factory,
-            discovery_factory=lambda: _nvidia_discovery_factory(api_key=nvidia_api_key, gateway=network_gateway),
-        ),
-    ]
-    if include_openrouter:
+        if adapter == "nvidia_api":
+            if provider_id != "nvidia_api":
+                raise ProviderRegistryError("nvidia_api adapter can only serve nvidia_api")
+
+            def factory(model: ModelSpec, api_key=nvidia_api_key, gateway=network_gateway) -> InferenceProvider:
+                from .nvidia_api import NVIDIAAPIProvider
+                return NVIDIAAPIProvider(model, api_key=api_key, gateway=gateway)
+
+        elif adapter == "openai_api":
+            provider_id_override = metadata.get("provider_id_override")
+            if provider_id_override is not None and provider_id_override != provider_id:
+                raise ProviderRegistryError(
+                    f"provider ID override does not match catalog entry: {provider_id}"
+                )
+            if provider_id_override == "openrouter":
+                provider_api_key = openrouter_api_key
+            else:
+                provider_api_key = openai_api_key
+
+            def factory(
+                model: ModelSpec,
+                api_key=provider_api_key,
+                override=provider_id_override,
+            ) -> InferenceProvider:
+                from .openai_api import OpenAIAPIProvider
+                if override is None:
+                    return OpenAIAPIProvider(model, api_key=api_key)
+                return OpenAIAPIProvider(model, api_key=api_key, provider_id=override)
+
+        elif adapter == "anthropic_api":
+            if provider_id != "anthropic":
+                raise ProviderRegistryError("anthropic_api adapter can only serve anthropic")
+
+            def factory(model: ModelSpec, api_key=anthropic_api_key) -> InferenceProvider:
+                from .anthropic_api import AnthropicAPIProvider
+                return AnthropicAPIProvider(model, api_key=api_key)
+
+        else:
+            raise ProviderRegistryError(
+                f"provider {provider_id} declares an unapproved adapter: {adapter}"
+            )
+
         providers.append(
             ProviderSpec(
-                "openrouter",
-                "OpenRouter Free Router",
-                ("chat", "reasoning"),
-                True,
-                openrouter_factory,
+                provider_id=provider_id,
+                name=metadata["name"],
+                capabilities=tuple(metadata["capabilities"]),
+                enabled=True,
+                factory=factory,
+                discovery_factory=discovery_factory,
             )
         )
-    if include_external:
-        providers.extend(
-            [
-                ProviderSpec(
-                    "anthropic",
-                    "Anthropic API",
-                    ("chat", "reasoning", "tool_use", "image"),
-                    True,
-                    anthropic_factory,
-                ),
-                ProviderSpec(
-                    "openai",
-                    "OpenAI API",
-                    ("chat", "reasoning", "tool_use", "image"),
-                    True,
-                    openai_factory,
-                ),
-            ]
-        )
+
     return ProviderRegistry(tuple(providers))
-def _nvidia_discovery_factory(*, api_key: str | None, gateway=None) -> "ModelDiscoveryProvider":
+
+
+def _nvidia_discovery_factory(
+    *,
+    api_key: str | None,
+    gateway=None,
+    base_url: str = "https://integrate.api.nvidia.com/v1",
+) -> "ModelDiscoveryProvider":
     from .nvidia_discovery import NVIDIAModelDiscoveryProvider
     return NVIDIAModelDiscoveryProvider(
-        base_url="https://integrate.api.nvidia.com/v1",
+        base_url=base_url,
         api_key=api_key,
         gateway=gateway,
     )
-
 
 __all__ = [
     "DiscoveryFactory",
