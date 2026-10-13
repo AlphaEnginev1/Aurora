@@ -1,19 +1,6 @@
 name: Live NVIDIA Free-Model Gate
 
 on:
-  pull_request:
-    paths:
-      - ".github/workflows/live-multi-provider-resilience.yml"
-      - "aurora/inference/providers/**"
-      - "aurora/inference/router.py"
-      - "aurora/inference/discovery.py"
-      - "aurora/inference/free_policy.py"
-      - "config/free-model-policy.json"
-      - "config/inference-policy.json"
-      - "tests/e2e/test_live_multi_provider_resilience.py"
-      - "tests/test_inference_router.py"
-      - "tests/test_multi_provider_adapters.py"
-      - "tests/test_provider_registry.py"
   workflow_dispatch:
     inputs:
       nvidia_model_id:
@@ -26,8 +13,11 @@ on:
         default: "https://integrate.api.nvidia.com/v1"
         type: string
 
+
 jobs:
   live-nvidia-only:
+    # Real NVIDIA inference consumes a provider request. Only explicit manual runs may do this.
+    if: ${{ github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-24.04
     # Reuse the GitHub Actions environment from the last confirmed real NVIDIA inference.
     environment: director-provider-failover-live
