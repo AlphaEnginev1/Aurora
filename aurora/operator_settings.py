@@ -24,7 +24,7 @@ DEFAULT_PROVIDER_ENDPOINTS = {
     "together_ai": "https://api.together.xyz/v1",
     "fireworks_ai": "https://api.fireworks.ai/inference/v1",
     "perplexity": "https://api.perplexity.ai",
-    "cohere": "https://api.cohere.com/compatibility/v1",
+    "cohere": "https://api.cohere.ai/compatibility/v1",
     "ollama": "http://127.0.0.1:11434/v1",
     "lm_studio": "http://127.0.0.1:1234/v1",
     "custom_openai_compatible": "",
