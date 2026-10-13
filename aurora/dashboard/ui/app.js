@@ -1261,7 +1261,9 @@ async function testProvider(provider) {
       });
     });
     showSettingsMessage(
-      "NVIDIA connection verified · " + Number(data.staged_count || 0) + " free model(s) discovered and staged.",
+      "NVIDIA model-catalog connection succeeded · " +
+      Number(data.staged_count || 0) +
+      " free model(s) discovered and staged. This check does not verify chat generation/inference.",
       false
     );
   }
