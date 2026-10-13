@@ -651,3 +651,130 @@ def test_live_inference_probe_refuses_unverified_paid_provider_routes(tmp_path: 
 
     with pytest.raises(DashboardProviderSettingsError, match="free-model policy"):
         ProviderSettingsService(store, runtime).test_inference("openai")
+
+
+
+def test_live_inference_probe_classifies_429_without_leaking_provider_details(tmp_path: Path):
+    import pytest
+    from aurora.dashboard.provider_settings import DashboardProviderSettingsError, ProviderSettingsService
+    from aurora.inference.errors import ProviderErrorContext, ProviderHTTPError
+    from aurora.inference.providers.registry import default_provider_registry
+    from aurora.operator_settings import OperatorSettingsStore
+
+    runtime = Runtime(router(tmp_path))
+    store = OperatorSettingsStore(tmp_path / "operator-settings.json")
+    store.save({
+        "providers": {
+            "openrouter": {
+                "api_key": "openrouter-secret-must-not-leak",
+                "base_url": "https://openrouter.ai/api/v1",
+                "enabled": True,
+            },
+        },
+    })
+    live_router = runtime.director.planner.router
+    live_router.provider_registry = default_provider_registry(
+        nvidia_api_key="nvidia-test",
+        openrouter_api_key="openrouter-secret-must-not-leak",
+        include_openrouter=True,
+    )
+
+    class RateLimitedAdapter:
+        def generate(self, request, *, selected_model, execution_id):
+            raise ProviderHTTPError(
+                "upstream raw error should not be used",
+                context=ProviderErrorContext(
+                    provider="openrouter",
+                    request_id=request.request_id,
+                    execution_id=execution_id,
+                    selected_model=selected_model,
+                    provider_model=selected_model,
+                ),
+                status_code=429,
+            )
+
+    live_router.provider_registry.create = lambda _model: RateLimitedAdapter()
+    with pytest.raises(DashboardProviderSettingsError, match="rate limit or quota") as exc:
+        ProviderSettingsService(store, runtime).test_inference("openrouter")
+    assert "openrouter-secret-must-not-leak" not in str(exc.value)
+    assert "upstream raw error should not be used" not in str(exc.value)
+
+
+def test_live_inference_probe_rejects_empty_response(tmp_path: Path):
+    import pytest
+    from types import SimpleNamespace
+    from aurora.dashboard.provider_settings import DashboardProviderSettingsError, ProviderSettingsService
+    from aurora.inference.models import ModelSpec
+    from aurora.operator_settings import OperatorSettingsStore
+
+    runtime = Runtime(router(tmp_path))
+    store = OperatorSettingsStore(tmp_path / "operator-settings.json")
+    store.save({
+        "providers": {
+            "nvidia_api": {
+                "api_key": "nvidia-test-key",
+                "base_url": "https://integrate.api.nvidia.com/v1",
+                "enabled": True,
+            },
+        },
+    })
+    candidate = ModelSpec(
+        id="nvidia/empty-response-test",
+        provider="nvidia_api",
+        endpoint="https://integrate.api.nvidia.com/v1",
+        enabled=False,
+        pricing_tier="free",
+    )
+
+    class Discovery:
+        def discover_and_stage(self, provider_id):
+            return (SimpleNamespace(model=candidate),)
+
+    runtime.model_discovery = Discovery()
+
+    class EmptyAdapter:
+        def generate(self, request, *, selected_model, execution_id):
+            return SimpleNamespace(content="  ", telemetry=None)
+
+    runtime.director.planner.router.provider_registry.create = lambda _model: EmptyAdapter()
+    with pytest.raises(DashboardProviderSettingsError, match="empty response"):
+        ProviderSettingsService(store, runtime).test_inference("nvidia_api")
+
+
+def test_live_inference_probe_never_sends_request_when_no_approved_free_model_exists(tmp_path: Path):
+    import pytest
+    from types import SimpleNamespace
+    from aurora.dashboard.provider_settings import DashboardProviderSettingsError, ProviderSettingsService
+    from aurora.inference.models import ModelSpec
+    from aurora.operator_settings import OperatorSettingsStore
+
+    runtime = Runtime(router(tmp_path))
+    store = OperatorSettingsStore(tmp_path / "operator-settings.json")
+    store.save({
+        "providers": {
+            "nvidia_api": {
+                "api_key": "nvidia-test-key",
+                "base_url": "https://integrate.api.nvidia.com/v1",
+                "enabled": True,
+            },
+        },
+    })
+    candidate = ModelSpec(
+        id="nvidia/not-approved-test",
+        provider="nvidia_api",
+        endpoint="https://integrate.api.nvidia.com/v1",
+        enabled=False,
+        pricing_tier="unknown",
+    )
+
+    class Discovery:
+        def discover_and_stage(self, provider_id):
+            return (SimpleNamespace(model=candidate),)
+
+    runtime.model_discovery = Discovery()
+    runtime.director.planner.router.provider_registry.create = lambda _model: (_ for _ in ()).throw(
+        AssertionError("inference must not run without a free-price classification")
+    )
+
+    with pytest.raises(DashboardProviderSettingsError, match="no inference request was sent"):
+        ProviderSettingsService(store, runtime).test_inference("nvidia_api")
