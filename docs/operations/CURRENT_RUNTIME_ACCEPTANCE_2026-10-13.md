@@ -4,10 +4,10 @@ This is the current acceptance snapshot for engineering work on Aurora. Use it t
 
 ## 1. Canonical architecture today
 
-- **Canonical source:** GitHub branch `main`. At the start of this audit, HEAD was `1f88c28867ce15041665d81ec05815be9c132470` after PR #218.
+- **Canonical source:** GitHub branch `main`. PR #218 added the joint controller acceptance; PR #220 subsequently merged the fail-closed OpenRouter quota preflight. Main is now at least `c037719221a654c930ad0d4a43250f7abfa50220` as of this update.
 - **Inference:** the existing provider-neutral `ModelRouter`, `ProviderRegistry`, and `ModelRegistry` remain canonical. The repository enforces `cost_policy=free_only`. NVIDIA is available through the official live Free Endpoint catalog when its credential is configured. OpenRouter is optional, requires `OPENROUTER_API_KEY`, and the reviewed model is only `openrouter/free`.
 - **Director selection:** the normal mode is the canonical inference router/fabric. Direct OpenRouter selection is opt-in through local configuration/process environment; it must not be inferred merely from a successful models-list request.
-- **OpenRouter quota safety:** PR #217 made the live workflow manual-only. A key-quota probe on PR #216's current test branch saw `used=51, limit=50, remaining=0` and stopped before generation. At this snapshot, a follow-up PR #220 is adding that fail-closed quota preflight to `main` itself; until #220 merges, do not manually run OpenRouter live inference on main while quota may be exhausted.
+- **OpenRouter quota safety:** PR #217 made the live workflow manual-only. PR #220 merged the fail-closed preflight: an authenticated `GET /api/v1/key` must prove free tier plus valid `used/limit/remaining`, and `remaining` must be positive before any model-list or chat request. The last real quota reading was `used=51, limit=50, remaining=0`; the code fix prevents future explicit manual runs from sending a chat generation while quota is exhausted or unprovable. It does not replenish the allowance.
 - **No paid fallback:** quota or provider failure is not authorization to choose paid models. Do not bypass the free-only model allowlist.
 
 ## 2. Point 2 — autonomous controller integration
@@ -56,7 +56,7 @@ A dashboard HTTP 200 by itself is only a boot check, not evidence of a successfu
 
 Still pending on the current canonical main SHA:
 - run the dedicated NVIDIA Free Endpoint live gate against current main after its catalog/test changes; PR #216 reports two successful NVIDIA inference runs on its PR head, which is useful but not identical to a current-main run;
-- wait until OpenRouter's account quota resets and the fail-closed preflight fix (#220) is merged and green before an explicitly manual free-inference acceptance run;
+- wait until OpenRouter's account quota resets before an explicitly manual free-inference acceptance run; quota preflight #220 is merged and its CI passed, but a real generation has not yet been revalidated;
 - execute the current multi-provider/reserve/fail-closed live gate with evidence showing primary failure, eligible NVIDIA reserve success, and durable mission/session continuity. If the primary is unavailable, confirm the controller fails closed rather than switching to any non-free provider;
 - complete the local WSL conversation/clean restart in point 6 and record that evidence.
 
