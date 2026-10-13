@@ -22,7 +22,7 @@ The narrower duplicate PR #196 was closed as superseded by #218; its branch has 
 
 The current audit snapshot enumerated 232 branch refs including `main`. All 231 non-main refs were compared to main for ancestry/divergence: 144 heads had zero commits ahead and 87 had one or more commits ahead. These are ancestry classes only. A divergent ref can already have its code represented on main via squash merge.
 
-**No branch was deleted or rewritten.** Open PRs requiring content-level disposition are #216 (provider/settings and NVIDIA catalog; OpenRouter quota gate pending), #192 (uploaded ZIP/PATCH artifacts must be preserved), #185 (one workflow-input change requiring current-branch review), and #183 (broad multi-provider branch; do not merge wholesale against the current provider policy). See the branch audit for the expanded queue.
+**No branch was deleted or rewritten.** Open PRs requiring content-level disposition are #216 (provider/settings and NVIDIA catalog; OpenRouter quota gate pending), #192 (uploaded ZIP/PATCH artifacts must be preserved), and #183 (broad multi-provider branch; do not merge wholesale against the current provider policy). PR #185 was closed unmerged because its single model-override change targeted a superseded multi-provider workflow; its branch is retained. See the branch audit for the expanded queue.
 
 ## 4. Point 4 — protecting main
 
