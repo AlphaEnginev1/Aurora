@@ -39,6 +39,13 @@
       ? "Optional for this provider" : "Paste the provider API key";
     const testButton = $("nvidia-test");
     if (testButton) testButton.hidden = providerId !== "nvidia_api";
+    const genericTestButton = $("credential-test-provider");
+    if (genericTestButton) {
+      genericTestButton.hidden = providerId === "nvidia_api"
+        || metadata.adapter_available !== true
+        || metadata.registry_mode === "catalog_only";
+      genericTestButton.textContent = "Test " + (metadata.name || providerId) + " connection";
+    }
     const stateLabel = $("provider-catalog-status");
     if (stateLabel && providerId) {
       if (metadata.registry_mode === "catalog_only") {
@@ -158,11 +165,48 @@
     }
   }
 
+  async function testSelectedProvider() {
+    const providerId = selectedProvider();
+    const metadata = definition(providerId);
+    const button = $("credential-test-provider");
+    if (!metadata.provider_id || metadata.adapter_available !== true || metadata.registry_mode === "catalog_only") {
+      message("This provider has no implemented runtime adapter yet; credentials can be stored but no connection test is available.", true);
+      return;
+    }
+    if (providerId === "nvidia_api") {
+      message("Use the NVIDIA discovery test for this provider.", true);
+      return;
+    }
+    button.disabled = true;
+    message("Checking the saved credential against the provider's model-list endpoint. This does not run inference.", false);
+    try {
+      const response = await fetch(apiBase + "/settings/test", {
+        method: "POST",
+        headers: { Accept: "application/json", "Content-Type": "application/json" },
+        body: JSON.stringify({ provider: providerId })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data && data.error || "Provider connection test failed");
+      const count = Number(data.model_count || 0);
+      message(
+        (metadata.name || providerId) + " authenticated successfully; " + count +
+        " model ID(s) visible. Chat inference has not been verified by this check.",
+        false
+      );
+    } catch (error) {
+      message((metadata.name || providerId) + " connection failed: " + error.message, true);
+    } finally {
+      button.disabled = false;
+    }
+  }
+
   function init() {
     const select = $("credential-provider");
     if (!select) return;
     select.addEventListener("change", setEndpointForSelection);
     $("credential-save").addEventListener("click", saveCredential);
+    const genericTestButton = $("credential-test-provider");
+    if (genericTestButton) genericTestButton.addEventListener("click", testSelectedProvider);
     $("credential-clear").addEventListener("click", function () {
       $("credential-key").value = "";
     });
