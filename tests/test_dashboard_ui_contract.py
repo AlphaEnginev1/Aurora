@@ -32,6 +32,7 @@ def test_dashboard_ui_assets_are_present():
     assert 'id="credential-inventory"' in html
     assert 'id="credential-refresh"' in html
     assert 'id="credential-test-provider"' in html
+    assert 'id="credential-test-inference"' in html
     # Local settings use restrictive filesystem permissions; do not claim
     # at-rest encryption because operator-settings.json is not encrypted.
     assert "LOCAL CREDENTIAL STORE" in html
@@ -39,7 +40,10 @@ def test_dashboard_ui_assets_are_present():
     assert 'id="nvidia-key"' not in html
     provider_js = (UI_DIR / "provider_credentials.js").read_text(encoding="utf-8")
     assert '"/settings/test"' in provider_js
+    assert '"/settings/test-inference"' in provider_js
     assert "testSelectedProvider" in provider_js
+    assert "testSelectedInference" in provider_js
+    assert "freeInferenceSupported" in provider_js
     assert "does not verify chat generation/inference" in js
     assert "Chat inference has not been verified by this check." in provider_js
     assert "data.provider_catalog" in provider_js
