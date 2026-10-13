@@ -392,24 +392,10 @@
               </div>
               <div class="settings-form">
                 <label for="credential-provider">Provider</label>
-                <select id="credential-provider">
-                  <option value="nvidia_api">NVIDIA NIM</option>
-                  <option value="openai">OpenAI</option>
-                  <option value="anthropic">Anthropic / Claude</option>
-                  <option value="gemini">Google Gemini</option>
-                  <option value="xai">xAI / Grok</option>
-                  <option value="openrouter">OpenRouter</option>
-                  <option value="groq">Groq</option>
-                  <option value="deepseek">DeepSeek</option>
-                  <option value="mistral">Mistral</option>
-                  <option value="together_ai">Together AI</option>
-                  <option value="fireworks_ai">Fireworks AI</option>
-                  <option value="perplexity">Perplexity</option>
-                  <option value="cohere">Cohere</option>
-                  <option value="ollama">Ollama (local, key optional)</option>
-                  <option value="lm_studio">LM Studio (local, key optional)</option>
-                  <option value="custom_openai_compatible">Custom OpenAI-compatible endpoint</option>
+                <select id="credential-provider" aria-describedby="provider-catalog-status">
+                  <option value="">Loading provider catalog…</option>
                 </select>
+                <p id="provider-catalog-status" class="settings-note">Provider choices and default endpoints are loaded from Aurora's validated provider catalog.</p>
                 <label for="credential-endpoint">API endpoint</label>
                 <input id="credential-endpoint" type="url" autocomplete="off" placeholder="Provider endpoint">
                 <label for="credential-key">API key</label>
