@@ -6,6 +6,8 @@ This document is the authoritative implementation/status inventory produced by t
 It separates implementation existence, automated testing, runtime wiring, live-provider verification, and
 genuine remaining work.
 
+**Current acceptance reconciliation (2026-10-13):** for current status, use `docs/operations/CURRENT_RUNTIME_ACCEPTANCE_2026-10-13.md` and `docs/audits/CURRENT_ACCEPTANCE_AND_BRANCH_INVENTORY_2026-10-13.md`. These snapshots supersede stale dated statuses below where provider-gate or autonomy-controller evidence has changed; historical acceptance evidence remains preserved and is not erased.
+
 ## 0. Canonical source of truth
 
 - **Canonical engineering branch: `main`**
@@ -41,13 +43,13 @@ remains as an auditable snapshot of the gate work and is not a second implementa
 | Inference Fabric / ModelRouter | YES | YES | YES | YES | None identified in frozen queue |
 | Provider Health / Availability Layer | YES | YES | YES | PENDING NEW LIVE GATE | LIVE free-model resilience acceptance |
 | Free-only model policy / routing guard | YES | YES | YES | PENDING NEW LIVE GATE | LIVE free-model policy acceptance |
-| Dynamic NVIDIA Free Endpoint catalog | YES | YES | YES | BLOCKED: HTTP 403 on current live inference gate | Verify NVIDIA key permissions/model entitlement/endpoint access, then rerun live inference |
+| Dynamic NVIDIA Free Endpoint catalog | YES | YES | YES | CURRENT MAIN SHA NOT YET LIVE-VERIFIED; PR #216 head passed NVIDIA inference twice; older main runs returned HTTP 403 | Rerun the dedicated live gate on the current canonical main SHA; keep account/model entitlement errors explicit |
 | Optional paid-provider adapters | YES | YES | NO | N/A | Intentionally excluded from canonical free-only runtime |
 | Dynamic free Director reserve pool | YES | YES | YES | PENDING CURRENT LIVE E2E | Prove real primary failure -> eligible NVIDIA reserve success -> durable state continuity |
 | Controlled autonomous model-catalog refresh | YES | YES | YES | PENDING CURRENT LIVE E2E | Verify refresh plus real inference on a currently authorized Free Endpoint |
 | Critical Decision Model Ensemble | YES | YES | YES | PENDING NEW LIVE GATE | LIVE free-model ensemble acceptance |
 | Multi-Agent Adversarial Review | YES | YES | YES | PENDING NEW LIVE GATE | LIVE free-model adversarial-review acceptance |
-| NVIDIA provider | YES | YES | YES | HISTORICAL LIVE EVIDENCE; CURRENT GATE FAILS HTTP 403 | Resolve current key/model/endpoint authorization and rerun live inference |
+| NVIDIA provider | YES | YES | YES | Current main SHA live gate pending; PR #216 head has two successful live inference runs; historical main runs failed HTTP 403 | Run current-main live inference and reserve/fail-closed acceptance |
 | Director provider abstraction / Gemini adapter | YES | YES | YES | YES | None identified in frozen queue |
 | Director 24/7 runtime | YES | YES | YES | N/A | None identified in frozen queue |
 | Loop safety / bounded mission review | YES | YES | YES | N/A | None identified |
@@ -70,7 +72,7 @@ remains as an auditable snapshot of the gate work and is not a second implementa
 | Active typed policy contract | YES | YES | YES | N/A | None identified |
 | Live provider workflows | YES (workflow code) | YES (workflow definition) | OPT-IN ONLY | CURRENT NVIDIA-ONLY GATE FAILED | Latest runs 37814164201 and 37813096077 returned HTTP 403 during actual inference |
 
-| New autonomy controllers (computer use, software engineering, discovery loop, mission manager, RSI) | YES | YES (deterministic callback tests) | **PARTIAL** | NO | Wire each controller to the canonical Workbench/Director/Research/Learning services and prove real runtime E2E; do not count fake callbacks as runtime integration |
+| New autonomy controllers (computer use, software engineering, discovery loop, mission manager, RSI) | YES | YES (unit tests + joint production-factory E2E, PR #218) | **YES for deterministic canonical runtime composition** | NO | Live/WSL acceptance and unmocked external-service proof remain pending; deterministic controller integration is closed by PR #218 |
 
 ### Meaning of the five columns
 
