@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from aurora.dashboard.provider_settings import ProviderSettingsService
@@ -259,3 +260,146 @@ def test_settings_rebinds_live_discovery_to_new_provider_and_model_registries(tm
     assert runtime.autonomous_discovery_refresh.discovery is runtime.model_discovery
     assert runtime.autonomous_discovery_refresh.router is live_router
     assert runtime.autonomous_discovery_refresh.health_store is live_router.health_store
+
+
+def test_openai_connection_probe_verifies_auth_and_redacts_the_secret(tmp_path: Path, monkeypatch):
+    from aurora.dashboard import provider_settings as provider_settings_module
+    from aurora.dashboard.provider_settings import ProviderSettingsService
+    from aurora.operator_settings import OperatorSettingsStore
+
+    runtime = Runtime(router(tmp_path))
+    store = OperatorSettingsStore(tmp_path / "operator-settings.json")
+    store.save({
+        "providers": {
+            "openai": {
+                "api_key": "openai-credential-secret",
+                "base_url": "https://api.openai.com/v1",
+                "enabled": True,
+            },
+        },
+    })
+    captured = {}
+
+    class Response:
+        status = 200
+        def __enter__(self):
+            return self
+        def __exit__(self, *_args):
+            return False
+        def read(self):
+            return json.dumps({"object": "list", "data": [{"id": "gpt-test"}]}).encode()
+
+    def fake_urlopen(request):
+        captured["url"] = request.full_url
+        captured["authorization"] = request.get_header("Authorization")
+        return Response()
+
+    monkeypatch.setattr(provider_settings_module, "_urlopen", fake_urlopen)
+    result = ProviderSettingsService(store, runtime).test_provider("openai")
+
+    assert captured["url"] == "https://api.openai.com/v1/models"
+    assert captured["authorization"] == "Bearer openai-credential-secret"
+    assert result["ok"] is True
+    assert result["connection_test"] == "authenticated_model_list"
+    assert result["inference_verified"] is False
+    assert result["models"] == ["gpt-test"]
+    assert "openai-credential-secret" not in str(result)
+
+
+def test_anthropic_connection_probe_uses_anthropic_auth_headers(tmp_path: Path, monkeypatch):
+    from aurora.dashboard import provider_settings as provider_settings_module
+    from aurora.dashboard.provider_settings import ProviderSettingsService
+    from aurora.operator_settings import OperatorSettingsStore
+
+    runtime = Runtime(router(tmp_path))
+    store = OperatorSettingsStore(tmp_path / "operator-settings.json")
+    store.save({
+        "providers": {
+            "anthropic": {
+                "api_key": "anthropic-credential-secret",
+                "base_url": "https://api.anthropic.com/v1",
+                "enabled": True,
+            },
+        },
+    })
+    captured = {}
+
+    class Response:
+        status = 200
+        def __enter__(self):
+            return self
+        def __exit__(self, *_args):
+            return False
+        def read(self):
+            return json.dumps({"data": [{"id": "claude-test"}]}).encode()
+
+    def fake_urlopen(request):
+        captured["url"] = request.full_url
+        captured["api_key"] = request.get_header("X-api-key")
+        captured["version"] = request.get_header("Anthropic-version")
+        captured["authorization"] = request.get_header("Authorization")
+        return Response()
+
+    monkeypatch.setattr(provider_settings_module, "_urlopen", fake_urlopen)
+    result = ProviderSettingsService(store, runtime).test_provider("anthropic")
+
+    assert captured["url"] == "https://api.anthropic.com/v1/models?limit=1"
+    assert captured["api_key"] == "anthropic-credential-secret"
+    assert captured["version"] == "2023-06-01"
+    assert captured["authorization"] is None
+    assert result["models"] == ["claude-test"]
+    assert "anthropic-credential-secret" not in str(result)
+
+
+def test_catalog_only_provider_connection_test_fails_closed(tmp_path: Path, monkeypatch):
+    from aurora.dashboard import provider_settings as provider_settings_module
+    from aurora.dashboard.provider_settings import DashboardProviderSettingsError, ProviderSettingsService
+    from aurora.operator_settings import OperatorSettingsStore
+    import pytest
+
+    runtime = Runtime(router(tmp_path))
+    store = OperatorSettingsStore(tmp_path / "operator-settings.json")
+    store.save({
+        "providers": {
+            "deepseek": {
+                "api_key": "stored-but-no-adapter",
+                "base_url": "https://api.deepseek.com/v1",
+                "enabled": True,
+            },
+        },
+    })
+    monkeypatch.setattr(
+        provider_settings_module,
+        "_urlopen",
+        lambda _request: (_ for _ in ()).throw(AssertionError("must not attempt network")),
+    )
+
+    with pytest.raises(DashboardProviderSettingsError, match="adapter is not implemented"):
+        ProviderSettingsService(store, runtime).test_provider("deepseek")
+
+
+def test_provider_connection_probe_rejects_endpoint_with_embedded_credentials(tmp_path: Path, monkeypatch):
+    from aurora.dashboard import provider_settings as provider_settings_module
+    from aurora.dashboard.provider_settings import DashboardProviderSettingsError, ProviderSettingsService
+    from aurora.operator_settings import OperatorSettingsStore
+    import pytest
+
+    runtime = Runtime(router(tmp_path))
+    store = OperatorSettingsStore(tmp_path / "operator-settings.json")
+    store.save({
+        "providers": {
+            "openai": {
+                "api_key": "stored-key",
+                "base_url": "https://someone:password@api.openai.com/v1",
+                "enabled": True,
+            },
+        },
+    })
+    monkeypatch.setattr(
+        provider_settings_module,
+        "_urlopen",
+        lambda _request: (_ for _ in ()).throw(AssertionError("must not attempt network")),
+    )
+
+    with pytest.raises(DashboardProviderSettingsError, match="without embedded credentials"):
+        ProviderSettingsService(store, runtime).test_provider("openai")
