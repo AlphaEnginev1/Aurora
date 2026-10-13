@@ -79,6 +79,7 @@ class ProviderSettingsService:
                 current_models,
                 provider_registry=router.provider_registry,
             )
+            _rebind_runtime_discovery(self.runtime, router)
 
             if openrouter_key:
                 from aurora.orchestration.factory import _register_openrouter_free_model
@@ -169,6 +170,7 @@ class ProviderSettingsService:
                         provider_registry=router.provider_registry,
                     )
                     router.models = list(router.model_registry.models)
+                    _rebind_runtime_discovery(self.runtime, router)
                 elif not existing.enabled or existing.endpoint != str(settings["providers"]["nvidia_api"]["base_url"]).rstrip("/"):
                     updated = ModelSpec(
                         id=existing.id,
@@ -235,6 +237,29 @@ class ProviderSettingsService:
             "staged_count": len(models),
             "stage_state": "discovered",
         }
+
+
+def _rebind_runtime_discovery(runtime, router) -> None:
+    """Keep all long-lived discovery services on the router's current registries.
+
+    Settings updates rebuild ModelRegistry and ProviderRegistry so newly entered
+    credentials are captured by provider factories. Discovery and autonomous
+    refresh retain references to their original objects unless they are rebound.
+    Without this, a key saved in Settings can be ignored by NVIDIA model discovery
+    until a complete process restart.
+    """
+    discovery = getattr(runtime, "model_discovery", None)
+    if discovery is not None:
+        discovery.provider_registry = router.provider_registry
+        discovery.model_registry = router.model_registry
+
+    refresh = getattr(runtime, "autonomous_discovery_refresh", None)
+    if refresh is not None:
+        if discovery is not None:
+            refresh.discovery = discovery
+        refresh.router = router
+        if hasattr(router, "health_store"):
+            refresh.health_store = router.health_store
 
 
 def _urlopen(request: urllib.request.Request):
