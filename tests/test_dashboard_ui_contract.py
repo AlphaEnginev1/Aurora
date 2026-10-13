@@ -40,6 +40,8 @@ def test_dashboard_ui_assets_are_present():
     provider_js = (UI_DIR / "provider_credentials.js").read_text(encoding="utf-8")
     assert '"/settings/test"' in provider_js
     assert "testSelectedProvider" in provider_js
+    assert "does not verify chat generation/inference" in js
+    assert "Chat inference has not been verified by this check." in provider_js
     assert "data.provider_catalog" in provider_js
     assert "provider.provider_id" in provider_js
     assert '<script src="./provider_credentials.js" defer></script>' in html
