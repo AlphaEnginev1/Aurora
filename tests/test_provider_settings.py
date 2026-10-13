@@ -162,7 +162,7 @@ def test_saved_openrouter_key_is_applied_to_runtime_registry(tmp_path: Path, mon
         "providers": {
             "openrouter": {
                 "api_key": "openrouter-saved-key",
-                "base_url": "https://openrouter.ai/api/v1",
+                "base_url": "https://openrouter-proxy.example/api/v1",
                 "enabled": True,
             },
         },
@@ -170,14 +170,12 @@ def test_saved_openrouter_key_is_applied_to_runtime_registry(tmp_path: Path, mon
     service = ProviderSettingsService(store, runtime)
 
     result = service.save_and_apply({})
-    registry = runtime.director.planner.router.provider_registry
+    router = runtime.director.planner.router
+    registry = router.provider_registry
     assert "openrouter" in registry.ids
-    provider = registry.create(ModelSpec(
-        "openrouter/free",
-        "openrouter",
-        "https://openrouter.ai/api/v1",
-        pricing_tier="free",
-    ))
+    registered_model = router.model_registry.resolve("openrouter/free")
+    assert registered_model.endpoint == "https://openrouter-proxy.example/api/v1"
+    provider = registry.create(registered_model)
     assert provider.api_key == "openrouter-saved-key"
     assert "openrouter-saved-key" not in str(result)
 
