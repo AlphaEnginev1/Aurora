@@ -1,0 +1,161 @@
+"""Joint acceptance of Aurora's four remaining autonomous controllers.
+
+Builds the actual canonical DirectorRuntime factory, then replaces external
+execution seams with deterministic receipts so this test performs no live model
+calls, external research calls, workstation mutations, or GitHub writes.
+"""
+from __future__ import annotations
+
+from pathlib import Path
+from types import SimpleNamespace
+
+
+def _build_runtime(tmp_path: Path, monkeypatch):
+    from aurora.orchestration.factory import build_director_runtime
+
+    monkeypatch.delenv("NVIDIA_API_KEY", raising=False)
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.setenv("AURORA_DIRECTOR_PROVIDER", "router")
+    monkeypatch.setenv("AURORA_MODEL_DISCOVERY_REFRESH_ENABLED", "0")
+    monkeypatch.setenv("AURORA_WORKBENCH_ROOTS", str(tmp_path))
+    return build_director_runtime(
+        inference_policy_path="config/inference-policy.json",
+        autonomy_policy_path="config/autonomy-policy.json",
+        registry_path="config/tool-registry.json",
+        network_policy_path="config/network-policy.json",
+        workspace_root=tmp_path,
+        egress_proxy_host="127.0.0.1",
+        egress_proxy_port=3128,
+        organization_path="config/organization.json",
+        skills_path="config/skills.json",
+        projects_path="config/projects.json",
+    )
+
+
+def test_joint_autonomy_controller_acceptance_uses_canonical_runtime_services(
+    tmp_path: Path, monkeypatch
+):
+    """Exercise all four controllers together through the production factory."""
+    runtime = _build_runtime(tmp_path, monkeypatch)
+    controllers = runtime.autonomy_controllers
+
+    # Prove there is one controller graph, using the same service objects the
+    # production factory exposed; no parallel Workbench/Router/Learning store.
+    assert runtime.autonomous_computer_use is controllers["computer_use"]
+    assert runtime.autonomous_software_engineer is controllers["software_engineer"]
+    assert runtime.autonomous_discovery_loop is controllers["discovery_loop"]
+    assert runtime.recursive_self_improvement is controllers["recursive_self_improvement"]
+    assert controllers["learning_store"] is runtime.skill_learning
+
+    workbench = runtime.workbench
+    router = runtime.director.planner.router
+    director_planner = runtime.director.planner
+    task_engine = runtime.director.task_engine
+    research_service = workbench.research
+    assert task_engine.orchestration._workbench is workbench
+    assert task_engine.skill_learning is controllers["learning_store"]
+    assert research_service is not None
+
+    workbench_calls = []
+    director_calls = []
+    research_calls = []
+
+    def execute_workbench(request):
+        workbench_calls.append(request)
+        if request.capability == "workbench:census":
+            output = [{"capability_id": "workbench:computer", "available": True}]
+        elif request.capability == "workbench:computer":
+            output = {"completed": True, "status": "succeeded"}
+        else:
+            raise AssertionError(f"unexpected Workbench capability: {request.capability}")
+        return SimpleNamespace(status="succeeded", error=None, output=output)
+
+    def generate(request, *, capability="reasoning", preferred_models=None):
+        prompt = request.messages[-1]["content"]
+        if "Choose at most one safe next action" in prompt:
+            content = '{"action":{"objective":"controlled acceptance","action":"observe"}}'
+        elif "State one testable hypothesis" in prompt:
+            content = "A controlled testable hypothesis"
+        elif "Evaluate whether the hypothesis" in prompt:
+            content = '{"verdict":"supported","evidence":["source-a","source-b"]}'
+        elif "Classify whether the claim is novel" in prompt:
+            content = "novel"
+        else:
+            raise AssertionError("unexpected router prompt in joint autonomy acceptance")
+        return SimpleNamespace(content=content)
+
+    def plan(*, objective, context=None, model=None):
+        director_calls.append(objective)
+        return SimpleNamespace(
+            objective=objective,
+            tasks=(SimpleNamespace(task_id="controlled-task", status="succeeded"),),
+        )
+
+    def execute_tasks(tasks):
+        return (SimpleNamespace(status="succeeded"),)
+
+    def discover(request):
+        research_calls.append(("discover", request.objective))
+        return ("https://research.example/a", "https://research.example/b")
+
+    def retrieve(request):
+        research_calls.append(("retrieve", request.objective))
+        return (
+            SimpleNamespace(
+                url="https://research.example/a",
+                source_id="source-a",
+                content_text="Controlled evidence A",
+            ),
+            SimpleNamespace(
+                url="https://research.example/b",
+                source_id="source-b",
+                content_text="Controlled evidence B",
+            ),
+        )
+
+    # Stub only the external side-effect seams on the canonical service objects.
+    # No live provider, real workstation operation, internet search, or code
+    # publication is performed by this acceptance test.
+    monkeypatch.setattr(workbench, "execute", execute_workbench)
+    monkeypatch.setattr(router, "generate", generate)
+    monkeypatch.setattr(director_planner, "plan", plan)
+    monkeypatch.setattr(task_engine, "execute", execute_tasks)
+    monkeypatch.setattr(research_service, "discover", discover)
+    monkeypatch.setattr(research_service, "retrieve", retrieve)
+
+    computer_result = controllers["computer_use"].run("inspect controlled workstation")
+    assert len(computer_result) == 1
+    assert [call.capability for call in workbench_calls] == [
+        "workbench:census",
+        "workbench:computer",
+        "workbench:census",
+    ]
+
+    engineering_result = controllers["software_engineer"].run(
+        "complete controlled software engineering acceptance"
+    )
+    assert engineering_result.status == "succeeded"
+    assert [iteration.result["phase"] for iteration in engineering_result.iterations] == [
+        "inspect", "research", "plan", "edit", "test", "verify", "publish"
+    ]
+    assert len(director_calls) == 7
+
+    discovery_result = controllers["discovery_loop"].run(
+        "test one controlled research hypothesis"
+    )
+    assert discovery_result.status == "discovered"
+    assert discovery_result.knowledge == (
+        "research-evidence:source-a,source-b",
+    )
+    assert [call[0] for call in research_calls] == ["discover", "retrieve"]
+
+    # RSI may not claim success merely because Director phases completed: absent
+    # explicit CI and change evidence it must remain fail-closed.
+    rsi_result = controllers["recursive_self_improvement"].run(
+        "improve Aurora under controlled acceptance"
+    )
+    assert rsi_result.status == "insufficient"
+    assert rsi_result.change_id is None
+    assert len(rsi_result.cycles) == 7
+    assert len(director_calls) == 14
+
