@@ -130,3 +130,96 @@ def test_local_nvidia_model_setting_can_be_restored_on_startup(tmp_path: Path):
     restored = r.model_registry.resolve("poolside/laguna-xs-2.1")
     assert restored.enabled is True
     assert restored.provider == "nvidia_api"
+
+
+
+def test_provider_settings_exposes_catalog_without_secret_values(tmp_path: Path):
+    runtime = Runtime(router(tmp_path))
+    store = OperatorSettingsStore(tmp_path / "operator-settings.json")
+    store.save({
+        "providers": {
+            "openai": {
+                "api_key": "openai-private-value",
+                "base_url": "https://api.openai.com/v1",
+            },
+        },
+    })
+    service = ProviderSettingsService(store, runtime)
+    public = service.public()
+
+    assert {item["provider_id"] for item in public["provider_catalog"]} >= {
+        "nvidia_api", "openai", "anthropic", "openrouter"
+    }
+    assert public["providers"]["openai"]["api_key_present"] is True
+    assert "openai-private-value" not in str(public)
+
+
+def test_saved_openrouter_key_is_applied_to_runtime_registry(tmp_path: Path, monkeypatch):
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    runtime = Runtime(router(tmp_path))
+    store = OperatorSettingsStore(tmp_path / "operator-settings.json")
+    store.save({
+        "providers": {
+            "openrouter": {
+                "api_key": "openrouter-saved-key",
+                "base_url": "https://openrouter.ai/api/v1",
+                "enabled": True,
+            },
+        },
+    })
+    service = ProviderSettingsService(store, runtime)
+
+    result = service.save_and_apply({})
+    registry = runtime.director.planner.router.provider_registry
+    assert "openrouter" in registry.ids
+    provider = registry.create(ModelSpec(
+        "openrouter/free",
+        "openrouter",
+        "https://openrouter.ai/api/v1",
+        pricing_tier="free",
+    ))
+    assert provider.api_key == "openrouter-saved-key"
+    assert "openrouter-saved-key" not in str(result)
+
+
+def test_openai_and_anthropic_saved_keys_register_only_configured_adapters(tmp_path: Path, monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    runtime = Runtime(router(tmp_path))
+    store = OperatorSettingsStore(tmp_path / "operator-settings.json")
+    store.save({
+        "providers": {
+            "openai": {
+                "api_key": "openai-saved-key",
+                "base_url": "https://api.openai.com/v1",
+                "enabled": True,
+            },
+            "anthropic": {
+                "api_key": "anthropic-saved-key",
+                "base_url": "https://api.anthropic.com/v1",
+                "enabled": True,
+            },
+        },
+    })
+    service = ProviderSettingsService(store, runtime)
+
+    service.save_and_apply({})
+    registry = runtime.director.planner.router.provider_registry
+    assert {"openai", "anthropic", "nvidia_api"} <= set(registry.ids)
+    openai = registry.create(ModelSpec("gpt-test", "openai", "https://api.openai.com/v1"))
+    anthropic = registry.create(ModelSpec("claude-test", "anthropic", "https://api.anthropic.com/v1"))
+    assert openai.api_key == "openai-saved-key"
+    assert anthropic.api_key == "anthropic-saved-key"
+
+
+def test_router_mode_can_save_provider_key_without_treating_router_as_model(tmp_path: Path, monkeypatch):
+    monkeypatch.delenv("NVIDIA_API_KEY", raising=False)
+    runtime = Runtime(router(tmp_path))
+    store = OperatorSettingsStore(tmp_path / "operator-settings.json")
+    store.save({"providers": {"nvidia_api": {"api_key": "nvidia-saved-key"}}})
+    service = ProviderSettingsService(store, runtime)
+
+    result = service.save_and_apply({"director": {"provider": "router", "model": "router"}})
+
+    assert result["director"]["model"] == "router"
+    assert result["providers"]["nvidia_api"]["api_key_present"] is True
