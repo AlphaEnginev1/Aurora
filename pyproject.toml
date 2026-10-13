@@ -13,6 +13,9 @@ where = ["."]
 include = ["aurora*"]
 exclude = ["config*", "deploy*"]
 
+[tool.setuptools.data-files]
+"config" = ["config/providers.json"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [
