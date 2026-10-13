@@ -225,3 +225,12 @@ def test_registry_fails_closed_for_unapproved_catalog_adapter(tmp_path: Path):
             include_external=True,
             catalog=catalog,
         )
+
+
+def test_operator_settings_endpoint_defaults_match_catalog():
+    from aurora.operator_settings import DEFAULT_PROVIDER_ENDPOINTS
+
+    providers = load_catalog()["providers"]
+    assert set(DEFAULT_PROVIDER_ENDPOINTS) == set(providers)
+    for provider_id, metadata in providers.items():
+        assert DEFAULT_PROVIDER_ENDPOINTS[provider_id].rstrip("/") == metadata["base_url"].rstrip("/"), provider_id
