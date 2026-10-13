@@ -1,5 +1,19 @@
 # Auditoría de aceptación y ramas — 2026-10-13
 
+## Re-audit refresh — 2026-10-13 (current at main baseline `497f866ccc48411dc6a21d193224149facf2c4c5`)
+
+This refresh supplements the older point-in-time sections below; it does not erase historical comparison data.
+
+- **Current branch refs at refresh:** 238 including `main`, 237 non-main. The previous complete ancestry comparison covered 231 heads (144 zero-ahead, 87 ahead/diverged). Six subsequent refs were compared against refreshed main and each has commits ahead: `audit/current-acceptance-and-branch-inventory-20261013`, `docs/reconcile-current-acceptance-20261013`, `fix/openrouter-main-quota-preflight-20261013`, `fix/nvidia-live-reserve-acceptance-20261013`, `fix/nvidia-free-catalog-parser-20261013`, and `fix/provider-http-diagnostics-nvidia-openrouter-20261013`. Updated ancestry tally: **144 zero-ahead, 93 ahead/diverged**. It remains an ancestry tally, not a complete semantic review.
+- **Merged since the earlier snapshot:** #220 OpenRouter quota preflight; #221 manual-only controlled NVIDIA reserve drill; #222 roadmap/matrix reconciliation; #223 NVIDIA Free Endpoint parser hardening; #224 secret-safe NVIDIA/OpenRouter HTTP diagnostics.
+- **Point 1:** code and CI for the manual NVIDIA primary + controlled primary failure + real different NVIDIA reserve response is ready. It has **not yet been manually run**. It does not prove natural primary-provider outage handling.
+- **Point 2:** deterministic runtime integration closed by #218 and its post-merge CI.
+- **Point 3:** no branch was deleted. Keep the archive branch and uploaded ZIP/PATCH artifacts; high-risk #183/#192/#216 remain open and require file-level review before any cleanup.
+- **Point 4:** `main protected=false`; accessible rulesets were empty and classic protection read returned HTTP 403. Admin setup/verification is still required.
+- **Point 5:** this re-audit refreshed `ROADMAP.md`, the matrix and the operational report; old entries below remain historical.
+- **Point 6:** local WSL boot plus a real Director conversation remain unverified and must be run on the workstation.
+- **Point 7:** OpenRouter generation still awaits a positive quota preflight; the last confirmed reading was `used=51, limit=50, remaining=0`. Both live provider workflows are manual-only. No paid fallback is enabled.
+
 ## Canonical snapshot
 
 - Canonical branch: `main`

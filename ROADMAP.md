@@ -2,17 +2,17 @@
 
 ## Canonical status
 
-**Current acceptance snapshot (2026-10-13):** the status recorded in the later historical sections must be read alongside the current acceptance record, which supersedes stale point-in-time claims where noted.
+**Seven-point acceptance audit refreshed (2026-10-13), main baseline `497f866ccc48411dc6a21d193224149facf2c4c5`.** Historical sections below preserve evidence for their original commits; this current snapshot takes precedence where statuses differ.
 
-- Canonical `main`: `1f88c28867ce15041665d81ec05815be9c132470`.
-- The four autonomy controllers (computer use, software engineering, discovery loop and RSI) now have a joint deterministic E2E through the production runtime factory. PR #218 is merged; post-merge CI run [38449077652](https://github.com/AlphaEnginev1/Aurora/actions/runs/38449077652) passed both `test` and `e2e-network`. This is deterministic integration evidence, not live-provider or physical-WSL evidence.
-- The OpenRouter live-inference workflow is manual-only after PR #217. Run [38427655156](https://github.com/AlphaEnginev1/Aurora/actions/runs/38427655156) read `used=51, limit=50, remaining=0` and stopped before sending another chat generation.
-- PR #216 reported two successful live NVIDIA inferences on its PR head, but the live result has not been rerun on the current post-merge main SHA. OpenRouter real free inference remains unverified while the authenticated key reports no free requests remaining.
-- The latest branch snapshot contained 232 refs including `main`; ancestry comparisons completed for all 231 non-main heads. Content-level review of divergent branches and safe cleanup remain open.
-- The branch list reports `main protected=false`; the accessible rulesets endpoint returned no rulesets, while reading classic branch protection returned HTTP 403. Effective enforcement is not certified.
-- Clean WSL startup and a real local Director conversation remain unverified by GitHub CI.
+- **Point 1 — NVIDIA:** real primary inference succeeded on the prior PR #216 head ([run 38433386028](https://github.com/AlphaEnginev1/Aurora/actions/runs/38433386028)). PR #221 is merged and adds a manual-only live reserve drill: it first requires real primary inference, injects a *controlled* HTTP 503 for that primary in the recovery phase, then requires a real response from a different official NVIDIA Free Endpoint candidate. It has passed deterministic CI, but **the reserve drill has not yet been run manually**. This is not evidence of a natural NVIDIA upstream primary failure.
+- **Point 2 — autonomy controllers:** CLOSED for deterministic canonical-runtime integration. PR #218's joint factory-level E2E passed both `test` and `e2e-network` ([run 38449077652](https://github.com/AlphaEnginev1/Aurora/actions/runs/38449077652)). Physical computer I/O and user's local WSL are separate.
+- **Point 3 — branches:** the latest fetched branch snapshot had **238 refs including `main` (237 non-main)**. The prior full ancestry classification covered 231 non-main refs: 144 had zero commits ahead and 87 had commits ahead. The six later-created refs were compared to current main and all had commits ahead, so the updated ancestry counts are 144 zero-ahead and 93 ahead/diverged. This is an ancestry count, not yet a semantic review of every divergent diff. No branch was deleted.
+- **Point 4 — protection:** GitHub currently reports `main protected=false`, the accessible rulesets collection is empty, and the classic protection read is denied to the connected integration (HTTP 403). **Not closed.** Requires repository admin settings.
+- **Point 5 — documentation:** this roadmap and the consolidation matrix are now reconciled with the latest evidence; full details are in the current acceptance report.
+- **Point 6 — WSL:** clean local restart and real Director conversation remain pending on the user's machine. CI and a dashboard HTTP 200 are not enough.
+- **Point 7 — providers:** OpenRouter is manual-only, with a fail-closed quota preflight merged in PR #220. The last confirmed free-quota reading was `used=51, limit=50, remaining=0`; a real OpenRouter completion remains pending until a later preflight observes positive allowance. PR #223's official NVIDIA Free Endpoint catalog parser fix and PR #224's secret-safe HTTP diagnostics are merged. All live provider workflows are manual-only; no paid fallback is allowed.
 
-See `docs/operations/CURRENT_RUNTIME_ACCEPTANCE_2026-10-13.md` and `docs/audits/CURRENT_ACCEPTANCE_AND_BRANCH_INVENTORY_2026-10-13.md` for the detailed current snapshot.
+See `docs/operations/CURRENT_RUNTIME_ACCEPTANCE_2026-10-13.md` and `docs/audits/CURRENT_ACCEPTANCE_AND_BRANCH_INVENTORY_2026-10-13.md` for steps and evidence links.
 
 
 **Canonical engineering branch: `main`**

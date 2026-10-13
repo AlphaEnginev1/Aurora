@@ -4,10 +4,12 @@ This is the current acceptance snapshot for engineering work on Aurora. Use it t
 
 ## 1. Canonical architecture today
 
-- **Canonical source:** GitHub branch `main`. PR #218 added the joint controller acceptance; PR #220 subsequently merged the fail-closed OpenRouter quota preflight. Main is now at least `c037719221a654c930ad0d4a43250f7abfa50220` as of this update.
+**New findings in this re-audit:** PR #221 added the manual-only NVIDIA primary/reserve live acceptance drill; its CI is green but its real manual execution is still pending. PR #223 fixed NVIDIA Free Endpoint HTML card association and retries. PR #224 added sanitized NVIDIA/OpenRouter HTTP diagnostics and its CI passed. The historical successful NVIDIA run on PR #216 remains real evidence for that PR revision, not a live run on current main.
+
+- **Canonical source at audit baseline:** GitHub branch `main`, SHA `497f866ccc48411dc6a21d193224149facf2c4c5` (after PRs #218, #219, #220, #221, #222, #223 and #224 were merged). This hash is the audit baseline; a later documentation-only PR will advance main again.
 - **Inference:** the existing provider-neutral `ModelRouter`, `ProviderRegistry`, and `ModelRegistry` remain canonical. The repository enforces `cost_policy=free_only`. NVIDIA is available through the official live Free Endpoint catalog when its credential is configured. OpenRouter is optional, requires `OPENROUTER_API_KEY`, and the reviewed model is only `openrouter/free`.
 - **Director selection:** the normal mode is the canonical inference router/fabric. Direct OpenRouter selection is opt-in through local configuration/process environment; it must not be inferred merely from a successful models-list request.
-- **OpenRouter quota safety:** PR #217 made the live workflow manual-only. PR #220 merged the fail-closed preflight: an authenticated `GET /api/v1/key` must prove free tier plus valid `used/limit/remaining`, and `remaining` must be positive before any model-list or chat request. The last real quota reading was `used=51, limit=50, remaining=0`; the code fix prevents future explicit manual runs from sending a chat generation while quota is exhausted or unprovable. It does not replenish the allowance.
+- **OpenRouter quota safety:** PR #217 made the live workflow manual-only. PR #220 merged fail-closed preflight: authenticated `GET /api/v1/key` must prove free tier plus valid `used/limit/remaining`, and `remaining` must be positive before any model-list or chat request. The last confirmed real reading was `used=51, limit=50, remaining=0`; the fix prevents a manual run from sending a chat generation while quota is exhausted or unprovable. It does not replenish the allowance. PR #224 also merged structured, sanitized HTTP error diagnostics for NVIDIA/OpenRouter.
 - **No paid fallback:** quota or provider failure is not authorization to choose paid models. Do not bypass the free-only model allowlist.
 
 ## 2. Point 2 — autonomous controller integration
@@ -20,7 +22,7 @@ The narrower duplicate PR #196 was closed as superseded by #218; its branch has 
 
 ## 3. Point 3 — branch hygiene
 
-The audit snapshot enumerated 232 branch refs including `main` before branches were subsequently added for documentation and quota-preflight work. All 231 non-main refs in that snapshot were compared to main for ancestry/divergence: 144 heads had zero commits ahead and 87 had one or more commits ahead. These are ancestry classes only. A divergent ref can already have its code represented on main via squash merge. Refresh the count before final branch cleanup.
+The refreshed branch snapshot for this audit enumerated 238 refs including `main` (237 non-main). The previous completed ancestry pass covered 231 heads: 144 had zero commits ahead and 87 had commits ahead. Six later-created refs were compared against current main and all were ahead/diverged; updated ancestry counts are therefore 144 zero-ahead and 93 ahead/diverged. This is not a semantic guarantee that all 93 refs contain missing functionality: squash-merged code creates divergent ancestry too. No branches were deleted. Content-level classification and safe deletion proposals remain open.
 
 **No branch was deleted or rewritten.** Open PRs requiring content-level disposition are #216 (provider/settings and NVIDIA catalog; OpenRouter quota gate pending), #192 (uploaded ZIP/PATCH artifacts must be preserved), and #183 (broad multi-provider branch; do not merge wholesale against the current provider policy). PR #185 was closed unmerged because its single model-override change targeted a superseded multi-provider workflow; its branch is retained. See the branch audit for the expanded queue.
 
