@@ -6,7 +6,7 @@ This document is the authoritative implementation/status inventory produced by t
 It separates implementation existence, automated testing, runtime wiring, live-provider verification, and
 genuine remaining work.
 
-**Current acceptance reconciliation (2026-10-13; main baseline `497f866ccc48411dc6a21d193224149facf2c4c5`):** use `docs/operations/CURRENT_RUNTIME_ACCEPTANCE_2026-10-13.md` and `docs/audits/CURRENT_ACCEPTANCE_AND_BRANCH_INVENTORY_2026-10-13.md`. PR #218 closes deterministic integration of all four autonomy controllers; PR #220 adds OpenRouter quota preflight; PR #221 adds a manual live NVIDIA reserve drill (not yet manually executed); PR #223 hardens official NVIDIA catalog parsing; PR #224 adds safe provider HTTP diagnostics. Live inference, user WSL and main protection remain separate acceptance gates. Historical acceptance evidence remains preserved.
+**Current acceptance reconciliation (2026-10-13; main audit baseline `a87e4bce7634afef0e3543b540d7cce49fec9799`):** use `docs/operations/CURRENT_RUNTIME_ACCEPTANCE_2026-10-13.md` and `docs/audits/CURRENT_ACCEPTANCE_AND_BRANCH_INVENTORY_2026-10-13.md`. PR #218 closes deterministic integration of all four autonomy controllers; PR #220 adds OpenRouter quota preflight; PR #221 adds a manual live NVIDIA reserve drill (not yet manually executed); PR #223 hardens official NVIDIA catalog parsing; PR #224 adds safe provider HTTP diagnostics. Live inference, user WSL and main protection remain separate acceptance gates. Historical acceptance evidence remains preserved.
 
 ## 0. Canonical source of truth
 
