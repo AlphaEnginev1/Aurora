@@ -180,15 +180,21 @@ def test_openrouter_http_diagnostics_classify_free_limit_without_leaking_body(mo
     private_body = "account-private-marker-must-not-escape"
     error_body = json.dumps({
         "error": {
-            "code": "free-models-per-day",
+            "code": 429,
             "message": f"Free model daily limit reached; {private_body}",
+            "metadata": {"error_type": "rate_limit_exceeded", "limit_source": "free_model_rpd"},
         }
     }).encode()
     error = __import__("urllib.error", fromlist=["HTTPError"]).HTTPError(
         "https://openrouter.ai/api/v1/chat/completions",
         429,
         "too many requests",
-        {"Retry-After": "2"},
+        {
+            "Retry-After": "2",
+            "X-RateLimit-Limit": "50",
+            "X-RateLimit-Remaining": "0",
+            "X-RateLimit-Reset": "1791878400",
+        },
         io.BytesIO(error_body),
     )
     monkeypatch.setattr(
@@ -214,8 +220,12 @@ def test_openrouter_http_diagnostics_classify_free_limit_without_leaking_body(mo
 
     assert caught.value.status_code == 429
     assert caught.value.failure_reason == "free_tier_limit"
-    assert caught.value.provider_code == "free-models-per-day"
+    assert caught.value.provider_code == "rate_limit_exceeded"
     assert caught.value.retry_after_seconds == 2.0
+    assert caught.value.rate_limit_limit == 50
+    assert caught.value.rate_limit_remaining == 0
+    assert caught.value.rate_limit_reset == 1791878400
+    assert caught.value.limit_source == "free_model_rpd"
     assert caught.value.retryable is True
     assert private_body not in str(caught.value)
     assert "SECRET-OPENROUTER" not in str(caught.value)

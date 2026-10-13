@@ -7,7 +7,6 @@ from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 import json
 import re
-import time
 from typing import Any
 
 
@@ -100,8 +99,16 @@ def provider_http_diagnostics(error: Any) -> dict[str, Any]:
     payload_error = payload.get("error", {}) if isinstance(payload, dict) else {}
     if not isinstance(payload_error, dict):
         payload_error = {}
+    payload_metadata = payload_error.get("metadata", {})
+    if not isinstance(payload_metadata, dict):
+        payload_metadata = {}
 
-    raw_code = payload_error.get("code") or payload_error.get("type")
+    raw_code = (
+        payload_metadata.get("provider_code")
+        or payload_metadata.get("error_type")
+        or payload_error.get("type")
+        or payload_error.get("code")
+    )
     provider_code = None
     if isinstance(raw_code, (str, int)) and not isinstance(raw_code, bool):
         candidate = str(raw_code).strip()
@@ -109,10 +116,39 @@ def provider_http_diagnostics(error: Any) -> dict[str, Any]:
             provider_code = candidate
 
     provider_text = " ".join(
-        str(payload_error.get(key, ""))
-        for key in ("code", "type", "message")
-        if payload_error.get(key) is not None
+        str(value)
+        for value in (
+            payload_error.get("code"),
+            payload_error.get("type"),
+            payload_error.get("message"),
+            payload_metadata.get("error_type"),
+            payload_metadata.get("limit_source"),
+            payload_metadata.get("provider_code"),
+        )
+        if value is not None
     ).lower()
+
+    def numeric_header(name: str) -> float | None:
+        if headers is None:
+            return None
+        try:
+            value = headers.get(name) or headers.get(name.lower())
+            number = float(str(value).strip()) if value is not None else None
+        except (AttributeError, TypeError, ValueError, OverflowError):
+            return None
+        if number is None or number < 0 or number > 1_000_000_000_000:
+            return None
+        return int(number) if number.is_integer() else round(number, 3)
+
+    rate_limit_limit = numeric_header("X-RateLimit-Limit")
+    rate_limit_remaining = numeric_header("X-RateLimit-Remaining")
+    rate_limit_reset = numeric_header("X-RateLimit-Reset")
+    raw_limit_source = payload_metadata.get("limit_source")
+    limit_source = None
+    if isinstance(raw_limit_source, str):
+        candidate = raw_limit_source.strip().lower()
+        if re.fullmatch(r"[a-z0-9_.:-]{1,80}", candidate):
+            limit_source = candidate
     if status == 401:
         reason = "authentication_rejected"
     elif status == 403:
@@ -120,7 +156,9 @@ def provider_http_diagnostics(error: Any) -> dict[str, Any]:
     elif status == 404:
         reason = "endpoint_or_model_not_found"
     elif status == 429:
-        if ("free-model" in provider_text or "free model" in provider_text) and any(
+        if limit_source and any(token in limit_source for token in ("free", "rpd", "daily")):
+            reason = "free_tier_limit"
+        elif ("free-model" in provider_text or "free model" in provider_text) and any(
             token in provider_text for token in ("daily", "per-day", "rpd", "limit")
         ):
             reason = "free_tier_limit"
@@ -137,6 +175,10 @@ def provider_http_diagnostics(error: Any) -> dict[str, Any]:
         "failure_reason": reason,
         "provider_code": provider_code,
         "retry_after_seconds": retry_after,
+        "rate_limit_limit": rate_limit_limit,
+        "rate_limit_remaining": rate_limit_remaining,
+        "rate_limit_reset": rate_limit_reset,
+        "limit_source": limit_source,
         "retryable": status in {408, 409, 425, 429, 500, 502, 503, 504},
     }
 
@@ -154,12 +196,20 @@ class ProviderHTTPError(ProviderExecutionError):
         provider_code: str | None = None,
         failure_reason: str | None = None,
         retry_after_seconds: float | None = None,
+        rate_limit_limit: float | None = None,
+        rate_limit_remaining: float | None = None,
+        rate_limit_reset: float | None = None,
+        limit_source: str | None = None,
     ) -> None:
         super().__init__(message, context=context)
         self.status_code = status_code
         self.provider_code = provider_code
         self.failure_reason = failure_reason
         self.retry_after_seconds = retry_after_seconds
+        self.rate_limit_limit = rate_limit_limit
+        self.rate_limit_remaining = rate_limit_remaining
+        self.rate_limit_reset = rate_limit_reset
+        self.limit_source = limit_source
         self.retryable = bool(
             status_code in {408, 409, 425, 429, 500, 502, 503, 504}
         )

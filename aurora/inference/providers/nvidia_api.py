@@ -155,6 +155,14 @@ class NVIDIAAPIProvider:
                 message += f"; provider_code={diagnostics['provider_code']}"
             if diagnostics["retry_after_seconds"] is not None:
                 message += f"; retry_after_seconds={diagnostics['retry_after_seconds']}"
+            if diagnostics["limit_source"]:
+                message += f"; limit_source={diagnostics['limit_source']}"
+            if diagnostics["rate_limit_remaining"] is not None:
+                message += f"; rate_limit_remaining={diagnostics['rate_limit_remaining']}"
+            if diagnostics["rate_limit_limit"] is not None:
+                message += f"; rate_limit_limit={diagnostics['rate_limit_limit']}"
+            if diagnostics["rate_limit_reset"] is not None:
+                message += f"; rate_limit_reset={diagnostics['rate_limit_reset']}"
             raise ProviderHTTPError(
                 message,
                 context=context,
@@ -162,6 +170,10 @@ class NVIDIAAPIProvider:
                 provider_code=diagnostics["provider_code"],
                 failure_reason=diagnostics["failure_reason"],
                 retry_after_seconds=diagnostics["retry_after_seconds"],
+                rate_limit_limit=diagnostics["rate_limit_limit"],
+                rate_limit_remaining=diagnostics["rate_limit_remaining"],
+                rate_limit_reset=diagnostics["rate_limit_reset"],
+                limit_source=diagnostics["limit_source"],
             ) from None
         except (TimeoutError, socket.timeout) as exc:
             raise ProviderTimeoutError(
