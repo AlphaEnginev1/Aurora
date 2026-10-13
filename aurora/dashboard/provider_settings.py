@@ -7,6 +7,7 @@ import os
 import urllib.error
 import urllib.request
 from typing import Any, Mapping
+from urllib.parse import urlparse
 
 from aurora.inference.models import ModelSpec
 from aurora.inference.free_policy import is_free_model
@@ -53,7 +54,7 @@ class ProviderSettingsService:
                 environment = os.getenv(env_name, "").strip() if isinstance(env_name, str) else ""
                 return stored or environment
 
-            nvidia_key = configured_key("nvidia_api") or os.getenv("NVIDIA_API_KEY", "").strip()
+            nvidia_key = configured_key("nvidia_api")
             openai_key = configured_key("openai")
             anthropic_key = configured_key("anthropic")
             openrouter_key = configured_key("openrouter")
@@ -207,35 +208,132 @@ class ProviderSettingsService:
 
     def test_provider(self, provider_id: str) -> dict[str, Any]:
         provider_id = str(provider_id).strip().lower()
-        if provider_id != "nvidia_api":
-            raise DashboardProviderSettingsError(
-                "Aurora provider test supports only nvidia_api"
-            )
+        try:
+            metadata = self.catalog.resolve(provider_id)
+        except ValueError as exc:
+            raise DashboardProviderSettingsError("provider is not present in the validated catalog") from exc
+
         settings = self.store.load()
-        key = self.store.credential("nvidia_api")
-        if not key:
-            raise DashboardProviderSettingsError("NVIDIA API key is not configured")
-        discovery = getattr(self.runtime, "model_discovery", None)
-        if discovery is None:
+        provider_configs = settings.get("providers", {})
+        config = provider_configs.get(provider_id, {}) if isinstance(provider_configs, Mapping) else {}
+        if isinstance(config, Mapping) and config.get("enabled", True) is False:
+            raise DashboardProviderSettingsError(f"{provider_id} is disabled in Settings")
+
+        key = self.store.credential(provider_id)
+        env_name = metadata.get("credential_env")
+        if not key and isinstance(env_name, str) and env_name:
+            key = os.getenv(env_name, "").strip()
+        if metadata.get("auth_required") is True and not key:
+            raise DashboardProviderSettingsError(f"{provider_id} API key is not configured")
+
+        # The NVIDIA check uses Aurora's existing governed discovery path.
+        if provider_id == "nvidia_api":
+            discovery = getattr(self.runtime, "model_discovery", None)
+            if discovery is None:
+                raise DashboardProviderSettingsError(
+                    "model discovery is not available in the current runtime"
+                )
+            try:
+                candidates = tuple(discovery.discover_and_stage("nvidia_api"))
+            except ModelDiscoveryError as exc:
+                raise DashboardProviderSettingsError(str(exc)) from exc
+            models = [
+                candidate.model.id
+                for candidate in candidates
+                if getattr(candidate, "model", None) is not None
+                and getattr(candidate.model, "pricing_tier", "unknown") == "free"
+            ]
+            return {
+                "provider": "nvidia_api",
+                "ok": True,
+                "connection_test": "authenticated_model_discovery",
+                "inference_verified": False,
+                "models": models,
+                "staged_count": len(models),
+                "stage_state": "discovered",
+            }
+
+        if not metadata.get("adapter_available") or metadata.get("registry_mode") == "catalog_only":
             raise DashboardProviderSettingsError(
-                "model discovery is not available in the current runtime"
+                f"{metadata.get('name', provider_id)} credentials can be stored, "
+                "but its runtime adapter is not implemented yet"
+            )
+        if metadata.get("adapter") not in {"openai_api", "anthropic_api"}:
+            raise DashboardProviderSettingsError(
+                f"{provider_id} does not have a supported connection-test adapter"
+            )
+
+        endpoint = (
+            str(config.get("base_url", "")).strip()
+            if isinstance(config, Mapping)
+            else ""
+        ) or str(metadata.get("base_url", "")).strip()
+        parsed = urlparse(endpoint)
+        if (
+            parsed.scheme != "https"
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise DashboardProviderSettingsError(
+                f"{provider_id} endpoint must be a valid HTTPS base URL without embedded credentials or query parameters"
+            )
+
+        if provider_id == "anthropic":
+            url = endpoint.rstrip("/") + "/models?limit=1"
+            headers = {
+                "x-api-key": key,
+                "anthropic-version": "2023-06-01",
+                "Accept": "application/json",
+            }
+        else:
+            suffix = "/models?limit=10" if provider_id == "openrouter" else "/models"
+            url = endpoint.rstrip("/") + suffix
+            headers = {
+                "Authorization": f"Bearer {key}",
+                "Accept": "application/json",
+            }
+
+        request = urllib.request.Request(url, method="GET", headers=headers)
+        try:
+            with _urlopen(request) as response:
+                status_code = int(getattr(response, "status", 200))
+                body = response.read()
+        except DashboardProviderSettingsError as exc:
+            raise DashboardProviderSettingsError(
+                f"{provider_id} connection test failed: {exc}"
+            ) from None
+
+        if len(body) > 2 * 1024 * 1024:
+            raise DashboardProviderSettingsError(
+                f"{provider_id} model-list response exceeded the 2 MiB safety limit"
             )
         try:
-            candidates = tuple(discovery.discover_and_stage("nvidia_api"))
-        except ModelDiscoveryError as exc:
-            raise DashboardProviderSettingsError(str(exc)) from exc
-        models = [
-            candidate.model.id
-            for candidate in candidates
-            if getattr(candidate, "model", None) is not None
-            and getattr(candidate.model, "pricing_tier", "unknown") == "free"
+            payload = json.loads(body.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            raise DashboardProviderSettingsError(
+                f"{provider_id} returned a non-JSON model-list response"
+            ) from None
+        if not isinstance(payload, dict) or not isinstance(payload.get("data"), list):
+            raise DashboardProviderSettingsError(
+                f"{provider_id} response did not match the supported model-list contract"
+            )
+
+        model_ids = [
+            str(item["id"])
+            for item in payload["data"]
+            if isinstance(item, dict) and isinstance(item.get("id"), str) and item["id"].strip()
         ]
         return {
-            "provider": "nvidia_api",
+            "provider": provider_id,
             "ok": True,
-            "models": models,
-            "staged_count": len(models),
-            "stage_state": "discovered",
+            "connection_test": "authenticated_model_list",
+            "http_status": status_code,
+            "model_count": len(model_ids),
+            "models": model_ids[:10],
+            "inference_verified": False,
         }
 
 
