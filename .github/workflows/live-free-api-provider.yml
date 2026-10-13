@@ -1,15 +1,8 @@
 name: Live OpenRouter Free Inference
 
+# Real free-model inference consumes the account's daily request allowance.
+# Keep this workflow manual-only; ordinary pull-request CI must never spend it.
 on:
-  pull_request:
-    paths:
-      - ".github/workflows/live-free-api-provider.yml"
-      - "aurora/inference/providers/**"
-      - "aurora/orchestration/factory.py"
-      - "config/free-model-policy.json"
-      - "config/network-policy.json"
-      - "tests/e2e/test_live_openrouter_inference.py"
-      - "tests/test_openrouter_network_policy.py"
   workflow_dispatch:
 
 permissions:
@@ -17,6 +10,8 @@ permissions:
 
 jobs:
   live-openrouter:
+    # Defense in depth: only an explicit manual dispatch may call OpenRouter.
+    if: ${{ github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
