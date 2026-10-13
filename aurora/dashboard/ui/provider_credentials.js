@@ -46,6 +46,16 @@
         || metadata.registry_mode === "catalog_only";
       genericTestButton.textContent = "Test " + (metadata.name || providerId) + " connection";
     }
+    const inferenceButton = $("credential-test-inference");
+    if (inferenceButton) {
+      const freeInferenceSupported = ["nvidia_api", "openrouter"].includes(providerId)
+        && metadata.adapter_available === true
+        && metadata.registry_mode !== "catalog_only";
+      inferenceButton.hidden = !freeInferenceSupported;
+      inferenceButton.textContent = freeInferenceSupported
+        ? "Test real " + (metadata.name || providerId) + " inference (free)"
+        : "Test real inference (free models only)";
+    }
     const stateLabel = $("provider-catalog-status");
     if (stateLabel && providerId) {
       if (metadata.registry_mode === "catalog_only") {
@@ -200,6 +210,47 @@
     }
   }
 
+  async function testSelectedInference() {
+    const providerId = selectedProvider();
+    const metadata = definition(providerId);
+    const button = $("credential-test-inference");
+    if (!["nvidia_api", "openrouter"].includes(providerId)
+        || metadata.adapter_available !== true
+        || metadata.registry_mode === "catalog_only") {
+      message("Real inference test is limited to currently approved free-provider routes.", true);
+      return;
+    }
+    button.disabled = true;
+    message(
+      "Sending one short test prompt using a free-model route. This is a real provider call, not a full Director mission.",
+      false
+    );
+    try {
+      const response = await fetch(apiBase + "/settings/test-inference", {
+        method: "POST",
+        headers: { Accept: "application/json", "Content-Type": "application/json" },
+        body: JSON.stringify({ provider: providerId })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data && data.error || "Live inference test failed");
+      if (data.inference_verified !== true || data.response_non_empty !== true) {
+        throw new Error("Provider did not return evidence of a non-empty inference response");
+      }
+      const latency = Number.isFinite(Number(data.latency_ms))
+        ? " · " + Number(data.latency_ms) + " ms" : "";
+      message(
+        "LIVE INFERENCE VERIFIED · " + (metadata.name || providerId) +
+        " · model " + String(data.model || "unknown") + latency +
+        ". This verifies one real response, not an entire Director mission.",
+        false
+      );
+    } catch (error) {
+      message((metadata.name || providerId) + " live inference failed: " + error.message, true);
+    } finally {
+      button.disabled = false;
+    }
+  }
+
   function init() {
     const select = $("credential-provider");
     if (!select) return;
@@ -207,6 +258,8 @@
     $("credential-save").addEventListener("click", saveCredential);
     const genericTestButton = $("credential-test-provider");
     if (genericTestButton) genericTestButton.addEventListener("click", testSelectedProvider);
+    const inferenceButton = $("credential-test-inference");
+    if (inferenceButton) inferenceButton.addEventListener("click", testSelectedInference);
     $("credential-clear").addEventListener("click", function () {
       $("credential-key").value = "";
     });
