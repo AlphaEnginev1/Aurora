@@ -10,6 +10,7 @@ from typing import Any, Mapping
 
 from aurora.inference.models import ModelSpec
 from aurora.inference.free_policy import is_free_model
+from aurora.inference.providers.catalog import ProviderCatalog
 from aurora.inference.providers.registry import default_provider_registry
 from aurora.inference.discovery import ModelDiscoveryError
 from aurora.operator_settings import OperatorSettingsError, OperatorSettingsStore
@@ -24,10 +25,12 @@ class ProviderSettingsService:
     def __init__(self, store: OperatorSettingsStore, runtime) -> None:
         self.store = store
         self.runtime = runtime
+        self.catalog = ProviderCatalog()
 
     def public(self) -> dict[str, Any]:
         provider = getattr(self.runtime.director.planner, "provider", None)
         data = self.store.public()
+        data["provider_catalog"] = list(self.catalog.providers)
         data["runtime"] = {"director_provider": getattr(provider, "provider_id", "unknown")}
         return data
 
@@ -35,12 +38,32 @@ class ProviderSettingsService:
         try:
             settings = self.store.update_from_form(payload)
             router = self.runtime.director.planner.router
-            nvidia_key = self.store.credential("nvidia_api")
-            openrouter_key = os.getenv("OPENROUTER_API_KEY", "").strip()
+            configured_providers = settings.get("providers", {})
+
+            def configured_key(provider_id: str) -> str:
+                config = configured_providers.get(provider_id, {})
+                if isinstance(config, Mapping) and config.get("enabled", True) is False:
+                    return ""
+                try:
+                    metadata = self.catalog.resolve(provider_id)
+                except ValueError:
+                    return ""
+                stored = self.store.credential(provider_id)
+                env_name = metadata.get("credential_env")
+                environment = os.getenv(env_name, "").strip() if isinstance(env_name, str) else ""
+                return stored or environment
+
+            nvidia_key = configured_key("nvidia_api") or os.getenv("NVIDIA_API_KEY", "").strip()
+            openai_key = configured_key("openai")
+            anthropic_key = configured_key("anthropic")
+            openrouter_key = configured_key("openrouter")
             router.nvidia_api_key = nvidia_key or None
             router.provider_registry = default_provider_registry(
                 nvidia_api_key=nvidia_key or None,
+                openai_api_key=openai_key or None,
+                anthropic_api_key=anthropic_key or None,
                 openrouter_api_key=openrouter_key or None,
+                include_external=bool(openai_key or anthropic_key),
                 include_openrouter=bool(openrouter_key),
             )
 
@@ -51,7 +74,7 @@ class ProviderSettingsService:
                     "Aurora supports only the NVIDIA inference fabric"
                 )
 
-            if nvidia_key and selected_model:
+            if nvidia_key and selected_model and selected_model != "router":
                 existing = next(
                     (item for item in router.model_registry.models if item.id == selected_model),
                     None,
