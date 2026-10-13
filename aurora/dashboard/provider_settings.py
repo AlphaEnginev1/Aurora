@@ -359,6 +359,15 @@ def _rebind_runtime_discovery(runtime, router) -> None:
         if hasattr(router, "health_store"):
             refresh.health_store = router.health_store
 
+    # Dashboard snapshots must observe the exact registries used by the router;
+    # otherwise a newly saved provider can work at runtime but remain invisible
+    # in the model/provider views until restart.
+    gateway = getattr(runtime, "dashboard_gateway", None)
+    if gateway is not None:
+        gateway.provider_registry = router.provider_registry
+        gateway.model_registry = router.model_registry
+        gateway.model_router = router
+
 
 def _urlopen(request: urllib.request.Request):
     try:
