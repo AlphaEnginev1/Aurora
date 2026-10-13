@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 from threading import RLock
 from typing import Any, Mapping
+from urllib.parse import urlparse
 
 
 NVIDIA_ENDPOINT = "https://integrate.api.nvidia.com/v1"
@@ -292,8 +293,31 @@ def _validate(data: Mapping[str, Any]) -> None:
         if not isinstance(config, Mapping):
             raise OperatorSettingsError(f"{provider_id}.configuration must be an object")
         endpoint = str(config.get("base_url", "") or "").strip()
-        if endpoint and not endpoint.startswith(("https://", "http://127.0.0.1", "http://localhost")):
-            raise OperatorSettingsError(f"{provider_id}.base_url must use HTTPS (or localhost for local inference)")
+        if not endpoint:
+            continue
+        try:
+            parsed = urlparse(endpoint)
+            hostname = (parsed.hostname or "").lower()
+            # Accessing .port also validates that a supplied port is numeric
+            # and within the valid TCP range.
+            _ = parsed.port
+        except ValueError:
+            raise OperatorSettingsError(f"{provider_id}.base_url is not a valid URL") from None
+        if (
+            not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise OperatorSettingsError(
+                f"{provider_id}.base_url must not contain embedded credentials, query parameters, or fragments"
+            )
+        local_http = parsed.scheme == "http" and hostname in {"127.0.0.1", "localhost", "::1"}
+        if parsed.scheme != "https" and not local_http:
+            raise OperatorSettingsError(
+                f"{provider_id}.base_url must use HTTPS (HTTP is allowed only for loopback services)"
+            )
 
 
 def _merge(base: Mapping[str, Any], overlay: Mapping[str, Any]) -> dict[str, Any]:
