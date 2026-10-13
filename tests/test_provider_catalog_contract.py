@@ -84,17 +84,19 @@ def test_provider_entries_follow_the_declared_contract():
                 assert parsed.scheme == "https" and parsed.hostname, provider_id
 
 
-def test_catalog_contains_all_settings_selector_providers_without_drift():
-    catalog_ids = set(load_catalog()["providers"])
+def test_settings_provider_selector_is_rendered_from_catalog_api():
     html = UI_PATH.read_text(encoding="utf-8")
-    selector_match = re.search(
-        r'<select id="credential-provider"[^>]*>(.*?)</select>',
-        html,
-        flags=re.DOTALL,
-    )
-    assert selector_match, "provider selector is missing from Settings"
-    ui_ids = set(re.findall(r'<option value="([^"]+)"', selector_match.group(1)))
-    assert ui_ids == catalog_ids
+    js_path = ROOT / "aurora" / "dashboard" / "ui" / "provider_credentials.js"
+    js = js_path.read_text(encoding="utf-8")
+    service_path = ROOT / "aurora" / "dashboard" / "provider_settings.py"
+    service = service_path.read_text(encoding="utf-8")
+
+    assert '<select id="credential-provider"' in html
+    assert "data.provider_catalog" in js
+    assert "provider.provider_id" in js
+    assert "provider.name" in js
+    assert "metadata.base_url" in js
+    assert 'data["provider_catalog"] = list(self.catalog.providers)' in service
 
 
 def test_nvidia_catalog_entry_preserves_canonical_runtime_contract():
