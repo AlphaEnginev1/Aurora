@@ -221,3 +221,41 @@ def test_router_mode_can_save_provider_key_without_treating_router_as_model(tmp_
 
     assert result["director"]["model"] == "router"
     assert result["providers"]["nvidia_api"]["api_key_present"] is True
+
+
+
+def test_settings_rebinds_live_discovery_to_new_provider_and_model_registries(tmp_path: Path):
+    from types import SimpleNamespace
+
+    runtime = Runtime(router(tmp_path))
+    old_router = runtime.director.planner.router
+    runtime.model_discovery = SimpleNamespace(
+        provider_registry=old_router.provider_registry,
+        model_registry=old_router.model_registry,
+    )
+    runtime.autonomous_discovery_refresh = SimpleNamespace(
+        discovery=runtime.model_discovery,
+        router=old_router,
+        health_store=None,
+    )
+
+    store = OperatorSettingsStore(tmp_path / "operator-settings.json")
+    store.save({
+        "providers": {
+            "nvidia_api": {
+                "api_key": "nvidia-key-added-in-settings",
+                "enabled": True,
+                "base_url": "https://integrate.api.nvidia.com/v1",
+            },
+        },
+    })
+    service = ProviderSettingsService(store, runtime)
+
+    service.save_and_apply({})
+
+    live_router = runtime.director.planner.router
+    assert runtime.model_discovery.provider_registry is live_router.provider_registry
+    assert runtime.model_discovery.model_registry is live_router.model_registry
+    assert runtime.autonomous_discovery_refresh.discovery is runtime.model_discovery
+    assert runtime.autonomous_discovery_refresh.router is live_router
+    assert runtime.autonomous_discovery_refresh.health_store is live_router.health_store
