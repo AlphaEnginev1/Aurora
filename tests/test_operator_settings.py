@@ -20,11 +20,14 @@ def test_operator_settings_round_trip_redacts_credentials(tmp_path: Path):
     })
     raw = store.load()
     public = store.public()
-    assert set(raw["providers"]) == {"nvidia_api"}
+    assert set(raw["providers"]) == {"nvidia_api", "legacy_provider"}
     assert raw["providers"]["nvidia_api"]["api_key"] == "nvidia-secret"
     assert raw["director"]["provider"] == "router"
     assert public["providers"]["nvidia_api"]["api_key_present"] is True
+    assert public["providers"]["legacy_provider"]["api_key_present"] is True
+    assert "api_key" not in public["providers"]["nvidia_api"]
     assert "nvidia-secret" not in str(public)
+    assert "ignored" not in str(public)
     assert os.stat(path).st_mode & 0o777 == 0o600
 
 
@@ -57,3 +60,44 @@ def test_legacy_external_model_is_migrated_to_router_contract(tmp_path: Path):
     assert loaded["director"]["provider"] == "router"
     assert loaded["director"]["model"] == "router"
     assert loaded["director"]["endpoint"] == "https://integrate.api.nvidia.com/v1"
+
+
+def test_multiple_provider_credentials_are_stored_and_redacted(tmp_path: Path):
+    store = OperatorSettingsStore(tmp_path / "operator-settings.json")
+    store.update_from_form({
+        "providers": {
+            "openai": {
+                "api_key": "openai-private",
+                "base_url": "https://api.openai.com/v1",
+            },
+            "anthropic": {
+                "api_key": "anthropic-private",
+                "base_url": "https://api.anthropic.com/v1",
+            },
+            "xai": {
+                "api_key": "grok-private",
+                "base_url": "https://api.x.ai/v1",
+            },
+        },
+    })
+
+    public = store.public()
+    assert store.credential("openai") == "openai-private"
+    assert store.credential("anthropic") == "anthropic-private"
+    assert store.credential("xai") == "grok-private"
+    assert public["providers"]["openai"]["api_key_present"] is True
+    assert public["providers"]["anthropic"]["api_key_present"] is True
+    assert public["providers"]["xai"]["api_key_present"] is True
+    assert "openai-private" not in str(public)
+    assert "anthropic-private" not in str(public)
+    assert "grok-private" not in str(public)
+
+
+def test_blank_key_for_one_provider_preserves_existing_key(tmp_path: Path):
+    store = OperatorSettingsStore(tmp_path / "operator-settings.json")
+    store.save({"providers": {"openrouter": {
+        "api_key": "existing-openrouter",
+        "base_url": "https://openrouter.ai/api/v1",
+    }}})
+    store.update_from_form({"providers": {"openrouter": {"api_key": ""}}})
+    assert store.credential("openrouter") == "existing-openrouter"
