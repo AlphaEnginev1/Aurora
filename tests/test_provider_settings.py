@@ -491,3 +491,36 @@ def test_provider_connection_probe_reports_auth_failure_without_secret(tmp_path:
     with pytest.raises(DashboardProviderSettingsError, match="401 provider response") as exc:
         ProviderSettingsService(store, runtime).test_provider("openai")
     assert "must-not-leak-this" not in str(exc.value)
+
+
+
+def test_provider_http_status_diagnostics_are_specific_and_body_safe(monkeypatch):
+    import io
+    import pytest
+    from aurora.dashboard import provider_settings as provider_settings_module
+    from aurora.dashboard.provider_settings import DashboardProviderSettingsError
+
+    cases = [
+        (401, "authentication rejected"),
+        (403, "access denied"),
+        (404, "base URL"),
+        (429, "rate limit or quota"),
+        (503, "service unavailable"),
+    ]
+    for status, expected in cases:
+        def reject(_request, timeout, current_status=status):
+            raise provider_settings_module.urllib.error.HTTPError(
+                "https://provider.example/v1/models",
+                current_status,
+                "provider error",
+                {},
+                io.BytesIO(b"private provider response body must not leak"),
+            )
+
+        monkeypatch.setattr(provider_settings_module.urllib.request, "urlopen", reject)
+        request = provider_settings_module.urllib.request.Request(
+            "https://provider.example/v1/models"
+        )
+        with pytest.raises(DashboardProviderSettingsError, match=expected) as exc:
+            provider_settings_module._urlopen(request)
+        assert "private provider response body must not leak" not in str(exc.value)
