@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace as dataclass_replace
 import os
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Callable, Mapping
 
 if TYPE_CHECKING:
     from ..discovery import ModelDiscoveryProvider
@@ -134,6 +134,7 @@ def default_provider_registry(
     openrouter_api_key: str | None = None,
     include_openrouter: bool = False,
     catalog: ProviderCatalog | None = None,
+    provider_endpoints: Mapping[str, str] | None = None,
 ) -> ProviderRegistry:
     """Build the active registry from validated catalog metadata and credentials.
 
@@ -147,6 +148,20 @@ def default_provider_registry(
         provider_catalog = catalog or ProviderCatalog()
     except ProviderCatalogError as exc:
         raise ProviderRegistryError(f"provider catalog is invalid: {exc}") from exc
+
+    endpoint_overrides: dict[str, str] = {}
+    if provider_endpoints is not None:
+        known_ids = set(provider_catalog.provider_ids)
+        for raw_id, raw_endpoint in provider_endpoints.items():
+            provider_id = str(raw_id).strip().lower()
+            endpoint = str(raw_endpoint).strip()
+            if not endpoint:
+                continue
+            if provider_id not in known_ids:
+                raise ProviderRegistryError(
+                    f"endpoint override references unknown provider: {provider_id}"
+                )
+            endpoint_overrides[provider_id] = endpoint.rstrip("/")
 
     explicit_keys = {
         "nvidia_api": nvidia_api_key,
@@ -196,7 +211,7 @@ def default_provider_registry(
                 raise ProviderRegistryError(
                     f"unsupported discovery adapter declared for provider: {provider_id}"
                 )
-            endpoint = metadata["base_url"]
+            endpoint = endpoint_overrides.get(provider_id) or metadata["base_url"]
             discovery_factory = (
                 lambda api_key=provider_api_key, gateway=network_gateway, base_url=endpoint:
                     _nvidia_discovery_factory(
@@ -210,9 +225,18 @@ def default_provider_registry(
             if provider_id != "nvidia_api":
                 raise ProviderRegistryError("nvidia_api adapter can only serve nvidia_api")
 
-            def factory(model: ModelSpec, api_key=provider_api_key, gateway=network_gateway) -> InferenceProvider:
+            def factory(
+                model: ModelSpec,
+                api_key=provider_api_key,
+                gateway=network_gateway,
+                endpoint_override=endpoint_overrides.get(provider_id),
+            ) -> InferenceProvider:
                 from .nvidia_api import NVIDIAAPIProvider
-                return NVIDIAAPIProvider(model, api_key=api_key, gateway=gateway)
+                return NVIDIAAPIProvider(
+                    _model_with_endpoint(model, endpoint_override),
+                    api_key=api_key,
+                    gateway=gateway,
+                )
 
         elif adapter == "openai_api":
             provider_id_override = metadata.get("provider_id_override")
@@ -225,19 +249,32 @@ def default_provider_registry(
                 model: ModelSpec,
                 api_key=provider_api_key,
                 override=provider_id_override,
+                endpoint_override=endpoint_overrides.get(provider_id),
             ) -> InferenceProvider:
                 from .openai_api import OpenAIAPIProvider
+                configured_model = _model_with_endpoint(model, endpoint_override)
                 if override is None:
-                    return OpenAIAPIProvider(model, api_key=api_key)
-                return OpenAIAPIProvider(model, api_key=api_key, provider_id=override)
+                    return OpenAIAPIProvider(configured_model, api_key=api_key)
+                return OpenAIAPIProvider(
+                    configured_model,
+                    api_key=api_key,
+                    provider_id=override,
+                )
 
         elif adapter == "anthropic_api":
             if provider_id != "anthropic":
                 raise ProviderRegistryError("anthropic_api adapter can only serve anthropic")
 
-            def factory(model: ModelSpec, api_key=provider_api_key) -> InferenceProvider:
+            def factory(
+                model: ModelSpec,
+                api_key=provider_api_key,
+                endpoint_override=endpoint_overrides.get(provider_id),
+            ) -> InferenceProvider:
                 from .anthropic_api import AnthropicAPIProvider
-                return AnthropicAPIProvider(model, api_key=api_key)
+                return AnthropicAPIProvider(
+                    _model_with_endpoint(model, endpoint_override),
+                    api_key=api_key,
+                )
 
         else:
             raise ProviderRegistryError(
@@ -256,6 +293,14 @@ def default_provider_registry(
         )
 
     return ProviderRegistry(tuple(providers))
+
+
+def _model_with_endpoint(model: ModelSpec, endpoint: str | None) -> ModelSpec:
+    """Apply the operator-selected provider endpoint without mutating model metadata."""
+    normalized = str(endpoint or "").strip().rstrip("/")
+    if not normalized or model.endpoint.rstrip("/") == normalized:
+        return model
+    return dataclass_replace(model, endpoint=normalized)
 
 
 def _nvidia_discovery_factory(
