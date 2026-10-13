@@ -2,7 +2,17 @@
 
 ## Canonical status
 
-**Current acceptance exceptions (2026-10-09):** the latest live NVIDIA-only acceptance runs (37814164201 and 37813096077) failed with HTTP 403 during real inference. This is not a green live gate. The five autonomy controllers from PR #177 have deterministic unit coverage, but runtime integration is only partial; the mission manager is now wired into the canonical runtime on the current remediation branch. Do not mark these items complete until the corresponding live/E2E proofs pass.
+**Current acceptance snapshot (2026-10-13):** the status recorded in the later historical sections must be read alongside the current acceptance record, which supersedes stale point-in-time claims where noted.
+
+- Canonical `main`: `1f88c28867ce15041665d81ec05815be9c132470`.
+- The four autonomy controllers (computer use, software engineering, discovery loop and RSI) now have a joint deterministic E2E through the production runtime factory. PR #218 is merged; post-merge CI run [38449077652](https://github.com/AlphaEnginev1/Aurora/actions/runs/38449077652) passed both `test` and `e2e-network`. This is deterministic integration evidence, not live-provider or physical-WSL evidence.
+- The OpenRouter live-inference workflow is manual-only after PR #217. Run [38427655156](https://github.com/AlphaEnginev1/Aurora/actions/runs/38427655156) read `used=51, limit=50, remaining=0` and stopped before sending another chat generation.
+- PR #216 reported two successful live NVIDIA inferences on its PR head, but the live result has not been rerun on the current post-merge main SHA. OpenRouter real free inference remains unverified while the authenticated key reports no free requests remaining.
+- The latest branch snapshot contained 232 refs including `main`; ancestry comparisons completed for all 231 non-main heads. Content-level review of divergent branches and safe cleanup remain open.
+- The branch list reports `main protected=false`; the accessible rulesets endpoint returned no rulesets, while reading classic branch protection returned HTTP 403. Effective enforcement is not certified.
+- Clean WSL startup and a real local Director conversation remain unverified by GitHub CI.
+
+See `docs/operations/CURRENT_RUNTIME_ACCEPTANCE_2026-10-13.md` and `docs/audits/CURRENT_ACCEPTANCE_AND_BRANCH_INVENTORY_2026-10-13.md` for the detailed current snapshot.
 
 
 **Canonical engineering branch: `main`**
@@ -109,15 +119,17 @@ Integrated and verified:
 - active policy registry;
 - immutable typed active policy contracts.
 
-## Current live-provider verification — NOT CLOSED
+## Current live-provider verification — NOT CLOSED (reconciled 2026-10-13)
 
-Historical live-provider gates are retained as evidence of earlier runtime states; they do not certify the current NVIDIA-only free-model topology. The current live NVIDIA inference gate failed with HTTP 403 on runs 37814164201 and 37813096077. The current free-model resilience gate remains pending until real NVIDIA inference succeeds and reserve/fail-closed behavior is proven. Do not label the current provider topology LIVE VERIFIED based on historical Gemini-to-NVIDIA runs.
+Historical live runs are retained as evidence of earlier runtime states, not as certification of the latest main SHA.
 
-Current evidence:
-- ordinary CI on main: run 37884952749 SUCCESS;
-- current NVIDIA live inference: BLOCKED, HTTP 403;
-- current multi-provider/free-model resilience: LIVE PENDING;
-- local WSL/dashboard conversation: NOT VERIFIED by GitHub CI.
+- The older main acceptance runs [37814164201](https://github.com/AlphaEnginev1/Aurora/actions/runs/37814164201) and [37813096077](https://github.com/AlphaEnginev1/Aurora/actions/runs/37813096077) failed with HTTP 403 during actual NVIDIA inference.
+- The open provider-settings PR #216 reports two successful live NVIDIA inference runs on its PR head; the post-PR-218 canonical main SHA has not yet had that dedicated live gate rerun.
+- The OpenRouter authenticated key/quota preflight reports 51 requests used against a daily limit of 50. That probe succeeded for authentication/model listing and deliberately sent no chat completion after the remaining allowance was zero.
+- PR #217 made the OpenRouter live inference workflow manual-only to prevent routine pull-request updates from spending the free allowance.
+- Current multi-provider/reserve-pool LIVE acceptance and current WSL clean-start/Director-conversation acceptance remain pending.
+
+Do not mark the active provider topology LIVE VERIFIED from ordinary CI, historical Gemini-to-NVIDIA evidence, or a live run on a different PR head. Current evidence and boundaries are tracked in `docs/operations/CURRENT_RUNTIME_ACCEPTANCE_2026-10-13.md`.
 
 ## Frozen historical production-readiness queue — COMPLETE AT ITS VERIFIED BASELINE
 
