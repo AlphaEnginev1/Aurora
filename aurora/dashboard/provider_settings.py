@@ -388,9 +388,29 @@ def _urlopen(request: urllib.request.Request):
     try:
         return urllib.request.urlopen(request, timeout=20)
     except urllib.error.HTTPError as exc:
-        raise DashboardProviderSettingsError(f"{exc.code} provider response") from None
-    except (urllib.error.URLError, TimeoutError, OSError) as exc:
-        raise DashboardProviderSettingsError(f"provider connection failed: {exc}") from None
+        # Never forward the response body or headers: providers can return
+        # diagnostics containing request metadata. Preserve only a classified
+        # status so the operator can distinguish bad credentials, bad endpoints,
+        # throttling, and provider-side outages.
+        if exc.code == 401:
+            detail = "authentication rejected (HTTP 401); verify this provider's API key"
+        elif exc.code == 403:
+            detail = "access denied (HTTP 403); verify account permissions and endpoint access"
+        elif exc.code == 404:
+            detail = "endpoint or model-list route not found (HTTP 404); verify the base URL"
+        elif exc.code == 408:
+            detail = "request timed out (HTTP 408)"
+        elif exc.code == 429:
+            detail = "rate limit or quota reached (HTTP 429); retry after the provider cooldown"
+        elif 500 <= exc.code <= 599:
+            detail = f"provider service unavailable (HTTP {exc.code}); retry later"
+        else:
+            detail = f"provider returned HTTP {exc.code}"
+        raise DashboardProviderSettingsError(detail) from None
+    except (urllib.error.URLError, TimeoutError, OSError):
+        raise DashboardProviderSettingsError(
+            "provider connection failed (DNS, TLS, proxy, or network error)"
+        ) from None
 
 
 __all__ = ["DashboardProviderSettingsError", "ProviderSettingsService"]
