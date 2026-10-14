@@ -132,7 +132,7 @@ def test_restart_script_cleans_orphaned_aurora_daemons_before_starting() -> None
 def test_update_script_uses_verified_restart_helper() -> None:
     script = (ROOT / "scripts" / "update-local.sh").read_text(encoding="utf-8")
 
-    restart_call = 'if !(\n  exec 9>&-\n  bash "$ROOT/scripts/restart-local.sh"\n); then'
+    restart_call = 'if ! (\n  exec 9>&-\n  bash "$ROOT/scripts/restart-local.sh"\n); then'
     ready_status = 'write_status "ready" "$updated" "Aurora updated and dashboard is ready"'
 
     assert restart_call in script
