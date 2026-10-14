@@ -40,7 +40,7 @@ aurora_load_local_env() {
         ;;
       AURORA_DIRECTOR_PROVIDER)
         case "$value" in
-          openrouter|router) export AURORA_DIRECTOR_PROVIDER="$value" ;;
+          nvidia_api|openrouter|router) export AURORA_DIRECTOR_PROVIDER="$value" ;;
           *)
             echo "Unsupported AURORA_DIRECTOR_PROVIDER in local configuration." >&2
             return 1
