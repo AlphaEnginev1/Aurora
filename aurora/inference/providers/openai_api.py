@@ -224,7 +224,7 @@ def _normalize_assistant_content(
                 context=context,
             )
         part_type = part.get("type")
-        if part_type in {"text", "output_text"} and isinstance(part.get("text"), str):
+        if isinstance(part_type, str) and part_type in {"text", "output_text"} and isinstance(part.get("text"), str):
             text_parts.append(part["text"])
         elif part_type == "refusal" and isinstance(part.get("refusal"), str):
             text_parts.append(part["refusal"])
