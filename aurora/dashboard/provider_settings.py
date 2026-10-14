@@ -61,7 +61,7 @@ class ProviderSettingsService:
                     "Aurora supports only the NVIDIA inference fabric"
                 )
 
-            if nvidia_key and selected_model:
+            if nvidia_key and selected_model and provider_id == "nvidia_api":
                 existing = next(
                     (item for item in router.model_registry.models if item.id == selected_model),
                     None,
@@ -125,6 +125,15 @@ class ProviderSettingsService:
                     )
                     router.model_registry.replace(updated)
                     router.models = list(router.model_registry.models)
+
+            # Keep live discovery on the same credential, registry, and gateway
+            # as inference after Settings has been saved. ModelDiscoveryService holds
+            # registry references from startup, so replacing the router registry alone
+            # leaves the catalog path stale.
+            discovery = getattr(self.runtime, "model_discovery", None)
+            if discovery is not None:
+                discovery.provider_registry = router.provider_registry
+                discovery.model_registry = router.model_registry
 
             provider = InferenceDirectorProvider(router)
             active = self.runtime.director.planner.provider
