@@ -184,6 +184,13 @@ def test_anthropic_http_failure_is_typed(monkeypatch):
 
 def test_openrouter_http_diagnostics_classify_free_limit_without_leaking_body(monkeypatch):
     import io
+    from aurora.inference.providers import openai_api as openai_api_module
+
+    monkeypatch.setattr(
+        openai_api_module,
+        "read_openrouter_free_quota",
+        lambda api_key, gateway: {"used": 4, "limit": 50, "remaining": 46, "is_free_tier": True},
+    )
 
     private_body = "account-private-marker-must-not-escape"
     error_body = json.dumps({
@@ -205,10 +212,10 @@ def test_openrouter_http_diagnostics_classify_free_limit_without_leaking_body(mo
         },
         io.BytesIO(error_body),
     )
-    monkeypatch.setattr(
-        "urllib.request.urlopen",
-        lambda request, timeout: (_ for _ in ()).throw(error),
-    )
+    class FakeGateway:
+        def request_with_metadata(self, url, *, method="GET", headers=None, body=None):
+            raise error
+
     provider = OpenAIAPIProvider(
         ModelSpec(
             "openrouter/free",
@@ -218,6 +225,7 @@ def test_openrouter_http_diagnostics_classify_free_limit_without_leaking_body(mo
         ),
         api_key="SECRET-OPENROUTER",
         provider_id="openrouter",
+        gateway=FakeGateway(),
     )
 
     with pytest.raises(ProviderHTTPError) as caught:
