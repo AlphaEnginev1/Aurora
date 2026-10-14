@@ -17,6 +17,7 @@ def read_openrouter_free_quota(
     api_key: str,
     *,
     urlopen: Callable[..., Any] | None = None,
+    gateway=None,
     timeout: float = 15.0,
 ) -> dict[str, int | float | bool]:
     """Read authenticated key allowance without making a chat-completion request.
@@ -33,10 +34,25 @@ def read_openrouter_free_quota(
         headers={"Authorization": f"Bearer {key}", "Accept": "application/json"},
         method="GET",
     )
-    opener = urlopen or urllib.request.urlopen
     try:
-        with opener(request, timeout=timeout) as response:
-            payload = json.loads(response.read().decode("utf-8"))
+        if gateway is not None:
+            # Local Aurora settings/tests must obey the same deny-by-default
+            # InternetGateway as inference. The legacy opener seam remains for
+            # the manual GitHub LIVE workflow and isolated unit tests.
+            response = gateway.request_with_metadata(
+                request.full_url,
+                method="GET",
+                headers={
+                    "Authorization": f"Bearer {key}",
+                    "Accept": "application/json",
+                },
+            )
+            response_body = response.body
+        else:
+            opener = urlopen or urllib.request.urlopen
+            with opener(request, timeout=timeout) as response:
+                response_body = response.read()
+        payload = json.loads(response_body.decode("utf-8"))
     except urllib.error.HTTPError as exc:
         raise OpenRouterQuotaError(
             f"OpenRouter quota preflight failed with HTTP {exc.code}; key was not logged"
@@ -44,6 +60,18 @@ def read_openrouter_free_quota(
     except (urllib.error.URLError, TimeoutError, OSError, UnicodeDecodeError, json.JSONDecodeError):
         raise OpenRouterQuotaError(
             "OpenRouter quota preflight could not be completed; refusing to send a generation request"
+        ) from None
+    except Exception as exc:
+        # InternetGateway wraps upstream HTTP errors. Recover only the numeric
+        # status and discard the exception chain/body, which may contain secrets.
+        cause = getattr(exc, "__cause__", None)
+        status = getattr(cause, "code", None)
+        if isinstance(status, int):
+            raise OpenRouterQuotaError(
+                f"OpenRouter quota preflight failed with HTTP {status}; key was not logged"
+            ) from None
+        raise OpenRouterQuotaError(
+            "OpenRouter quota preflight failed at the controlled network boundary; refusing generation"
         ) from None
 
     if not isinstance(payload, dict) or not isinstance(payload.get("data"), dict):
