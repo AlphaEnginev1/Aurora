@@ -114,3 +114,33 @@ def test_quota_preflight_sanitizes_http_errors_without_reading_error_body():
 
     assert "fake-secret" not in str(caught.value)
     assert "private-key-echo" not in str(caught.value)
+
+
+def test_quota_preflight_uses_controlled_gateway_when_supplied():
+    from types import SimpleNamespace
+
+    calls = []
+
+    class Gateway:
+        def request_with_metadata(self, url, *, method="GET", headers=None, body=None):
+            calls.append((url, method, dict(headers or {}), body))
+            return SimpleNamespace(
+                status_code=200,
+                body=json.dumps(quota_payload()).encode("utf-8"),
+            )
+
+    result = read_openrouter_free_quota(
+        "fake-secret",
+        gateway=Gateway(),
+        urlopen=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("controlled gateway must be used when supplied")
+        ),
+    )
+
+    assert result["remaining"] == 46
+    assert len(calls) == 1
+    url, method, headers, body = calls[0]
+    assert url == "https://openrouter.ai/api/v1/key"
+    assert method == "GET"
+    assert headers["Authorization"] == "Bearer fake-secret"
+    assert body is None
