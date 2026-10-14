@@ -361,7 +361,7 @@
         <section id="view-settings" class="view" data-view-panel="settings" aria-label="Settings">
           <div class="view-header">
             <div><div class="eyebrow">AURORA // SETTINGS</div><h1>AI Engines</h1><p>Director routing · provider credentials · connection inventory</p></div>
-            <div id="settings-state" class="header-state"><span class="signal-dot"></span> NVIDIA ONLY</div>
+            <div id="settings-state" class="header-state"><span class="signal-dot"></span> PROVIDER SETTINGS</div>
           </div>
           <div class="settings-layout">
             <section class="panel content-panel settings-main">
@@ -385,25 +385,7 @@
               </div>
             </section>
 
-            <section class="panel content-panel settings-side">
-              <div class="panel-head">
-                <div><div class="eyebrow">NVIDIA NIM</div><h2>Only external provider</h2></div>
-                <span id="nvidia-status" class="badge">NOT CONNECTED</span>
-              </div>
-              <div class="settings-form">
-                <label for="nvidia-key">API key</label>
-                <input id="nvidia-key" type="password" autocomplete="new-password" placeholder="Enter NVIDIA API key">
-                <label for="nvidia-endpoint">Base URL</label>
-                <input id="nvidia-endpoint" type="url" autocomplete="off" value="https://integrate.api.nvidia.com/v1">
-                <p class="settings-note">Aurora uses NVIDIA only. The router discovers the current NVIDIA Free Endpoint catalog dynamically and can continue to another NVIDIA model when one fails.</p>
-                <div class="settings-actions">
-                  <button id="nvidia-test" class="ghost-button" type="button">Test & discover NVIDIA models</button>
-                </div>
-                <div id="nvidia-models" class="settings-models"></div>
-              </div>
-            </section>
-          </div>
-          <section class="panel content-panel settings-side provider-credentials-panel">
+            <section class="panel content-panel settings-side provider-credentials-panel">
               <div class="panel-head">
                 <div><div class="eyebrow">PROVIDER CREDENTIAL VAULT</div><h2>Connect an AI provider</h2></div>
                 <span class="badge">LOCAL CREDENTIAL STORE</span>
@@ -424,12 +406,13 @@
                   <button id="credential-clear" class="ghost-button" type="button">Clear input</button>
                   <button id="credential-test-provider" class="ghost-button" type="button" hidden>Test selected provider connection</button>
                   <button id="credential-test-inference" class="primary-button" type="button" hidden>Test real inference (free models only)</button>
-
+                  <button id="nvidia-test" class="ghost-button" type="button">Test NVIDIA & discover models</button>
                 </div>
-
+                <div id="nvidia-models" class="settings-models"></div>
               </div>
             </section>
-<section class="panel content-panel provider-inventory-panel">
+          </div>
+          <section class="panel content-panel provider-inventory-panel">
             <div class="panel-head">
               <div><span class="eyebrow">CREDENTIAL INVENTORY</span><h2>Saved providers & API keys</h2></div>
               <button id="credential-refresh" class="ghost-button" type="button">Refresh inventory</button>
