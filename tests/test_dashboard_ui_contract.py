@@ -76,6 +76,7 @@ def test_dashboard_ui_assets_are_present():
 
 def test_dashboard_ui_uses_gateway_endpoints_only():
     js = (UI_DIR / "app.js").read_text(encoding="utf-8")
+    provider_js = (UI_DIR / "provider_credentials.js").read_text(encoding="utf-8")
 
     assert '"/snapshot"' in js
     assert '"/projects/"' in js
