@@ -587,13 +587,20 @@ def test_live_inference_probe_uses_only_a_discovered_free_nvidia_model(tmp_path:
     assert "nvidia-live-test-secret" not in str(result)
 
 
-def test_live_inference_probe_uses_openrouter_free_and_returns_real_success_evidence(tmp_path: Path):
+def test_live_inference_probe_uses_openrouter_free_and_returns_real_success_evidence(tmp_path: Path, monkeypatch):
     from types import SimpleNamespace
+    from aurora.dashboard import provider_settings as provider_settings_module
     from aurora.dashboard.provider_settings import ProviderSettingsService
     from aurora.inference.providers.registry import default_provider_registry
     from aurora.operator_settings import OperatorSettingsStore
 
     runtime = Runtime(router(tmp_path))
+    runtime.workbench = SimpleNamespace(gateway=object())
+    monkeypatch.setattr(
+        provider_settings_module,
+        "read_openrouter_free_quota",
+        lambda _key, gateway: {"used": 4, "limit": 50, "remaining": 46, "is_free_tier": True},
+    )
     store = OperatorSettingsStore(tmp_path / "operator-settings.json")
     store.save({
         "providers": {
@@ -655,14 +662,22 @@ def test_live_inference_probe_refuses_unverified_paid_provider_routes(tmp_path: 
 
 
 
-def test_live_inference_probe_classifies_429_without_leaking_provider_details(tmp_path: Path):
+def test_live_inference_probe_classifies_429_without_leaking_provider_details(tmp_path: Path, monkeypatch):
     import pytest
+    from types import SimpleNamespace
+    from aurora.dashboard import provider_settings as provider_settings_module
     from aurora.dashboard.provider_settings import DashboardProviderSettingsError, ProviderSettingsService
     from aurora.inference.errors import ProviderErrorContext, ProviderHTTPError
     from aurora.inference.providers.registry import default_provider_registry
     from aurora.operator_settings import OperatorSettingsStore
 
     runtime = Runtime(router(tmp_path))
+    runtime.workbench = SimpleNamespace(gateway=object())
+    monkeypatch.setattr(
+        provider_settings_module,
+        "read_openrouter_free_quota",
+        lambda _key, gateway: {"used": 4, "limit": 50, "remaining": 46, "is_free_tier": True},
+    )
     store = OperatorSettingsStore(tmp_path / "operator-settings.json")
     store.save({
         "providers": {
@@ -833,3 +848,47 @@ def test_saving_router_mode_with_nvidia_key_does_not_pin_alias_as_model(
 
     assert state["director"]["provider"] == "router"
     assert state["director"]["model"] == "router"
+
+def test_live_inference_probe_refuses_openrouter_when_quota_is_exhausted(tmp_path: Path, monkeypatch):
+    import pytest
+    from types import SimpleNamespace
+    from aurora.dashboard import provider_settings as provider_settings_module
+    from aurora.dashboard.provider_settings import DashboardProviderSettingsError, ProviderSettingsService
+    from aurora.inference.providers.openrouter_quota import OpenRouterQuotaError
+    from aurora.inference.providers.registry import default_provider_registry
+    from aurora.operator_settings import OperatorSettingsStore
+
+    runtime = Runtime(router(tmp_path))
+    runtime.workbench = SimpleNamespace(gateway=object())
+    store = OperatorSettingsStore(tmp_path / "operator-settings.json")
+    store.save({
+        "providers": {
+            "openrouter": {
+                "api_key": "openrouter-exhausted-test-secret",
+                "base_url": "https://openrouter.ai/api/v1",
+                "enabled": True,
+            },
+        },
+    })
+    live_router = runtime.director.planner.router
+    live_router.provider_registry = default_provider_registry(
+        nvidia_api_key="nvidia-test",
+        openrouter_api_key="openrouter-exhausted-test-secret",
+        include_openrouter=True,
+    )
+    create_calls = []
+    live_router.provider_registry.create = lambda model: create_calls.append(model)
+    monkeypatch.setattr(
+        provider_settings_module,
+        "read_openrouter_free_quota",
+        lambda _key, gateway: (_ for _ in ()).throw(
+            OpenRouterQuotaError(
+                "OpenRouter free-model daily allowance exhausted; no chat-completion request was sent"
+            )
+        ),
+    )
+
+    with pytest.raises(DashboardProviderSettingsError, match="allowance exhausted"):
+        ProviderSettingsService(store, runtime).test_inference("openrouter")
+    assert create_calls == []
+
