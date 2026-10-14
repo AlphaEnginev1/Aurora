@@ -9,6 +9,8 @@ import time
 import urllib.error
 import urllib.request
 
+from aurora.autonomy.internet import InternetPolicyError
+
 from ..audit import now_utc
 from ..errors import (
     ProviderConfigurationError,
@@ -42,11 +44,13 @@ class OpenAIAPIProvider:
         api_key: str | None = None,
         timeout: float = 60.0,
         provider_id: str = "openai",
+        gateway=None,
     ) -> None:
         self.spec = spec
         self.provider_id = str(provider_id).strip().lower() or "openai"
         self.api_key = api_key or (os.getenv("OPENROUTER_API_KEY") if self.provider_id == "openrouter" else os.getenv("OPENAI_API_KEY"))
         self.timeout = timeout
+        self.gateway = gateway
 
     def health(self) -> bool:
         return bool(self.spec.enabled and self.spec.endpoint and self.api_key)
@@ -84,49 +88,32 @@ class OpenAIAPIProvider:
             payload["temperature"] = request.temperature
         if request.max_tokens is not None:
             payload["max_tokens"] = request.max_tokens
-        req = urllib.request.Request(
-            self.spec.endpoint.rstrip("/") + "/chat/completions",
-            data=json.dumps(payload).encode("utf-8"),
-            method="POST",
-            headers={
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-            },
-        )
+        url = self.spec.endpoint.rstrip("/") + "/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        }
+        body = json.dumps(payload).encode("utf-8")
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as response:
-                raw = json.loads(response.read().decode("utf-8"))
+            if self.gateway is not None:
+                response = self.gateway.request_with_metadata(
+                    url, method="POST", headers=headers, body=body
+                )
+                response_body = response.body
+            else:
+                req = urllib.request.Request(url, data=body, method="POST", headers=headers)
+                with urllib.request.urlopen(req, timeout=self.timeout) as response:
+                    response_body = response.read()
+            raw = json.loads(response_body.decode("utf-8"))
         except urllib.error.HTTPError as exc:
-            diagnostics = provider_http_diagnostics(exc)
-            provider_name = "OpenRouter" if self.provider_id == "openrouter" else "OpenAI"
-            message = (
-                f"{provider_name} HTTP request failed with status {exc.code}; "
-                f"reason={diagnostics['failure_reason']}"
-            )
-            if diagnostics["provider_code"]:
-                message += f"; provider_code={diagnostics['provider_code']}"
-            if diagnostics["retry_after_seconds"] is not None:
-                message += f"; retry_after_seconds={diagnostics['retry_after_seconds']}"
-            if diagnostics["limit_source"]:
-                message += f"; limit_source={diagnostics['limit_source']}"
-            if diagnostics["rate_limit_remaining"] is not None:
-                message += f"; rate_limit_remaining={diagnostics['rate_limit_remaining']}"
-            if diagnostics["rate_limit_limit"] is not None:
-                message += f"; rate_limit_limit={diagnostics['rate_limit_limit']}"
-            if diagnostics["rate_limit_reset"] is not None:
-                message += f"; rate_limit_reset={diagnostics['rate_limit_reset']}"
-            raise ProviderHTTPError(
-                message,
-                context=context,
-                status_code=exc.code,
-                provider_code=diagnostics["provider_code"],
-                failure_reason=diagnostics["failure_reason"],
-                retry_after_seconds=diagnostics["retry_after_seconds"],
-                rate_limit_limit=diagnostics["rate_limit_limit"],
-                rate_limit_remaining=diagnostics["rate_limit_remaining"],
-                rate_limit_reset=diagnostics["rate_limit_reset"],
-                limit_source=diagnostics["limit_source"],
+            raise _handle_http_error(exc, context, self.provider_id) from None
+        except InternetPolicyError as exc:
+            cause = exc.__cause__
+            if isinstance(cause, urllib.error.HTTPError):
+                raise _handle_http_error(cause, context, self.provider_id) from None
+            raise ProviderTransportError(
+                f"{self.provider_id} inference transport failed", context=context
             ) from None
         except (TimeoutError, socket.timeout):
             raise ProviderTimeoutError("OpenAI inference request timed out", context=context) from None
@@ -172,6 +159,41 @@ class OpenAIAPIProvider:
             usage=usage,
             telemetry=telemetry,
         )
+
+
+def _handle_http_error(
+    exc: urllib.error.HTTPError,
+    context: ProviderErrorContext,
+    provider_id: str,
+) -> ProviderHTTPError:
+    diagnostics = provider_http_diagnostics(exc)
+    provider_name = "OpenRouter" if provider_id == "openrouter" else "OpenAI"
+    message = (
+        f"{provider_name} HTTP request failed with status {exc.code}; "
+        f"reason={diagnostics['failure_reason']}"
+    )
+    if diagnostics["provider_code"]:
+        message += f"; provider_code={diagnostics['provider_code']}"
+    if diagnostics["retry_after_seconds"] is not None:
+        message += f"; retry_after_seconds={diagnostics['retry_after_seconds']}"
+    if diagnostics["limit_source"]:
+        message += f"; limit_source={diagnostics['limit_source']}"
+    if diagnostics["rate_limit_remaining"] is not None:
+        message += f"; rate_limit_remaining={diagnostics['rate_limit_remaining']}"
+    if diagnostics["rate_limit_limit"] is not None:
+        message += f"; rate_limit_limit={diagnostics['rate_limit_limit']}"
+    if diagnostics["rate_limit_reset"] is not None:
+        message += f"; rate_limit_reset={diagnostics['rate_limit_reset']}"
+    return ProviderHTTPError(
+        message, context=context, status_code=exc.code,
+        provider_code=diagnostics["provider_code"],
+        failure_reason=diagnostics["failure_reason"],
+        retry_after_seconds=diagnostics["retry_after_seconds"],
+        rate_limit_limit=diagnostics["rate_limit_limit"],
+        rate_limit_remaining=diagnostics["rate_limit_remaining"],
+        rate_limit_reset=diagnostics["rate_limit_reset"],
+        limit_source=diagnostics["limit_source"],
+    )
 
 
 def _usage(value: object, context: ProviderErrorContext) -> InferenceUsage:

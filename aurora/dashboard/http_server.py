@@ -225,6 +225,14 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                     raise DashboardConversationAPIError("provider must be a string")
                 self._json(200, self.provider_settings.test_provider(provider))
                 return
+            if parsed.path == "/api/dashboard/settings/test-inference":
+                if self.provider_settings is None:
+                    raise DashboardHTTPError("provider settings are not configured")
+                provider = payload.get("provider")
+                if not isinstance(provider, str):
+                    raise DashboardConversationAPIError("provider must be a string")
+                self._json(200, self.provider_settings.test_inference(provider))
+                return
             if parsed.path == "/api/conversation/session":
                 session_id = payload.get("session_id")
                 if session_id is not None and not isinstance(session_id, str):

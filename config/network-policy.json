@@ -4,7 +4,9 @@
     "https"
   ],
   "allowed_hosts": [
+    "api.anthropic.com",
     "api.github.com",
+    "api.openai.com",
     "api.telegram.org",
     "archive.ubuntu.com",
     "build.nvidia.com",
