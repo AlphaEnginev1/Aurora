@@ -149,3 +149,20 @@ The current NVIDIA documentation confirms the hosted LLM API endpoint is https:/
 The official NVIDIA Build catalog is dynamic and currently exposes a large Free Endpoint catalogue. This is precisely why Aurora must discover it at runtime rather than treating checked-in model IDs as authoritative.
 
 This document is the permanent incident record and regression contract. Future NVIDIA routing work must preserve these invariants.
+
+## Follow-up regression — settings save detached the runtime gateway (2026-10-14)
+
+A later incident exposed another way to violate the same canonical request-path contract:
+
+- `build_director_service()` creates the NVIDIA `ProviderRegistry` with Aurora's `InternetGateway`, as required by PR #176.
+- `ProviderSettingsService.test_provider()` uses the already-constructed `runtime.model_discovery` service to read and stage the NVIDIA model catalog. This path does **not** call `POST /v1/chat/completions`; the UI result is discovery evidence, not proof of live inference.
+- `ProviderSettingsService.save_and_apply()` rebuilt `router.provider_registry` after saving Settings but omitted `network_gateway`. The Director chat could therefore construct NVIDIA providers on the legacy direct-`urllib` path while model discovery continued using the gateway-bound registry.
+
+The corrective contract is now explicit:
+
+1. Any runtime provider-registry reconstruction after a settings change must preserve the active Workbench `InternetGateway`.
+2. Add a regression test asserting that a provider created from the registry after saving Settings retains the gateway and the existing credential.
+3. Never interpret “Test & discover NVIDIA models” or a successful `GET /v1/models` as a successful inference test. Only a real `POST /v1/chat/completions` response can satisfy the inference acceptance.
+4. When investigating another NVIDIA incident, compare the discovery and inference provider construction paths before changing credentials, the endpoint, the router, or the dynamic model-selection policy.
+
+This follow-up does not authorize a static model list, alter the free-only policy, or require issuing a new NVIDIA API key.
