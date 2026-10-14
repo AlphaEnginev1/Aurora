@@ -1168,24 +1168,14 @@
   function renderSettings(data) {
     state.settings = data;
     const director = safeObject(data.director);
-    const providers = safeObject(data.providers);
     $("director-provider").value = String(director.provider || "router");
-    $("director-model").value = String(director.model || "");
+    $("director-model").value = String(director.model || "router");
     $("director-endpoint").value = String(director.endpoint || "https://integrate.api.nvidia.com/v1");
-    $("nvidia-endpoint").value = String(
-      safeObject(providers.nvidia_api).base_url || "https://integrate.api.nvidia.com/v1"
-    );
-
-    const nvidiaPresent = !!safeObject(providers.nvidia_api).api_key_present;
-    $("nvidia-status").textContent = nvidiaPresent ? "CONNECTED" : "NOT CONNECTED";
     $("settings-state").innerHTML =
       '<span class="signal-dot"></span> ' +
       esc(String(data.runtime && data.runtime.director_provider || director.provider || "unknown").toUpperCase());
-    $("nvidia-models").innerHTML = "";
     showSettingsMessage(
-      nvidiaPresent
-        ? "NVIDIA-only provider configuration loaded."
-        : "Enter the NVIDIA API key. Aurora discovers the available free NVIDIA models dynamically.",
+      "Runtime settings loaded. Provider credentials are managed in the provider credential vault.",
       false
     );
   }
@@ -1202,19 +1192,11 @@ async function loadSettings() {
         provider: $("director-provider").value,
         model: $("director-model").value.trim(),
         endpoint: $("director-endpoint").value.trim()
-      },
-      providers: {
-        nvidia_api: {
-          base_url: $("nvidia-endpoint").value.trim()
-        }
       }
     };
-    const nvidiaKey = $("nvidia-key").value.trim();
-    if (nvidiaKey) payload.providers.nvidia_api.api_key = nvidiaKey;
-
     const button = $("settings-save");
     button.disabled = true;
-    showSettingsMessage("Saving and applying NVIDIA-only configuration…", false);
+    showSettingsMessage("Saving and applying Director routing settings…", false);
     try {
       const response = await fetch(state.apiBase + "/settings", {
         method: "POST",
@@ -1223,9 +1205,8 @@ async function loadSettings() {
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data && data.error ? data.error : "settings " + response.status);
-      $("nvidia-key").value = "";
       renderSettings(data);
-      showSettingsMessage("NVIDIA-only configuration saved and applied.", false);
+      showSettingsMessage("Director routing settings saved and applied.", false);
       return true;
     } catch (error) {
       showSettingsMessage(error.message, true);
