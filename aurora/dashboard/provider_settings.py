@@ -13,6 +13,7 @@ from urllib.parse import urlparse
 from aurora.inference.models import InferenceRequest, ModelSpec, new_execution_id
 from aurora.inference.free_policy import is_free_model
 from aurora.inference.providers.catalog import ProviderCatalog
+from aurora.inference.providers.openrouter_quota import OpenRouterQuotaError, read_openrouter_free_quota
 from aurora.inference.providers.registry import default_provider_registry
 from aurora.inference.discovery import ModelDiscoveryError
 from aurora.operator_settings import OperatorSettingsError, OperatorSettingsStore
@@ -417,6 +418,22 @@ class ProviderSettingsService:
                 f"{provider_id} is not active in the runtime registry; save its credential and reload Settings"
             )
 
+        openrouter_quota: dict[str, int | float | bool] | None = None
+        if provider_id == "openrouter":
+            network_gateway = getattr(
+                getattr(self.runtime, "workbench", None), "gateway", None
+            )
+            if network_gateway is None:
+                raise DashboardProviderSettingsError(
+                    "OpenRouter quota preflight requires Aurora's controlled InternetGateway; no inference request was sent"
+                )
+            try:
+                openrouter_quota = read_openrouter_free_quota(
+                    key, gateway=network_gateway
+                )
+            except OpenRouterQuotaError as exc:
+                raise DashboardProviderSettingsError(str(exc)) from None
+
         discovered_models: list[str] = []
         if provider_id == "nvidia_api":
             discovery = getattr(self.runtime, "model_discovery", None)
@@ -508,6 +525,7 @@ class ProviderSettingsService:
             "response_non_empty": True,
             "latency_ms": getattr(telemetry, "duration_ms", None),
             "discovered_free_models": discovered_models[:10],
+            "openrouter_quota_preflight": openrouter_quota,
             "request_id": request.request_id,
             "execution_id": execution_id,
         }
