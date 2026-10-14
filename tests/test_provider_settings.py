@@ -892,3 +892,76 @@ def test_live_inference_probe_refuses_openrouter_when_quota_is_exhausted(tmp_pat
         ProviderSettingsService(store, runtime).test_inference("openrouter")
     assert create_calls == []
 
+
+
+def test_openrouter_inference_reports_allowlisted_response_diagnostics_without_leaking_body(
+    tmp_path: Path, monkeypatch,
+):
+    import pytest
+    from types import SimpleNamespace
+    from aurora.dashboard import provider_settings as provider_settings_module
+    from aurora.dashboard.provider_settings import (
+        DashboardProviderSettingsError,
+        ProviderSettingsService,
+    )
+    from aurora.inference.errors import ProviderErrorContext, ProviderResponseError
+    from aurora.inference.providers.registry import default_provider_registry
+    from aurora.operator_settings import OperatorSettingsStore
+
+    cases = [
+        (
+            "OpenAI response did not contain choices[0].message.content",
+            "response did not contain choices[0].message.content",
+        ),
+        (
+            "upstream body must never be displayed: sensitive-provider-detail",
+            "response did not match Aurora's expected chat-completions schema",
+        ),
+    ]
+    for adapter_message, safe_diagnostic in cases:
+        runtime = Runtime(router(tmp_path))
+        runtime.workbench = SimpleNamespace(gateway=object())
+        monkeypatch.setattr(
+            provider_settings_module,
+            "read_openrouter_free_quota",
+            lambda _key, gateway: {
+                "used": 4, "limit": 50, "remaining": 46, "is_free_tier": True,
+            },
+        )
+        store = OperatorSettingsStore(tmp_path / "operator-settings.json")
+        store.save({
+            "providers": {
+                "openrouter": {
+                    "api_key": "openrouter-live-diagnostic-secret",
+                    "base_url": "https://openrouter.ai/api/v1",
+                    "enabled": True,
+                },
+            },
+        })
+        live_router = runtime.director.planner.router
+        live_router.provider_registry = default_provider_registry(
+            nvidia_api_key="nvidia-test",
+            openrouter_api_key="openrouter-live-diagnostic-secret",
+            include_openrouter=True,
+        )
+
+        class FailingAdapter:
+            def generate(self, request, *, selected_model, execution_id):
+                raise ProviderResponseError(
+                    adapter_message,
+                    context=ProviderErrorContext(
+                        provider="openrouter",
+                        request_id=request.request_id,
+                        execution_id=execution_id,
+                        selected_model=selected_model,
+                        provider_model=selected_model,
+                    ),
+                )
+
+        live_router.provider_registry.create = lambda _model: FailingAdapter()
+        with pytest.raises(DashboardProviderSettingsError) as caught:
+            ProviderSettingsService(store, runtime).test_inference("openrouter")
+
+        assert safe_diagnostic in str(caught.value)
+        assert "sensitive-provider-detail" not in str(caught.value)
+        assert "openrouter-live-diagnostic-secret" not in str(caught.value)
