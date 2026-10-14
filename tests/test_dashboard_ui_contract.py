@@ -44,7 +44,8 @@ def test_dashboard_ui_assets_are_present():
     assert "testSelectedProvider" in provider_js
     assert "testSelectedInference" in provider_js
     assert "freeInferenceSupported" in provider_js
-    assert "does not verify chat generation/inference" in js
+    # Director routing remains in app.js; provider checks and credential redaction live in provider_credentials.js.
+    assert "This does not test chat inference" in js
     assert "Chat inference has not been verified by this check." in provider_js
     assert "data.provider_catalog" in provider_js
     assert "provider.provider_id" in provider_js
@@ -83,7 +84,7 @@ def test_dashboard_ui_uses_gateway_endpoints_only():
     assert '"/settings"' in js
     assert '"/settings/test"' in js
     assert '"/health"' in js
-    assert "api_key_present" in js
+    assert "api_key_present" in provider_js
     assert "AURORA_DASHBOARD_API_BASE" in js
     assert "sqlite" not in js.lower()
     assert "task_events" not in js
