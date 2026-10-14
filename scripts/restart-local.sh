@@ -8,8 +8,8 @@ RUNTIME="$ROOT/.aurora-runtime"
 [[ -x "$PYTHON" ]] || { echo "Aurora virtual environment is missing: $PYTHON" >&2; exit 1; }
 mkdir -p "$RUNTIME"
 
-# Find only processes launched with this repository's venv and exact Aurora module.
-# This also catches orphaned instances missing from stale PID files.
+# Find orphaned processes running the exact Aurora module from this checkout.
+# This catches stale instances even when PID files or interpreter paths differ.
 find_module_pids() {
   "$PYTHON" - "$ROOT" "$1" "$2" <<'PY'
 import pathlib
