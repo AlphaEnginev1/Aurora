@@ -269,3 +269,18 @@ def test_gateway_wrapped_http_error_keeps_safe_http_diagnostics():
     assert "model entitlement" in str(caught.value)
     assert "SECRET-NVIDIA-KEY" not in str(caught.value)
 
+def test_nvidia_authorization_failed_detail_is_normalized_without_leaking_body():
+    import io
+    from aurora.inference.errors import provider_http_diagnostics
+
+    error = urllib.error.HTTPError(
+        "https://integrate.api.nvidia.com/v1/chat/completions",
+        403,
+        "Forbidden",
+        {},
+        io.BytesIO(b'{"status":403,"title":"Forbidden","detail":"Authorization failed"}'),
+    )
+    diagnostics = provider_http_diagnostics(error)
+    assert diagnostics["failure_reason"] == "access_denied_or_model_entitlement"
+    assert diagnostics["provider_code"] == "authorization_failed"
+
