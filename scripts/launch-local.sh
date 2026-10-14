@@ -49,8 +49,15 @@ fi
 
 PROXY_READY=0
 for _ in $(seq 1 30); do
-  if ! process_matches "$PROXY_STARTED_PID" "aurora.autonomy.egress_proxy_daemon"; then
+  # The background nohup process can briefly appear under its launcher command
+  # before exec replaces it with Python. Do not classify that startup window as
+  # a dead proxy; retry identity detection while the PID remains alive.
+  if ! kill -0 "$PROXY_STARTED_PID" 2>/dev/null; then
     break
+  fi
+  if ! process_matches "$PROXY_STARTED_PID" "aurora.autonomy.egress_proxy_daemon"; then
+    sleep 1
+    continue
   fi
   if python3 - "$HOST_IP" <<'PY' >/dev/null 2>&1
 import socket, sys
@@ -74,9 +81,9 @@ done
 
 if [[ "$PROXY_READY" -ne 1 ]]; then
   echo "Aurora egress proxy process did not stay alive and accept connections." >&2
-  if process_matches "$PROXY_STARTED_PID" "aurora.autonomy.egress_proxy_daemon"; then
-    kill -TERM "$PROXY_STARTED_PID" 2>/dev/null || true
-  fi
+  # This PID was spawned directly by this launcher, so it is safe to reap even
+  # if it never reached the expected Python module command line.
+  kill -TERM "$PROXY_STARTED_PID" 2>/dev/null || true
   rm -f "$PROXY_PID"
   tail -n 80 "$PROXY_LOG" >&2 || true
   exit 1
@@ -109,8 +116,14 @@ echo "$DAEMON_STARTED_PID" > "$AURORA_PID"
 
 DASHBOARD_READY=0
 for _ in $(seq 1 30); do
-  if ! process_matches "$DAEMON_STARTED_PID" "aurora.orchestration.daemon --dashboard"; then
+  # Allow the spawned nohup process time to exec Python before enforcing the
+  # module identity check, while still exiting promptly if the PID has died.
+  if ! kill -0 "$DAEMON_STARTED_PID" 2>/dev/null; then
     break
+  fi
+  if ! process_matches "$DAEMON_STARTED_PID" "aurora.orchestration.daemon --dashboard"; then
+    sleep 1
+    continue
   fi
   if curl -fsS --max-time 1 http://127.0.0.1:8787/ >/dev/null 2>&1; then
     # Make sure the HTTP listener belongs to a process that survived startup.
@@ -125,9 +138,8 @@ done
 
 if [[ "$DASHBOARD_READY" -ne 1 ]]; then
   echo "Aurora dashboard did not become ready from its new daemon process." >&2
-  if process_matches "$DAEMON_STARTED_PID" "aurora.orchestration.daemon --dashboard"; then
-    kill -TERM "$DAEMON_STARTED_PID" 2>/dev/null || true
-  fi
+  # As above, this exact PID was created by this launch attempt.
+  kill -TERM "$DAEMON_STARTED_PID" 2>/dev/null || true
   rm -f "$AURORA_PID"
   tail -n 120 "$AURORA_LOG" >&2 || true
   exit 1
