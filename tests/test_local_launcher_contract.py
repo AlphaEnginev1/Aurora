@@ -46,3 +46,34 @@ def test_launcher_does_not_accept_another_process_as_its_dashboard():
     assert 'curl -fsS --max-time 2 http://127.0.0.1:8787/' in script
     assert "sleep 1" in script
     assert script.index('process_matches "$DAEMON_STARTED_PID"') < script.index('echo "Aurora dashboard: http://127.0.0.1:8787"')
+
+
+
+def test_local_launcher_retries_during_nohup_exec_transition_instead_of_orphaning_processes():
+    script = (ROOT / "scripts" / "launch-local.sh").read_text(encoding="utf-8")
+
+    proxy_retry = (
+        'if ! kill -0 "$PROXY_STARTED_PID" 2>/dev/null; then\n'
+        '    break\n'
+        '  fi\n'
+        '  if ! process_matches "$PROXY_STARTED_PID" "aurora.autonomy.egress_proxy_daemon"; then\n'
+        '    sleep 1\n'
+        '    continue\n'
+        '  fi'
+    )
+    daemon_retry = (
+        'if ! kill -0 "$DAEMON_STARTED_PID" 2>/dev/null; then\n'
+        '    break\n'
+        '  fi\n'
+        '  if ! process_matches "$DAEMON_STARTED_PID" "aurora.orchestration.daemon --dashboard"; then\n'
+        '    sleep 1\n'
+        '    continue\n'
+        '  fi'
+    )
+
+    assert proxy_retry in script
+    assert daemon_retry in script
+    # The PIDs are owned by this launcher attempt, so failures reap the exact
+    # process it spawned even if it has not reached the final module argv.
+    assert 'kill -TERM "$PROXY_STARTED_PID" 2>/dev/null || true' in script
+    assert 'kill -TERM "$DAEMON_STARTED_PID" 2>/dev/null || true' in script
