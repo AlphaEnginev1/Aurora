@@ -10,6 +10,7 @@ import urllib.request
 from typing import Any, Mapping
 from urllib.parse import urlparse
 
+from aurora.inference.errors import ProviderResponseError
 from aurora.inference.models import InferenceRequest, ModelSpec, new_execution_id
 from aurora.inference.free_policy import is_free_model
 from aurora.inference.providers.catalog import ProviderCatalog
@@ -506,6 +507,15 @@ class ProviderSettingsService:
             if type(exc).__name__ == "ProviderTransportError":
                 raise DashboardProviderSettingsError(
                     f"{provider_id} live inference transport failed; verify DNS, TLS, proxy and network policy"
+                ) from None
+            if provider_id == "openrouter" and isinstance(exc, ProviderResponseError):
+                # ProviderResponseError messages are adapter-authored diagnostics,
+                # not upstream response bodies. Preserve this safe parser diagnosis
+                # so a malformed/unexpected response can be distinguished from quota
+                # or connectivity failures without leaking response payloads.
+                raise DashboardProviderSettingsError(
+                    f"{provider_id} live inference returned an unexpected response: {exc}; "
+                    "credential value and provider response body were omitted"
                 ) from None
             raise DashboardProviderSettingsError(
                 f"{provider_id} live inference failed ({type(exc).__name__}); credential value and provider response body were omitted"
