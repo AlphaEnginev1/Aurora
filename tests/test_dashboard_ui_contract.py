@@ -24,7 +24,31 @@ def test_dashboard_ui_assets_are_present():
     assert 'data-nav-target="settings"' in html
     assert 'id="director-provider"' in html
     assert 'id="gemini-key"' not in html
-    assert 'id="nvidia-key"' in html
+    # Settings uses one provider-agnostic form; the legacy NVIDIA-only input is gone.
+    assert 'id="credential-provider"' in html
+    assert 'id="credential-endpoint"' in html
+    assert 'id="credential-key"' in html
+    assert 'id="credential-save"' in html
+    assert 'id="credential-inventory"' in html
+    assert 'id="credential-refresh"' in html
+    assert 'id="credential-test-provider"' in html
+    assert 'id="credential-test-inference"' in html
+    # Local settings use restrictive filesystem permissions; do not claim
+    # at-rest encryption because operator-settings.json is not encrypted.
+    assert "LOCAL CREDENTIAL STORE" in html
+    assert "LOCAL ENCRYPTION BOUNDARY" not in html
+    assert 'id="nvidia-key"' not in html
+    provider_js = (UI_DIR / "provider_credentials.js").read_text(encoding="utf-8")
+    assert '"/settings/test"' in provider_js
+    assert '"/settings/test-inference"' in provider_js
+    assert "testSelectedProvider" in provider_js
+    assert "testSelectedInference" in provider_js
+    assert "freeInferenceSupported" in provider_js
+    assert "does not verify chat generation/inference" in js
+    assert "Chat inference has not been verified by this check." in provider_js
+    assert "data.provider_catalog" in provider_js
+    assert "provider.provider_id" in provider_js
+    assert '<script src="./provider_credentials.js" defer></script>' in html
     assert 'id="chat-expand"' in html
     assert '<section id="view-health" class="view"' in html
     assert '\n        id="view-health"' not in html
@@ -135,13 +159,14 @@ def test_dashboard_javascript_syntax_when_node_is_available():
     node = shutil.which("node")
     if node is None:
         return
-    result = subprocess.run(
-        [node, "--check", str(UI_DIR / "app.js")],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    assert result.returncode == 0, result.stderr
+    for script in ("app.js", "provider_credentials.js"):
+        result = subprocess.run(
+            [node, "--check", str(UI_DIR / script)],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, f"{script}: {result.stderr}"
 
 def test_dashboard_navigation_and_home_overview_swap_sides():
     html = (UI_DIR / "index.html").read_text(encoding="utf-8")
