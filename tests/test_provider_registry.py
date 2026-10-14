@@ -196,3 +196,59 @@ def test_default_registry_can_opt_into_external_providers():
     )
     assert openai.provider_id == "openai"
     assert anthropic.provider_id == "anthropic"
+
+
+
+def test_registry_applies_operator_endpoint_override_to_adapter_spec():
+    registry = default_provider_registry(
+        nvidia_api_key="nvidia-test",
+        openai_api_key="openai-test",
+        include_external=True,
+        provider_endpoints={"openai": "https://openai-proxy.example/v1"},
+    )
+    provider = registry.create(
+        ModelSpec("gpt-test", "openai", "https://api.openai.com/v1")
+    )
+
+    assert provider.spec.id == "gpt-test"
+    assert provider.spec.endpoint == "https://openai-proxy.example/v1"
+
+
+def test_registry_applies_operator_endpoint_override_to_nvidia_discovery():
+    registry = default_provider_registry(
+        nvidia_api_key="nvidia-test",
+        provider_endpoints={"nvidia_api": "https://nvidia-proxy.example/v1"},
+    )
+
+    discovery = registry.create_discovery("nvidia_api")
+
+    assert discovery.base_url == "https://nvidia-proxy.example/v1"
+
+
+
+def test_registry_rejects_non_loopback_http_endpoint_override():
+    with pytest.raises(ProviderRegistryError, match="must use HTTPS"):
+        default_provider_registry(
+            nvidia_api_key="nvidia-test",
+            openai_api_key="openai-test",
+            include_external=True,
+            provider_endpoints={"openai": "http://127.0.0.1.attacker.example/v1"},
+        )
+
+
+def test_registry_rejects_endpoint_override_with_embedded_credentials():
+    with pytest.raises(ProviderRegistryError, match="contains credentials"):
+        default_provider_registry(
+            nvidia_api_key="nvidia-test",
+            openai_api_key="openai-test",
+            include_external=True,
+            provider_endpoints={"openai": "https://user:password@api.openai.com/v1"},
+        )
+
+
+def test_registry_rejects_unknown_endpoint_override_provider():
+    with pytest.raises(ProviderRegistryError, match="unknown provider"):
+        default_provider_registry(
+            nvidia_api_key="nvidia-test",
+            provider_endpoints={"not_in_catalog": "https://example.invalid/v1"},
+        )
