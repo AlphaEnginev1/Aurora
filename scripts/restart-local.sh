@@ -8,24 +8,34 @@ RUNTIME="$ROOT/.aurora-runtime"
 [[ -x "$PYTHON" ]] || { echo "Aurora virtual environment is missing: $PYTHON" >&2; exit 1; }
 mkdir -p "$RUNTIME"
 
-# Find only processes launched with this repository's venv and exact Aurora module.
-# This also catches orphaned instances missing from stale PID files.
+# Find orphaned processes running the exact Aurora module from this checkout.
+# This catches stale instances even when PID files or interpreter paths differ.
 find_module_pids() {
-  "$PYTHON" - "$PYTHON" "$1" "$2" <<'PY'
+  "$PYTHON" - "$ROOT" "$1" "$2" <<'PY'
 import pathlib
 import sys
 
-executable, module, required_arg = sys.argv[1:4]
+root, module, required_arg = sys.argv[1:4]
+root_path = pathlib.Path(root).resolve()
 for entry in pathlib.Path("/proc").iterdir():
     if not entry.name.isdigit():
         continue
     try:
         args = [item.decode(errors="replace") for item in (entry / "cmdline").read_bytes().split(b"\0") if item]
-    except (OSError, PermissionError):
+        cwd = (entry / "cwd").resolve(strict=True)
+    except (OSError, PermissionError, RuntimeError):
         continue
-    if len(args) < 3 or args[0] != executable or args[1:3] != ["-m", module]:
+    # Scope cleanup to this checkout, but don't depend on which Python binary
+    # or virtual-environment symlink originally launched Aurora.
+    if cwd != root_path:
         continue
-    if required_arg and required_arg not in args[3:]:
+    try:
+        module_index = args.index("-m")
+    except ValueError:
+        continue
+    if module_index + 1 >= len(args) or args[module_index + 1] != module:
+        continue
+    if required_arg and required_arg not in args[module_index + 2:]:
         continue
     print(entry.name)
 PY
@@ -61,6 +71,18 @@ stop_module() {
 
 stop_module "aurora.orchestration.daemon" "--dashboard"
 stop_module "aurora.autonomy.egress_proxy_daemon" ""
+
+# Do not start a duplicate daemon if an unrecognized process still owns 8787.
+# Report the listener but never terminate a process outside this checkout.
+if command -v ss >/dev/null 2>&1; then
+  dashboard_listeners="$(ss -H -ltn 'sport = :8787' 2>/dev/null || true)"
+  if [[ -n "$dashboard_listeners" ]]; then
+    echo "STOP: el puerto 8787 sigue ocupado tras detener las instancias de Aurora de este repositorio." >&2
+    echo "No se terminará automáticamente un proceso ajeno. Propietario del puerto:" >&2
+    ss -ltnp 'sport = :8787' >&2 || true
+    exit 1
+  fi
+fi
 
 rm -f -- "$RUNTIME/aurora.pid" "$RUNTIME/egress-proxy.pid"
 exec bash "$ROOT/scripts/launch-local.sh"
