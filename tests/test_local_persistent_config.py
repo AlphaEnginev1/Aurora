@@ -79,6 +79,20 @@ def test_loader_restores_provider_and_model_without_executing_config(tmp_path: P
     assert stat.S_IMODE(config_file.stat().st_mode) == 0o600
 
 
+def test_loader_allows_explicit_nvidia_director_selection(tmp_path: Path) -> None:
+    config_file = tmp_path / "aurora.env"
+    config_file.write_text(
+        "AURORA_DIRECTOR_PROVIDER=nvidia_api\n",
+        encoding="utf-8",
+    )
+    config_file.chmod(0o600)
+
+    result = run_loader(config_file)
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "nvidia_api\n\n"
+
+
 def test_loader_rejects_unapproved_values_without_evaluating_them(tmp_path: Path) -> None:
     config_file = tmp_path / "aurora.env"
     sentinel = tmp_path / "should-not-exist"
@@ -118,7 +132,7 @@ def test_restart_script_cleans_orphaned_aurora_daemons_before_starting() -> None
 def test_update_script_uses_verified_restart_helper() -> None:
     script = (ROOT / "scripts" / "update-local.sh").read_text(encoding="utf-8")
 
-    restart_call = 'if ! (\n  exec 9>&-\n  bash "$ROOT/scripts/restart-local.sh"\n); then'
+    restart_call = 'if !(\n  exec 9>&-\n  bash "$ROOT/scripts/restart-local.sh"\n); then'
     ready_status = 'write_status "ready" "$updated" "Aurora updated and dashboard is ready"'
 
     assert restart_call in script
@@ -139,4 +153,3 @@ def test_update_script_compares_dashboard_process_argv_without_flattening_proc_c
     assert '[[ "${argv[2]}" == "aurora.orchestration.daemon" ]]' in script
     assert '[[ "${argv[3]}" == "--dashboard" ]]' in script
     assert 'cmdline="$(tr' not in script
-
