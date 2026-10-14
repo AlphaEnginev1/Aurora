@@ -1226,8 +1226,10 @@ async function loadSettings() {
       $("nvidia-key").value = "";
       renderSettings(data);
       showSettingsMessage("NVIDIA-only configuration saved and applied.", false);
+      return true;
     } catch (error) {
       showSettingsMessage(error.message, true);
+      return false;
     } finally {
       button.disabled = false;
     }
@@ -1238,7 +1240,11 @@ async function testProvider(provider) {
       showSettingsMessage("Aurora uses NVIDIA only.", true);
       return;
     }
-    showSettingsMessage("Testing NVIDIA…", false);
+    // Save the exact values shown in Settings before discovery. Otherwise this
+    // test can use a stale credential/registry snapshot from daemon startup.
+    const saved = await saveSettings();
+    if (!saved) return;
+    showSettingsMessage("Checking NVIDIA's live model catalog…", false);
     const response = await fetch(state.apiBase + "/settings/test", {
       method: "POST",
       headers: { Accept: "application/json", "Content-Type": "application/json" },
@@ -1261,7 +1267,8 @@ async function testProvider(provider) {
       });
     });
     showSettingsMessage(
-      "NVIDIA connection verified · " + Number(data.staged_count || 0) + " free model(s) discovered and staged.",
+      "Catalog discovery completed · " + Number(data.staged_count || 0) +
+        " free model(s) discovered and staged. This does not test chat inference; send a message to verify generation.",
       false
     );
   }

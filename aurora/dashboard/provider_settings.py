@@ -38,11 +38,26 @@ class ProviderSettingsService:
             nvidia_key = self.store.credential("nvidia_api")
             openrouter_key = os.getenv("OPENROUTER_API_KEY", "").strip()
             router.nvidia_api_key = nvidia_key or None
+            # Settings saves must not detach inference from Aurora's canonical
+            # deny-by-default InternetGateway. The catalog/discovery path is gateway-
+            # bound at runtime; replacing this registry without the gateway makes chat
+            # use the legacy direct urllib path instead (regression of PR #176).
+            network_gateway = getattr(
+                getattr(self.runtime, "workbench", None),
+                "gateway",
+                None,
+            )
             router.provider_registry = default_provider_registry(
                 nvidia_api_key=nvidia_key or None,
+                network_gateway=network_gateway,
                 openrouter_api_key=openrouter_key or None,
                 include_openrouter=bool(openrouter_key),
             )
+            # Refresh must use the new key and the same gateway too; update this
+            # reference before selected-model handling can trigger a catalog refresh.
+            discovery = getattr(self.runtime, "model_discovery", None)
+            if discovery is not None:
+                discovery.provider_registry = router.provider_registry
 
             selected_model = str(settings["director"].get("model", "")).strip()
             provider_id = str(settings["director"].get("provider", "")).strip().lower()
@@ -51,7 +66,7 @@ class ProviderSettingsService:
                     "Aurora supports only the NVIDIA inference fabric"
                 )
 
-            if nvidia_key and selected_model:
+            if nvidia_key and selected_model and provider_id == "nvidia_api":
                 existing = next(
                     (item for item in router.model_registry.models if item.id == selected_model),
                     None,
@@ -115,6 +130,15 @@ class ProviderSettingsService:
                     )
                     router.model_registry.replace(updated)
                     router.models = list(router.model_registry.models)
+
+            # Keep live discovery on the same credential, registry, and gateway
+            # as inference after Settings has been saved. ModelDiscoveryService holds
+            # registry references from startup, so replacing the router registry alone
+            # leaves the catalog path stale.
+            discovery = getattr(self.runtime, "model_discovery", None)
+            if discovery is not None:
+                discovery.provider_registry = router.provider_registry
+                discovery.model_registry = router.model_registry
 
             provider = InferenceDirectorProvider(router)
             active = self.runtime.director.planner.provider
