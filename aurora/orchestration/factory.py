@@ -19,6 +19,7 @@ from aurora.inference.models import InferenceRequest, ModelSpec
 from aurora.inference.free_policy import is_free_model
 from aurora.inference.discovery import ModelCandidateStore, ModelDiscoveryService
 from aurora.inference.autonomous_discovery import AutonomousDiscoveryRefreshService
+from aurora.inference.providers.catalog import ProviderCatalog
 from aurora.inference.providers.registry import default_provider_registry
 from aurora.inference.model_performance import ModelPerformanceStore
 from aurora.inference.provider_health import ProviderHealthStore
@@ -110,14 +111,19 @@ def build_orchestration_engine(policy_path: str | Path) -> OrchestrationEngine:
         )
     )
 
-def _register_openrouter_free_model(model_registry: ModelRegistry, api_key: str | None) -> None:
+def _register_openrouter_free_model(
+    model_registry: ModelRegistry,
+    api_key: str | None,
+    *,
+    endpoint: str | None = None,
+) -> None:
     """Register OpenRouter's free router only when its local credential is present."""
     if not str(api_key or "").strip() or "openrouter/free" in model_registry.ids:
         return
     model_registry.register(ModelSpec(
         id="openrouter/free",
         provider="openrouter",
-        endpoint="https://openrouter.ai/api/v1",
+        endpoint=str(endpoint or "https://openrouter.ai/api/v1").rstrip("/"),
         capabilities=("chat", "reasoning"),
         context_window=200000,
         enabled=True,
@@ -501,19 +507,53 @@ def build_director_service(*, inference_policy_path: str | Path, autonomy_policy
 ) -> DirectorService:
     settings_store = OperatorSettingsStore(settings_path(workspace_root))
     gateway = InternetGateway(InternetPolicy.from_file(network_policy_path))
-    nvidia_key = settings_store.credential("nvidia_api") or os.getenv("NVIDIA_API_KEY")
-    openrouter_key = os.getenv("OPENROUTER_API_KEY", "").strip()
+    catalog = ProviderCatalog()
+    operator_settings = settings_store.load()
+    provider_configs = operator_settings.get("providers", {})
+
+    def configured_credential(provider_id: str) -> str:
+        config = provider_configs.get(provider_id, {}) if isinstance(provider_configs, dict) else {}
+        if isinstance(config, dict) and config.get("enabled", True) is False:
+            return ""
+        stored = settings_store.credential(provider_id)
+        metadata = catalog.resolve(provider_id)
+        env_name = metadata.get("credential_env")
+        environment = os.getenv(env_name, "").strip() if isinstance(env_name, str) and env_name else ""
+        return stored or environment
+
+    nvidia_key = configured_credential("nvidia_api")
+    openai_key = configured_credential("openai")
+    anthropic_key = configured_credential("anthropic")
+    openrouter_key = configured_credential("openrouter")
+    provider_endpoints: dict[str, str] = {}
+    for configured_provider_id in catalog.provider_ids:
+        configured = provider_configs.get(configured_provider_id, {}) if isinstance(provider_configs, dict) else {}
+        saved_endpoint = str(configured.get("base_url", "")).strip() if isinstance(configured, dict) else ""
+        catalog_endpoint = str(catalog.resolve(configured_provider_id).get("base_url", "")).strip()
+        endpoint = saved_endpoint or catalog_endpoint
+        if endpoint:
+            provider_endpoints[configured_provider_id] = endpoint
+
     provider_registry = default_provider_registry(
-        nvidia_api_key=nvidia_key,
+        nvidia_api_key=nvidia_key or None,
+        openai_api_key=openai_key or None,
+        anthropic_api_key=anthropic_key or None,
         network_gateway=gateway,
         openrouter_api_key=openrouter_key or None,
+        include_external=bool(openai_key or anthropic_key),
         include_openrouter=bool(openrouter_key),
+        catalog=catalog,
+        provider_endpoints=provider_endpoints,
     )
     model_registry = ModelRegistry.from_file(
         inference_policy_path,
         provider_registry=provider_registry,
     )
-    _register_openrouter_free_model(model_registry, openrouter_key)
+    _register_openrouter_free_model(
+        model_registry,
+        openrouter_key,
+        endpoint=provider_endpoints.get("openrouter") or str(catalog.resolve("openrouter")["base_url"]),
+    )
     policy_data = json.loads(Path(inference_policy_path).read_text(encoding="utf-8"))
     cost_policy = os.getenv("AURORA_INFERENCE_COST_POLICY", str(policy_data.get("cost_policy", "free_only"))).strip().lower()
     if cost_policy != "free_only":
