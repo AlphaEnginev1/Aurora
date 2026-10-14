@@ -38,8 +38,18 @@ class ProviderSettingsService:
             nvidia_key = self.store.credential("nvidia_api")
             openrouter_key = os.getenv("OPENROUTER_API_KEY", "").strip()
             router.nvidia_api_key = nvidia_key or None
+            # Settings saves must not detach inference from Aurora's canonical
+            # deny-by-default InternetGateway. The catalog/discovery path is gateway-
+            # bound at runtime; replacing this registry without the gateway makes chat
+            # use the legacy direct urllib path instead (regression of PR #176).
+            network_gateway = getattr(
+                getattr(self.runtime, "workbench", None),
+                "gateway",
+                None,
+            )
             router.provider_registry = default_provider_registry(
                 nvidia_api_key=nvidia_key or None,
+                network_gateway=network_gateway,
                 openrouter_api_key=openrouter_key or None,
                 include_openrouter=bool(openrouter_key),
             )
