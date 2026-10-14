@@ -360,7 +360,7 @@
 
         <section id="view-settings" class="view" data-view-panel="settings" aria-label="Settings">
           <div class="view-header">
-            <div><div class="eyebrow">AURORA // SETTINGS</div><h1>AI Engines</h1><p>NVIDIA Director · dynamic free models · credentials</p></div>
+            <div><div class="eyebrow">AURORA // SETTINGS</div><h1>AI Engines</h1><p>Director routing · provider credentials · connection inventory</p></div>
             <div id="settings-state" class="header-state"><span class="signal-dot"></span> NVIDIA ONLY</div>
           </div>
           <div class="settings-layout">
@@ -403,6 +403,46 @@
               </div>
             </section>
           </div>
+          <section class="panel content-panel settings-side provider-credentials-panel">
+              <div class="panel-head">
+                <div><div class="eyebrow">PROVIDER CREDENTIAL VAULT</div><h2>Connect an AI provider</h2></div>
+                <span class="badge">LOCAL CREDENTIAL STORE</span>
+              </div>
+              <div class="settings-form">
+                <label for="credential-provider">Provider</label>
+                <select id="credential-provider" aria-describedby="provider-catalog-status">
+                  <option value="">Loading provider catalog…</option>
+                </select>
+                <p id="provider-catalog-status" class="settings-note">Provider choices and default endpoints are loaded from Aurora's validated provider catalog.</p>
+                <label for="credential-endpoint">API endpoint</label>
+                <input id="credential-endpoint" type="url" autocomplete="off" placeholder="Provider endpoint">
+                <label for="credential-key">API key</label>
+                <input id="credential-key" type="password" autocomplete="new-password" placeholder="Paste the provider API key">
+                <p class="settings-note">Keys are stored in Aurora's local operator settings with restricted file permissions. The table never displays the secret itself. Saving a key does not automatically enable inference: each provider must also have a compatible runtime adapter and a successful connection test.</p>
+                <div class="settings-actions">
+                  <button id="credential-save" class="primary-button" type="button">Save provider credential</button>
+                  <button id="credential-clear" class="ghost-button" type="button">Clear input</button>
+                  <button id="credential-test-provider" class="ghost-button" type="button" hidden>Test selected provider connection</button>
+                  <button id="credential-test-inference" class="primary-button" type="button" hidden>Test real inference (free models only)</button>
+
+                </div>
+
+              </div>
+            </section>
+<section class="panel content-panel provider-inventory-panel">
+            <div class="panel-head">
+              <div><span class="eyebrow">CREDENTIAL INVENTORY</span><h2>Saved providers & API keys</h2></div>
+              <button id="credential-refresh" class="ghost-button" type="button">Refresh inventory</button>
+            </div>
+            <p class="settings-note">Only provider names, endpoints, and credential presence are shown. Secret values are never returned to the browser after saving.</p>
+            <div class="provider-table-wrap">
+              <table class="provider-table">
+                <thead><tr><th>Provider</th><th>Endpoint</th><th>Credential</th><th>Runtime integration</th></tr></thead>
+                <tbody id="credential-inventory"><tr><td colspan="4">Loading provider inventory…</td></tr></tbody>
+              </table>
+            </div>
+            <div id="credential-message" class="settings-message" aria-live="polite"></div>
+          </section>
           <section class="panel content-panel" style="margin-top:12px">
             <div class="panel-head">
               <div>
@@ -498,6 +538,7 @@
   </aside>
 
   <script src="./avatar_voice.js" defer></script>
+  <script src="./provider_credentials.js" defer></script>
   <script src="./app.js" defer></script>
 </body>
 </html>
