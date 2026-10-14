@@ -53,6 +53,11 @@ class ProviderSettingsService:
                 openrouter_api_key=openrouter_key or None,
                 include_openrouter=bool(openrouter_key),
             )
+            # Refresh must use the new key and the same gateway too; update this
+            # reference before selected-model handling can trigger a catalog refresh.
+            discovery = getattr(self.runtime, "model_discovery", None)
+            if discovery is not None:
+                discovery.provider_registry = router.provider_registry
 
             selected_model = str(settings["director"].get("model", "")).strip()
             provider_id = str(settings["director"].get("provider", "")).strip().lower()
