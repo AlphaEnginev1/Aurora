@@ -24,6 +24,14 @@ class SettingsStub:
     def test_provider(self, provider):
         return {"provider": provider, "ok": True}
 
+    def test_inference(self, provider):
+        return {
+            "provider": provider,
+            "ok": True,
+            "inference_verified": True,
+            "response_non_empty": True,
+        }
+
 
 class Gateway:
     def snapshot(self):
@@ -76,6 +84,22 @@ def test_dashboard_settings_http_contract():
             tested = json.loads(response.read().decode("utf-8"))
         assert response.status == 200
         assert tested == {"ok": True, "provider": "nvidia_api"}
+
+        inference_request = Request(
+            base + "/api/dashboard/settings/test-inference",
+            data=b'{"provider":"openrouter"}',
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urlopen(inference_request, timeout=5) as response:
+            inference = json.loads(response.read().decode("utf-8"))
+        assert response.status == 200
+        assert inference == {
+            "provider": "openrouter",
+            "ok": True,
+            "inference_verified": True,
+            "response_non_empty": True,
+        }
     finally:
         server.shutdown()
         server.server_close()
