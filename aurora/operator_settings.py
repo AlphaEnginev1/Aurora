@@ -1,4 +1,4 @@
-"""Local NVIDIA-only operator settings and credential storage for Aurora."""
+"""Local operator settings and securely redacted provider credential storage for Aurora."""
 
 from __future__ import annotations
 
@@ -7,9 +7,44 @@ import os
 from pathlib import Path
 from threading import RLock
 from typing import Any, Mapping
+from urllib.parse import urlparse
 
 
-NVIDIA_ENDPOINT = "https://integrate.api.nvidia.com/v1"
+_FALLBACK_NVIDIA_ENDPOINT = "https://integrate.api.nvidia.com/v1"
+
+
+def _load_default_provider_endpoints() -> dict[str, str]:
+    """Read endpoint defaults from the canonical provider catalog.
+
+    A minimal NVIDIA fallback keeps old installations importable only when the
+    catalog file is absent. If the file exists but is malformed, fail closed
+    instead of silently reintroducing a second hard-coded provider catalog.
+    """
+    catalog_path = Path(__file__).resolve().parents[1] / "config" / "providers.json"
+    if not catalog_path.exists():
+        return {"nvidia_api": _FALLBACK_NVIDIA_ENDPOINT}
+    try:
+        raw = json.loads(catalog_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise RuntimeError("canonical provider catalog is unreadable") from exc
+    providers = raw.get("providers") if isinstance(raw, Mapping) else None
+    if not isinstance(providers, Mapping):
+        raise RuntimeError("canonical provider catalog has no providers mapping")
+    endpoints: dict[str, str] = {}
+    for raw_id, metadata in providers.items():
+        provider_id = str(raw_id).strip().lower()
+        if not provider_id or not isinstance(metadata, Mapping):
+            raise RuntimeError("canonical provider catalog contains an invalid provider entry")
+        endpoint = metadata.get("base_url", "")
+        if not isinstance(endpoint, str):
+            raise RuntimeError(f"canonical provider endpoint must be a string: {provider_id}")
+        endpoints[provider_id] = endpoint.strip().rstrip("/")
+    endpoints.setdefault("nvidia_api", _FALLBACK_NVIDIA_ENDPOINT)
+    return endpoints
+
+
+DEFAULT_PROVIDER_ENDPOINTS = _load_default_provider_endpoints()
+NVIDIA_ENDPOINT = DEFAULT_PROVIDER_ENDPOINTS["nvidia_api"] or _FALLBACK_NVIDIA_ENDPOINT
 DEFAULT_NVIDIA_MODEL = "nvidia/nemotron-3-ultra-550b-a55b"
 
 DEFAULT_SETTINGS: dict[str, Any] = {
@@ -76,27 +111,32 @@ class OperatorSettingsStore:
 
     def public(self) -> dict[str, Any]:
         data = self.load()
-        provider = dict(data["providers"]["nvidia_api"])
-        key = str(provider.pop("api_key", "") or "")
-        provider["api_key_present"] = bool(key.strip())
+        providers: dict[str, Any] = {}
+        for provider_id, config in data.get("providers", {}).items():
+            if not isinstance(config, Mapping):
+                continue
+            public_config = dict(config)
+            key = str(public_config.pop("api_key", "") or "")
+            public_config["api_key_present"] = bool(key.strip())
+            providers[provider_id] = public_config
         github = dict(data.get("github", {}))
         github_token = str(github.pop("access_token", "") or "")
         github["access_token_present"] = bool(github_token.strip())
         return {
             "director": dict(data["director"]),
-            "providers": {"nvidia_api": provider},
+            "providers": providers,
             "github": github,
         }
 
     def credential(self, provider_id: str) -> str:
         provider_id = str(provider_id).strip().lower()
-        if provider_id == "nvidia_api":
-            provider = self.load()["providers"].get("nvidia_api", {})
-            return str(provider.get("api_key", "") or "").strip()
         if provider_id == "github":
             github = self.load().get("github", {})
             return str(github.get("access_token", "") or "").strip()
-        return ""
+        provider = self.load().get("providers", {}).get(provider_id, {})
+        if not isinstance(provider, Mapping):
+            return ""
+        return str(provider.get("api_key", "") or "").strip()
 
     def set_github_connection(
         self,
@@ -138,12 +178,14 @@ class OperatorSettingsStore:
         next_data = _merge(current, payload)
         incoming = payload.get("providers", {}) if isinstance(payload, Mapping) else {}
         if isinstance(incoming, Mapping):
-            nvidia = incoming.get("nvidia_api", {})
-            if isinstance(nvidia, Mapping) and "api_key" in nvidia:
-                value = str(nvidia.get("api_key") or "")
+            for provider_id, config in incoming.items():
+                if not isinstance(config, Mapping) or "api_key" not in config:
+                    continue
+                value = str(config.get("api_key") or "")
                 if not value.strip():
-                    next_data["providers"]["nvidia_api"]["api_key"] = (
-                        current["providers"]["nvidia_api"].get("api_key", "")
+                    existing = current.get("providers", {}).get(provider_id, {})
+                    next_data.setdefault("providers", {}).setdefault(provider_id, {})["api_key"] = (
+                        existing.get("api_key", "") if isinstance(existing, Mapping) else ""
                     )
         return self.save(next_data)
 
@@ -190,16 +232,30 @@ def _normalize(data: Mapping[str, Any]) -> dict[str, Any]:
         "enabled": bool(failover.get("enabled", True)),
         "order": ["nvidia_api"],
     }
-    nvidia = result.get("providers", {}).get("nvidia_api", {})
-    if not isinstance(nvidia, Mapping):
-        nvidia = {}
-    result["providers"] = {
-        "nvidia_api": {
-            "enabled": bool(nvidia.get("enabled", True)),
-            "api_key": str(nvidia.get("api_key", "") or ""),
-            "base_url": str(nvidia.get("base_url", NVIDIA_ENDPOINT) or NVIDIA_ENDPOINT).rstrip("/"),
+    provider_configs = result.get("providers", {})
+    if not isinstance(provider_configs, Mapping):
+        provider_configs = {}
+    normalized_providers: dict[str, Any] = {}
+    for raw_id, raw_config in provider_configs.items():
+        provider_id = str(raw_id).strip().lower()
+        if not provider_id or not all(ch.isalnum() or ch in "_-" for ch in provider_id):
+            continue
+        if not isinstance(raw_config, Mapping):
+            continue
+        default_url = DEFAULT_PROVIDER_ENDPOINTS.get(provider_id, "")
+        base_url = str(raw_config.get("base_url", default_url) or default_url).strip().rstrip("/")
+        normalized_providers[provider_id] = {
+            "enabled": bool(raw_config.get("enabled", True)),
+            "api_key": str(raw_config.get("api_key", "") or ""),
+            "base_url": base_url,
         }
-    }
+    if "nvidia_api" not in normalized_providers:
+        normalized_providers["nvidia_api"] = {
+            "enabled": True,
+            "api_key": "",
+            "base_url": NVIDIA_ENDPOINT,
+        }
+    result["providers"] = normalized_providers
     github = result.get("github", {})
     if not isinstance(github, Mapping):
         github = {}
@@ -249,8 +305,35 @@ def _validate(data: Mapping[str, Any]) -> None:
     nvidia = providers.get("nvidia_api")
     if not isinstance(nvidia, Mapping):
         raise OperatorSettingsError("provider configuration missing: nvidia_api")
-    if not str(nvidia.get("base_url", "")).strip().startswith("https://"):
-        raise OperatorSettingsError("nvidia_api.base_url must use HTTPS")
+    for provider_id, config in providers.items():
+        if not isinstance(config, Mapping):
+            raise OperatorSettingsError(f"{provider_id}.configuration must be an object")
+        endpoint = str(config.get("base_url", "") or "").strip()
+        if not endpoint:
+            continue
+        try:
+            parsed = urlparse(endpoint)
+            hostname = (parsed.hostname or "").lower()
+            # Accessing .port also validates that a supplied port is numeric
+            # and within the valid TCP range.
+            _ = parsed.port
+        except ValueError:
+            raise OperatorSettingsError(f"{provider_id}.base_url is not a valid URL") from None
+        if (
+            not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise OperatorSettingsError(
+                f"{provider_id}.base_url must not contain embedded credentials, query parameters, or fragments"
+            )
+        local_http = parsed.scheme == "http" and hostname in {"127.0.0.1", "localhost", "::1"}
+        if parsed.scheme != "https" and not local_http:
+            raise OperatorSettingsError(
+                f"{provider_id}.base_url must use HTTPS (HTTP is allowed only for loopback services)"
+            )
 
 
 def _merge(base: Mapping[str, Any], overlay: Mapping[str, Any]) -> dict[str, Any]:
