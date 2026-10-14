@@ -144,12 +144,13 @@
     }
     const endpoint = $("credential-endpoint").value.trim();
     const key = $("credential-key").value.trim();
+    const existing = safeObject(providerConfig(providerId));
     if (!endpoint) {
       message("Enter the API endpoint for this provider.", true);
       return;
     }
-    if (metadata.auth_required !== false && !key) {
-      message("Enter the API key. An empty field never overwrites an existing key.", true);
+    if (metadata.auth_required !== false && !key && existing.api_key_present !== true) {
+      message("Enter an API key; a blank field preserves any saved key.", true);
       return;
     }
     const button = $("credential-save");
