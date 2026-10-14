@@ -327,6 +327,12 @@ class ProviderSettingsService:
                 with _urlopen(request) as response:
                     status_code = int(getattr(response, "status", 200))
                     body = response.read()
+        except DashboardProviderSettingsError as exc:
+            # _urlopen already converts HTTP and transport errors into safe diagnostics.
+            # Preserve those messages; they contain no response body or credential.
+            raise DashboardProviderSettingsError(
+                f"{provider_id} connection test failed: {exc}"
+            ) from None
         except Exception as exc:
             cause = getattr(exc, "__cause__", None)
             status = getattr(cause, "code", None)
