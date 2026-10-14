@@ -133,54 +133,19 @@ class NVIDIAAPIProvider:
                 with urllib.request.urlopen(req, timeout=self.timeout) as response:
                     raw = json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
-            diagnostics = provider_http_diagnostics(exc)
-            if exc.code in {403, 429}:
-                report_failure("provider_http_403_429", RuntimeError(f"NVIDIA HTTP status {exc.code}"))
-            # Keep raw response bodies and headers out of logs/errors. Only the
-            # normalized reason, provider error code, and retry delay are exposed.
-            message = f"NVIDIA HTTP request failed with status {exc.code}"
-            if exc.code == 401:
-                message += "; authentication rejected—verify NVIDIA_API_KEY configuration"
-            elif exc.code == 403:
-                message += (
-                    "; access denied—verify API-key permissions, model entitlement, "
-                    "and endpoint access in the NVIDIA account"
-                )
-            elif exc.code == 404:
-                message += "; endpoint or model not found—verify the configured model ID and endpoint"
-            elif exc.code == 429:
-                message += "; rate limit or quota reached—check account limits and retry policy"
-            message += f"; reason={diagnostics['failure_reason']}"
-            if diagnostics["provider_code"]:
-                message += f"; provider_code={diagnostics['provider_code']}"
-            if diagnostics["retry_after_seconds"] is not None:
-                message += f"; retry_after_seconds={diagnostics['retry_after_seconds']}"
-            if diagnostics["limit_source"]:
-                message += f"; limit_source={diagnostics['limit_source']}"
-            if diagnostics["rate_limit_remaining"] is not None:
-                message += f"; rate_limit_remaining={diagnostics['rate_limit_remaining']}"
-            if diagnostics["rate_limit_limit"] is not None:
-                message += f"; rate_limit_limit={diagnostics['rate_limit_limit']}"
-            if diagnostics["rate_limit_reset"] is not None:
-                message += f"; rate_limit_reset={diagnostics['rate_limit_reset']}"
-            raise ProviderHTTPError(
-                message,
-                context=context,
-                status_code=exc.code,
-                provider_code=diagnostics["provider_code"],
-                failure_reason=diagnostics["failure_reason"],
-                retry_after_seconds=diagnostics["retry_after_seconds"],
-                rate_limit_limit=diagnostics["rate_limit_limit"],
-                rate_limit_remaining=diagnostics["rate_limit_remaining"],
-                rate_limit_reset=diagnostics["rate_limit_reset"],
-                limit_source=diagnostics["limit_source"],
-            ) from None
+            raise _handle_nvidia_http_error(exc, context) from None
         except (TimeoutError, socket.timeout) as exc:
             raise ProviderTimeoutError(
                 "NVIDIA inference request timed out",
                 context=context,
             ) from None
         except InternetPolicyError as exc:
+            # InternetGateway wraps HTTPError as InternetPolicyError to keep its
+            # generic network boundary stable. Preserve the original HTTP status
+            # here so NVIDIA 401/403/429 failures remain diagnostically useful.
+            cause = exc.__cause__
+            if isinstance(cause, urllib.error.HTTPError):
+                raise _handle_nvidia_http_error(cause, context) from None
             raise ProviderTransportError(
                 "NVIDIA inference transport failed",
                 context=context,
@@ -226,6 +191,54 @@ class NVIDIAAPIProvider:
             usage=usage,
             telemetry=telemetry,
         )
+
+
+def _handle_nvidia_http_error(
+    exc: urllib.error.HTTPError,
+    context: ProviderErrorContext,
+) -> ProviderHTTPError:
+    diagnostics = provider_http_diagnostics(exc)
+    if exc.code in {403, 429}:
+        report_failure("provider_http_403_429", RuntimeError(f"NVIDIA HTTP status {exc.code}"))
+    # Keep raw response bodies and headers out of logs/errors. Only normalized
+    # reason, provider code, and bounded retry metadata are exposed.
+    message = f"NVIDIA HTTP request failed with status {exc.code}"
+    if exc.code == 401:
+        message += "; authentication rejected—verify NVIDIA_API_KEY configuration"
+    elif exc.code == 403:
+        message += (
+            "; access denied—verify API-key permissions, model entitlement, "
+            "and endpoint access in the NVIDIA account"
+        )
+    elif exc.code == 404:
+        message += "; endpoint or model not found—verify the configured model ID and endpoint"
+    elif exc.code == 429:
+        message += "; rate limit or quota reached—check account limits and retry policy"
+    message += f"; reason={diagnostics['failure_reason']}"
+    if diagnostics["provider_code"]:
+        message += f"; provider_code={diagnostics['provider_code']}"
+    if diagnostics["retry_after_seconds"] is not None:
+        message += f"; retry_after_seconds={diagnostics['retry_after_seconds']}"
+    if diagnostics["limit_source"]:
+        message += f"; limit_source={diagnostics['limit_source']}"
+    if diagnostics["rate_limit_remaining"] is not None:
+        message += f"; rate_limit_remaining={diagnostics['rate_limit_remaining']}"
+    if diagnostics["rate_limit_limit"] is not None:
+        message += f"; rate_limit_limit={diagnostics['rate_limit_limit']}"
+    if diagnostics["rate_limit_reset"] is not None:
+        message += f"; rate_limit_reset={diagnostics['rate_limit_reset']}"
+    return ProviderHTTPError(
+        message,
+        context=context,
+        status_code=exc.code,
+        provider_code=diagnostics["provider_code"],
+        failure_reason=diagnostics["failure_reason"],
+        retry_after_seconds=diagnostics["retry_after_seconds"],
+        rate_limit_limit=diagnostics["rate_limit_limit"],
+        rate_limit_remaining=diagnostics["rate_limit_remaining"],
+        rate_limit_reset=diagnostics["rate_limit_reset"],
+        limit_source=diagnostics["limit_source"],
+    )
 
 
 def _response_error(message: str, context: ProviderErrorContext) -> ProviderResponseError:
