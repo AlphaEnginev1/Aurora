@@ -142,14 +142,18 @@ class OpenAIAPIProvider:
         if not isinstance(raw, dict):
             raise ProviderResponseError("OpenAI response body must be a JSON object", context=context)
         try:
-            content = raw["choices"][0]["message"]["content"]
+            message = raw["choices"][0]["message"]
         except (KeyError, IndexError, TypeError):
             raise ProviderResponseError(
                 "OpenAI response did not contain choices[0].message.content",
                 context=context,
             ) from None
-        if not isinstance(content, str):
-            raise ProviderResponseError("OpenAI response content must be a string", context=context)
+        if not isinstance(message, dict):
+            raise ProviderResponseError(
+                "OpenAI response assistant message must be an object",
+                context=context,
+            )
+        content = _normalize_assistant_content(message, context)
         usage = _usage(raw.get("usage"), context)
         reported_model = _reported_model(raw.get("model"), context)
         duration_ms = int((time.monotonic() - started) * 1000)
@@ -177,6 +181,59 @@ class OpenAIAPIProvider:
             telemetry=telemetry,
         )
 
+
+
+def _normalize_assistant_content(
+    message: dict[str, object],
+    context: ProviderErrorContext,
+) -> str:
+    """Extract only recognized text/refusal content from an assistant message.
+
+    Most Chat Completions responses return a string. Some compatible endpoints
+    return typed text/refusal content parts; concatenate only those known shapes
+    and reject unknown objects rather than stringifying arbitrary provider data.
+    """
+    content = message.get("content")
+    if isinstance(content, str):
+        return content
+
+    if content is None:
+        refusal = message.get("refusal")
+        if isinstance(refusal, str) and refusal.strip():
+            return refusal
+        raise ProviderResponseError(
+            "OpenAI response content was empty or not textual",
+            context=context,
+        )
+
+    if isinstance(content, dict):
+        parts = [content]
+    elif isinstance(content, list) and content:
+        parts = content
+    else:
+        raise ProviderResponseError(
+            "OpenAI response content must be a string or recognized text parts",
+            context=context,
+        )
+
+    text_parts: list[str] = []
+    for part in parts:
+        if not isinstance(part, dict):
+            raise ProviderResponseError(
+                "OpenAI response content must be a string or recognized text parts",
+                context=context,
+            )
+        part_type = part.get("type")
+        if isinstance(part_type, str) and part_type in {"text", "output_text"} and isinstance(part.get("text"), str):
+            text_parts.append(part["text"])
+        elif part_type == "refusal" and isinstance(part.get("refusal"), str):
+            text_parts.append(part["refusal"])
+        else:
+            raise ProviderResponseError(
+                "OpenAI response content must be a string or recognized text parts",
+                context=context,
+            )
+    return "".join(text_parts)
 
 def _handle_http_error(
     exc: urllib.error.HTTPError,

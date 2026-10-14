@@ -278,3 +278,83 @@ def test_openrouter_adapter_fails_closed_before_chat_when_quota_preflight_fails(
     assert calls == []
     assert "SECRET-OPENROUTER" not in str(caught.value)
 
+
+
+@pytest.mark.parametrize(
+    ("message", "expected"),
+    [
+        (
+            {"content": [
+                {"type": "text", "text": "AURORA "},
+                {"type": "text", "text": "OPENROUTER_OK"},
+            ]},
+            "AURORA OPENROUTER_OK",
+        ),
+        (
+            {"content": [{"type": "output_text", "text": "AURORA OPENROUTER_OK"}]},
+            "AURORA OPENROUTER_OK",
+        ),
+        (
+            {"content": [{"type": "refusal", "refusal": "I cannot help with that request."}]},
+            "I cannot help with that request.",
+        ),
+        (
+            {"content": None, "refusal": "This request cannot be completed."},
+            "This request cannot be completed.",
+        ),
+    ],
+)
+def test_openai_adapter_normalizes_recognized_text_content_parts(
+    monkeypatch, message, expected,
+):
+    def fake_urlopen(_request, timeout):
+        assert timeout > 0
+        return _Response({
+            "model": "served-test-model",
+            "choices": [{"message": message}],
+            "usage": {"prompt_tokens": 2, "completion_tokens": 3, "total_tokens": 5},
+        })
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    provider = OpenAIAPIProvider(
+        ModelSpec("gpt-test", "openai", "https://api.openai.test/v1"),
+        api_key="SECRET-OPENAI",
+    )
+    response = provider.generate(
+        InferenceRequest(messages=[{"role": "user", "content": "test"}]),
+        selected_model="gpt-test",
+        execution_id="exec-content-normalization",
+    )
+
+    assert response.content == expected
+    assert response.usage.total_tokens == 5
+    assert "SECRET-OPENAI" not in str(response)
+
+
+def test_openai_adapter_rejects_unknown_content_parts_without_stringifying_them(monkeypatch):
+    private_body = "PRIVATE-UPSTREAM-CONTENT-MUST-NOT-LEAK"
+    payload = {
+        "model": "served-test-model",
+        "choices": [{
+            "message": {
+                "content": [{"type": "unknown", "data": private_body}],
+            },
+        }],
+    }
+
+    monkeypatch.setattr(
+        "urllib.request.urlopen",
+        lambda _request, timeout: _Response(payload),
+    )
+    provider = OpenAIAPIProvider(
+        ModelSpec("gpt-test", "openai", "https://api.openai.test/v1"),
+        api_key="SECRET-OPENAI",
+    )
+
+    with pytest.raises(ProviderResponseError, match="recognized text parts") as caught:
+        provider.generate(
+            InferenceRequest(messages=[{"role": "user", "content": "test"}]),
+        )
+
+    assert private_body not in str(caught.value)
+    assert "SECRET-OPENAI" not in str(caught.value)
