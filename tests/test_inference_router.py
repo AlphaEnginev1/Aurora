@@ -312,3 +312,72 @@ def test_router_exposes_only_live_inference_executions_and_clears_them():
     assert len(outcomes) == 1
     assert isinstance(outcomes[0], InferenceResponse)
     assert router.active_executions() == ()
+
+def test_router_skips_same_provider_reserves_after_global_authorization_denial():
+    from aurora.inference.errors import ProviderErrorContext, ProviderHTTPError
+    from aurora.inference.models import InferenceResponse
+    from aurora.inference.providers.registry import ProviderRegistry, ProviderSpec
+
+    attempts = []
+
+    class FakeProvider:
+        def __init__(self, provider_id):
+            self.provider_id = provider_id
+
+        def generate(self, request, *, selected_model=None, execution_id=""):
+            attempts.append((self.provider_id, selected_model))
+            if selected_model == "nvidia/model-a":
+                raise ProviderHTTPError(
+                    "NVIDIA HTTP request failed with status 403; provider_code=authorization_failed",
+                    context=ProviderErrorContext(
+                        provider="nvidia_api",
+                        request_id=request.request_id,
+                        execution_id=execution_id,
+                        selected_model=selected_model,
+                        provider_model=selected_model,
+                    ),
+                    status_code=403,
+                    provider_code="authorization_failed",
+                    failure_reason="access_denied_or_model_entitlement",
+                )
+            return InferenceResponse(
+                model=selected_model,
+                provider=self.provider_id,
+                content="AURORA CROSS-PROVIDER FAILOVER OK",
+                raw={},
+                request_id=request.request_id,
+                execution_id=execution_id,
+                requested_model=request.model,
+                selected_model=selected_model,
+                provider_model=selected_model,
+            )
+
+    registry = ProviderRegistry((
+        ProviderSpec("nvidia_api", "NVIDIA", ("chat", "reasoning"), True, lambda _model: FakeProvider("nvidia_api")),
+        ProviderSpec("openrouter", "OpenRouter", ("chat", "reasoning"), True, lambda _model: FakeProvider("openrouter")),
+    ))
+    models = [
+        ModelSpec("nvidia/model-a", "nvidia_api", "https://integrate.api.nvidia.com/v1",
+                  capabilities=("reasoning",), quality_score=0.99, pricing_tier="free"),
+        ModelSpec("nvidia/model-b", "nvidia_api", "https://integrate.api.nvidia.com/v1",
+                  capabilities=("reasoning",), quality_score=0.95, pricing_tier="free"),
+        ModelSpec("openrouter/free", "openrouter", "https://openrouter.ai/api/v1",
+                  capabilities=("reasoning",), quality_score=0.90, pricing_tier="free"),
+    ]
+    router = ModelRouter(models, provider_registry=registry, cost_policy="free_only")
+    response = router.generate(
+        InferenceRequest(
+            messages=[{"role": "user", "content": "test"}],
+            metadata={"allowed_models": ["nvidia/model-a", "nvidia/model-b", "openrouter/free"]},
+        ),
+        capability="reasoning",
+        preferred_models=("nvidia/model-a", "nvidia/model-b", "openrouter/free"),
+    )
+
+    assert response.provider == "openrouter"
+    assert response.model == "openrouter/free"
+    assert attempts == [
+        ("nvidia_api", "nvidia/model-a"),
+        ("openrouter", "openrouter/free"),
+    ]
+

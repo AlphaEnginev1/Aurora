@@ -56,23 +56,31 @@ def test_openai_adapter_preserves_identity_usage_and_request_shape(monkeypatch):
 
 
 def test_openrouter_adapter_uses_openrouter_identity_and_endpoint(monkeypatch):
+    from types import SimpleNamespace
+    from aurora.inference.providers import openai_api as openai_api_module
     captured = {}
 
-    def fake_urlopen(request, timeout):
-        captured["url"] = request.full_url
-        captured["headers"] = dict(request.headers)
-        captured["body"] = json.loads(request.data)
-        return _Response({
-            "model": "nvidia/nemotron-3-super:free",
-            "choices": [{"message": {"content": "OpenRouter is connected."}}],
-            "usage": {"prompt_tokens": 3, "completion_tokens": 5, "total_tokens": 8},
-        })
+    class FakeGateway:
+        def request_with_metadata(self, url, *, method="GET", headers=None, body=None):
+            captured["url"] = url
+            captured["headers"] = dict(headers or {})
+            captured["body"] = json.loads(body)
+            return SimpleNamespace(body=json.dumps({
+                "model": "nvidia/nemotron-3-super:free",
+                "choices": [{"message": {"content": "OpenRouter is connected."}}],
+                "usage": {"prompt_tokens": 3, "completion_tokens": 5, "total_tokens": 8},
+            }).encode("utf-8"))
 
-    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr(
+        openai_api_module,
+        "read_openrouter_free_quota",
+        lambda api_key, gateway: {"used": 2, "limit": 50, "remaining": 48, "is_free_tier": True},
+    )
     provider = OpenAIAPIProvider(
         ModelSpec("openrouter/free", "openrouter", "https://openrouter.ai/api/v1", pricing_tier="free"),
         api_key="SECRET-OPENROUTER",
         provider_id="openrouter",
+        gateway=FakeGateway(),
     )
     response = provider.generate(
         InferenceRequest(messages=[{"role": "user", "content": "Confirm connection."}]),
@@ -176,6 +184,13 @@ def test_anthropic_http_failure_is_typed(monkeypatch):
 
 def test_openrouter_http_diagnostics_classify_free_limit_without_leaking_body(monkeypatch):
     import io
+    from aurora.inference.providers import openai_api as openai_api_module
+
+    monkeypatch.setattr(
+        openai_api_module,
+        "read_openrouter_free_quota",
+        lambda api_key, gateway: {"used": 4, "limit": 50, "remaining": 46, "is_free_tier": True},
+    )
 
     private_body = "account-private-marker-must-not-escape"
     error_body = json.dumps({
@@ -197,10 +212,10 @@ def test_openrouter_http_diagnostics_classify_free_limit_without_leaking_body(mo
         },
         io.BytesIO(error_body),
     )
-    monkeypatch.setattr(
-        "urllib.request.urlopen",
-        lambda request, timeout: (_ for _ in ()).throw(error),
-    )
+    class FakeGateway:
+        def request_with_metadata(self, url, *, method="GET", headers=None, body=None):
+            raise error
+
     provider = OpenAIAPIProvider(
         ModelSpec(
             "openrouter/free",
@@ -210,6 +225,7 @@ def test_openrouter_http_diagnostics_classify_free_limit_without_leaking_body(mo
         ),
         api_key="SECRET-OPENROUTER",
         provider_id="openrouter",
+        gateway=FakeGateway(),
     )
 
     with pytest.raises(ProviderHTTPError) as caught:
@@ -229,3 +245,36 @@ def test_openrouter_http_diagnostics_classify_free_limit_without_leaking_body(mo
     assert caught.value.retryable is True
     assert private_body not in str(caught.value)
     assert "SECRET-OPENROUTER" not in str(caught.value)
+
+def test_openrouter_adapter_fails_closed_before_chat_when_quota_preflight_fails(monkeypatch):
+    from aurora.inference.errors import ProviderConfigurationError
+    from aurora.inference.providers import openai_api as openai_api_module
+    from aurora.inference.providers.openrouter_quota import OpenRouterQuotaError
+
+    calls = []
+
+    class FakeGateway:
+        def request_with_metadata(self, url, *, method="GET", headers=None, body=None):
+            calls.append((url, method))
+            raise AssertionError("chat request must not happen after quota rejection")
+
+    monkeypatch.setattr(
+        openai_api_module,
+        "read_openrouter_free_quota",
+        lambda api_key, gateway: (_ for _ in ()).throw(
+            OpenRouterQuotaError("OpenRouter free-model daily allowance exhausted")
+        ),
+    )
+    provider = OpenAIAPIProvider(
+        ModelSpec("openrouter/free", "openrouter", "https://openrouter.ai/api/v1", pricing_tier="free"),
+        api_key="SECRET-OPENROUTER",
+        provider_id="openrouter",
+        gateway=FakeGateway(),
+    )
+
+    with pytest.raises(ProviderConfigurationError, match="allowance exhausted") as caught:
+        provider.generate(InferenceRequest(messages=[{"role": "user", "content": "hello"}]))
+
+    assert calls == []
+    assert "SECRET-OPENROUTER" not in str(caught.value)
+

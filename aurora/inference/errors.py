@@ -109,6 +109,13 @@ def provider_http_diagnostics(error: Any) -> dict[str, Any]:
         or payload_error.get("type")
         or payload_error.get("code")
     )
+    # NVIDIA's hosted inference endpoint has returned RFC 7807-style bodies such
+    # as {"status":403,"title":"Forbidden","detail":"Authorization failed"}.
+    # Normalize only this exact, known message. Never forward arbitrary detail text.
+    if raw_code is None and status == 403 and isinstance(payload, dict):
+        top_level_detail = payload.get("detail")
+        if isinstance(top_level_detail, str) and top_level_detail.strip().casefold() == "authorization failed":
+            raw_code = "authorization_failed"
     provider_code = None
     if isinstance(raw_code, (str, int)) and not isinstance(raw_code, bool):
         candidate = str(raw_code).strip()

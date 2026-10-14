@@ -528,10 +528,23 @@ class ModelRouter:
                 finally:
                     self._end_active_execution(execution_id)
 
+            # A model-specific 403 should still try other candidates. A normalized
+            # provider-level "authorization_failed" response means that retrying
+            # more model IDs at the same provider is unlikely to help. Filter that
+            # provider's remaining candidates and allow a configured alternative
+            # provider (such as OpenRouter's free route) to be considered.
+            provider_wide_authorization_denial = (
+                attempt_status_code == 403
+                and getattr(last_error, "provider_code", None) == "authorization_failed"
+            )
             remaining = [
                 model_id
                 for model_id, _score in decision.candidates
                 if model_id not in tried
+                and not (
+                    provider_wide_authorization_denial
+                    and self._model_by_id(model_id).provider == spec.provider
+                )
             ]
             if not remaining:
                 logger.warning(

@@ -31,6 +31,7 @@ from ..models import (
     new_execution_id,
 )
 from ..multimodal import MultimodalContentError, openai_messages
+from .openrouter_quota import OpenRouterQuotaError, read_openrouter_free_quota
 
 
 class OpenAIAPIProvider:
@@ -76,6 +77,22 @@ class OpenAIAPIProvider:
         )
         if not self.health():
             raise ProviderConfigurationError("OpenAI provider is not configured", context=context)
+        if self.provider_id == "openrouter":
+            # All OpenRouter generations, including automatic model-router
+            # failover, must prove positive free quota before a chat request.
+            # Catalog/model-list success is not a quota or inference signal.
+            if self.gateway is None:
+                raise ProviderConfigurationError(
+                    "OpenRouter inference requires Aurora's controlled InternetGateway quota preflight",
+                    context=context,
+                )
+            try:
+                read_openrouter_free_quota(self.api_key, gateway=self.gateway)
+            except OpenRouterQuotaError as exc:
+                raise ProviderConfigurationError(
+                    f"OpenRouter free inference is blocked by quota preflight: {exc}",
+                    context=context,
+                ) from None
         try:
             messages = openai_messages(request.messages, allowed_modalities=frozenset({"text", "image"}))
         except MultimodalContentError as exc:

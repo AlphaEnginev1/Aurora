@@ -77,8 +77,16 @@ from .task_worker import WorkerPolicy
 def build_orchestration_engine(policy_path: str | Path) -> OrchestrationEngine:
     nvidia_key = os.getenv("NVIDIA_API_KEY")
     openrouter_key = os.getenv("OPENROUTER_API_KEY", "").strip()
+    policy_file = Path(policy_path).resolve()
+    network_policy_file = policy_file.with_name("network-policy.json")
+    network_gateway = (
+        InternetGateway(InternetPolicy.from_file(network_policy_file))
+        if network_policy_file.is_file()
+        else None
+    )
     provider_registry = default_provider_registry(
         nvidia_api_key=nvidia_key,
+        network_gateway=network_gateway,
         openrouter_api_key=openrouter_key or None,
         include_openrouter=bool(openrouter_key),
     )
