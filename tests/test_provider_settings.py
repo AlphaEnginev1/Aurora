@@ -1,4 +1,5 @@
 from pathlib import Path
+from types import SimpleNamespace
 
 from aurora.dashboard.provider_settings import ProviderSettingsService
 from aurora.inference.models import ModelSpec
@@ -130,3 +131,31 @@ def test_local_nvidia_model_setting_can_be_restored_on_startup(tmp_path: Path):
     restored = r.model_registry.resolve("poolside/laguna-xs-2.1")
     assert restored.enabled is True
     assert restored.provider == "nvidia_api"
+
+
+
+def test_save_and_apply_preserves_canonical_nvidia_network_gateway(tmp_path: Path):
+    runtime = Runtime(router(tmp_path))
+    gateway = object()
+    runtime.workbench = SimpleNamespace(gateway=gateway)
+    store = OperatorSettingsStore(tmp_path / "operator-settings.json")
+    store.save({
+        "providers": {"nvidia_api": {"api_key": "existing-nvidia-key"}},
+    })
+    service = ProviderSettingsService(store, runtime)
+
+    service.save_and_apply({
+        "director": {
+            "provider": "nvidia_api",
+            "model": "nvidia/nemotron-3-ultra-550b-a55b",
+            "endpoint": "https://integrate.api.nvidia.com/v1",
+        },
+    })
+
+    selected = runtime.director.planner.router.model_registry.resolve(
+        "nvidia/nemotron-3-ultra-550b-a55b"
+    )
+    provider = runtime.director.planner.router.provider_registry.create(selected)
+
+    assert provider.gateway is gateway
+    assert provider.api_key == "existing-nvidia-key"
