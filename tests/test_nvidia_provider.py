@@ -10,6 +10,7 @@ from aurora.inference.errors import (
     ProviderTimeoutError,
     ProviderTransportError,
 )
+from aurora.autonomy.internet import InternetPolicyError
 from aurora.inference.models import InferenceRequest, ModelSpec
 from aurora.inference.providers.nvidia_api import NVIDIAAPIProvider
 
@@ -240,3 +241,31 @@ def test_nvidia_provider_uses_network_gateway_when_bound():
     assert gateway.calls
     assert gateway.calls[0][0].endswith("/chat/completions")
     assert gateway.calls[0][1] == "POST"
+
+def test_gateway_wrapped_http_error_keeps_safe_http_diagnostics():
+    http_error = urllib.error.HTTPError(
+        "https://example.invalid/v1/chat/completions",
+        403,
+        "forbidden",
+        {},
+        None,
+    )
+
+    class FailingGateway:
+        def request_with_metadata(self, url, *, method="GET", headers=None, body=None):
+            try:
+                raise http_error
+            except urllib.error.HTTPError as exc:
+                raise InternetPolicyError(f"network request failed: {exc}") from exc
+
+    provider = _provider()
+    provider.gateway = FailingGateway()
+
+    with pytest.raises(ProviderHTTPError) as caught:
+        provider.generate(InferenceRequest(messages=[]), execution_id="exec-gateway-forbidden")
+
+    assert caught.value.status_code == 403
+    assert "access denied" in str(caught.value)
+    assert "model entitlement" in str(caught.value)
+    assert "SECRET-NVIDIA-KEY" not in str(caught.value)
+
