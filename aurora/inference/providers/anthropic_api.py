@@ -8,6 +8,8 @@ import socket
 import time
 import urllib.error
 import urllib.request
+
+from aurora.autonomy.internet import InternetPolicyError
 from typing import Any
 
 from ..audit import now_utc
@@ -41,11 +43,13 @@ class AnthropicAPIProvider:
         api_key: str | None = None,
         timeout: float = 60.0,
         api_version: str = "2023-06-01",
+        gateway=None,
     ) -> None:
         self.spec = spec
         self.api_key = api_key or os.getenv("ANTHROPIC_API_KEY")
         self.timeout = timeout
         self.api_version = api_version
+        self.gateway = gateway
 
     def health(self) -> bool:
         return bool(self.spec.enabled and self.spec.endpoint and self.api_key)
@@ -91,26 +95,38 @@ class AnthropicAPIProvider:
         if request.temperature is not None:
             payload["temperature"] = request.temperature
 
-        req = urllib.request.Request(
-            self.spec.endpoint.rstrip("/") + "/messages",
-            data=json.dumps(payload).encode("utf-8"),
-            method="POST",
-            headers={
-                "x-api-key": self.api_key,
-                "anthropic-version": self.api_version,
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-            },
-        )
+        url = self.spec.endpoint.rstrip("/") + "/messages"
+        headers = {
+            "x-api-key": self.api_key,
+            "anthropic-version": self.api_version,
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        }
+        body = json.dumps(payload).encode("utf-8")
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as response:
-                raw = json.loads(response.read().decode("utf-8"))
+            if self.gateway is not None:
+                response = self.gateway.request_with_metadata(url, method="POST", headers=headers, body=body)
+                response_body = response.body
+            else:
+                req = urllib.request.Request(url, data=body, method="POST", headers=headers)
+                with urllib.request.urlopen(req, timeout=self.timeout) as response:
+                    response_body = response.read()
+            raw = json.loads(response_body.decode("utf-8"))
         except urllib.error.HTTPError as exc:
             raise ProviderHTTPError(
                 f"Anthropic HTTP request failed with status {exc.code}",
                 context=context,
                 status_code=exc.code,
             ) from None
+        except InternetPolicyError as exc:
+            cause = exc.__cause__
+            if isinstance(cause, urllib.error.HTTPError):
+                raise ProviderHTTPError(
+                    f"Anthropic HTTP request failed with status {cause.code}",
+                    context=context,
+                    status_code=cause.code,
+                ) from None
+            raise ProviderTransportError("Anthropic inference transport failed", context=context) from None
         except (TimeoutError, socket.timeout):
             raise ProviderTimeoutError("Anthropic inference request timed out", context=context) from None
         except urllib.error.URLError:
