@@ -509,13 +509,25 @@ class ProviderSettingsService:
                     f"{provider_id} live inference transport failed; verify DNS, TLS, proxy and network policy"
                 ) from None
             if provider_id == "openrouter" and isinstance(exc, ProviderResponseError):
-                # ProviderResponseError messages are adapter-authored diagnostics,
-                # not upstream response bodies. Preserve this safe parser diagnosis
-                # so a malformed/unexpected response can be distinguished from quota
-                # or connectivity failures without leaking response payloads.
+                # Allowlist static adapter diagnostics. Never relay arbitrary exception
+                # text, since malformed upstream data must not leak through this boundary.
+                safe_diagnostics = {
+                    "OpenAI inference response was not valid JSON": "response was not valid JSON",
+                    "OpenAI response body must be a JSON object": "response was not a JSON object",
+                    "OpenAI response did not contain choices[0].message.content": (
+                        "response did not contain choices[0].message.content"
+                    ),
+                    "OpenAI response content must be a string": "message content was not a string",
+                    "OpenAI response usage must be an object": "usage metadata was not an object",
+                    "OpenAI response model must be a non-empty string": "reported model field was invalid",
+                }
+                diagnostic = safe_diagnostics.get(
+                    str(exc),
+                    "response did not match Aurora's expected chat-completions schema",
+                )
                 raise DashboardProviderSettingsError(
-                    f"{provider_id} live inference returned an unexpected response: {exc}; "
-                    "credential value and provider response body were omitted"
+                    f"{provider_id} live inference returned an unexpected response "
+                    f"({diagnostic}); credential value and provider response body were omitted"
                 ) from None
             raise DashboardProviderSettingsError(
                 f"{provider_id} live inference failed ({type(exc).__name__}); credential value and provider response body were omitted"
