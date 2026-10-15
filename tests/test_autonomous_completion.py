@@ -21,6 +21,21 @@ def test_software_engineer_reaches_publish():
     assert result.status=="succeeded"
     assert phases==["inspect","research","plan","edit","test","verify","publish"]
 
+def test_software_engineer_stops_immediately_on_blocked_edit():
+    phases = []
+
+    def execute(phase, state):
+        phases.append(phase)
+        return {"last_phase": phase}
+
+    result = AutonomousSoftwareEngineer(
+        execute=execute,
+        evaluate=lambda state: "blocked" if state["last_phase"] == "edit" else "continue",
+    ).run("fix project")
+
+    assert result.status == "blocked"
+    assert phases == ["inspect", "research", "plan", "edit"]
+
 def test_discovery_loop_does_not_treat_supported_as_verified():
     learned = []
     loop = DiscoveryLoop(
