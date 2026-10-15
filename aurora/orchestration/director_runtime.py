@@ -1454,20 +1454,43 @@ class DirectorRuntime:
         stored = self.store.get(mission_id, cycle.task_id)
         if stored is None:
             return
-        result = stored.result or {}
         if cycle.action in {"failed", "retried"}:
             self._adapt_team_after_runtime_signal(mission_id, stored.task.task_id)
+
+        # A different slot may already have claimed a retry and advanced the
+        # durable row before this cycle is projected. Always use the immutable
+        # attempt snapshot carried by WorkerCycle, never a later read of that row.
+        result = (
+            dict(cycle.result_payload)
+            if cycle.result_payload is not None
+            else dict(stored.result or {})
+        )
+        status_value = getattr(cycle.task_status, "value", cycle.task_status)
+        projected_status = str(status_value or stored.status)
+        projected_attempt = cycle.attempt if cycle.attempt is not None else stored.attempts
+        projected_error = cycle.error if cycle.error is not None else stored.last_error
+
+        # A retry is not the task's authoritative result. Keeping its snapshot
+        # in a separate kind prevents task_result_task_ids() from suppressing a
+        # later terminal result for this same task ID.
+        projection_kind = "task_attempt" if cycle.action == "retried" else "task_result"
         try:
             self.memory.append(
                 mission_id=mission_id,
                 source=f"worker:{self.worker_id}",
-                kind="task_result",
-                content=self._result_text(stored.task.task_id, stored.status, result, stored.last_error),
+                kind=projection_kind,
+                content=self._result_text(
+                    stored.task.task_id,
+                    projected_status,
+                    result,
+                    projected_error,
+                ),
                 metadata={
                     "task_id": stored.task.task_id,
-                    "attempt": stored.attempts,
-                    "status": stored.status,
+                    "attempt": projected_attempt,
+                    "status": projected_status,
                     "action": cycle.action,
+                    **({"error": projected_error} if projected_error else {}),
                 },
                 task_id=stored.task.task_id,
             )
