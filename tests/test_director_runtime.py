@@ -833,6 +833,9 @@ def test_retry_attempt_does_not_mask_the_final_task_result_in_shared_memory(tmp_
     assert len(collect_attempts) == 1
     assert collect_attempts[0].metadata["action"] == "retried"
     assert collect_attempts[0].metadata["attempt"] == 1
+    assert collect_attempts[0].metadata["status"] == "failed"
+    assert collect_attempts[0].metadata["error"] == "controlled transient failure"
+    assert "controlled transient failure" in collect_attempts[0].content
     assert len(collect_results) == 1
     assert collect_results[0].metadata["action"] == "succeeded"
     assert collect_results[0].metadata["status"] == "succeeded"
