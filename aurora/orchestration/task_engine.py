@@ -90,8 +90,9 @@ def research_learning_is_authorized(result: DelegatedTaskResult) -> bool:
     Only the dedicated research result carrying verified knowledge artifacts
     may cross the research learning boundary.
     """
-    capability = str(result.task.capability or "").strip().lower()
-    capability_result = result.capability_result
+    task = getattr(result, "task", None)
+    capability = str(getattr(task, "capability", "") or "").strip().lower()
+    capability_result = getattr(result, "capability_result", None)
 
     if capability.startswith("workbench:research:"):
         # These Workbench operations return discovery/retrieval/extraction
@@ -104,9 +105,17 @@ def research_learning_is_authorized(result: DelegatedTaskResult) -> bool:
         )
     if isinstance(capability_result, ResearchTaskResult):
         return capability_result.learning_authorized
+    trusted_artifact_ids = tuple(
+        getattr(result, "trusted_research_artifact_ids", ()) or ()
+    )
+    research_trust_state = getattr(
+        result,
+        "research_trust_state",
+        EvidenceState.INSUFFICIENT,
+    )
     if (
-        result.trusted_research_artifact_ids
-        and result.research_trust_state is not EvidenceState.VERIFIED
+        trusted_artifact_ids
+        and research_trust_state is not EvidenceState.VERIFIED
     ):
         return False
     return True
