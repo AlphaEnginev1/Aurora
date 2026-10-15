@@ -74,11 +74,14 @@ class DiscoveryLoop:
             )
             if verdict == "falsified":
                 continue
-            if verdict in {"verified", "supported"} and novelty_state in {"novel", "new"}:
+            if verdict == "verified" and novelty_state in {"novel", "new"}:
                 artifact = self.learn(hypothesis, falsification)
+                # A positive model verdict is not a persisted learning result.
+                # Do not report discovery unless the learning boundary returns
+                # a durable artifact identifier.
                 if artifact:
                     knowledge.append(artifact)
-                return DiscoveryResult("discovered", tuple(cycles), tuple(knowledge))
+                    return DiscoveryResult("discovered", tuple(cycles), tuple(knowledge))
             if verdict in {"blocked", "insufficient"}:
                 continue
         return DiscoveryResult("insufficient", tuple(cycles), tuple(knowledge))

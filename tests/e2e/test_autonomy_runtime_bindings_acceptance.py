@@ -6,8 +6,12 @@ calls, external research calls, workstation mutations, or GitHub writes.
 """
 from __future__ import annotations
 
+import hashlib
+import json
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
+from uuid import uuid4
 
 
 def _build_runtime(tmp_path: Path, monkeypatch):
@@ -47,6 +51,9 @@ def test_joint_autonomy_controller_acceptance_uses_canonical_runtime_services(
     assert runtime.recursive_self_improvement is controllers["recursive_self_improvement"]
     assert controllers["learning_store"] is runtime.skill_learning
 
+    from aurora.research.learning import ResearchLearningGate
+    from aurora.research.models import SourceRecord
+
     workbench = runtime.workbench
     router = runtime.director.planner.router
     director_planner = runtime.director.planner
@@ -74,10 +81,14 @@ def test_joint_autonomy_controller_acceptance_uses_canonical_runtime_services(
         prompt = request.messages[-1]["content"]
         if "Choose at most one safe next action" in prompt:
             content = '{"action":{"objective":"controlled acceptance","action":"observe"}}'
-        elif "State one testable hypothesis" in prompt:
-            content = "A controlled testable hypothesis"
-        elif "Evaluate whether the hypothesis" in prompt:
-            content = '{"verdict":"supported","evidence":["source-a","source-b"]}'
+        elif "Choose one candidate claim by its exact claim_id" in prompt:
+            payload = json.loads(prompt.split("\n", 1)[1])
+            content = json.dumps({"claim_id": payload["candidates"][0]["claim_id"]})
+        elif "Classify whether this independent source provides support" in prompt:
+            content = json.dumps({
+                "relation": "support",
+                "evidence_text": "Aurora stores durable research source artifacts.",
+            })
         elif "Classify whether the claim is novel" in prompt:
             content = "novel"
         else:
@@ -96,22 +107,34 @@ def test_joint_autonomy_controller_acceptance_uses_canonical_runtime_services(
 
     def discover(request):
         research_calls.append(("discover", request.objective))
-        return ("https://research.example/a", "https://research.example/b")
+        return (
+            "https://research.example/a",
+            "https://research.example/b",
+            "https://research.example/c",
+        )
 
     def retrieve(request):
-        research_calls.append(("retrieve", request.objective))
-        return (
-            SimpleNamespace(
-                url="https://research.example/a",
-                source_id="source-a",
-                content_text="Controlled evidence A",
-            ),
-            SimpleNamespace(
-                url="https://research.example/b",
-                source_id="source-b",
-                content_text="Controlled evidence B",
-            ),
-        )
+        research_calls.append(("retrieve", request.objective, request.required_sources))
+        sources = []
+        for url in request.required_sources:
+            body = (
+                "Aurora stores durable research source artifacts. "
+                "Each source preserves a stable provenance record."
+            ).encode("utf-8")
+            source = SourceRecord(
+                source_id=f"controlled-source-{uuid4().hex}",
+                url=url,
+                retrieved_at=datetime.now(timezone.utc).isoformat(),
+                content_sha256=hashlib.sha256(body).hexdigest(),
+                status_code=200,
+                content_type="text/plain",
+                content_text=body.decode("utf-8"),
+                final_url=url,
+            )
+            research_service.store.record_source(source)
+            sources.append(source)
+        return tuple(sources)
+
 
     # Stub only the external side-effect seams on the canonical service objects.
     # No live provider, real workstation operation, internet search, or code
@@ -144,10 +167,17 @@ def test_joint_autonomy_controller_acceptance_uses_canonical_runtime_services(
         "test one controlled research hypothesis"
     )
     assert discovery_result.status == "discovered"
-    assert discovery_result.knowledge == (
-        "research-evidence:source-a,source-b",
-    )
-    assert [call[0] for call in research_calls] == ["discover", "retrieve"]
+    assert len(discovery_result.knowledge) == 1
+    artifact_id = discovery_result.knowledge[0]
+    artifact = research_service.store.knowledge_artifact(artifact_id)
+    assert artifact is not None
+    assert artifact_id.startswith("kart-")
+    assert artifact.state.value == "verified"
+    assert len(artifact.evidence_ids) >= 2
+    signal = ResearchLearningGate(research_service.store).authorize((artifact_id,))
+    assert signal.artifact_ids == (artifact_id,)
+    assert len(research_service.store.citation_edges(artifact_id)) >= 5
+    assert [call[0] for call in research_calls] == ["discover", "retrieve", "retrieve"]
 
     # RSI may not claim success merely because Director phases completed: absent
     # explicit CI and change evidence it must remain fail-closed.

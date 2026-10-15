@@ -21,16 +21,47 @@ def test_software_engineer_reaches_publish():
     assert result.status=="succeeded"
     assert phases==["inspect","research","plan","edit","test","verify","publish"]
 
-def test_discovery_loop_requires_verified_novel_result():
-    learned=[]
-    loop=DiscoveryLoop(
-        investigate=lambda h:{"sources":["s1"]},
-        hypothesize=lambda h,e:h+" improved",
-        falsify=lambda h,e:{"verdict":"supported","evidence":["e1"]},
-        novelty=lambda h,e:"novel",
-        learn=lambda h,e:learned.append(h) or "ka-1")
-    result=loop.run("hypothesis")
-    assert result.status=="discovered" and learned
+def test_discovery_loop_does_not_treat_supported_as_verified():
+    learned = []
+    loop = DiscoveryLoop(
+        investigate=lambda h: {"sources": ["s1"]},
+        hypothesize=lambda h, e: h + " improved",
+        falsify=lambda h, e: {"verdict": "supported", "evidence": ["e1"]},
+        novelty=lambda h, e: "novel",
+        learn=lambda h, e: learned.append(h) or "kart-1",
+    )
+    result = loop.run("hypothesis")
+    assert result.status == "insufficient"
+    assert result.knowledge == ()
+    assert not learned
+
+
+def test_discovery_loop_requires_a_durable_artifact_even_after_verification():
+    loop = DiscoveryLoop(
+        investigate=lambda h: {"sources": ["s1"]},
+        hypothesize=lambda h, e: h + " improved",
+        falsify=lambda h, e: {"verdict": "verified", "evidence": ["ev-a", "ev-b"]},
+        novelty=lambda h, e: "novel",
+        learn=lambda h, e: None,
+        max_cycles=1,
+    )
+    result = loop.run("hypothesis")
+    assert result.status == "insufficient"
+    assert result.knowledge == ()
+
+
+def test_discovery_loop_accepts_verified_result_with_durable_artifact():
+    loop = DiscoveryLoop(
+        investigate=lambda h: {"sources": ["s1", "s2", "s3"]},
+        hypothesize=lambda h, e: h + " improved",
+        falsify=lambda h, e: {"verdict": "verified", "evidence": ["ev-a", "ev-b"]},
+        novelty=lambda h, e: "novel",
+        learn=lambda h, e: "kart-verified-1",
+        max_cycles=1,
+    )
+    result = loop.run("hypothesis")
+    assert result.status == "discovered"
+    assert result.knowledge == ("kart-verified-1",)
 
 def test_mission_manager_delegates_to_existing_runtime():
     class Submission: mission_id="m-1"

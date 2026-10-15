@@ -97,11 +97,13 @@ def test_software_engineer_delegates_each_phase_to_existing_director_service():
     assert all("Autonomous engineering controller phase" in item["objective"] for item in director.calls)
 
 
-def test_discovery_loop_uses_persisted_research_sources_and_returns_evidence_ids():
+def test_discovery_loop_does_not_promote_two_sources_to_trusted_knowledge():
     controllers, _, _, _ = build()
     result = controllers["discovery_loop"].run("test a research hypothesis")
-    assert result.status == "discovered"
-    assert result.knowledge == ("research-evidence:src-1,src-2",)
+    # Two sources are insufficient: a candidate source plus two independent
+    # source observations are required, and a model verdict is not an artifact.
+    assert result.status == "insufficient"
+    assert result.knowledge == ()
 
 
 def test_recursive_self_improvement_fails_closed_without_explicit_ci_evidence():
