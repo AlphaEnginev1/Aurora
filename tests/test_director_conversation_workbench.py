@@ -133,14 +133,25 @@ def test_conversation_can_use_shared_workbench_directly(tmp_path: Path):
         session_id=session.session_id,
         user_input="Comprueba directamente las notas del proyecto.",
     )
+    second_response = service.send_message(
+        session_id=session.session_id,
+        user_input="Comprueba directamente las notas del proyecto otra vez.",
+    )
 
     assert response.response_text.startswith("He comprobado")
-    assert len(workbench.requests) == 1
-    assert workbench.requests[0].capability == "workbench:file:read"
-    assert workbench.requests[0].actor == "director"
-    assert workbench.requests[0].mission_id.startswith("conversation:")
+    assert second_response.response_text.startswith("He comprobado")
+    assert len(workbench.requests) == 2
+    assert all(request.capability == "workbench:file:read" for request in workbench.requests)
+    assert all(request.actor == "director" for request in workbench.requests)
+    assert all(request.mission_id.startswith("conversation:") for request in workbench.requests)
+    first_turn_id = response.turn.turn_id.removesuffix("-response")
+    second_turn_id = second_response.turn.turn_id.removesuffix("-response")
+    assert workbench.requests[0].mission_id == f"conversation:{first_turn_id}:call-wb-1"
+    assert workbench.requests[1].mission_id == f"conversation:{second_turn_id}:call-wb-1"
+    assert workbench.requests[0].mission_id != workbench.requests[1].mission_id
     assert ("director_conversation", ("workbench",)) in provider.calls
-    assert ("director_conversation_result", ()) in provider.calls
+    assert provider.calls.count(("director_conversation", ("workbench",))) == 2
+    assert provider.calls.count(("director_conversation_result", ())) == 2
 
 
 def test_mission_evidence_includes_durable_identity_and_planning_metadata():
