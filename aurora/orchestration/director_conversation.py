@@ -821,6 +821,8 @@ Keep responses useful and concise unless the human asks for depth."""
                             correlation_id=correlation_id,
                             idempotency_key=(
                                 f"direct-workbench:{direct_workbench_mission_id}"
+                                if getattr(self.workbench, "session_store", None) is not None
+                                else None
                             ),
                         )
                     )
