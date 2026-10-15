@@ -261,6 +261,86 @@ Keep responses useful and concise unless the human asks for depth."""
                 self._session_locks[session_id] = lock
             return lock
 
+    def _get_turn_by_id(
+        self,
+        session_id: str,
+        turn_id: str,
+    ) -> ConversationTurn | None:
+        with self._connect() as db:
+            row = db.execute(
+                """
+                SELECT turn_id, session_id, sequence, role, content, state,
+                       created_at, correlation_id, model, provider,
+                       execution_id, error_code
+                FROM conversation_turns
+                WHERE session_id = ? AND turn_id = ?
+                LIMIT 1
+                """,
+                (session_id, turn_id),
+            ).fetchone()
+        return ConversationTurn(**dict(row)) if row is not None else None
+
+    @staticmethod
+    def _response_from_saved_turn(
+        session: ConversationSession,
+        turn: ConversationTurn,
+    ) -> DirectorConversationResponse:
+        """Replay a completed response without invoking inference or mission tools."""
+        return DirectorConversationResponse(
+            turn=turn,
+            response_text=turn.content,
+            state="completed",
+            correlation_id=turn.correlation_id,
+            context_manifest_id=session.context_manifest_id,
+            model=turn.model or "unknown",
+            provider=turn.provider or "unknown",
+            execution_id=turn.execution_id or "",
+            presentation_hints={
+                "avatar_state": "SPEAKING",
+                "text_available": True,
+                "voice_requested": False,
+                "idempotent_replay": True,
+            },
+        )
+
+    @staticmethod
+    def _in_progress_response(
+        session: ConversationSession,
+        user_turn: ConversationTurn,
+    ) -> DirectorConversationResponse:
+        message = (
+            "Esta solicitud ya está registrada y sigue en curso. No se ha vuelto "
+            "a ejecutar. Consulta el historial de esta conversación para ver la "
+            "respuesta cuando termine. "
+            f"correlation_id={user_turn.correlation_id}"
+        )
+        pending_turn = ConversationTurn(
+            turn_id=f"{user_turn.turn_id}-in-progress",
+            session_id=user_turn.session_id,
+            sequence=user_turn.sequence + 1,
+            role="assistant",
+            content=message,
+            state="processing",
+            created_at=_now(),
+            correlation_id=user_turn.correlation_id,
+        )
+        return DirectorConversationResponse(
+            turn=pending_turn,
+            response_text=message,
+            state="in_progress",
+            correlation_id=user_turn.correlation_id,
+            context_manifest_id=session.context_manifest_id,
+            model="unknown",
+            provider="unknown",
+            execution_id="",
+            presentation_hints={
+                "avatar_state": "THINKING",
+                "text_available": True,
+                "voice_requested": False,
+                "idempotent_replay": True,
+            },
+        )
+
     def send_message(
         self,
         *,
