@@ -226,10 +226,8 @@ def test_later_phase_supersedes_previous_failed_phase(tmp_path: Path):
 def test_enqueue_rolls_back_task_rows_and_initial_events_as_one_transaction(tmp_path: Path):
     store = DurableTaskStore(tmp_path / "tasks.db")
     tasks = (
-        DelegatedTask("valid", "researcher", "valid task"),
-        # Deliberately invalid JSON-serializable payload in a later task. The
-        # store must roll back the earlier row and pre-staged mission receipt.
-        DelegatedTask("invalid", "reviewer", "invalid task", args=(object(),)),
+        DelegatedTask("valid-a", "researcher", "valid task A"),
+        DelegatedTask("valid-b", "reviewer", "valid task B"),
     )
 
     with pytest.raises(TypeError):
@@ -239,11 +237,13 @@ def test_enqueue_rolls_back_task_rows_and_initial_events_as_one_transaction(tmp_
             initial_events=(
                 {
                     "event_type": "mission_submitted",
-                    "payload": {"objective": "atomic test", "task_ids": ["valid", "invalid"]},
+                    "payload": {"objective": "atomic test", "task_ids": ["valid-a", "valid-b"]},
                 },
                 {
                     "event_type": "team.formed",
-                    "payload": {"roles": ["researcher", "reviewer"]},
+                    # The non-serializable value fails only after both tasks,
+                    # their enqueued events and the first receipt were staged.
+                    "payload": {"roles": [object()]},
                 },
             ),
         )
