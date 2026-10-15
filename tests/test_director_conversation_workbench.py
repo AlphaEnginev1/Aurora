@@ -622,3 +622,38 @@ def test_replaying_the_same_conversation_tool_call_reuses_its_mission_key(tmp_pa
     assert len(executed_mission_ids) == 1
     assert '"mission_id":' in first.content
     assert '"mission_id":' in second.content
+
+
+def test_mission_evidence_does_not_mislabel_timed_out_active_mission_as_failed():
+    task = SimpleNamespace(
+        task=SimpleNamespace(task_id="task-retry", role="engineer", capability=None, depends_on=()),
+        status=SimpleNamespace(value="failed"),
+        error="intermediate retryable error",
+        capability_result=None,
+        model_result=None,
+        durable_result={"error": "intermediate retryable error"},
+    )
+    mission = SimpleNamespace(
+        submission=SimpleNamespace(
+            mission_id="mission-active-after-wait-timeout",
+            plan=SimpleNamespace(
+                objective="continue after caller deadline",
+                model="nvidia/test-model",
+                provider="nvidia_api",
+                execution_id="planning-execution",
+            ),
+        ),
+        status=SimpleNamespace(value="running"),
+        tasks=(task,),
+        events=(),
+        wait_timed_out=True,
+        wait_timeout_seconds=0.01,
+    )
+
+    evidence = DirectorConversationService._mission_evidence(mission)
+
+    assert evidence["accepted"] is True
+    assert evidence["status"] == "running"
+    assert evidence["wait_timed_out"] is True
+    assert evidence["wait_timeout_seconds"] == 0.01
+    assert evidence["mission_id"] == "mission-active-after-wait-timeout"

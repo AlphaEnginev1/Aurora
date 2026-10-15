@@ -67,7 +67,7 @@ from .durable_director import DurableDirectorService
 from .engine import OrchestrationEngine
 from .event_bus import DurableEventBus
 from .mission_memory import MissionMemory
-from .director_runtime import DirectorRuntime
+from .director_runtime import DirectorMissionWaitTimeout, DirectorRuntime
 from .director_eligibility import DirectorEligibilityStore
 from .director_conversation import DirectorConversationService
 from .task_engine import TaskEngine
@@ -924,10 +924,16 @@ def build_director_runtime(*, inference_policy_path: str | Path, autonomy_policy
         )
         # The daemon's run_forever loop owns worker cycles. The HTTP conversation
         # handler must wait for its durable result, not start a second run_once loop.
-        return runtime.wait_until_terminal(
-            submission,
-            timeout_seconds=timeout_seconds,
-        )
+        # If the caller's wait expires, the order is still accepted and durable;
+        # return its structured running receipt rather than presenting it as a
+        # failed submission or encouraging a duplicate command.
+        try:
+            return runtime.wait_until_terminal(
+                submission,
+                timeout_seconds=timeout_seconds,
+            )
+        except DirectorMissionWaitTimeout as exc:
+            return exc.result
 
     conversation_service.mission_runner = run_durable_conversation_mission
     runtime.autonomy_controllers = build_autonomy_runtime_bindings(

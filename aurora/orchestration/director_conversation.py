@@ -901,11 +901,18 @@ Keep responses useful and concise unless the human asks for depth."""
                 "correlation_id": correlation_id,
             })
 
+        wait_timed_out = bool(getattr(mission, "wait_timed_out", False))
+        wait_timeout_seconds = getattr(mission, "wait_timeout_seconds", None)
         failed = any(item["status"] == "failed" for item in tasks)
         blocked = any(item["status"] == "blocked" for item in tasks)
         mission_status = getattr(mission, "status", None)
         mission_status = getattr(mission_status, "value", mission_status)
-        if failed:
+        if wait_timed_out:
+            # The request's wait timer expired, not the accepted mission. Until
+            # DirectorRuntime finalizes the durable order, the conversation must
+            # not override this receipt with one task's intermediate failed state.
+            status = "running"
+        elif failed:
             status = "failed"
         elif blocked:
             status = "blocked"
@@ -931,7 +938,10 @@ Keep responses useful and concise unless the human asks for depth."""
         ]
         return {
             "mission_id": mission_id,
+            "accepted": bool(mission_id and submission is not None),
             "status": status,
+            "wait_timed_out": wait_timed_out,
+            "wait_timeout_seconds": wait_timeout_seconds,
             "objective": objective,
             "model": getattr(plan, "model", None),
             "provider": getattr(plan, "provider", None),

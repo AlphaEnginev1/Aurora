@@ -929,3 +929,42 @@ def test_conversation_mission_idempotency_preserves_one_durable_order_and_correl
         matching = [message for message in messages if message.kind == kind]
         assert matching, f"missing mailbox projection: {kind}"
         assert all(message.correlation_id == correlation_id for message in matching), kind
+
+
+def test_conversation_wait_timeout_preserves_accepted_durable_mission_receipt(tmp_path: Path):
+    from aurora.orchestration.director_runtime import DirectorMissionWaitTimeout
+
+    runtime, store, planner, _engine = make_runtime(tmp_path)
+    submission = runtime.submit_mission(
+        objective="complete after the conversation wait deadline",
+        mission_id="mission-timeout-receipt-test",
+        correlation_id="corr-timeout-receipt-test",
+    )
+
+    try:
+        runtime.wait_until_terminal(
+            submission,
+            timeout_seconds=0.001,
+            poll_interval_seconds=0.001,
+        )
+    except DirectorMissionWaitTimeout as exc:
+        receipt = exc.result
+    else:
+        raise AssertionError("non-terminal mission should return a timeout receipt")
+
+    assert receipt.submission.mission_id == submission.mission_id
+    assert receipt.status is TaskStatus.RUNNING
+    assert receipt.wait_timed_out is True
+    assert receipt.wait_timeout_seconds == 0.001
+    assert all(item.status in {TaskStatus.PENDING, TaskStatus.RUNNING} for item in receipt.tasks)
+    assert len(store.list_tasks(submission.mission_id)) == 2
+    assert len([
+        event for event in store.events(submission.mission_id)
+        if event.event_type == "mission_submitted"
+    ]) == 1
+
+    # The caller's deadline must not cancel or mark the durable mission failed.
+    result = runtime.run_until_terminal(submission)
+    assert result.status is TaskStatus.SUCCEEDED
+    assert len(store.list_tasks(submission.mission_id)) == 2
+    assert len(planner.calls) == 1
