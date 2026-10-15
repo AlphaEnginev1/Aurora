@@ -32,6 +32,10 @@ class WorkSession:
     updated_at: str = ""
 
 
+class WorkSessionInvocationError(RuntimeError):
+    """An idempotent Workbench invocation conflicts or has an uncertain outcome."""
+
+
 class WorkSessionStore:
     """Persist WorkSession metadata without storing secrets.
 
@@ -54,6 +58,21 @@ class WorkSessionStore:
                     correlation_id TEXT,
                     created_at TEXT NOT NULL,
                     payload TEXT NOT NULL
+                )
+                """
+            )
+            db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS work_session_invocations (
+                    work_id TEXT NOT NULL,
+                    idempotency_key TEXT NOT NULL,
+                    capability TEXT NOT NULL,
+                    fingerprint TEXT NOT NULL,
+                    state TEXT NOT NULL CHECK (state IN ('started', 'completed')),
+                    result_json TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY (work_id, idempotency_key)
                 )
                 """
             )
@@ -225,6 +244,162 @@ class WorkSessionStore:
 
         return self._mutate(work_id, mutate, side_effect=side_effect)
 
+    def begin_invocation(
+        self,
+        *,
+        work_id: str,
+        idempotency_key: str,
+        capability: str,
+        fingerprint: str,
+    ) -> dict[str, object]:
+        """Reserve one side-effect attempt or return its persisted result.
+
+        A row left in started means Aurora cannot prove whether the external
+        operation completed before a crash. It is intentionally not re-executed.
+        """
+        for value, field in (
+            (work_id, "work_id"),
+            (idempotency_key, "idempotency_key"),
+            (capability, "capability"),
+            (fingerprint, "fingerprint"),
+        ):
+            if not isinstance(value, str) or not value.strip():
+                raise WorkSessionInvocationError(f"{field} is required")
+
+        now = datetime.now(timezone.utc).isoformat()
+        try:
+            with sqlite3.connect(self.path, timeout=30, isolation_level=None) as db:
+                db.row_factory = sqlite3.Row
+                db.execute("PRAGMA busy_timeout=30000")
+                db.execute("BEGIN IMMEDIATE")
+                row = db.execute(
+                    """
+                    SELECT capability, fingerprint, state, result_json,
+                           created_at, updated_at
+                    FROM work_session_invocations
+                    WHERE work_id = ? AND idempotency_key = ?
+                    """,
+                    (work_id, idempotency_key),
+                ).fetchone()
+                if row is not None:
+                    if row["capability"] != capability or row["fingerprint"] != fingerprint:
+                        db.rollback()
+                        raise WorkSessionInvocationError(
+                            "idempotency key is already bound to a different Workbench request"
+                        )
+                    if row["state"] == "completed" and row["result_json"]:
+                        result = json.loads(row["result_json"])
+                        db.commit()
+                        return {"state": "completed", "result": result}
+                    db.rollback()
+                    raise WorkSessionInvocationError(
+                        "Workbench outcome is uncertain because a previous attempt was interrupted; "
+                        "refusing to repeat a possibly completed side effect"
+                    )
+
+                db.execute(
+                    """
+                    INSERT INTO work_session_invocations (
+                        work_id, idempotency_key, capability, fingerprint,
+                        state, result_json, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, 'started', NULL, ?, ?)
+                    """,
+                    (work_id, idempotency_key, capability, fingerprint, now, now),
+                )
+                db.commit()
+                return {"state": "started", "result": None}
+        except sqlite3.Error as exc:
+            raise WorkSessionInvocationError(
+                f"could not reserve Workbench invocation: {exc}"
+            ) from exc
+
+    def complete_invocation(
+        self,
+        *,
+        work_id: str,
+        idempotency_key: str,
+        fingerprint: str,
+        result: dict[str, object],
+    ) -> None:
+        """Persist a finished result before any secondary receipt projection."""
+        now = datetime.now(timezone.utc).isoformat()
+        try:
+            serialized = json.dumps(
+                result,
+                ensure_ascii=False,
+                sort_keys=True,
+                default=str,
+            )
+            with sqlite3.connect(self.path, timeout=30, isolation_level=None) as db:
+                db.row_factory = sqlite3.Row
+                db.execute("PRAGMA busy_timeout=30000")
+                db.execute("BEGIN IMMEDIATE")
+                row = db.execute(
+                    """
+                    SELECT fingerprint, state, result_json
+                    FROM work_session_invocations
+                    WHERE work_id = ? AND idempotency_key = ?
+                    """,
+                    (work_id, idempotency_key),
+                ).fetchone()
+                if row is None:
+                    db.rollback()
+                    raise WorkSessionInvocationError(
+                        "Workbench invocation reservation disappeared before completion"
+                    )
+                if row["fingerprint"] != fingerprint:
+                    db.rollback()
+                    raise WorkSessionInvocationError(
+                        "Workbench invocation fingerprint changed before completion"
+                    )
+                if row["state"] == "completed":
+                    if row["result_json"] != serialized:
+                        db.rollback()
+                        raise WorkSessionInvocationError(
+                            "completed Workbench invocation cannot be overwritten by a different result"
+                        )
+                    db.commit()
+                    return
+                db.execute(
+                    """
+                    UPDATE work_session_invocations
+                    SET state = 'completed', result_json = ?, updated_at = ?
+                    WHERE work_id = ? AND idempotency_key = ? AND state = 'started'
+                    """,
+                    (serialized, now, work_id, idempotency_key),
+                )
+                db.commit()
+        except sqlite3.Error as exc:
+            raise WorkSessionInvocationError(
+                f"could not persist Workbench invocation result: {exc}"
+            ) from exc
+
+    def invocation(self, work_id: str, idempotency_key: str) -> dict[str, object] | None:
+        """Read one invocation journal row for diagnostics and recovery tooling."""
+        with sqlite3.connect(self.path, timeout=30) as db:
+            db.row_factory = sqlite3.Row
+            row = db.execute(
+                """
+                SELECT work_id, idempotency_key, capability, fingerprint,
+                       state, result_json, created_at, updated_at
+                FROM work_session_invocations
+                WHERE work_id = ? AND idempotency_key = ?
+                """,
+                (work_id, idempotency_key),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "work_id": row["work_id"],
+            "idempotency_key": row["idempotency_key"],
+            "capability": row["capability"],
+            "fingerprint": row["fingerprint"],
+            "state": row["state"],
+            "result": json.loads(row["result_json"]) if row["result_json"] else None,
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
+
     def get_receipts(self, work_id: str) -> tuple[dict[str, object], ...]:
         with sqlite3.connect(self.path, timeout=30) as db:
             rows = db.execute(
@@ -344,3 +519,6 @@ class WorkSessionStore:
 
 
 __all__ = ["WorkSession", "WorkSessionStore"]
+
+
+__all__ = ["WorkSession", "WorkSessionStore", "WorkSessionInvocationError"]
