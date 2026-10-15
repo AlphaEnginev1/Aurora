@@ -1051,8 +1051,8 @@ class DirectorRuntime:
                     },
                 )
 
+            stored_tasks = self.store.list_tasks(mission_id)
             if self.memory.first_of_kind(mission_id, "mission_plan") is None:
-                stored_tasks = self.store.list_tasks(mission_id)
                 if not stored_tasks:
                     raise DirectorRuntimeError(
                         f"mission {mission_id} has a submission receipt but no durable tasks"
@@ -1068,6 +1068,38 @@ class DirectorRuntime:
                         "submission_event_id": submitted.event_id,
                     },
                 )
+
+            # Task completion lives in DurableTaskStore. Rebuild any missing
+            # mailbox projection from it so a transient write failure cannot
+            # permanently deprive later Director reviews or agents of the result.
+            projected_task_ids = self.memory.task_result_task_ids(mission_id)
+            for stored in stored_tasks:
+                if stored.task.task_id in projected_task_ids:
+                    continue
+                if stored.status not in {"succeeded", "failed", "blocked"}:
+                    continue
+                if stored.result is None and not stored.last_error:
+                    continue
+                result_payload = stored.result or {}
+                self.memory.append(
+                    mission_id=mission_id,
+                    source=f"worker:{self.worker_id}",
+                    kind="task_result",
+                    content=self._result_text(
+                        stored.task.task_id,
+                        stored.status,
+                        result_payload,
+                        stored.last_error,
+                    ),
+                    metadata={
+                        "task_id": stored.task.task_id,
+                        "attempt": stored.attempts,
+                        "status": stored.status,
+                        "action": "reconciled",
+                    },
+                    task_id=stored.task.task_id,
+                )
+                projected_task_ids = projected_task_ids | {stored.task.task_id}
             return True
 
     def run_once(self) -> RuntimeCycle:
@@ -1161,9 +1193,19 @@ class DirectorRuntime:
                                 "event_id": event.event_id,
                                 "task_id": event.task_id,
                             },
+                            event_id=event.event_id,
+                            task_id=event.task_id,
                         )
-                    except MissionMemoryError:
-                        pass
+                    except Exception:
+                        # At-least-once event delivery: do not advance the durable
+                        # consumer cursor if the projection did not persist. The
+                        # same event will be retried next cycle and event_id makes
+                        # the mailbox write idempotent if commit succeeded first.
+                        logging.getLogger(__name__).exception(
+                            "event %s could not be projected to mission memory; cursor retained",
+                            event.event_id,
+                        )
+                        break
                 self.event_bus.ack(self._subscription, event.event_id)
             return RuntimeCycle(
                 worker_cycles=tuple(cycles),
@@ -1370,6 +1412,7 @@ class DirectorRuntime:
                     "status": stored.status,
                     "action": cycle.action,
                 },
+                task_id=stored.task.task_id,
             )
         except MissionMemoryError as exc:
             self.event_bus.publish(
