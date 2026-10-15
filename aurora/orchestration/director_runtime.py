@@ -947,8 +947,15 @@ class DirectorRuntime:
         mission_id = str(kwargs.get("mission_id") or f"mission-{uuid4().hex}")
         next_kwargs = dict(kwargs)
         next_kwargs["mission_id"] = mission_id
+        correlation_id = next_kwargs.get("correlation_id")
+        correlation_id = (
+            correlation_id.strip()
+            if isinstance(correlation_id, str) and correlation_id.strip()
+            else None
+        )
         self._provider_failover_context = {
             "mission_id": mission_id,
+            "correlation_id": correlation_id,
             "role": (
                 "director_conversation"
                 if next_kwargs.get("tasks") is not None
@@ -976,6 +983,7 @@ class DirectorRuntime:
                         "fencing_epoch": ownership.fencing_epoch,
                         "lease_until": ownership.lease_until,
                     },
+                    correlation_id=correlation_id or self._mission_correlation_id(submission.mission_id),
                 )
             except Exception:
                 # The mission/task receipt is already committed. A telemetry
@@ -993,6 +1001,7 @@ class DirectorRuntime:
                     mission_id=submission.mission_id,
                     event_type="director_ownership_rejected",
                     payload={"owner_id": self.worker_id, "reason": str(exc)},
+                    correlation_id=correlation_id or self._mission_correlation_id(submission.mission_id),
                 )
             except Exception:
                 logging.getLogger(__name__).exception(
@@ -1019,6 +1028,17 @@ class DirectorRuntime:
                 submission.mission_id,
             )
         return submission
+
+    def _mission_correlation_id(self, mission_id: str) -> str | None:
+        """Read a mission's canonical correlation from its durable submission receipt."""
+        for event in reversed(self.store.events(mission_id)):
+            if event.event_type != "mission_submitted":
+                continue
+            if event.correlation_id:
+                return event.correlation_id
+            value = event.payload.get("correlation_id")
+            return value.strip() if isinstance(value, str) and value.strip() else None
+        return None
 
     def _ensure_mission_memory(self, mission_id: str) -> bool:
         """Reconcile the mailbox projection from the durable submission receipt."""
@@ -1049,6 +1069,10 @@ class DirectorRuntime:
                         "planning_execution_id": payload.get("planning_execution_id"),
                         "submission_event_id": submitted.event_id,
                     },
+                    correlation_id=(
+                        submitted.correlation_id
+                        or payload.get("correlation_id")
+                    ),
                 )
 
             stored_tasks = self.store.list_tasks(mission_id)
@@ -1067,6 +1091,10 @@ class DirectorRuntime:
                         "task_count": len(tasks),
                         "submission_event_id": submitted.event_id,
                     },
+                    correlation_id=(
+                        submitted.correlation_id
+                        or payload.get("correlation_id")
+                    ),
                 )
 
             # Task completion lives in DurableTaskStore. Rebuild any missing
@@ -1098,6 +1126,10 @@ class DirectorRuntime:
                         "action": "reconciled",
                     },
                     task_id=stored.task.task_id,
+                    correlation_id=(
+                        submitted.correlation_id
+                        or payload.get("correlation_id")
+                    ),
                 )
                 projected_task_ids = projected_task_ids | {stored.task.task_id}
             return True
@@ -1147,6 +1179,7 @@ class DirectorRuntime:
                         mission_id=mission_id,
                         event_type="mission_started",
                         payload={"worker_id": self.worker_id},
+                        correlation_id=self._mission_correlation_id(mission_id),
                     )
             assignments = [
                 (mission_id, slot)
@@ -1172,6 +1205,7 @@ class DirectorRuntime:
                                 mission_id=mission_id,
                                 event_type="worker.cycle_failed",
                                 payload={"worker_id": self.worker_id, "error": str(exc)},
+                                correlation_id=self._mission_correlation_id(mission_id),
                             )
                         cycles.append(cycle)
                         self._record_worker_result(mission_id, cycle)
@@ -1212,6 +1246,7 @@ class DirectorRuntime:
                             },
                             event_id=event.event_id,
                             task_id=event.task_id,
+                            correlation_id=event.correlation_id,
                         )
                     except Exception:
                         # At-least-once event delivery: do not advance the durable
@@ -1429,6 +1464,7 @@ class DirectorRuntime:
                 worker_id=f"{self.worker_id}:{mission_id}:{slot}",
                 policy=self.worker_policy,
                 event_bus=self.event_bus,
+                correlation_id=self._mission_correlation_id(mission_id),
                 skill_evaluator=self.skill_evaluator,
                 skill_learning=self.skill_learning,
                 skill_evolution=self.skill_evolution,
@@ -1493,6 +1529,7 @@ class DirectorRuntime:
                     **({"error": projected_error} if projected_error else {}),
                 },
                 task_id=stored.task.task_id,
+                correlation_id=self._mission_correlation_id(mission_id),
             )
         except MissionMemoryError as exc:
             self.event_bus.publish(
@@ -1500,6 +1537,7 @@ class DirectorRuntime:
                 task_id=stored.task.task_id,
                 event_type="memory_write_failed",
                 payload={"error": str(exc)},
+                correlation_id=self._mission_correlation_id(mission_id),
             )
 
 
@@ -2666,15 +2704,16 @@ class DirectorRuntime:
                 for item in self.store.list_tasks(mission_id)
             ],
         }
-        correlation_id = None
-        for event in reversed(self.store.events(mission_id)):
-            if event.correlation_id and event.event_type in {
-                "director_ownership_takeover",
-                "director_ownership_rejected",
-                "director_eligibility_rejected",
-            }:
-                correlation_id = event.correlation_id
-                break
+        correlation_id = self._mission_correlation_id(mission_id)
+        if correlation_id is None:
+            for event in reversed(self.store.events(mission_id)):
+                if event.correlation_id and event.event_type in {
+                    "director_ownership_takeover",
+                    "director_ownership_rejected",
+                    "director_eligibility_rejected",
+                }:
+                    correlation_id = event.correlation_id
+                    break
         self.event_bus.publish(
             mission_id=mission_id,
             event_type=f"mission_{status}",
