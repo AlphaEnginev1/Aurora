@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Sequence
 
 from .agent_selection import AgentSelectionError, AgentSelector
-from .registry import OrganizationRegistry
+from .registry import OrganizationConfigError, OrganizationRegistry
 
 
 @dataclass(frozen=True)
@@ -52,6 +52,7 @@ class DynamicAgentTeamSelector:
         capability: str | None = None,
         tags: Sequence[str] = (),
         preferred_roles: Sequence[str] = (),
+        required_roles: Sequence[str] = (),
         max_members: int = 4,
     ) -> AgentTeam:
         objective = objective.strip()
@@ -61,6 +62,16 @@ class DynamicAgentTeamSelector:
             raise AgentTeamError("max_members must be at least 1")
 
         required = tuple(dict.fromkeys(skill.strip() for skill in required_skill_ids if skill.strip()))
+        pinned_roles = tuple(dict.fromkeys(role.strip() for role in required_roles if role.strip()))
+        if len(pinned_roles) > max_members:
+            raise AgentTeamError(
+                f"required roles ({len(pinned_roles)}) exceed team capacity ({max_members})"
+            )
+        for role in pinned_roles:
+            try:
+                self.organization.resolve_agent(role)
+            except OrganizationConfigError as exc:
+                raise AgentTeamError(f"unknown required team role: {role}") from exc
         candidates: list[tuple[str, float, tuple[str, ...]]] = []
 
         for skill_id in required or ("__objective__",):
@@ -94,6 +105,25 @@ class DynamicAgentTeamSelector:
         selected: list[TeamMember] = []
         covered_skills: set[str] = set()
         remaining = set(required)
+        scores = {role: score for role, score, _covered in ranked}
+
+        # Explicit task roles are part of the plan, not candidates that the
+        # objective scorer may silently replace. Pin them before filling the
+        # remaining skills needed by tasks whose role is "auto".
+        for role in pinned_roles:
+            agent = self.organization.resolve_agent(role)
+            available = set(self._agent_skills(role, required))
+            new_coverage = available & remaining
+            selected.append(
+                TeamMember(
+                    role=role,
+                    score=scores.get(role, 0.0),
+                    covered_skills=tuple(sorted(new_coverage)),
+                    department=agent.department,
+                )
+            )
+            covered_skills.update(new_coverage)
+            remaining -= new_coverage
 
         while remaining and len(selected) < max_members:
             options = [item for item in ranked if item[0] not in {m.role for m in selected}]
