@@ -267,8 +267,8 @@ def _mission_summary(director_service, phase: str, objective: str, state: Mappin
                     })
                 else:
                     summary["change_receipt_rejected"] = (
-                        "multiple GitHub file-write receipts must form one proven commit chain "
-                        "on the same non-default branch and repository"
+                        "multiple GitHub file-write receipts must form one linear commit chain "
+                        "proved by commit parents on the same non-default branch and repository"
                     )
             elif valid_chain:
                 summary.update({
