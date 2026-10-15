@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import inspect
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -337,6 +338,8 @@ Keep responses useful and concise unless the human asks for depth."""
                         model=model,
                         provider_messages=provider_messages,
                         user_input=prompt,
+                        conversation_turn_id=turn_id,
+                        correlation_id=correlation_id,
                     )
         except Exception as exc:
             self._insert_turn(
@@ -508,6 +511,36 @@ Keep responses useful and concise unless the human asks for depth."""
             tools.append(self._WORKBENCH_TOOL)
         return tuple(tools)
 
+    def _invoke_mission_runner(
+        self,
+        *,
+        objective: str,
+        mission_id: str | None = None,
+        correlation_id: str | None = None,
+        **kwargs: Any,
+    ) -> Any:
+        """Invoke the durable mission boundary with per-turn identity when supported.
+
+        Compatibility with third-party/test callbacks is preserved, while the
+        canonical factory callback receives both idempotency and correlation IDs.
+        """
+        if self.mission_runner is None:
+            raise DirectorConversationError("run_mission is unavailable")
+        call_kwargs: dict[str, Any] = {"objective": objective, **kwargs}
+        try:
+            parameters = inspect.signature(self.mission_runner).parameters
+        except (TypeError, ValueError):
+            parameters = {}
+        accepts_extra = any(
+            item.kind is inspect.Parameter.VAR_KEYWORD
+            for item in parameters.values()
+        )
+        if mission_id and (accepts_extra or "mission_id" in parameters):
+            call_kwargs["mission_id"] = mission_id
+        if correlation_id and (accepts_extra or "correlation_id" in parameters):
+            call_kwargs["correlation_id"] = correlation_id
+        return self.mission_runner(**call_kwargs)
+
     def _execute_conversation_tools(
         self,
         *,
@@ -515,6 +548,8 @@ Keep responses useful and concise unless the human asks for depth."""
         model: str | None,
         provider_messages: list[dict[str, Any]],
         user_input: str | None = None,
+        conversation_turn_id: str | None = None,
+        correlation_id: str | None = None,
     ) -> Any:
         calls = tuple(getattr(response, "tool_calls", ()) or ())
         results: list[dict[str, Any]] = []
@@ -536,7 +571,14 @@ Keep responses useful and concise unless the human asks for depth."""
                 calls = ()
                 objective = str(user_input or "").strip()
                 try:
-                    mission = self.mission_runner(objective=objective)
+                    mission = self._invoke_mission_runner(
+                        objective=objective,
+                        mission_id=(
+                            f"mission-conversation-{conversation_turn_id}"
+                            if conversation_turn_id else None
+                        ),
+                        correlation_id=correlation_id,
+                    )
                     evidence = self._mission_evidence(mission)
                     evidence["routing_fallback"] = (
                         "explicit_mission_request_without_run_mission_tool_call"
@@ -561,13 +603,25 @@ Keep responses useful and concise unless the human asks for depth."""
                     raise DirectorConversationError("run_mission is unavailable")
                 objective, explicit_tasks = self._normalize_mission_tool_arguments(arguments)
                 try:
+                    mission_id = (
+                        f"mission-conversation-{conversation_turn_id}"
+                        if conversation_turn_id else None
+                    )
                     if explicit_tasks is None:
-                        mission = self.mission_runner(objective=objective)
-                    else:
-                        # The conversation inference that emitted this declarative
-                        # task graph is the planning source; preserve its real metadata.
-                        mission = self.mission_runner(
+                        mission = self._invoke_mission_runner(
                             objective=objective,
+                            mission_id=mission_id,
+                            correlation_id=correlation_id,
+                        )
+                    else:
+                        # All missions emitted by one conversation turn share a
+                        # durable idempotency key. Duplicate tool calls for the
+                        # same objective return the original receipt instead of
+                        # enqueueing a second task graph.
+                        mission = self._invoke_mission_runner(
+                            objective=objective,
+                            mission_id=mission_id,
+                            correlation_id=correlation_id,
                             tasks=explicit_tasks,
                             planning_model=getattr(response, "model", None),
                             planning_provider=getattr(response, "provider", None),
@@ -604,6 +658,7 @@ Keep responses useful and concise unless the human asks for depth."""
                             reason="Director conversation direct Workbench evidence",
                             arguments=tuple(call_args),
                             options=dict(options),
+                            correlation_id=correlation_id,
                         )
                     )
                     results.append(self._workbench_evidence(result))
