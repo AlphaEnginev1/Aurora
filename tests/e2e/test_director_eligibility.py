@@ -236,6 +236,65 @@ def test_g8_ea3_stale_record_is_rejected(tmp_path: Path):
     )
 
 
+def test_same_runtime_can_reacquire_its_expired_lease_without_failover_registration(tmp_path: Path):
+    store = DurableTaskStore(tmp_path / "state.db")
+    bus = DurableEventBus(store)
+    ownership = DirectorOwnershipStore(store.path)
+    eligibility = DirectorEligibilityStore(store.path)
+    clock = _Clock("2026-01-01T00:00:00+00:00")
+    runtime = _runtime(
+        store=store,
+        bus=bus,
+        ownership=ownership,
+        eligibility=eligibility,
+        director_id="director-A",
+        event_consumer_id="director-A-events",
+        clock=clock,
+        workspace=tmp_path / "workspace-a",
+    )
+    submission = runtime.submit_mission(objective="reacquire own expired lease")
+    assert runtime._ensure_mission_ownership(submission.mission_id)
+    first = ownership.get(submission.mission_id)
+    assert first is not None and first.fencing_epoch == 1
+
+    # Model a specialist execution that took longer than the 30-second lease.
+    clock.value = "2026-01-01T00:00:31+00:00"
+    assert runtime._ensure_mission_ownership(submission.mission_id)
+    current = ownership.get(submission.mission_id, now=clock.value)
+    assert current is not None
+    assert current.owner_id == "director-A"
+    assert current.fencing_epoch == 2
+    assert not [
+        event for event in store.events(submission.mission_id)
+        if event.event_type == "director_eligibility_rejected"
+    ]
+
+
+def test_unchanged_ineligible_takeover_emits_only_one_rejection_event(tmp_path: Path):
+    submission, store, bus, ownership, eligibility, clock = _mission_with_expired_owner(tmp_path)
+    runtime_b = _runtime(
+        store=store,
+        bus=bus,
+        ownership=ownership,
+        eligibility=eligibility,
+        director_id="director-B",
+        event_consumer_id="director-B-events",
+        clock=clock,
+        workspace=tmp_path / "workspace-b",
+    )
+
+    for _ in range(10):
+        assert not runtime_b._ensure_mission_ownership(submission.mission_id)
+
+    rejected = [
+        event for event in store.events(submission.mission_id)
+        if event.event_type == "director_eligibility_rejected"
+        and event.payload.get("director_id") == "director-B"
+    ]
+    assert len(rejected) == 1
+    assert rejected[0].payload["reason"] == "no_authoritative_eligibility_record"
+
+
 class _UnavailableEligibility(DirectorEligibilityStore):
     def evaluate(self, *args, **kwargs):
         raise DirectorEligibilityUnavailable("authoritative eligibility source unavailable")
