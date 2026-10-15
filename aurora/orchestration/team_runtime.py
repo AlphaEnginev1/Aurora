@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Sequence
 
 from aurora.organization import AgentSelector, AgentTeam, DynamicAgentTeamSelector, TeamMember, TeamReconfiguration, reconfigure_team
@@ -161,14 +161,54 @@ class TeamCoordinator:
                 if skill.strip()
             )
         )
+        explicit_roles = tuple(
+            dict.fromkeys(task.role for task in normalized_tasks if task.role != "auto")
+        )
+        auto_required_skills = tuple(
+            dict.fromkeys(
+                skill
+                for task in normalized_tasks
+                if task.role == "auto"
+                for skill in task.skills
+                if skill.strip()
+            )
+        )
+
+        # Validate explicitly assigned roles and skills against the real
+        # organization/skill policy before team formation. Those assignments
+        # are already part of the requested graph; only auto-role tasks need
+        # the selector to discover additional specialists to cover skills.
+        try:
+            self.task_engine.validate(normalized_tasks)
+        except TaskEngineError as exc:
+            raise TeamCoordinatorError(str(exc)) from exc
+
         selector = DynamicAgentTeamSelector(
             self.agent_selector.organization,
             self.agent_selector,
         )
         team = selector.form(
             objective=objective,
-            required_skill_ids=required_skills,
+            required_skill_ids=auto_required_skills,
+            preferred_roles=explicit_roles,
+            required_roles=explicit_roles,
             max_members=self.max_members,
+        )
+
+        # A task-level skill explicitly validated for a pinned role counts as
+        # assigned coverage even when that skill is not one of that agent's
+        # default skills. Keep the team receipt complete without pretending
+        # that the auto-role team selector discovered that skill.
+        explicit_task_skills = {
+            skill
+            for task in normalized_tasks
+            if task.role != "auto"
+            for skill in task.skills
+        }
+        team = replace(
+            team,
+            required_skills=required_skills,
+            covered_skills=tuple(sorted(set(team.covered_skills) | explicit_task_skills)),
         )
         if not team.complete:
             if self.skill_acquisition is not None:
