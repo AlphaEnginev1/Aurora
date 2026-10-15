@@ -1286,6 +1286,50 @@ async function testProvider(provider) {
     });
   }
 
+  function uploadFingerprint(file) {
+    const value = [file.name, file.size, file.lastModified].join("\\u0000");
+    let hash = 2166136261;
+    for (let index = 0; index < value.length; index += 1) {
+      hash ^= value.charCodeAt(index);
+      hash = Math.imul(hash, 16777619);
+    }
+    return (hash >>> 0).toString(16) + "-" + value.length;
+  }
+
+  function stableUploadRequest(file) {
+    const fingerprint = uploadFingerprint(file);
+    const storageKey = "aurora.pendingUploadRequest." + fingerprint;
+    try {
+      const saved = JSON.parse(window.sessionStorage.getItem(storageKey) || "null");
+      if (saved && saved.fingerprint === fingerprint && typeof saved.request_id === "string") {
+        return { requestId: saved.request_id, storageKey: storageKey, fingerprint: fingerprint };
+      }
+    } catch (_) {}
+    const requestId = "upload-" + (
+      window.crypto && typeof window.crypto.randomUUID === "function"
+        ? window.crypto.randomUUID()
+        : Date.now().toString(36) + "-" + Math.random().toString(36).slice(2)
+    );
+    const pending = { requestId: requestId, storageKey: storageKey, fingerprint: fingerprint };
+    try {
+      window.sessionStorage.setItem(storageKey, JSON.stringify({
+        fingerprint: fingerprint,
+        request_id: requestId
+      }));
+    } catch (_) {}
+    return pending;
+  }
+
+  function clearStableUploadRequest(pending) {
+    if (!pending) return;
+    try {
+      const saved = JSON.parse(window.sessionStorage.getItem(pending.storageKey) || "null");
+      if (saved && saved.request_id === pending.requestId) {
+        window.sessionStorage.removeItem(pending.storageKey);
+      }
+    } catch (_) {}
+  }
+
   async function uploadAurora(files) {
     const selected = Array.from(files || []);
     if (!selected.length) return;
@@ -1298,15 +1342,21 @@ async function testProvider(provider) {
         if (file.size > 25 * 1024 * 1024) {
           throw new Error(file.name + " exceeds the 25 MiB per-file limit.");
         }
+        const pendingRequest = stableUploadRequest(file);
         const response = await fetch(state.apiBase + "/artifacts", {
           method: "POST",
           headers: {
             Accept: "application/json",
             "Content-Type": file.type || "application/octet-stream",
-            "X-Aurora-Filename": encodeURIComponent(file.name)
+            "X-Aurora-Filename": encodeURIComponent(file.name),
+            "X-Aurora-Request-ID": pendingRequest.requestId
           },
           body: await file.arrayBuffer()
         });
+        // Keep the same key only if the network fails before an HTTP response.
+        // Any response means the server has classified this request (including
+        // payload mismatch); a later intentional upload gets a new key.
+        clearStableUploadRequest(pendingRequest);
         let data = {};
         try { data = await response.json(); } catch (_) {}
         if (!response.ok) throw new Error(data && data.error ? data.error : "upload failed for " + file.name);
