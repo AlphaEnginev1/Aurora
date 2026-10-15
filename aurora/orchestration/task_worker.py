@@ -57,6 +57,11 @@ class WorkerCycle:
     task_status: TaskStatus | None = None
     recovered_tasks: int = 0
     blocked_tasks: int = 0
+    # Immutable snapshot for result projection. Other concurrent worker slots
+    # may advance the same durable row before DirectorRuntime sees this cycle.
+    attempt: int | None = None
+    error: str | None = None
+    result_payload: dict | None = None
 
 
 class TaskWorker:
@@ -135,6 +140,8 @@ class TaskWorker:
                 task_status=TaskStatus.SUCCEEDED,
                 recovered_tasks=recovered,
                 blocked_tasks=blocked,
+                attempt=claimed.attempts,
+                result_payload=dict(result_payload),
             )
 
         error = result.error or "task execution failed"
@@ -161,6 +168,9 @@ class TaskWorker:
                 task_status=TaskStatus.FAILED,
                 recovered_tasks=recovered,
                 blocked_tasks=blocked,
+                attempt=claimed.attempts,
+                error=error,
+                result_payload={"error": error, "attempt": claimed.attempts},
             )
 
         self.store.complete(
@@ -190,6 +200,9 @@ class TaskWorker:
             task_status=TaskStatus.FAILED,
             recovered_tasks=recovered,
             blocked_tasks=blocked + newly_blocked,
+            attempt=claimed.attempts,
+            error=error,
+            result_payload={"error": error, "attempt": claimed.attempts},
         )
 
     def run_until_idle(self, *, max_cycles: int = 1000) -> tuple[WorkerCycle, ...]:
