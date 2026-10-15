@@ -609,17 +609,78 @@ def build_autonomy_runtime_bindings(*, director_service, router, workbench, rese
     )
 
     def rsi_execute(phase: str, state: Mapping[str, Any]) -> Mapping[str, Any]:
+        # Once a phase fails its evidence contract, do not launch later generic
+        # missions; preserve the blocker and stop producing side effects.
+        if state.get("phase_failed"):
+            return {
+                "phase": phase,
+                "phase_succeeded": False,
+                "phase_failed": True,
+                "blocked_by": state.get("phase"),
+                "error": state.get("error") or "a prior phase failed its evidence contract",
+            }
+
+        if phase in {"test", "ci", "learn"} and not state.get("change_id"):
+            return {
+                "phase": phase,
+                "phase_succeeded": False,
+                "phase_failed": True,
+                "error": f"{phase} requires a verified GitHub commit receipt from the modify phase",
+            }
+        if phase == "learn" and (
+            state.get("ci_status") != "success"
+            or state.get("ci_head_sha") != state.get("change_id")
+            or not state.get("ci_run_id")
+        ):
+            return {
+                "phase": phase,
+                "phase_succeeded": False,
+                "phase_failed": True,
+                "error": "learn requires a completed successful GitHub CI run for the exact change SHA",
+            }
+
         objective = str(state.get("objective", "Improve Aurora safely"))
         result = _mission_summary(director_service, phase, objective, state)
-        # A CI result must be explicit evidence; a Director mission finishing is
-        # not equivalent to GitHub CI passing. The controller therefore fails
-        # closed unless its existing service path returns both fields.
+        if not result.get("phase_succeeded"):
+            result["phase_failed"] = True
+            result["error"] = "Director phase returned no successful, complete task evidence"
+            return result
+
+        if phase == "modify":
+            if not result.get("change_id"):
+                result["phase_failed"] = True
+                result["phase_succeeded"] = False
+                result["error"] = (
+                    "modify did not return a successful GitHub file-write receipt on a non-default branch; "
+                    "a completed Director mission is not a source-code change"
+                )
+                return result
+
+        if phase == "ci":
+            change_id = str(state.get("change_id", "")).strip().lower()
+            if (
+                result.get("ci_status") != "success"
+                or result.get("ci_head_sha") != change_id
+                or not result.get("ci_run_id")
+            ):
+                result["phase_failed"] = True
+                result["phase_succeeded"] = False
+                result["error"] = (
+                    "GitHub CI did not report completed success for the exact candidate commit SHA"
+                )
+                return result
+
         return result
 
     def rsi_evaluate(state: Mapping[str, Any]) -> str:
         if state.get("phase_failed"):
             return "blocked"
-        if state.get("ci_status") == "success" and state.get("change_id"):
+        if (
+            state.get("ci_status") == "success"
+            and state.get("change_id")
+            and state.get("ci_head_sha") == state.get("change_id")
+            and state.get("ci_run_id")
+        ):
             return "improved"
         return "insufficient"
 
