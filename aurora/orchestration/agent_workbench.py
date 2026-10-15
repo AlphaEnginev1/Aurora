@@ -92,6 +92,7 @@ If no Workbench action is needed, answer normally.
         actor: str,
         mission_id: str,
         reason: str,
+        task_id: str | None = None,
         preferred_models: Sequence[str] = (),
         router,
         capability: str = "reasoning",
@@ -142,6 +143,11 @@ If no Workbench action is needed, answer normally.
                         reason=reason,
                         arguments=call.arguments,
                         options=dict(call.options or {}),
+                        idempotency_key=(
+                            f"agent-task:{mission_id}:{task_id}:call:{executed}"
+                            if task_id
+                            else None
+                        ),
                     )
                 )
                 executed += 1
