@@ -24,6 +24,7 @@ class WorkbenchRequest:
     arguments: tuple[str, ...] = ()
     options: dict[str, Any] = field(default_factory=dict)
     correlation_id: str | None = None
+    idempotency_key: str | None = None
 
 
 @dataclass(frozen=True)
