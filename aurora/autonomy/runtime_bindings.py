@@ -87,10 +87,14 @@ def _mission_summary(director_service, phase: str, objective: str, state: Mappin
             "Use workbench:github:workflow:read to inspect the GitHub Actions workflow named CI. "
             "Only a completed success run whose head_sha exactly matches the candidate commit proves CI."
         ),
-        "verify": "Check the produced evidence and report only claims supported by execution receipts.",
+        "verify": (
+            "Use workbench:github:workflow:read to inspect the GitHub Actions workflow named CI. "
+            "Only a completed success run whose head_sha exactly matches the candidate commit proves verification."
+        ),
         "publish": (
-            "Open or report a pull request for the verified feature branch when policy permits; never merge "
-            "automatically. Do not claim publication without a successful GitHub PR receipt."
+            "Open a pull request for the verified feature branch using workbench:github:pr only after the exact "
+            "commit has successful CI. The PR must remain open and target the configured base branch; never merge "
+            "automatically. Do not claim publication without a successful matching GitHub PR receipt."
         ),
         "learn": (
             "Summarize reusable lessons only from the exact change whose GitHub CI completed successfully. "
@@ -204,19 +208,15 @@ def _mission_summary(director_service, phase: str, objective: str, state: Mappin
                 "change_branch": branch_name,
             })
 
-        if saw_write and not rejected_write and writes:
-            identities = {(item["change_repository"], item["change_branch"]) for item in writes}
-            if len(identities) == 1:
-                # When the phase commits multiple files serially to one branch,
-                # the last returned commit is the candidate head.
-                summary.update(writes[-1])
-                summary["change_write_receipts"] = len(writes)
-            else:
-                summary["change_receipt_rejected"] = "writes target multiple repositories or branches"
+        if saw_write and not rejected_write and len(writes) == 1:
+            summary.update(writes[0])
+            summary["change_write_receipts"] = 1
         elif saw_write:
-            summary["change_receipt_rejected"] = "GitHub file-write receipt missing, invalid, or targets a protected branch"
+            summary["change_receipt_rejected"] = (
+                "expected exactly one unambiguous GitHub file-write receipt on one non-default branch"
+            )
 
-    if phase == "ci":
+    if phase in {"ci", "verify"}:
         expected_sha = str(state.get("change_id", "")).strip().lower()
         matched_runs = []
         relevant_runs = []
@@ -265,6 +265,82 @@ def _mission_summary(director_service, phase: str, objective: str, state: Mappin
             summary.update({"ci_status": "failure", "ci_head_sha": expected_sha})
         else:
             summary.update({"ci_status": "insufficient", "ci_head_sha": expected_sha or None})
+
+    if phase == "publish":
+        saw_pr = False
+        rejected_pr = False
+        base_branch = os.getenv("AURORA_RSI_BASE_BRANCH", "main").strip() or "main"
+        expected_repository = str(state.get("change_repository", "")).strip()
+        expected_branch = str(state.get("change_branch", "")).strip()
+        expected_sha = str(state.get("change_id", "")).strip().lower()
+        for item in tasks:
+            task = getattr(item, "task", None)
+            capability = str(getattr(task, "capability", "") or "")
+            if capability != "workbench:github:pr":
+                continue
+            saw_pr = True
+            receipt = execution_receipt(item)
+            if receipt is None:
+                rejected_pr = True
+                continue
+            task, _, output = receipt
+            raw_args = tuple(getattr(task, "args", ()) or ())
+            request = {}
+            for raw in raw_args:
+                if not isinstance(raw, str):
+                    continue
+                try:
+                    parsed = json.loads(raw)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(parsed, dict):
+                    request = parsed
+                    break
+            owner = str(request.get("owner", "")).strip()
+            repository = str(request.get("repo", "")).strip()
+            requested_repository = f"{owner}/{repository}" if owner and repository else ""
+            requested_head = str(request.get("head", "")).strip()
+            requested_base = str(request.get("base", "")).strip()
+            pr_head = output.get("head")
+            pr_base = output.get("base")
+            pr_number = output.get("number")
+            pr_url = str(output.get("html_url", "")).strip()
+            valid = (
+                expected_sha
+                and expected_repository
+                and expected_branch
+                and requested_repository == expected_repository
+                and requested_head in {expected_branch, f"{owner}:{expected_branch}"}
+                and requested_base == base_branch
+                and isinstance(pr_head, Mapping)
+                and isinstance(pr_base, Mapping)
+                and str(output.get("state", "")).strip().lower() == "open"
+                and str(pr_head.get("ref", "")).strip() == expected_branch
+                and str(pr_head.get("sha", "")).strip().lower() == expected_sha
+                and str(pr_base.get("ref", "")).strip() == base_branch
+                and pr_base.get("ref") != pr_head.get("ref")
+                and isinstance(pr_number, int)
+                and pr_number > 0
+                and pr_url.startswith(f"https://github.com/{expected_repository}/pull/")
+                and pr_url.rstrip("/").endswith(f"/{pr_number}")
+            )
+            if not valid:
+                rejected_pr = True
+                continue
+            summary.update({
+                "pull_request_id": pr_number,
+                "pull_request_url": pr_url,
+                "pull_request_state": "open",
+                "pull_request_head_sha": expected_sha,
+                "pull_request_head_branch": expected_branch,
+                "pull_request_repository": expected_repository,
+                "pull_request_base_branch": base_branch,
+            })
+            break
+        if saw_pr and (rejected_pr or not summary.get("pull_request_id")):
+            summary["pull_request_receipt_rejected"] = (
+                "GitHub PR receipt is missing, mismatched, merged, or targets an invalid branch"
+            )
 
     return summary
 
@@ -321,14 +397,82 @@ def build_autonomy_runtime_bindings(*, director_service, router, workbench, rese
     )
 
     def engineering_execute(phase: str, state: Mapping[str, Any]) -> Mapping[str, Any]:
+        # Do not continue launching Director missions after a required evidence
+        # contract fails in an earlier engineering phase.
+        if state.get("phase_failed"):
+            return {
+                "phase": phase,
+                "phase_succeeded": False,
+                "phase_failed": True,
+                "blocked_by": state.get("phase"),
+                "error": state.get("error") or "an earlier engineering phase failed",
+            }
+        if phase in {"test", "verify", "publish"} and not state.get("change_id"):
+            return {
+                "phase": phase,
+                "phase_succeeded": False,
+                "phase_failed": True,
+                "error": f"{phase} requires a verified GitHub commit receipt from the edit phase",
+            }
+        if phase == "publish" and (
+            state.get("ci_status") != "success"
+            or state.get("ci_head_sha") != state.get("change_id")
+            or not state.get("ci_run_id")
+        ):
+            return {
+                "phase": phase,
+                "phase_succeeded": False,
+                "phase_failed": True,
+                "error": "publish requires completed successful CI for the exact candidate commit",
+            }
+
         objective = str(state.get("objective", "Complete the requested software engineering task"))
-        return _mission_summary(director_service, phase, objective, state)
+        result = _mission_summary(director_service, phase, objective, state)
+        if not result.get("phase_succeeded"):
+            result["phase_failed"] = True
+            result["error"] = "Director engineering phase returned no successful, complete task evidence"
+            return result
+        if phase == "edit" and not result.get("change_id"):
+            result["phase_failed"] = True
+            result["phase_succeeded"] = False
+            result["error"] = (
+                "edit did not return a successful GitHub file-write receipt on a non-default branch"
+            )
+            return result
+        if phase == "verify" and (
+            result.get("ci_status") != "success"
+            or result.get("ci_head_sha") != state.get("change_id")
+            or not result.get("ci_run_id")
+        ):
+            result["phase_failed"] = True
+            result["phase_succeeded"] = False
+            result["error"] = "verify requires completed successful GitHub CI for the exact commit SHA"
+            return result
+        if phase == "publish" and (
+            result.get("pull_request_state") != "open"
+            or result.get("pull_request_head_sha") != state.get("change_id")
+            or result.get("pull_request_head_branch") != state.get("change_branch")
+            or result.get("pull_request_repository") != state.get("change_repository")
+        ):
+            result["phase_failed"] = True
+            result["phase_succeeded"] = False
+            result["error"] = "publish did not return an open GitHub PR for the verified commit and branch"
+            return result
+        return result
 
     def engineering_evaluate(state: Mapping[str, Any]) -> str:
         if state.get("phase_failed"):
             return "blocked"
         if state.get("phase") == "publish":
-            return "succeeded" if state.get("phase_succeeded") else "blocked"
+            return (
+                "succeeded"
+                if state.get("phase_succeeded")
+                and state.get("pull_request_state") == "open"
+                and state.get("pull_request_head_sha") == state.get("change_id")
+                and state.get("pull_request_head_branch") == state.get("change_branch")
+                and state.get("pull_request_repository") == state.get("change_repository")
+                else "blocked"
+            )
         return "continue"
 
     software_engineer = AutonomousSoftwareEngineer(
