@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 import inspect
 import json
 from datetime import datetime, timezone
@@ -603,8 +604,13 @@ Keep responses useful and concise unless the human asks for depth."""
                     raise DirectorConversationError("run_mission is unavailable")
                 objective, explicit_tasks = self._normalize_mission_tool_arguments(arguments)
                 try:
+                    call_key = hashlib.sha256(
+                        str(call.call_id).encode("utf-8")
+                    ).hexdigest()[:16]
+                    # Distinct tool calls in one user turn are distinct commands;
+                    # retries/replays of the same call keep the same durable ID.
                     mission_id = (
-                        f"mission-conversation-{conversation_turn_id}"
+                        f"mission-conversation-{conversation_turn_id}-{call_key}"
                         if conversation_turn_id else None
                     )
                     if explicit_tasks is None:
