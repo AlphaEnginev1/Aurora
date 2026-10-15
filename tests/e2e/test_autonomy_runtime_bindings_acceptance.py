@@ -179,15 +179,16 @@ def test_joint_autonomy_controller_acceptance_uses_canonical_runtime_services(
     assert len(research_service.store.citation_edges(artifact_id)) >= 5
     assert [call[0] for call in research_calls] == ["discover", "retrieve", "retrieve"]
 
-    # RSI may not claim success merely because Director phases completed: absent
-    # explicit CI and change evidence it must remain fail-closed.
+    # RSI may not claim success merely because Director phases completed.
+    # The first four phases run, then absence of a real GitHub feature-branch
+    # commit receipt blocks all later phase missions.
     rsi_result = controllers["recursive_self_improvement"].run(
         "improve Aurora under controlled acceptance"
     )
-    assert rsi_result.status == "insufficient"
+    assert rsi_result.status == "blocked"
     assert rsi_result.change_id is None
     assert len(rsi_result.cycles) == 7
-    assert len(director_calls) == 14
+    assert len(director_calls) == 11
 
 
 
