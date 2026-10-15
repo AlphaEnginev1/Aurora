@@ -433,12 +433,21 @@ def build_autonomy_runtime_bindings(*, director_service, router, workbench, rese
 
     def computer_execute(actions: list[dict[str, Any]]) -> Mapping[str, Any]:
         objective = str(actions[0].get("objective", "computer action")) if actions else "computer action"
+        mission_id = _mission_id("computer", objective)
+        action_fingerprint = hashlib.sha256(
+            json.dumps(actions, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
+        ).hexdigest()[:24]
         result = workbench.execute(WorkbenchRequest(
             capability="workbench:computer",
             actor="aurora-autonomous-computer-use",
-            mission_id=_mission_id("computer", objective),
+            mission_id=mission_id,
             reason="Execute one bounded action through the governed local computer gateway",
             arguments=(json.dumps(actions, ensure_ascii=False),),
+            options={
+                "idempotency_key": (
+                    f"autonomy-computer:{mission_id}:{action_fingerprint}"
+                )
+            },
         ))
         if result.status != "succeeded":
             return {"completed": False, "status": result.status, "error": result.error}
