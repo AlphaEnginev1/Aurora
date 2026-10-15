@@ -8,7 +8,7 @@ import json
 import logging
 import re
 from threading import Event, RLock
-from time import sleep
+from time import monotonic, sleep
 from typing import Any, Callable, Mapping
 from uuid import uuid4
 
@@ -274,6 +274,9 @@ class DirectorRuntime:
         self._sleep = sleep_fn
         self._subscription: EventSubscription = self.event_bus.subscribe(event_consumer_id)
         self._workers: dict[str, TaskWorker] = {}
+        # Suppress repeated durable rejection events for the same unchanged
+        # eligibility decision. A new reason/correlation remains auditable.
+        self._eligibility_rejections_recorded: set[tuple[str, str, str, str | None]] = set()
 
 
     def run_critical_decision(
@@ -1114,6 +1117,44 @@ class DirectorRuntime:
         raise DirectorRuntimeError(
             f"mission did not reach final state within max_cycles: {submission.mission_id}"
         )
+
+    def wait_until_terminal(
+        self,
+        submission: MissionSubmission,
+        *,
+        timeout_seconds: float = 300.0,
+        poll_interval_seconds: float = 0.25,
+    ) -> MissionRuntimeResult:
+        """Wait for the daemon-owned runtime loop to finalize a submitted mission.
+
+        Unlike run_until_terminal(), this method deliberately does not call
+        run_once(): it is for request handlers running concurrently with
+        run_forever(), so one mission is never driven by two independent loops.
+        """
+        if timeout_seconds <= 0:
+            raise DirectorRuntimeError("timeout_seconds must be positive")
+        if poll_interval_seconds <= 0:
+            raise DirectorRuntimeError("poll_interval_seconds must be positive")
+        deadline = monotonic() + timeout_seconds
+        while True:
+            if self._is_finalized(submission.mission_id):
+                return MissionRuntimeResult(
+                    submission=submission,
+                    status=self._final_status(submission.mission_id),
+                    tasks=self._results_snapshot(submission.mission_id),
+                    events=self._mission_events(submission.mission_id),
+                )
+            remaining = deadline - monotonic()
+            if remaining <= 0:
+                task_states = ", ".join(
+                    f"{item.task.task_id}={item.status}"
+                    for item in self.store.list_tasks(submission.mission_id)
+                )
+                raise DirectorRuntimeError(
+                    f"mission did not reach final state within {timeout_seconds:g}s: "
+                    f"{submission.mission_id}; tasks=[{task_states}]"
+                )
+            self._sleep(min(poll_interval_seconds, remaining))
 
     def run_forever(self, stop_event: Event | None = None) -> None:
         """Run continuously with bounded autonomous model-catalog refresh."""
@@ -2390,13 +2431,16 @@ class DirectorRuntime:
         return False
 
     def _is_finalized(self, mission_id: str) -> bool:
+        # Use indexed existence checks rather than materializing the full event
+        # journal on every runtime cycle. Rejection storms must not make this
+        # hot path increasingly expensive as the journal grows.
         return any(
-            event.event_type in {
+            self.store.has_event(mission_id, event_type)
+            for event_type in (
                 "mission_succeeded",
                 "mission_failed",
                 "mission_blocked",
-            }
-            for event in self.store.events(mission_id)
+            )
         )
 
     def _publish_terminal(
@@ -2449,6 +2493,28 @@ class DirectorRuntime:
         """Gate Director control on the authoritative durable eligibility source."""
         if self.director_eligibility is None:
             return True
+
+        def record_rejection(reason: str, *, record=None) -> None:
+            key = (mission_id, self.worker_id, reason, correlation_id)
+            if key in self._eligibility_rejections_recorded:
+                return
+            self._eligibility_rejections_recorded.add(key)
+            payload = {
+                "director_id": self.worker_id,
+                "eligible": False,
+                "reason": reason,
+                "source": "authoritative_durable_eligibility",
+            }
+            if record is not None:
+                payload["generation"] = record.generation
+                payload["state"] = record.state
+            self.event_bus.publish(
+                mission_id=mission_id,
+                event_type="director_eligibility_rejected",
+                payload=payload,
+                correlation_id=correlation_id,
+            )
+
         try:
             decision = self.director_eligibility.evaluate(
                 self.worker_id,
@@ -2456,33 +2522,10 @@ class DirectorRuntime:
                 required_capabilities=self.DIRECTOR_CONTROL_CAPABILITIES,
             )
         except DirectorEligibilityError as exc:
-            self.event_bus.publish(
-                mission_id=mission_id,
-                event_type="director_eligibility_rejected",
-                payload={
-                    "director_id": self.worker_id,
-                    "eligible": False,
-                    "reason": str(exc),
-                    "source": "authoritative_durable_eligibility",
-                },
-                correlation_id=correlation_id,
-            )
+            record_rejection(str(exc))
             return False
         if not decision.eligible:
-            record = decision.record
-            self.event_bus.publish(
-                mission_id=mission_id,
-                event_type="director_eligibility_rejected",
-                payload={
-                    "director_id": self.worker_id,
-                    "eligible": False,
-                    "reason": decision.reason,
-                    "generation": record.generation if record else None,
-                    "state": record.state if record else None,
-                    "source": "authoritative_durable_eligibility",
-                },
-                correlation_id=correlation_id,
-            )
+            record_rejection(decision.reason, record=decision.record)
             return False
         return True
 
@@ -2655,11 +2698,26 @@ class DirectorRuntime:
         # before acquire() advances the fencing epoch so the emitted event
         # distinguishes a real takeover from first acquisition.
         previous_ownership = self.director_ownership.get(mission_id)
+        cached_ownership = self._mission_ownership.get(mission_id)
+        # Long-running work can outlive its lease while this same runtime is
+        # synchronously executing a specialist. Permit only the exact in-memory
+        # owner/fencing epoch that this runtime previously acquired to reclaim
+        # its expired lease. A restarted or competing Director has no matching
+        # in-memory fence and must still pass the authoritative eligibility gate.
+        same_runtime_reacquire = (
+            previous_ownership is not None
+            and current is None
+            and cached_ownership is not None
+            and previous_ownership.owner_id == self.worker_id
+            and cached_ownership.owner_id == previous_ownership.owner_id
+            and cached_ownership.fencing_epoch == previous_ownership.fencing_epoch
+        )
         failover_correlation_id = None
         if (
             previous_ownership is not None
             and current is None
             and self.director_eligibility is not None
+            and not same_runtime_reacquire
         ):
             failover_correlation_id = (
                 f"director-failover:{mission_id}:epoch-"
@@ -2720,7 +2778,10 @@ class DirectorRuntime:
             )
             return False
 
-        takeover = previous_ownership is not None
+        takeover = (
+            previous_ownership is not None
+            and previous_ownership.owner_id != self.worker_id
+        )
         self._mission_ownership[mission_id] = ownership
         self.event_bus.publish(
             mission_id=mission_id,
@@ -2733,8 +2794,14 @@ class DirectorRuntime:
                 "owner_id": ownership.owner_id,
                 "fencing_epoch": ownership.fencing_epoch,
                 "lease_until": ownership.lease_until,
-                "previous_owner_id": current.owner_id if current else None,
-                "previous_fencing_epoch": current.fencing_epoch if current else None,
+                "previous_owner_id": (
+                    current.owner_id if current else
+                    previous_ownership.owner_id if previous_ownership else None
+                ),
+                "previous_fencing_epoch": (
+                    current.fencing_epoch if current else
+                    previous_ownership.fencing_epoch if previous_ownership else None
+                ),
             },
             correlation_id=failover_correlation_id,
         )
