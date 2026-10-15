@@ -1292,11 +1292,51 @@ class DirectorRuntime:
             self._sleep(min(poll_interval_seconds, remaining))
 
     def run_forever(self, stop_event: Event | None = None) -> None:
-        """Run continuously with bounded autonomous model-catalog refresh."""
+        """Run continuously; transient cycle errors must not kill the queue consumer."""
         stop = stop_event or Event()
+        consecutive_cycle_failures = 0
         while not stop.is_set():
-            self._refresh_model_catalogs_if_due()
-            cycle = self.run_once()
+            try:
+                self._refresh_model_catalogs_if_due()
+                cycle = self.run_once()
+            except Exception as exc:
+                # Orders and task state are committed before they are consumed.
+                # A failed cycle therefore needs supervision/retry, not process
+                # termination or a caller retry that could enqueue a duplicate.
+                consecutive_cycle_failures += 1
+                safe_error = _safe_catalog_error_text(exc)
+                logging.getLogger(__name__).exception(
+                    "Director runtime cycle failed; durable work remains recoverable "
+                    "(consecutive_failures=%d, error_type=%s)",
+                    consecutive_cycle_failures,
+                    type(exc).__name__,
+                )
+                try:
+                    self.event_bus.publish(
+                        mission_id="system",
+                        event_type="director_runtime_cycle_failed",
+                        payload={
+                            "worker_id": self.worker_id,
+                            "consecutive_failures": consecutive_cycle_failures,
+                            "error_type": type(exc).__name__,
+                            "error": safe_error,
+                        },
+                    )
+                except Exception as telemetry_exc:
+                    # SQLite/event-bus outages may be the cause of the original
+                    # exception. Keep logging and retrying even if telemetry is
+                    # itself unavailable.
+                    logging.getLogger(__name__).error(
+                        "Unable to persist runtime cycle failure telemetry (%s)",
+                        type(telemetry_exc).__name__,
+                    )
+                base_delay = max(float(self.idle_sleep_seconds), 0.1)
+                backoff = min(base_delay * (2 ** min(consecutive_cycle_failures - 1, 8)), 30.0)
+                if stop.wait(backoff):
+                    break
+                continue
+
+            consecutive_cycle_failures = 0
             if not cycle.did_work and self.idle_sleep_seconds:
                 self._sleep(self.idle_sleep_seconds)
 
