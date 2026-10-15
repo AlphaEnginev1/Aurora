@@ -78,6 +78,51 @@ def test_task_engine_orders_dependencies_before_dependents(tmp_path):
     assert isinstance(result[1].capability_result, CapabilityTaskResult)
 
 
+def test_task_engine_passes_dependency_result_to_downstream_reasoning_task(tmp_path):
+    class CapturingOrchestration:
+        def __init__(self):
+            self.calls = []
+
+        def run_task(self, **kwargs):
+            self.calls.append(kwargs)
+            content = (
+                "verified input: upstream-record-42"
+                if kwargs["task_id"] == "producer"
+                else "review complete"
+            )
+            return TaskResult(
+                task_id=kwargs["task_id"],
+                role=kwargs["role"],
+                response=InferenceResponse(
+                    model="fake/model",
+                    provider="fake",
+                    content=content,
+                ),
+            )
+
+    orchestration = CapturingOrchestration()
+    engine = TaskEngine(orchestration, tmp_path)
+    result = engine.execute([
+        DelegatedTask("producer", "researcher", "collect a record"),
+        DelegatedTask(
+            "consumer",
+            "analyst",
+            "review the upstream record",
+            depends_on=("producer",),
+        ),
+    ])
+
+    assert [item.status for item in result] == [TaskStatus.SUCCEEDED, TaskStatus.SUCCEEDED]
+    consumer_call = next(call for call in orchestration.calls if call["task_id"] == "consumer")
+    assert consumer_call["context"]
+    dependency_message = "\n".join(
+        str(message.get("content", "")) for message in consumer_call["context"]
+    )
+    assert "producer" in dependency_message
+    assert "upstream-record-42" in dependency_message
+    assert "untrusted task output" in dependency_message
+
+
 def test_task_engine_blocks_failed_dependency(tmp_path):
     class FailingEngine:
         def run_task(self, **kwargs):
