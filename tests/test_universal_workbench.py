@@ -1,9 +1,14 @@
 from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
 
 from aurora.autonomy.internet import InternetGateway, InternetPolicy
 from aurora.autonomy.policy import Policy
 from aurora.organization import OrganizationRegistry
 from aurora.workbench import UniversalWorkbench, WorkbenchRequest
+from aurora.workbench.models import WorkbenchResult
+from aurora.workbench.service import WorkbenchError
 from aurora.workbench.session import WorkSessionStore
 
 
@@ -135,3 +140,161 @@ def test_work_session_store_reads_legacy_payload_with_new_defaults(tmp_path: Pat
     assert loaded.work_id == "legacy-work"
     assert loaded.execution_receipts == ()
     assert loaded.approval_state == "not_required"
+
+
+def test_mutating_workbench_invocation_replays_persisted_result_without_reexecution(
+    tmp_path: Path,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    runtime = tmp_path / "runtime"
+    runtime.mkdir()
+    sessions = WorkSessionStore(runtime / "sessions.db")
+    wb = UniversalWorkbench(
+        repository_root=repo,
+        runtime_root=runtime,
+        gateway=FakeGateway(),
+        policy=Policy(frozenset({"workbench:*"}), frozenset()),
+        session_store=sessions,
+    )
+    effects = []
+
+    def file_write(request):
+        effects.append(tuple(request.arguments))
+        return WorkbenchResult(
+            capability=request.capability,
+            operation="file_write",
+            status="succeeded",
+            output={"path": request.arguments[0], "written": True},
+            provenance="local-filesystem",
+        )
+
+    wb._file_write = file_write
+    request = WorkbenchRequest(
+        capability="workbench:file:write",
+        actor="engineer",
+        mission_id="mission-retry",
+        reason="write one task output",
+        arguments=("out.txt", "durable"),
+        options={
+            "work_id": "mission-retry",
+            "idempotency_key": "task:mission-retry:write-1:workbench:file:write",
+        },
+    )
+
+    first = wb.execute(request)
+    replay = wb.execute(request)
+
+    assert effects == [("out.txt", "durable")]
+    assert replay == first
+    assert replay.receipt_id == first.receipt_id
+    assert replay.correlation_id == first.correlation_id
+    invocation = sessions.invocation("mission-retry", request.options["idempotency_key"])
+    assert invocation is not None
+    assert invocation["state"] == "completed"
+    assert sessions.get_receipts("mission-retry") == ({
+        "receipt_id": first.receipt_id,
+        "work_id": "mission-retry",
+        "correlation_id": first.correlation_id,
+        "created_at": sessions.get_receipts("mission-retry")[0]["created_at"],
+        "payload": {
+            "capability": "workbench:file:write",
+            "operation": "file_write",
+            "status": "succeeded",
+            "artifact_id": None,
+            "provenance": "local-filesystem",
+            "error": None,
+            "idempotency_key": request.options["idempotency_key"],
+            "replayed": False,
+        },
+    },)
+
+
+def test_workbench_idempotency_key_conflict_fails_before_second_side_effect(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    runtime = tmp_path / "runtime"
+    runtime.mkdir()
+    sessions = WorkSessionStore(runtime / "sessions.db")
+    wb = UniversalWorkbench(
+        repository_root=repo,
+        runtime_root=runtime,
+        gateway=FakeGateway(),
+        policy=Policy(frozenset({"workbench:*"}), frozenset()),
+        session_store=sessions,
+    )
+    effects = []
+
+    def file_write(request):
+        effects.append(tuple(request.arguments))
+        return WorkbenchResult(
+            capability=request.capability,
+            operation="file_write",
+            status="succeeded",
+            output={"written": True},
+        )
+
+    wb._file_write = file_write
+    base = {
+        "capability": "workbench:file:write",
+        "actor": "engineer",
+        "mission_id": "mission-conflict",
+        "reason": "write one task output",
+        "options": {
+            "work_id": "mission-conflict",
+            "idempotency_key": "task:mission-conflict:write-1",
+        },
+    }
+    wb.execute(WorkbenchRequest(**base, arguments=("out.txt", "first")))
+
+    with pytest.raises(WorkbenchError, match="already bound to a different Workbench request"):
+        wb.execute(WorkbenchRequest(**base, arguments=("out.txt", "different")))
+
+    assert effects == [("out.txt", "first")]
+
+
+def test_uncertain_workbench_invocation_is_not_reexecuted_after_interruption(
+    tmp_path: Path,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    runtime = tmp_path / "runtime"
+    runtime.mkdir()
+    sessions = WorkSessionStore(runtime / "sessions.db")
+    wb = UniversalWorkbench(
+        repository_root=repo,
+        runtime_root=runtime,
+        gateway=FakeGateway(),
+        policy=Policy(frozenset({"workbench:*"}), frozenset()),
+        session_store=sessions,
+    )
+    side_effect_count = {"value": 0}
+
+    def interrupted_write(request):
+        # Simulate a remote side effect followed by process failure before the
+        # durable result checkpoint can commit.
+        side_effect_count["value"] += 1
+        raise RuntimeError("process interruption after external effect")
+
+    wb._file_write = interrupted_write
+    request = WorkbenchRequest(
+        capability="workbench:file:write",
+        actor="engineer",
+        mission_id="mission-uncertain",
+        arguments=("out.txt", "value"),
+        options={
+            "work_id": "mission-uncertain",
+            "idempotency_key": "task:mission-uncertain:write-1",
+        },
+    )
+
+    with pytest.raises(RuntimeError, match="process interruption"):
+        wb.execute(request)
+    with pytest.raises(WorkbenchError, match="outcome is uncertain"):
+        wb.execute(request)
+
+    assert side_effect_count["value"] == 1
+    invocation = sessions.invocation("mission-uncertain", request.options["idempotency_key"])
+    assert invocation is not None
+    assert invocation["state"] == "started"
+    assert invocation["result"] is None
