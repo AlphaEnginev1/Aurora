@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from typing import Any, Mapping
 from uuid import uuid4
 
@@ -16,7 +17,10 @@ from aurora.autonomy.discovery_loop import DiscoveryLoop
 from aurora.autonomy.rsi import RecursiveSelfImprovement
 from aurora.autonomy.software_engineer import AutonomousSoftwareEngineer
 from aurora.inference.models import InferenceRequest
-from aurora.research.models import ResearchRequest
+from aurora.research.models import EvidenceState, ResearchFinding, ResearchRequest
+from aurora.research.knowledge import KnowledgeError, TrustedKnowledgeBuilder
+from aurora.research.learning import ResearchLearningError, ResearchLearningGate
+from aurora.research.verification import EvidenceRelation, VerificationError
 from aurora.workbench import WorkbenchRequest
 
 
@@ -177,26 +181,180 @@ def build_autonomy_runtime_bindings(*, director_service, router, workbench, rese
             "source_ids": [source.source_id for source in sources],
         }
 
+    candidate_claims: dict[str, Any] = {}
+
     def hypothesize(previous: str, evidence: Mapping[str, Any]) -> str:
-        return _text(router, "State one testable hypothesis based only on this research evidence.\n"
-                     + json.dumps({"previous": previous, "evidence": evidence}, ensure_ascii=False, default=str)[:10000])
+        sources = [
+            item for item in evidence.get("sources", ())
+            if isinstance(item, Mapping)
+            and str(item.get("source_id", "")).strip()
+            and str(item.get("url", "")).strip()
+        ]
+        unique_urls = {str(item["url"]).strip() for item in sources}
+        # A candidate source plus two separately retrieved sources are required
+        # before the runtime even attempts to verify a claim.
+        if len(unique_urls) < 3:
+            return previous.strip()
+
+        store = research_service.store
+        candidates = []
+        for item in sources:
+            source = store.source(str(item["source_id"]))
+            if source is None:
+                continue
+            try:
+                extracted = research_service.extract_claims(source)
+            except (ValueError, TypeError):
+                continue
+            independent_urls = {
+                str(other["url"]).strip()
+                for other in sources
+                if str(other.get("source_id", "")) != source.source_id
+                and str(other.get("url", "")).strip()
+                and str(other.get("url", "")).strip() != source.url
+            }
+            if len(independent_urls) < 2:
+                continue
+            candidates.extend(extracted)
+
+        # Bound model context and keep only claim text that was actually
+        # extracted from a persisted source snapshot.
+        unique_candidates = []
+        seen_claim_ids = set()
+        for claim in candidates:
+            if claim.claim_id in seen_claim_ids:
+                continue
+            seen_claim_ids.add(claim.claim_id)
+            unique_candidates.append(claim)
+            if len(unique_candidates) >= 20:
+                break
+        if not unique_candidates:
+            return previous.strip()
+
+        payload_candidates = [
+            {"claim_id": item.claim_id, "source_id": item.source_id, "claim": item.claim}
+            for item in unique_candidates
+        ]
+        parsed = _json_object(_text(
+            router,
+            "Choose one candidate claim by its exact claim_id for independent verification. "
+            "Return JSON only: {claim_id: string}. Select a literal claim extracted from one "
+            "provided persisted source, not a paraphrase. Do not invent a claim.\n"
+            + json.dumps(
+                {"previous": previous, "candidates": payload_candidates},
+                ensure_ascii=False,
+                default=str,
+            )[:10000],
+        ))
+        selected_id = str(parsed.get("claim_id", "")).strip()
+        selected = next(
+            (item for item in unique_candidates if item.claim_id == selected_id),
+            None,
+        )
+        if selected is None:
+            return previous.strip()
+        candidate_claims[selected.claim] = selected
+        return selected.claim
 
     def falsify(hypothesis: str, evidence: Mapping[str, Any]) -> Mapping[str, Any]:
-        sources = evidence.get("sources", [])
-        unique_urls = {str(item.get("url", "")) for item in sources if isinstance(item, Mapping)}
-        if len(unique_urls) < 2:
-            return {"verdict": "insufficient", "evidence": list(evidence.get("source_ids", []))}
-        parsed = _json_object(_text(router,
-            "Evaluate whether the hypothesis is supported, falsified, or still insufficient. "
-            "Use only supplied evidence. Return JSON {verdict: supported|falsified|insufficient, evidence: [source ids]}. "
-            "Do not claim formal verification.\n"
-            + json.dumps({"hypothesis": hypothesis, "evidence": sources}, ensure_ascii=False, default=str)[:12000]
+        claim = candidate_claims.get(hypothesis)
+        sources = [
+            item for item in evidence.get("sources", ())
+            if isinstance(item, Mapping)
+            and str(item.get("source_id", "")).strip()
+            and str(item.get("url", "")).strip()
+        ]
+        source_ids = {str(item["source_id"]) for item in sources}
+        if claim is None or claim.source_id not in source_ids:
+            return {"verdict": "insufficient", "evidence": []}
+
+        candidate_source = research_service.store.source(claim.source_id)
+        if candidate_source is None:
+            return {"verdict": "insufficient", "evidence": []}
+        independent_urls = tuple(dict.fromkeys(
+            str(item["url"]).strip()
+            for item in sources
+            if str(item["source_id"]) != claim.source_id
+            and str(item["url"]).strip()
+            and str(item["url"]).strip() != candidate_source.url
         ))
-        verdict = str(parsed.get("verdict", "insufficient")).lower()
-        if verdict not in {"supported", "falsified", "insufficient"}:
-            verdict = "insufficient"
-        ids = [str(item) for item in parsed.get("evidence", []) if str(item)]
-        return {"verdict": verdict, "evidence": ids}
+        if len(independent_urls) < 2:
+            return {"verdict": "insufficient", "evidence": []}
+
+        def classify_relation(candidate, source, parsed_text: str) -> EvidenceRelation:
+            parsed = _json_object(_text(
+                router,
+                "Classify whether this independent source provides support, contradiction, or no "
+                "clear evidence for the exact candidate claim. Return JSON only: "
+                "{relation: support|contradict|unclear, evidence_text: verbatim passage}. "
+                "evidence_text must be copied exactly from the supplied source; if no exact "
+                "passage supports the relation, use relation unclear.\n"
+                + json.dumps(
+                    {
+                        "claim": candidate.claim,
+                        "source_id": source.source_id,
+                        "source_text": parsed_text[:7000],
+                    },
+                    ensure_ascii=False,
+                    default=str,
+                )[:10000],
+            ))
+            relation = str(parsed.get("relation", "unclear")).strip().lower()
+            if relation not in {"support", "contradict", "unclear"}:
+                relation = "unclear"
+            quoted_text = str(parsed.get("evidence_text", "")).strip()
+            normalize = lambda value: re.sub(r"\s+", " ", value).strip().casefold()
+            if not quoted_text or normalize(quoted_text) not in normalize(parsed_text):
+                # Model prose is not evidence unless the cited passage exists
+                # verbatim in the independently retrieved source.
+                relation = "unclear"
+                quoted_text = "No matching verbatim passage was provided."
+            return EvidenceRelation(
+                source_id=source.source_id,
+                relation=relation,
+                evidence_text=quoted_text,
+            )
+
+        try:
+            assessment = research_service.verify_claim(
+                claim,
+                independent_urls,
+                classify_relation,
+            )
+        except VerificationError:
+            return {"verdict": "insufficient", "evidence": []}
+
+        assessment_state = str(getattr(assessment.state, "value", assessment.state)).lower()
+        if assessment_state == EvidenceState.CONTRADICTED.value:
+            return {
+                "verdict": "falsified",
+                "evidence": [],
+                "source_ids": list(assessment.contradicting_source_ids),
+                "rationale": assessment.rationale,
+            }
+        if assessment_state != EvidenceState.VERIFIED.value:
+            return {
+                "verdict": "insufficient",
+                "evidence": [],
+                "source_ids": list(assessment.source_ids),
+                "rationale": assessment.rationale,
+            }
+
+        verified_evidence = []
+        for source_id in assessment.supporting_source_ids:
+            verified_evidence.extend(
+                item for item in research_service.store.evidence_for_source(source_id)
+                if item.claim == claim.claim and item.state is EvidenceState.VERIFIED
+            )
+        evidence_ids = tuple(dict.fromkeys(item.evidence_id for item in verified_evidence))
+        if len(evidence_ids) < 2:
+            return {"verdict": "insufficient", "evidence": [], "rationale": "verified evidence records were not persisted"}
+        return {
+            "verdict": "verified",
+            "evidence": list(evidence_ids),
+            "source_ids": list(assessment.supporting_source_ids),
+            "rationale": assessment.rationale,
+        }
 
     def novelty(hypothesis: str, assessment: Mapping[str, Any]) -> str:
         answer = _text(router,
@@ -207,11 +365,59 @@ def build_autonomy_runtime_bindings(*, director_service, router, workbench, rese
         return answer if answer in {"novel", "known", "uncertain"} else "uncertain"
 
     def learn(hypothesis: str, assessment: Mapping[str, Any]) -> str | None:
-        # ResearchService.retrieve has already durably persisted source artifacts.
-        # Return their stable IDs as the evidence artifact; never promote an
-        # unsupported claim directly into trusted knowledge or skill policy.
-        ids = tuple(str(item) for item in assessment.get("evidence", ()) if str(item))
-        return "research-evidence:" + ",".join(ids) if ids else None
+        if str(assessment.get("verdict", "")).strip().lower() != "verified":
+            return None
+        claim = candidate_claims.get(hypothesis)
+        if claim is None:
+            return None
+
+        requested_ids = {
+            str(item).strip()
+            for item in assessment.get("evidence", ())
+            if str(item).strip()
+        }
+        evidence = []
+        source_ids = tuple(
+            dict.fromkeys(
+                str(item).strip()
+                for item in assessment.get("source_ids", ())
+                if str(item).strip()
+            )
+        )
+        for source_id in source_ids:
+            evidence.extend(
+                item for item in research_service.store.evidence_for_source(source_id)
+                if item.evidence_id in requested_ids
+                and item.claim == claim.claim
+                and item.state is EvidenceState.VERIFIED
+            )
+        evidence = tuple({item.evidence_id: item for item in evidence}.values())
+        if len(evidence) < 2 or {item.evidence_id for item in evidence} != requested_ids:
+            return None
+
+        finding_id = "finding-" + hashlib.sha256(
+            f"{claim.claim_id}|{claim.claim}|{'|'.join(sorted(requested_ids))}".encode("utf-8")
+        ).hexdigest()[:32]
+        finding = ResearchFinding(
+            finding_id=finding_id,
+            claim=claim.claim,
+            evidence_ids=tuple(item.evidence_id for item in evidence),
+            confidence=1.0,
+            state=EvidenceState.VERIFIED,
+        )
+        try:
+            research_service.store.record_finding(finding)
+            artifact, _ = TrustedKnowledgeBuilder(research_service.store).build(
+                finding,
+                evidence,
+            )
+            # This is the same trust gate used before research-derived results
+            # can enter adaptive learning. Only its durable artifact ID leaves
+            # this callback; source IDs alone never masquerade as knowledge.
+            ResearchLearningGate(research_service.store).authorize((artifact.artifact_id,))
+        except (KnowledgeError, ResearchLearningError, ValueError):
+            return None
+        return artifact.artifact_id
 
     discovery_loop = DiscoveryLoop(
         investigate=investigate,
