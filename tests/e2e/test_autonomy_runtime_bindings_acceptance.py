@@ -165,7 +165,7 @@ def test_joint_autonomy_controller_acceptance_uses_canonical_runtime_services(
 def test_production_runtime_wires_task_engine_to_canonical_research_stack(
     tmp_path: Path, monkeypatch
 ):
-    """A production-built TaskEngine can execute research through the canonical store."""
+    """The runtime, TaskEngine and Workbench share one canonical research stack."""
     from aurora.orchestration.task_engine import DelegatedTask, TaskStatus
 
     runtime = _build_runtime(tmp_path, monkeypatch)
@@ -174,6 +174,7 @@ def test_production_runtime_wires_task_engine_to_canonical_research_stack(
 
     assert research_service is not None
     assert task_engine.research_service is research_service
+    assert research_service.gateway is workbench.gateway
     assert task_engine.research_learning_gate is not None
     assert task_engine.research_learning_gate.store is research_service.store
 
@@ -186,8 +187,8 @@ def test_production_runtime_wires_task_engine_to_canonical_research_stack(
     def retrieve_and_extract(request):
         calls.append(("retrieve_and_extract", request.objective, request.required_sources))
         return (
-            (SimpleNamespace(source_id="persisted-source"),),
-            (SimpleNamespace(claim_id="persisted-claim"),),
+            (SimpleNamespace(source_id="controlled-source"),),
+            (SimpleNamespace(claim_id="controlled-claim"),),
         )
 
     # Exercise the actual TaskEngine research dispatch without external network
@@ -205,7 +206,7 @@ def test_production_runtime_wires_task_engine_to_canonical_research_stack(
     )
 
     assert result.status is TaskStatus.SUCCEEDED
-    assert result.capability_result.source_ids == ("persisted-source",)
-    assert result.capability_result.claim_ids == ("persisted-claim",)
+    assert result.capability_result.source_ids == ("controlled-source",)
+    assert result.capability_result.claim_ids == ("controlled-claim",)
     assert [item[0] for item in calls] == ["discover", "retrieve_and_extract"]
     assert calls[1][2] == ("https://research.example/runtime-wiring",)
