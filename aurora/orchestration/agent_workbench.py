@@ -150,7 +150,7 @@ If no Workbench action is needed, answer normally.
                         },
                         idempotency_key=(
                             f"agent-task:{mission_id}:{task_id}:call:{executed}"
-                            if task_id
+                            if task_id and getattr(self.workbench, "session_store", None) is not None
                             else None
                         ),
                     )
