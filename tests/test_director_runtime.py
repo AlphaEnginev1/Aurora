@@ -314,6 +314,12 @@ def test_full_director_event_bus_worker_cycle(tmp_path: Path):
         TaskStatus.SUCCEEDED,
         TaskStatus.SUCCEEDED,
     ]
+    # The final runtime receipt is reconstructed from DurableTaskStore and must
+    # retain the task result, not just status/error metadata.
+    assert result.tasks[0].durable_result["type"] == "model"
+    assert "completed collect" in result.tasks[0].durable_result["content"]
+    assert result.tasks[1].durable_result["type"] == "model"
+    assert "completed review" in result.tasks[1].durable_result["content"]
 
     event_types = [event.event_type for event in store.events(submission.mission_id)]
     assert event_types[:2] == ["enqueued", "enqueued"]

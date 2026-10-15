@@ -177,6 +177,56 @@ def test_mission_evidence_includes_durable_identity_and_planning_metadata():
     assert evidence["tasks"][0]["task_id"] == "task-readonly-1"
 
 
+def test_mission_evidence_restores_persisted_result_after_runtime_restart():
+    task_result = SimpleNamespace(
+        task=SimpleNamespace(
+            task_id="task-research-1",
+            role="researcher",
+            capability="workbench:research:retrieve",
+            depends_on=(),
+        ),
+        status=SimpleNamespace(value="succeeded"),
+        error=None,
+        capability_result=None,
+        model_result=None,
+        durable_result={
+            "type": "workbench",
+            "status": "succeeded",
+            "operation": "research_retrieve",
+            "output": {"sources": [{"source_id": "src-1", "url": "https://example.test"}]},
+            "artifact_id": "artifact-1",
+            "provenance": "aurora-research:retrieval",
+            "receipt_id": "receipt-1",
+            "correlation_id": "corr-1",
+        },
+    )
+    mission = SimpleNamespace(
+        submission=SimpleNamespace(
+            mission_id="mission-restored-results",
+            plan=SimpleNamespace(
+                objective="retrieve research sources",
+                model="nvidia/test-model",
+                provider="nvidia_api",
+                execution_id="planning-exec",
+            ),
+        ),
+        status=SimpleNamespace(value="succeeded"),
+        tasks=(task_result,),
+        events=(),
+    )
+
+    evidence = DirectorConversationService._mission_evidence(mission)
+
+    assert evidence["status"] == "succeeded"
+    assert evidence["tasks"][0]["result"] == {
+        "sources": [{"source_id": "src-1", "url": "https://example.test"}]
+    }
+    assert evidence["tasks"][0]["artifact_id"] == "artifact-1"
+    assert evidence["tasks"][0]["receipt_id"] == "receipt-1"
+    assert evidence["tasks"][0]["provenance"] == "aurora-research:retrieval"
+    assert evidence["tasks"][0]["correlation_id"] == "corr-1"
+
+
 def test_conversation_executes_native_explicit_readonly_tasks_and_returns_durable_evidence(tmp_path: Path):
     service, _ = base_service(tmp_path)
 

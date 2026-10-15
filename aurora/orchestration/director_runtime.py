@@ -3040,6 +3040,7 @@ class DirectorRuntime:
                     task=stored.task,
                     status=status,
                     error=stored.last_error,
+                    durable_result=dict(stored.result) if stored.result is not None else None,
                 )
             )
         return tuple(results)

@@ -787,9 +787,45 @@ Keep responses useful and concise unless the human asks for depth."""
             execution = getattr(capability_result, "execution", capability_result)
             output = getattr(execution, "output", None)
             model_result = getattr(item, "model_result", None)
+            durable_result = getattr(item, "durable_result", None)
             if output is None and model_result is not None:
                 model_response = getattr(model_result, "response", None)
                 output = getattr(model_response, "content", None)
+
+            # DurableRuntime reconstructs completed tasks from SQLite; typed
+            # live provider objects are not available on that path. Preserve the
+            # persisted result instead of returning a successful task with result=null.
+            if output is None and isinstance(durable_result, Mapping):
+                result_type = str(durable_result.get("type", ""))
+                if result_type == "model":
+                    output = durable_result.get("content")
+                elif result_type == "research":
+                    output = {
+                        "request_id": durable_result.get("request_id"),
+                        "source_ids": durable_result.get("source_ids", []),
+                        "claim_ids": durable_result.get("claim_ids", []),
+                        "trust_state": durable_result.get("trust_state"),
+                        "knowledge_artifact_ids": durable_result.get("knowledge_artifact_ids", []),
+                    }
+                elif "output" in durable_result:
+                    output = durable_result.get("output")
+                elif "stdout" in durable_result or "stderr" in durable_result:
+                    output = {
+                        "returncode": durable_result.get("returncode"),
+                        "stdout": durable_result.get("stdout", ""),
+                        "stderr": durable_result.get("stderr", ""),
+                        "truncated": durable_result.get("truncated", False),
+                    }
+
+            artifact_id = getattr(execution, "artifact_id", None)
+            receipt_id = getattr(execution, "receipt_id", None)
+            provenance = getattr(execution, "provenance", None)
+            correlation_id = getattr(execution, "correlation_id", None)
+            if isinstance(durable_result, Mapping):
+                artifact_id = artifact_id or durable_result.get("artifact_id")
+                receipt_id = receipt_id or durable_result.get("receipt_id")
+                provenance = provenance or durable_result.get("provenance")
+                correlation_id = correlation_id or durable_result.get("correlation_id")
             tasks.append({
                 "task_id": getattr(task, "task_id", None),
                 "role": getattr(task, "role", None),
@@ -798,10 +834,10 @@ Keep responses useful and concise unless the human asks for depth."""
                 "capability": getattr(task, "capability", None),
                 "depends_on": list(getattr(task, "depends_on", ()) or ()),
                 "result": DirectorConversationService._bound_evidence_value(output),
-                "artifact_id": getattr(execution, "artifact_id", None),
-                "receipt_id": getattr(execution, "receipt_id", None),
-                "provenance": getattr(execution, "provenance", None),
-                "correlation_id": getattr(execution, "correlation_id", None),
+                "artifact_id": artifact_id,
+                "receipt_id": receipt_id,
+                "provenance": provenance,
+                "correlation_id": correlation_id,
             })
 
         failed = any(item["status"] == "failed" for item in tasks)

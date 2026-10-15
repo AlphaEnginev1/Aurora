@@ -342,3 +342,37 @@ def test_verified_research_artifact_may_cross_learning_gate():
     )
 
     assert research_learning_is_authorized(result)
+
+
+def test_worker_persists_structured_workbench_output_and_receipt_metadata():
+    task = DelegatedTask(
+        "research-output",
+        "researcher",
+        "retrieve source metadata",
+        capability="workbench:research:retrieve",
+    )
+    execution = SimpleNamespace(
+        status="succeeded",
+        operation="research_retrieve",
+        output={"sources": [{"source_id": "src-1", "url": "https://example.test"}]},
+        artifact_id="artifact-1",
+        provenance="aurora-research:retrieval",
+        receipt_id="receipt-1",
+        correlation_id="corr-1",
+    )
+    result = DelegatedTaskResult(
+        task=task,
+        status=TaskStatus.SUCCEEDED,
+        capability_result=SimpleNamespace(execution=execution),
+    )
+
+    payload = TaskWorker._result_payload(result)
+
+    assert payload["type"] == "workbench"
+    assert payload["output"] == {
+        "sources": [{"source_id": "src-1", "url": "https://example.test"}]
+    }
+    assert payload["artifact_id"] == "artifact-1"
+    assert payload["provenance"] == "aurora-research:retrieval"
+    assert payload["receipt_id"] == "receipt-1"
+    assert payload["correlation_id"] == "corr-1"

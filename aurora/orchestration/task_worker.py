@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 from threading import Event, Thread
 from time import sleep
 from typing import Callable
@@ -402,14 +403,27 @@ class TaskWorker:
                 stderr = str(getattr(execution, "stderr", ""))[:limit]
                 output = getattr(execution, "output", None)
                 if output is not None:
-                    serialized = str(output)
+                    serialized = json.dumps(
+                        output,
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        default=str,
+                    )
+                    output_value = (
+                        json.loads(serialized)
+                        if len(serialized) <= limit
+                        else {"truncated": True, "preview": serialized[:limit]}
+                    )
+                    raw_status = getattr(execution, "status", None)
                     return {
                         "type": "workbench" if not hasattr(execution, "returncode") else "capability",
-                        "status": getattr(execution, "status", None),
+                        "status": getattr(raw_status, "value", raw_status),
                         "operation": getattr(execution, "operation", None),
-                        "output": serialized[:limit],
+                        "output": output_value,
                         "artifact_id": getattr(execution, "artifact_id", None),
                         "provenance": getattr(execution, "provenance", None),
+                        "receipt_id": getattr(execution, "receipt_id", None),
+                        "correlation_id": getattr(execution, "correlation_id", None),
                         "truncated": len(serialized) > limit,
                     }
                 return {
