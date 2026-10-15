@@ -71,20 +71,91 @@ def test_team_coordinator_resolves_auto_tasks_inside_formed_team():
     assert state.tasks[2].role in {"researcher", "engineer"}
 
 
-def test_team_coordinator_rejects_role_outside_team():
+def test_team_coordinator_preserves_explicit_role_in_plan():
     org = registry()
     engine = TaskEngine(None, Path(".").resolve(), organization=org)
     coordinator = TeamCoordinator(
         task_engine=engine,
         agent_selector=AgentSelector(org),
     )
-    try:
-        coordinator.prepare(
-            mission_id="mission-2",
-            objective="research only",
-            tasks=(DelegatedTask("x", "engineer", "implement"),),
+    state = coordinator.prepare(
+        mission_id="mission-2",
+        objective="research only",
+        tasks=(DelegatedTask("x", "engineer", "implement"),),
+    )
+
+    assert state.team.complete
+    assert {member.role for member in state.team.members} == {"engineer"}
+    assert state.tasks[0].role == "engineer"
+
+
+def test_team_coordinator_treats_explicit_task_skill_as_assigned_coverage():
+    from aurora.skills.models import SkillSpec
+    from aurora.skills.registry import SkillRegistry
+
+    org = OrganizationRegistry(
+        agents={
+            "engineer": AgentSpec(
+                agent_id="engineer",
+                role="engineer",
+                department="engineering",
+                mission="implement software",
+                capabilities=frozenset({"workbench:*"}),
+                model_preferences=(),
+                skill_ids=(),
+                universal_access=True,
+            ),
+        },
+        departments={
+            "engineering": DepartmentSpec(
+                department_id="engineering",
+                mission="engineering",
+                agent_ids=("engineer",),
+                model_preferences=(),
+                allowed_capabilities=frozenset({"workbench:*"}),
+            ),
+        },
+    )
+    skill_registry = SkillRegistry({
+        "discovery-hypothesis-generation": SkillSpec(
+            skill_id="discovery-hypothesis-generation",
+            version="1.0.0",
+            name="Hypothesis generation",
+            mission="Explore alternatives",
+            instructions="Use evidence and do not treat hypotheses as facts.",
+            required_capabilities=frozenset({"tool:rg"}),
+            verification_requirements=(),
+            quality_checks=(),
+            tags=("discovery",),
         )
-    except TeamCoordinatorError as exc:
-        assert "outside formed team" in str(exc)
-    else:
-        raise AssertionError("team boundary was not enforced")
+    })
+    engine = TaskEngine(
+        None,
+        Path(".").resolve(),
+        organization=org,
+        skill_registry=skill_registry,
+    )
+    coordinator = TeamCoordinator(
+        task_engine=engine,
+        agent_selector=AgentSelector(org, skill_registry),
+    )
+
+    state = coordinator.prepare(
+        mission_id="mission-explicit-skill",
+        objective="engineer investigates runtime",
+        tasks=(
+            DelegatedTask(
+                "inspect",
+                "engineer",
+                "inspect governed runtime design",
+                skills=("discovery-hypothesis-generation",),
+            ),
+        ),
+    )
+
+    assert state.team.complete
+    assert {member.role for member in state.team.members} == {"engineer"}
+    assert state.team.required_skills == ("discovery-hypothesis-generation",)
+    assert state.team.covered_skills == ("discovery-hypothesis-generation",)
+    assert state.team.missing_skills == ()
+    assert state.tasks[0].skills == ("discovery-hypothesis-generation",)
