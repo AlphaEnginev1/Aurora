@@ -356,3 +356,28 @@ def store_connection(path: Path):
     import sqlite3
 
     return sqlite3.connect(path)
+
+
+def test_mission_memory_is_idempotent_for_replayed_event_ids(tmp_path: Path):
+    from aurora.orchestration.mission_memory import MissionMemoryError
+
+    store = DurableTaskStore(tmp_path / "tasks.db")
+    memory = MissionMemory(store)
+    kwargs = {
+        "mission_id": "mission-replay",
+        "source": "skill-learning",
+        "kind": "skill.evaluated",
+        "content": '{"skill_id": "research", "score": 0.9}',
+        "metadata": {"event_id": 51, "task_id": "task-1"},
+        "event_id": 51,
+        "task_id": "task-1",
+    }
+
+    first = memory.append(**kwargs)
+    replay = memory.append(**kwargs)
+
+    assert replay.message_id == first.message_id
+    assert len([item for item in memory.list("mission-replay") if item.event_id == 51]) == 1
+
+    with pytest.raises(MissionMemoryError, match="already bound to a different mailbox projection"):
+        memory.append(**{**kwargs, "content": '{"skill_id": "research", "score": 0.1}'})

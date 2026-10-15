@@ -110,6 +110,26 @@ class MissionMemory:
                 "CREATE INDEX IF NOT EXISTS idx_mission_messages_correlation "
                 "ON mission_messages (correlation_id, message_id)"
             )
+            # event_id identifies one append-only event globally. Older runtime
+            # versions could replay an event before its cursor ack and create
+            # duplicate mailbox rows; retain the first projection before enforcing
+            # uniqueness going forward.
+            db.execute(
+                """
+                DELETE FROM mission_messages
+                WHERE event_id IS NOT NULL
+                  AND message_id NOT IN (
+                      SELECT MIN(message_id)
+                      FROM mission_messages
+                      WHERE event_id IS NOT NULL
+                      GROUP BY event_id
+                  )
+                """
+            )
+            db.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_mission_messages_event_unique "
+                "ON mission_messages (event_id) WHERE event_id IS NOT NULL"
+            )
 
     def append(
         self,
@@ -164,6 +184,51 @@ class MissionMemory:
         try:
             with self.store._connect() as db:
                 db.execute("BEGIN IMMEDIATE")
+                if event_id is not None:
+                    existing = db.execute(
+                        """
+                        SELECT message_id, mission_id, source, kind, content,
+                               metadata_json, created_at, scope, project_id,
+                               agent_role, task_id, event_id, correlation_id
+                        FROM mission_messages
+                        WHERE event_id = ?
+                        """,
+                        (event_id,),
+                    ).fetchone()
+                    if existing is not None:
+                        same_projection = (
+                            existing["mission_id"] == mission_id
+                            and existing["source"] == source
+                            and existing["kind"] == kind
+                            and existing["content"] == content
+                            and existing["metadata_json"] == payload
+                            and existing["scope"] == scope.value
+                            and existing["project_id"] == project_id
+                            and existing["agent_role"] == agent_role
+                            and existing["task_id"] == task_id
+                            and existing["correlation_id"] == correlation_id
+                        )
+                        if not same_projection:
+                            db.rollback()
+                            raise MissionMemoryError(
+                                f"event_id {event_id} is already bound to a different mailbox projection"
+                            )
+                        db.rollback()
+                        return MissionMessage(
+                            message_id=int(existing["message_id"]),
+                            mission_id=str(existing["mission_id"]),
+                            source=str(existing["source"]),
+                            kind=str(existing["kind"]),
+                            content=str(existing["content"]),
+                            metadata=json.loads(existing["metadata_json"]),
+                            created_at=str(existing["created_at"]),
+                            scope=MailboxScope(existing["scope"]),
+                            project_id=existing["project_id"],
+                            agent_role=existing["agent_role"],
+                            task_id=existing["task_id"],
+                            event_id=int(existing["event_id"]),
+                            correlation_id=existing["correlation_id"],
+                        )
                 cursor = db.execute(
                     """
                     INSERT INTO mission_messages (
@@ -339,6 +404,31 @@ class MissionMemory:
                 )
             )
         )
+
+    def task_result_task_ids(self, mission_id: str) -> frozenset[str]:
+        """Return task IDs with a task_result mailbox projection for this mission."""
+        if not mission_id.strip():
+            raise MissionMemoryError("mission_id is empty")
+        try:
+            with self.store._connect() as db:
+                rows = db.execute(
+                    """
+                    SELECT metadata_json, task_id
+                    FROM mission_messages
+                    WHERE mission_id = ? AND kind = 'task_result'
+                    """,
+                    (mission_id,),
+                ).fetchall()
+        except sqlite3.Error as exc:
+            raise MissionMemoryError(f"could not read task result projections: {exc}") from exc
+        result: set[str] = set()
+        for row in rows:
+            task_id = row["task_id"]
+            if not task_id:
+                task_id = json.loads(row["metadata_json"]).get("task_id")
+            if isinstance(task_id, str) and task_id.strip():
+                result.add(task_id)
+        return frozenset(result)
 
     def first_of_kind(self, mission_id: str, kind: str) -> MissionMessage | None:
         if not kind.strip():
