@@ -135,3 +135,199 @@ def test_work_session_store_reads_legacy_payload_with_new_defaults(tmp_path: Pat
     assert loaded.work_id == "legacy-work"
     assert loaded.execution_receipts == ()
     assert loaded.approval_state == "not_required"
+
+
+def test_workbench_replays_completed_side_effect_receipt_without_running_it_twice(
+    tmp_path: Path, monkeypatch
+):
+    from aurora.workbench.models import WorkbenchResult
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    runtime = tmp_path / "runtime"
+    runtime.mkdir()
+    sessions = WorkSessionStore(runtime / "sessions.db")
+    wb = UniversalWorkbench(
+        repository_root=repo,
+        runtime_root=runtime,
+        gateway=FakeGateway(),
+        policy=Policy(frozenset({"workbench:*"}), frozenset()),
+        session_store=sessions,
+        audit_path=runtime / "audit.jsonl",
+        configured_roots=(),
+    )
+    executions = []
+
+    def fake_file_write(request):
+        executions.append(tuple(request.arguments))
+        return WorkbenchResult(
+            capability=request.capability,
+            operation="file_write",
+            status="succeeded",
+            output={"path": request.arguments[0], "content": request.arguments[1]},
+            provenance="controlled-write",
+        )
+
+    monkeypatch.setattr(wb, "_file_write", fake_file_write)
+    request = WorkbenchRequest(
+        capability="workbench:file:write",
+        actor="engineer",
+        mission_id="mission-idempotent-write",
+        reason="write one controlled artifact",
+        arguments=("result.txt", "durable output"),
+        options={"work_id": "mission-idempotent-write"},
+        correlation_id="corr-idempotent-write",
+        idempotency_key="task:mission-idempotent-write:write-result",
+    )
+
+    first = wb.execute(request)
+    replay = wb.execute(request)
+
+    assert executions == [("result.txt", "durable output")]
+    assert replay.output == first.output
+    assert replay.receipt_id == first.receipt_id
+    assert replay.correlation_id == first.correlation_id
+    action = sessions.get_action("task:mission-idempotent-write:write-result")
+    assert action is not None
+    assert action["state"] == "completed"
+    assert action["result"]["receipt_id"] == first.receipt_id
+
+
+def test_workbench_rejects_reusing_action_key_for_different_side_effect(
+    tmp_path: Path, monkeypatch
+):
+    from aurora.workbench.models import WorkbenchResult
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    runtime = tmp_path / "runtime"
+    runtime.mkdir()
+    sessions = WorkSessionStore(runtime / "sessions.db")
+    wb = UniversalWorkbench(
+        repository_root=repo,
+        runtime_root=runtime,
+        gateway=FakeGateway(),
+        policy=Policy(frozenset({"workbench:*"}), frozenset()),
+        session_store=sessions,
+        audit_path=runtime / "audit.jsonl",
+        configured_roots=(),
+    )
+    executions = []
+
+    def fake_file_write(request):
+        executions.append(tuple(request.arguments))
+        return WorkbenchResult(
+            request.capability,
+            "file_write",
+            "succeeded",
+            output={"path": request.arguments[0]},
+            provenance="controlled-write",
+        )
+
+    monkeypatch.setattr(wb, "_file_write", fake_file_write)
+    first_request = WorkbenchRequest(
+        "workbench:file:write",
+        "engineer",
+        "mission-key-binding",
+        arguments=("one.txt", "first"),
+        options={"work_id": "mission-key-binding"},
+        idempotency_key="same-key-different-payload",
+    )
+    wb.execute(first_request)
+    second_request = WorkbenchRequest(
+        "workbench:file:write",
+        "engineer",
+        "mission-key-binding",
+        arguments=("two.txt", "second"),
+        options={"work_id": "mission-key-binding"},
+        idempotency_key="same-key-different-payload",
+    )
+
+    try:
+        wb.execute(second_request)
+    except Exception as exc:
+        assert "idempotency_key is already bound to a different Workbench action" in str(exc)
+    else:
+        raise AssertionError("Workbench executed two different side effects under one action key")
+
+    assert executions == [("one.txt", "first")]
+
+
+def test_workbench_does_not_repeat_side_effect_with_indeterminate_prior_outcome(
+    tmp_path: Path, monkeypatch
+):
+    import sqlite3
+    from datetime import datetime, timedelta, timezone
+    from aurora.workbench.models import WorkbenchResult
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    runtime = tmp_path / "runtime"
+    runtime.mkdir()
+    sessions = WorkSessionStore(runtime / "sessions.db")
+    wb = UniversalWorkbench(
+        repository_root=repo,
+        runtime_root=runtime,
+        gateway=FakeGateway(),
+        policy=Policy(frozenset({"workbench:*"}), frozenset()),
+        session_store=sessions,
+        audit_path=runtime / "audit.jsonl",
+        configured_roots=(),
+    )
+    request = WorkbenchRequest(
+        "workbench:file:write",
+        "engineer",
+        "mission-crashed-write",
+        arguments=("side-effect.txt", "must not repeat"),
+        options={"work_id": "mission-crashed-write"},
+        idempotency_key="task:mission-crashed-write:file-write",
+    )
+    sessions.create_or_get(
+        work_id="mission-crashed-write",
+        mission_id="mission-crashed-write",
+        actor="engineer",
+        environment="local",
+        workspace_root=str(repo),
+    )
+    decision = sessions.begin_action(
+        idempotency_key=request.idempotency_key,
+        work_id="mission-crashed-write",
+        mission_id="mission-crashed-write",
+        capability_id=request.capability,
+        request_fingerprint=wb._idempotency_fingerprint(request, request.capability),
+        replay_safe=False,
+    )
+    assert decision["state"] == "claimed"
+
+    stale_time = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+    with sqlite3.connect(sessions.path) as db:
+        db.execute(
+            "UPDATE work_session_actions SET updated_at = ? WHERE idempotency_key = ?",
+            (stale_time, request.idempotency_key),
+        )
+
+    executions = []
+
+    def fake_file_write(_request):
+        executions.append("executed")
+        return WorkbenchResult(
+            "workbench:file:write",
+            "file_write",
+            "succeeded",
+            output={"unexpected": True},
+            provenance="controlled-write",
+        )
+
+    monkeypatch.setattr(wb, "_file_write", fake_file_write)
+    try:
+        wb.execute(request)
+    except Exception as exc:
+        assert "previous execution outcome is unknown" in str(exc)
+        assert "side effect was not repeated" in str(exc)
+    else:
+        raise AssertionError("Workbench silently re-executed an indeterminate side effect")
+
+    assert executions == []
+    state = sessions.get_action(request.idempotency_key)
+    assert state is not None
+    assert state["state"] == "indeterminate"
