@@ -257,6 +257,26 @@ class UniversalWorkbench:
             "correlation_id": result.correlation_id,
         }
 
+    @staticmethod
+    def _idempotency_fingerprint(request: WorkbenchRequest, capability: str) -> str:
+        fingerprint_payload = {
+            "capability": capability,
+            "actor": request.actor,
+            "mission_id": request.mission_id,
+            "reason": request.reason,
+            "arguments": list(request.arguments),
+            "options": dict(request.options),
+        }
+        return hashlib.sha256(
+            json.dumps(
+                fingerprint_payload,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                default=str,
+            ).encode("utf-8")
+        ).hexdigest()
+
     def execute(self, request: WorkbenchRequest) -> WorkbenchResult:
         if not request.actor.strip() or not request.mission_id.strip():
             raise WorkbenchError("actor and mission_id are required")
@@ -291,23 +311,7 @@ class UniversalWorkbench:
             self.session_store.record_capability(work_id, capability)
 
         if idempotency_key is not None:
-            fingerprint_payload = {
-                "capability": capability,
-                "actor": request.actor,
-                "mission_id": request.mission_id,
-                "reason": request.reason,
-                "arguments": list(request.arguments),
-                "options": dict(request.options),
-            }
-            fingerprint = hashlib.sha256(
-                json.dumps(
-                    fingerprint_payload,
-                    ensure_ascii=False,
-                    sort_keys=True,
-                    separators=(",", ":"),
-                    default=str,
-                ).encode("utf-8")
-            ).hexdigest()
+            fingerprint = self._idempotency_fingerprint(request, capability)
             try:
                 decision = self.session_store.begin_action(
                     idempotency_key=idempotency_key,
@@ -316,7 +320,7 @@ class UniversalWorkbench:
                     capability_id=capability,
                     request_fingerprint=fingerprint,
                     replay_safe=capability in self._REPLAY_SAFE_CAPABILITIES,
-                    stale_after_seconds=900.0,
+                    stale_after_seconds=300.0,
                 )
             except (ValueError, KeyError) as exc:
                 raise WorkbenchError(str(exc)) from exc
