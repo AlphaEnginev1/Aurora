@@ -9,6 +9,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 import sqlite3
+from threading import RLock
 import unicodedata
 from typing import Any, Callable, Mapping
 from uuid import uuid4
@@ -177,6 +178,8 @@ Keep responses useful and concise unless the human asks for depth."""
         self.provider: DirectorProvider = provider or InferenceDirectorProvider(router)
         self.mission_runner = mission_runner
         self.workbench = workbench
+        self._session_locks_guard = RLock()
+        self._session_locks: dict[str, RLock] = {}
         self.router.configure_context_gate(bootstrap.context_gate, enforce=True)
         self._initialize_schema()
 
@@ -247,12 +250,41 @@ Keep responses useful and concise unless the human asks for depth."""
             ConversationTurn(**dict(row)) for row in reversed(rows)
         )
 
+    def _session_lock_for(self, session_id: str) -> RLock:
+        # One session must have a total order for concurrent HTTP turns. The lock
+        # also makes duplicate request IDs wait for the original response to be
+        # persisted before attempting to replay it.
+        with self._session_locks_guard:
+            lock = self._session_locks.get(session_id)
+            if lock is None:
+                lock = RLock()
+                self._session_locks[session_id] = lock
+            return lock
+
     def send_message(
         self,
         *,
         session_id: str,
         user_input: str,
         model: str | None = None,
+        request_id: str | None = None,
+    ) -> DirectorConversationResponse:
+        _require_identifier(session_id, "session_id")
+        with self._session_lock_for(session_id):
+            return self._send_message_locked(
+                session_id=session_id,
+                user_input=user_input,
+                model=model,
+                request_id=request_id,
+            )
+
+    def _send_message_locked(
+        self,
+        *,
+        session_id: str,
+        user_input: str,
+        model: str | None = None,
+        request_id: str | None = None,
     ) -> DirectorConversationResponse:
         _require_identifier(session_id, "session_id")
         prompt = user_input.strip()
