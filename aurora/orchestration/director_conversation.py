@@ -596,14 +596,22 @@ Keep responses useful and concise unless the human asks for depth."""
                 requested_capability = capability.strip()
                 capability = self._canonical_workbench_capability(requested_capability)
                 try:
+                    # Provider tool-call IDs are stable identifiers for this
+                    # specific direct conversation action. Never trust a key
+                    # supplied by model-generated tool arguments.
+                    direct_call_id = str(call.call_id)
+                    direct_options = dict(options)
+                    direct_options["idempotency_key"] = (
+                        f"conversation-workbench:{direct_call_id}"
+                    )
                     result = self.workbench.execute(
                         WorkbenchRequest(
                             capability=capability,
                             actor="director",
-                            mission_id=f"conversation:{call.call_id}",
+                            mission_id=f"conversation:{direct_call_id}",
                             reason="Director conversation direct Workbench evidence",
                             arguments=tuple(call_args),
-                            options=dict(options),
+                            options=direct_options,
                         )
                     )
                     results.append(self._workbench_evidence(result))
