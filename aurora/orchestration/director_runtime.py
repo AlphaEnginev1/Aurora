@@ -1417,11 +1417,16 @@ class DirectorRuntime:
         result = stored.result or {}
         if cycle.action in {"failed", "retried"}:
             self._adapt_team_after_runtime_signal(mission_id, stored.task.task_id)
+        # A retry is not the task's authoritative result. If it is
+        # projected as `task_result`, task_result_task_ids() will suppress
+        # reconciliation of the later successful/terminal result for this same
+        # task ID. Keep attempt diagnostics in a separate mailbox kind.
+        projection_kind = "task_attempt" if cycle.action == "retried" else "task_result"
         try:
             self.memory.append(
                 mission_id=mission_id,
                 source=f"worker:{self.worker_id}",
-                kind="task_result",
+                kind=projection_kind,
                 content=self._result_text(stored.task.task_id, stored.status, result, stored.last_error),
                 metadata={
                     "task_id": stored.task.task_id,
