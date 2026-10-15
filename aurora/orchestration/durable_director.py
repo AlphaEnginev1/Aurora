@@ -118,9 +118,9 @@ class DurableDirectorService:
                         "mission_id is already bound to a different explicit task graph"
                     )
                 existing_correlation = submitted.get("correlation_id")
-                if correlation_id and existing_correlation and existing_correlation != correlation_id:
+                if correlation_id and existing_correlation != correlation_id:
                     raise DurableDirectorError(
-                        "mission_id is already bound to a different correlation_id"
+                        "mission_id is already bound to a different or missing correlation_id"
                     )
                 restored_tasks = tuple(item.task for item in existing_tasks)
                 restored_plan = DirectorPlan(
