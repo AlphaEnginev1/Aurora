@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 import sqlite3
 import uuid
-from typing import Sequence
+from typing import Mapping, Sequence
 
 from .task_engine import DelegatedTask
 
@@ -174,6 +174,7 @@ class DurableTaskStore:
         tasks: Sequence[DelegatedTask],
         *,
         phase: int = 0,
+        initial_events: Sequence[Mapping[str, object]] = (),
     ) -> None:
         if not mission_id.strip():
             raise TaskStoreError("mission_id is empty")
@@ -188,6 +189,30 @@ class DurableTaskStore:
         known = set(ids)
         if any(dep not in known for task in tasks for dep in task.depends_on):
             raise TaskStoreError("task plan contains an unknown dependency")
+
+        normalized_events: list[dict[str, object]] = []
+        for event in initial_events:
+            if not isinstance(event, Mapping):
+                raise TaskStoreError("initial events must be mapping objects")
+            event_type = event.get("event_type")
+            payload = event.get("payload", {})
+            task_id = event.get("task_id")
+            if not isinstance(event_type, str) or not event_type.strip():
+                raise TaskStoreError("initial event_type must be a non-empty string")
+            if not isinstance(payload, Mapping):
+                raise TaskStoreError("initial event payload must be a mapping")
+            if task_id is not None and (
+                not isinstance(task_id, str) or task_id not in known
+            ):
+                raise TaskStoreError("initial event task_id must identify a task in the plan")
+            normalized_events.append({
+                "event_type": event_type,
+                "payload": dict(payload),
+                "task_id": task_id,
+                "project_id": event.get("project_id"),
+                "agent_role": event.get("agent_role"),
+                "correlation_id": event.get("correlation_id"),
+            })
 
         now = self._now()
         with self._connect() as db:
@@ -226,6 +251,19 @@ class DurableTaskStore:
                             "capability": task.capability,
                             "skills": list(task.skills),
                         },
+                    )
+                # Preserve the existing event chronology (task enqueued events
+                # first, mission receipts afterwards) without splitting commits.
+                for event in normalized_events:
+                    self._event_locked(
+                        db,
+                        mission_id,
+                        event["task_id"],
+                        str(event["event_type"]),
+                        dict(event["payload"]),
+                        project_id=event["project_id"],
+                        agent_role=event["agent_role"],
+                        correlation_id=event["correlation_id"],
                     )
                 db.commit()
             except sqlite3.IntegrityError as exc:

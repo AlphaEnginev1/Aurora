@@ -221,3 +221,32 @@ def test_later_phase_supersedes_previous_failed_phase(tmp_path: Path):
     assert recovered.task.task_id == "b"
     store.complete("mission-1", "b", status="succeeded", worker_id="worker-b")
     assert store.mission_status("mission-1") == "succeeded"
+
+
+def test_enqueue_rolls_back_task_rows_and_initial_events_as_one_transaction(tmp_path: Path):
+    store = DurableTaskStore(tmp_path / "tasks.db")
+    tasks = (
+        DelegatedTask("valid-a", "researcher", "valid task A"),
+        DelegatedTask("valid-b", "reviewer", "valid task B"),
+    )
+
+    with pytest.raises(TypeError):
+        store.enqueue(
+            "mission-atomic",
+            tasks,
+            initial_events=(
+                {
+                    "event_type": "mission_submitted",
+                    "payload": {"objective": "atomic test", "task_ids": ["valid-a", "valid-b"]},
+                },
+                {
+                    "event_type": "team.formed",
+                    # The non-serializable value fails only after both tasks,
+                    # their enqueued events and the first receipt were staged.
+                    "payload": {"roles": [object()]},
+                },
+            ),
+        )
+
+    assert store.list_tasks("mission-atomic") == ()
+    assert store.events("mission-atomic") == ()

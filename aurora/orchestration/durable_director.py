@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
+import json
 from typing import Sequence
 from uuid import uuid4
 
@@ -15,6 +17,31 @@ from .team_runtime import TeamCoordinator, TeamCoordinatorError
 
 class DurableDirectorError(RuntimeError):
     """Raised when a Director mission cannot be durably submitted."""
+
+
+def _task_graph_payload(tasks: Sequence[DelegatedTask]) -> list[dict[str, object]]:
+    return [
+        {
+            "task_id": task.task_id,
+            "role": task.role,
+            "objective": task.objective,
+            "capability": task.capability,
+            "args": list(task.args),
+            "depends_on": list(task.depends_on),
+            "skills": list(task.skills),
+        }
+        for task in tasks
+    ]
+
+
+def _task_graph_fingerprint(tasks: Sequence[DelegatedTask]) -> str:
+    serialized = json.dumps(
+        _task_graph_payload(tasks),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -53,8 +80,54 @@ class DurableDirectorService:
         planning_provider: str | None = None,
         planning_execution_id: str | None = None,
     ) -> MissionSubmission:
-        if not objective.strip():
+        normalized_objective = objective.strip()
+        if not normalized_objective:
             raise DurableDirectorError("mission objective is empty")
+
+        # A caller-supplied mission_id is the idempotency key. If the request was
+        # already committed, return its durable receipt instead of invoking the
+        # planner or attempting to enqueue the same task IDs again.
+        requested_fingerprint = (
+            _task_graph_fingerprint(tuple(tasks)) if tasks is not None else None
+        )
+        if mission_id and mission_id.strip():
+            existing_tasks = self.store.list_tasks(mission_id.strip())
+            if existing_tasks:
+                existing_events = self.store.events(mission_id.strip())
+                submitted_event = next(
+                    (event for event in existing_events if event.event_type == "mission_submitted"),
+                    None,
+                )
+                if submitted_event is None:
+                    raise DurableDirectorError(
+                        "mission_id already has queued tasks but no authoritative submission receipt; "
+                        "refusing to create a duplicate mission"
+                    )
+                submitted = submitted_event.payload
+                if submitted.get("objective") != normalized_objective:
+                    raise DurableDirectorError(
+                        "mission_id is already bound to a different objective"
+                    )
+                if tasks is not None and submitted.get("requested_tasks_fingerprint") != requested_fingerprint:
+                    raise DurableDirectorError(
+                        "mission_id is already bound to a different explicit task graph"
+                    )
+                restored_tasks = tuple(item.task for item in existing_tasks)
+                restored_plan = DirectorPlan(
+                    objective=str(submitted.get("objective", normalized_objective)),
+                    tasks=restored_tasks,
+                    model=str(submitted.get("model", "unknown")),
+                    provider=(
+                        str(submitted["provider"])
+                        if submitted.get("provider") is not None else None
+                    ),
+                    execution_id=(
+                        str(submitted["planning_execution_id"])
+                        if submitted.get("planning_execution_id") is not None else None
+                    ),
+                )
+                return MissionSubmission(mission_id=mission_id.strip(), plan=restored_plan)
+
         if tasks is None:
             plan = self.planner.plan(
                 objective=objective,
@@ -73,7 +146,8 @@ class DurableDirectorService:
                 execution_id=planning_execution_id,
             )
         try:
-            mission = mission_id or f"mission-{uuid4().hex}"
+            mission = mission_id.strip() if mission_id and mission_id.strip() else f"mission-{uuid4().hex}"
+            initial_events: list[dict[str, object]] = []
             team_state = None
             if self.team_coordinator is not None:
                 team_state = self.team_coordinator.prepare(
@@ -82,30 +156,32 @@ class DurableDirectorService:
                     tasks=plan.tasks,
                 )
                 validated = team_state.tasks
-                self.event_bus.publish(
-                    mission_id=mission,
-                    event_type="team.formed",
-                    payload={
+                initial_events.append({
+                    "event_type": "team.formed",
+                    "payload": {
                         "objective": plan.objective,
                         "roles": [member.role for member in team_state.team.members],
                         "required_skills": list(team_state.team.required_skills),
                         "covered_skills": list(team_state.team.covered_skills),
                     },
-                )
+                })
             else:
                 validated = self.task_engine.validate(plan.tasks)
-            self.store.enqueue(mission, validated)
-            self.event_bus.publish(
-                mission_id=mission,
-                event_type="mission_submitted",
-                payload={
+            initial_events.append({
+                "event_type": "mission_submitted",
+                "payload": {
                     "objective": plan.objective,
                     "model": plan.model,
                     "provider": plan.provider,
                     "planning_execution_id": plan.execution_id,
                     "task_ids": [task.task_id for task in validated],
+                    "requested_tasks_fingerprint": requested_fingerprint,
+                    "task_graph": _task_graph_payload(validated),
                 },
-            )
+            })
+            # Task records, per-task "enqueued" events, and the submission
+            # receipt commit or roll back as one SQLite transaction.
+            self.store.enqueue(mission, validated, initial_events=initial_events)
         except Exception as exc:
             raise DurableDirectorError(
                 f"mission could not be durably submitted: {exc}"

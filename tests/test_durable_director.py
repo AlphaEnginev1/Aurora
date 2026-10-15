@@ -128,3 +128,55 @@ def test_durable_director_persists_explicit_validated_task_graph_and_planning_ev
     )
     assert submitted_event.payload["provider"] == "nvidia_api"
     assert submitted_event.payload["planning_execution_id"] == "conversation-planning-exec-123"
+
+
+def test_durable_director_submission_is_idempotent_for_same_mission_id(tmp_path: Path):
+    service, store, planner = make_service(tmp_path)
+
+    first = service.submit_mission(objective="test mission", mission_id="mission-idempotent")
+    second = service.submit_mission(objective="test mission", mission_id="mission-idempotent")
+
+    assert second.mission_id == first.mission_id
+    assert second.plan.tasks == first.plan.tasks
+    assert len(planner.calls) == 1
+    assert len(store.list_tasks("mission-idempotent")) == 2
+    assert len([
+        event for event in store.events("mission-idempotent")
+        if event.event_type == "mission_submitted"
+    ]) == 1
+
+
+def test_durable_director_rejects_reuse_of_mission_id_for_different_objective(tmp_path: Path):
+    service, store, planner = make_service(tmp_path)
+    service.submit_mission(objective="test mission", mission_id="mission-id-conflict")
+
+    with pytest.raises(DurableDirectorError, match="different objective"):
+        service.submit_mission(
+            objective="a different order",
+            mission_id="mission-id-conflict",
+        )
+
+    assert len(planner.calls) == 1
+    assert len(store.list_tasks("mission-id-conflict")) == 2
+
+
+def test_durable_director_rejects_reuse_of_mission_id_for_different_explicit_graph(tmp_path: Path):
+    service, store, planner = make_service(tmp_path)
+    original = (
+        DelegatedTask("read-one", "operator", "read first"),
+    )
+    service.submit_mission(
+        objective="explicit idempotency test",
+        mission_id="mission-graph-conflict",
+        tasks=original,
+    )
+
+    with pytest.raises(DurableDirectorError, match="different explicit task graph"):
+        service.submit_mission(
+            objective="explicit idempotency test",
+            mission_id="mission-graph-conflict",
+            tasks=(DelegatedTask("read-two", "operator", "read different"),),
+        )
+
+    assert planner.calls == []
+    assert [item.task.task_id for item in store.list_tasks("mission-graph-conflict")] == ["read-one"]

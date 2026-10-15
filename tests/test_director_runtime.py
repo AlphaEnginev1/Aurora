@@ -655,3 +655,59 @@ def test_cross_decision_replication_is_advisory(tmp_path: Path):
     assert '"observed_direction": "better"' in knowledge_messages[-1]
     assert '"state": "promoted_empirical"' in knowledge_messages[-1]
 
+
+def test_runtime_submission_stays_accepted_when_ownership_telemetry_fails(tmp_path: Path):
+    runtime, store, _planner, _engine = make_runtime(tmp_path)
+
+    def unavailable_telemetry(**kwargs):
+        raise RuntimeError("event bus temporarily unavailable")
+
+    runtime.event_bus.publish = unavailable_telemetry
+    submission = runtime.submit_mission(objective="accepted despite telemetry outage")
+
+    assert submission.mission_id
+    assert len(store.list_tasks(submission.mission_id)) == 2
+    submitted = [
+        event for event in store.events(submission.mission_id)
+        if event.event_type == "mission_submitted"
+    ]
+    assert len(submitted) == 1
+    assert submitted[0].payload["objective"] == "accepted despite telemetry outage"
+    assert runtime.memory.first_of_kind(submission.mission_id, "mission_objective") is not None
+    assert runtime.memory.first_of_kind(submission.mission_id, "mission_plan") is not None
+
+
+def test_runtime_reconciles_partial_mailbox_write_from_durable_submission(tmp_path: Path):
+    from aurora.orchestration.mission_memory import MissionMemoryError
+
+    runtime, store, _planner, _engine = make_runtime(tmp_path)
+    real_append = runtime.memory.append
+    failed_once = {"value": False}
+
+    def fail_plan_once(**kwargs):
+        if kwargs.get("kind") == "mission_plan" and not failed_once["value"]:
+            failed_once["value"] = True
+            raise MissionMemoryError("temporary mailbox outage")
+        return real_append(**kwargs)
+
+    runtime.memory.append = fail_plan_once
+    submission = runtime.submit_mission(objective="recover mailbox projection")
+
+    # Queue acceptance is authoritative even if the auxiliary mailbox is down.
+    assert len(store.list_tasks(submission.mission_id)) == 2
+    assert runtime.memory.first_of_kind(submission.mission_id, "mission_objective") is not None
+    assert runtime.memory.first_of_kind(submission.mission_id, "mission_plan") is None
+
+    runtime.memory.append = real_append
+    runtime.run_once()
+
+    assert runtime.memory.first_of_kind(submission.mission_id, "mission_objective") is not None
+    assert runtime.memory.first_of_kind(submission.mission_id, "mission_plan") is not None
+    assert len([
+        message for message in runtime.memory.list(submission.mission_id)
+        if message.kind == "mission_objective"
+    ]) == 1
+    assert len([
+        message for message in runtime.memory.list(submission.mission_id)
+        if message.kind == "mission_plan"
+    ]) == 1
