@@ -290,8 +290,44 @@ Keep responses useful and concise unless the human asks for depth."""
         prompt = user_input.strip()
         if not prompt:
             raise DirectorConversationError("user_input is empty")
+        if request_id is not None:
+            if not isinstance(request_id, str):
+                raise DirectorConversationError("request_id must be a string or null")
+            request_id = request_id.strip()
+            if not request_id or len(request_id) > 256 or "\x00" in request_id:
+                raise DirectorConversationError("request_id must contain 1 to 256 non-null characters")
+            digest = hashlib.sha256(
+                f"{session_id}\x00{request_id}".encode("utf-8")
+            ).hexdigest()[:32]
+            turn_id = f"turn-request-{digest}"
+            correlation_id = f"corr-request-{digest}"
+        else:
+            turn_id = f"turn-{uuid4().hex}"
+            correlation_id = f"corr-{uuid4().hex}"
 
         session = self.get_session(session_id)
+        if request_id is not None:
+            existing_user_turn = self._get_turn_by_id(session_id, turn_id)
+            if existing_user_turn is not None:
+                if existing_user_turn.role != "user" or existing_user_turn.content != prompt:
+                    raise DirectorConversationError(
+                        "request_id is already bound to different conversation input"
+                    )
+                existing_response = self._get_turn_by_id(
+                    session_id, f"{turn_id}-response"
+                )
+                if existing_response is not None and existing_response.state == "completed":
+                    return self._response_from_saved_turn(session, existing_response)
+                existing_error = self._get_turn_by_id(
+                    session_id, f"{turn_id}-error"
+                )
+                if existing_error is not None:
+                    raise DirectorConversationError(
+                        "this request_id already failed and will not be re-executed; "
+                        "use a new request_id only to intentionally submit a new turn"
+                    )
+                return self._in_progress_response(session, existing_user_turn)
+
         if session.state != "active":
             raise DirectorConversationError(
                 f"conversation session is not active: {session_id}"
@@ -301,10 +337,7 @@ Keep responses useful and concise unless the human asks for depth."""
         policy = bootstrap_state.director_model_policy
         self._validate_requested_model(model, policy)
 
-        correlation_id = f"corr-{uuid4().hex}"
-        turn_id = f"turn-{uuid4().hex}"
         next_sequence = self._next_sequence(session_id)
-
         self._insert_turn(
             turn_id=turn_id,
             session_id=session_id,
