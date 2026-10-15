@@ -208,17 +208,13 @@ def _mission_summary(director_service, phase: str, objective: str, state: Mappin
                 "change_branch": branch_name,
             })
 
-        if saw_write and not rejected_write and writes:
-            identities = {(item["change_repository"], item["change_branch"]) for item in writes}
-            if len(identities) == 1:
-                # When the phase commits multiple files serially to one branch,
-                # the last returned commit is the candidate head.
-                summary.update(writes[-1])
-                summary["change_write_receipts"] = len(writes)
-            else:
-                summary["change_receipt_rejected"] = "writes target multiple repositories or branches"
+        if saw_write and not rejected_write and len(writes) == 1:
+            summary.update(writes[0])
+            summary["change_write_receipts"] = 1
         elif saw_write:
-            summary["change_receipt_rejected"] = "GitHub file-write receipt missing, invalid, or targets a protected branch"
+            summary["change_receipt_rejected"] = (
+                "expected exactly one unambiguous GitHub file-write receipt on one non-default branch"
+            )
 
     if phase in {"ci", "verify"}:
         expected_sha = str(state.get("change_id", "")).strip().lower()
