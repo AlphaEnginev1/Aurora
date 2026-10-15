@@ -806,7 +806,11 @@ Keep responses useful and concise unless the human asks for depth."""
                         WorkbenchRequest(
                             capability=capability,
                             actor="director",
-                            mission_id=f"conversation:{call.call_id}",
+                            mission_id=(
+                                f"conversation:{conversation_turn_id}:{call.call_id}"
+                                if conversation_turn_id
+                                else f"conversation:adhoc-{uuid4().hex}:{call.call_id}"
+                            ),
                             reason="Director conversation direct Workbench evidence",
                             arguments=tuple(call_args),
                             options=dict(options),
