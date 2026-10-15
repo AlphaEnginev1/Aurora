@@ -843,3 +843,35 @@ def test_retry_attempt_does_not_mask_the_final_task_result_in_shared_memory(tmp_
     assert "completed collect" in collect_results[0].content
     assert "collect" in runtime.memory.task_result_task_ids(submission.mission_id)
 
+
+def test_run_forever_recovers_after_transient_cycle_error_without_losing_mission(tmp_path: Path):
+    runtime, store, _planner, _engine = make_runtime(tmp_path)
+    submission = runtime.submit_mission(objective="finish despite one transient runtime cycle error")
+    real_run_once = runtime.run_once
+    stop = Event()
+    calls = {"count": 0}
+
+    def fail_first_cycle_then_resume():
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise RuntimeError("controlled transient event-store failure")
+        cycle = real_run_once()
+        if runtime._is_finalized(submission.mission_id):
+            stop.set()
+        return cycle
+
+    runtime.run_once = fail_first_cycle_then_resume
+    runtime._refresh_model_catalogs_if_due = lambda: None
+    runtime.run_forever(stop)
+
+    assert calls["count"] >= 2
+    assert runtime._is_finalized(submission.mission_id)
+    assert runtime._final_status(submission.mission_id) is TaskStatus.SUCCEEDED
+    assert len(store.list_tasks(submission.mission_id)) == 2
+    failures = [
+        event for event in store.events("system")
+        if event.event_type == "director_runtime_cycle_failed"
+    ]
+    assert len(failures) == 1
+    assert failures[0].payload["consecutive_failures"] == 1
+    assert failures[0].payload["error_type"] == "RuntimeError"
