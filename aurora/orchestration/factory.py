@@ -892,7 +892,15 @@ def build_director_runtime(*, inference_policy_path: str | Path, autonomy_policy
                 "planning_execution_id": planning_execution_id,
             })
         submission = runtime.submit_mission(**submission_kwargs)
-        return runtime.run_until_terminal(submission)
+        timeout_seconds = float(
+            os.getenv("AURORA_CONVERSATION_MISSION_TIMEOUT_SECONDS", "300")
+        )
+        # The daemon's run_forever loop owns worker cycles. The HTTP conversation
+        # handler must wait for its durable result, not start a second run_once loop.
+        return runtime.wait_until_terminal(
+            submission,
+            timeout_seconds=timeout_seconds,
+        )
 
     conversation_service.mission_runner = run_durable_conversation_mission
     runtime.autonomy_controllers = build_autonomy_runtime_bindings(
