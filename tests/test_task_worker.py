@@ -3,9 +3,17 @@ from pathlib import Path
 
 from aurora.inference.models import InferenceResponse
 from aurora.orchestration.engine import TaskResult
-from aurora.orchestration.task_engine import DelegatedTask, DelegatedTaskResult, TaskEngine, TaskStatus
+from aurora.orchestration.task_engine import (
+    DelegatedTask,
+    DelegatedTaskResult,
+    ResearchTaskResult,
+    TaskEngine,
+    TaskStatus,
+    research_learning_is_authorized,
+)
 from aurora.orchestration.task_store import DurableTaskStore, TaskStoreError
 from aurora.orchestration.task_worker import TaskWorker, WorkerPolicy
+from aurora.research.models import EvidenceState
 
 
 class FakeOrchestration:
@@ -192,3 +200,123 @@ def test_worker_persists_routing_evidence_for_director_review(tmp_path: Path):
             {"model": "model-b", "score": 0.71},
         ],
     }
+
+
+
+class _CountingEvaluator:
+    def __init__(self):
+        self.calls = 0
+
+    def evaluate(self, **kwargs):
+        self.calls += 1
+        return ()
+
+
+class _CountingLearningStore:
+    def __init__(self):
+        self.records = []
+
+    def record(self, evaluation):
+        self.records.append(evaluation)
+
+
+def _claimed_task_for_learning(tmp_path: Path, task: DelegatedTask):
+    store, worker, _ = make_worker(tmp_path)
+    store.enqueue("mission-1", [task])
+    claimed = store.claim_next("mission-1", "worker-a", lease_seconds=30)
+    assert claimed is not None
+    return store, worker, claimed
+
+
+def test_unverified_research_result_cannot_enter_worker_or_engine_learning(tmp_path: Path):
+    task = DelegatedTask(
+        "research-task",
+        "researcher",
+        "retrieve candidate research",
+        capability="research",
+        skills=("research-skill",),
+    )
+    _, worker, claimed = _claimed_task_for_learning(tmp_path, task)
+    evaluator = _CountingEvaluator()
+    learning = _CountingLearningStore()
+    worker.skill_evaluator = evaluator
+    worker.skill_learning = learning
+    worker.task_engine.skill_evaluator = evaluator
+    worker.task_engine.skill_learning = learning
+    worker.task_engine.skill_registry = object()
+    worker.task_engine.organization = object()
+
+    result = DelegatedTaskResult(
+        task=task,
+        status=TaskStatus.SUCCEEDED,
+        capability_result=ResearchTaskResult(
+            request_id="research-untrusted",
+            source_ids=("source-untrusted",),
+            claim_ids=("claim-unverified",),
+            trust_state=EvidenceState.INSUFFICIENT,
+            knowledge_artifact_ids=(),
+        ),
+    )
+
+    assert not research_learning_is_authorized(result)
+    assert worker.task_engine._learn_from_result(result) is result
+    worker._learn_from_result(claimed, result)
+    assert evaluator.calls == 0
+    assert learning.records == []
+
+
+def test_raw_workbench_research_retrieval_cannot_enter_skill_learning(tmp_path: Path):
+    task = DelegatedTask(
+        "workbench-research",
+        "researcher",
+        "retrieve and extract candidate claims",
+        capability="workbench:research:retrieve_extract",
+        skills=("research-skill",),
+    )
+    _, worker, claimed = _claimed_task_for_learning(tmp_path, task)
+    evaluator = _CountingEvaluator()
+    learning = _CountingLearningStore()
+    worker.skill_evaluator = evaluator
+    worker.skill_learning = learning
+    worker.task_engine.skill_evaluator = evaluator
+    worker.task_engine.skill_learning = learning
+    worker.task_engine.skill_registry = object()
+    worker.task_engine.organization = object()
+    result = DelegatedTaskResult(
+        task=task,
+        status=TaskStatus.SUCCEEDED,
+        capability_result=type("CapabilityResult", (), {
+            "execution": type("WorkbenchResult", (), {
+                "status": "succeeded",
+                "operation": "research_retrieve_extract",
+                "output": {"claims": [{"claim": "unverified candidate"}]},
+            })()
+        })(),
+    )
+
+    assert not research_learning_is_authorized(result)
+    assert worker.task_engine._learn_from_result(result) is result
+    worker._learn_from_result(claimed, result)
+    assert evaluator.calls == 0
+    assert learning.records == []
+
+
+def test_verified_research_artifact_may_cross_learning_gate():
+    result = DelegatedTaskResult(
+        task=DelegatedTask(
+            "verified-research",
+            "researcher",
+            "summarize verified knowledge",
+            capability="research",
+        ),
+        status=TaskStatus.SUCCEEDED,
+        capability_result=ResearchTaskResult(
+            request_id="research-verified",
+            source_ids=("source-a", "source-b"),
+            claim_ids=("claim-verified",),
+            trust_state=EvidenceState.VERIFIED,
+            knowledge_artifact_ids=("kart-verified",),
+        ),
+    )
+
+    assert research_learning_is_authorized(result)
