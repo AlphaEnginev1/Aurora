@@ -142,7 +142,12 @@ If no Workbench action is needed, answer normally.
                         mission_id=mission_id,
                         reason=reason,
                         arguments=call.arguments,
-                        options=dict(call.options or {}),
+                        options={
+                            **dict(call.options or {}),
+                            # Model-provided options cannot redirect receipts into
+                            # another WorkSession's durable work identity.
+                            "work_id": mission_id,
+                        },
                         idempotency_key=(
                             f"agent-task:{mission_id}:{task_id}:call:{executed}"
                             if task_id
