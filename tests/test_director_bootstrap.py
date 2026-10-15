@@ -4,6 +4,7 @@ import json
 from aurora.context import AuroraContextPlane, ContextGate
 from aurora.inference.models import ModelSpec
 from aurora.organization import AgentSpec, DepartmentSpec, OrganizationRegistry
+from aurora.orchestration.event_bus import DurableEventBus
 from aurora.orchestration.director_bootstrap import (
     DirectorBootstrap,
     build_context_knowledge_adapter,
@@ -119,6 +120,47 @@ def test_bootstrap_adapters_return_known_empty_indexes(tmp_path):
     assert build_context_runtime_adapter(task_store)(None)["mission_count"] == 0
     assert build_context_mailbox_adapter(task_store)(None)
     assert build_context_knowledge_adapter(research_store)(None)
+
+
+def test_mailbox_adapter_scopes_project_context_without_cross_project_events(tmp_path):
+    task_store = DurableTaskStore(tmp_path / "tasks.db")
+    event_bus = DurableEventBus(task_store)
+    project_a = event_bus.publish(
+        mission_id="mission-a",
+        event_type="project_a_result",
+        payload={"detail": "A-only detail"},
+        project_id="project-a",
+    )
+    project_b = event_bus.publish(
+        mission_id="mission-b",
+        event_type="project_b_result",
+        payload={"detail": "B-only detail"},
+        project_id="project-b",
+    )
+    unscoped = event_bus.publish(
+        mission_id="mission-global",
+        event_type="unscoped_task_result",
+        payload={"detail": "project attribution unavailable"},
+    )
+
+    mailbox = build_context_mailbox_adapter(task_store)
+    project_a_messages = mailbox("project-a")
+    global_messages = mailbox(None)
+
+    # Unscoped task events are ambiguous, not proven global; they must not be
+    # leaked into a project-scoped model context.
+    assert [item["event_id"] for item in project_a_messages] == [project_a.event_id]
+    assert project_a_messages[0]["project_id"] == "project-a"
+    assert "A-only detail" in str(project_a_messages[0]["payload"])
+    assert "B-only detail" not in str(project_a_messages)
+    assert "project attribution unavailable" not in str(project_a_messages)
+
+    # Director/global scope can still consult the cross-project event history.
+    assert [item["event_id"] for item in global_messages] == [
+        project_a.event_id,
+        project_b.event_id,
+        unscoped.event_id,
+    ]
 
 
 def test_bootstrap_policy_never_exposes_secret_values(tmp_path):
