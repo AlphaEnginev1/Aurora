@@ -875,3 +875,57 @@ def test_run_forever_recovers_after_transient_cycle_error_without_losing_mission
     assert len(failures) == 1
     assert failures[0].payload["consecutive_failures"] == 1
     assert failures[0].payload["error_type"] == "RuntimeError"
+
+
+def test_conversation_mission_idempotency_preserves_one_durable_order_and_correlation(tmp_path: Path):
+    runtime, store, planner, _engine = make_runtime(tmp_path)
+    mission_id = "mission-conversation-turn-correlation-test"
+    correlation_id = "corr-conversation-turn-correlation-test"
+    objective = "process this conversation order exactly once"
+
+    submission = runtime.submit_mission(
+        objective=objective,
+        mission_id=mission_id,
+        correlation_id=correlation_id,
+    )
+    replay = runtime.submit_mission(
+        objective=objective,
+        mission_id=mission_id,
+        correlation_id=correlation_id,
+    )
+
+    assert replay.mission_id == submission.mission_id == mission_id
+    assert len(planner.calls) == 1
+    assert len(store.list_tasks(mission_id)) == 2
+    events_before_execution = store.events(mission_id)
+    assert len([
+        event for event in events_before_execution
+        if event.event_type == "mission_submitted"
+    ]) == 1
+    assert all(
+        event.correlation_id == correlation_id
+        for event in events_before_execution
+        if event.event_type in {"enqueued", "mission_submitted", "team.formed"}
+    )
+
+    result = runtime.run_until_terminal(submission)
+    assert result.status is TaskStatus.SUCCEEDED
+
+    events = store.events(mission_id)
+    required_types = {
+        "mission_submitted",
+        "director_ownership_acquired",
+        "mission_started",
+        "worker.task_succeeded",
+        "mission_succeeded",
+    }
+    for event_type in required_types:
+        matching = [event for event in events if event.event_type == event_type]
+        assert matching, f"missing lifecycle event: {event_type}"
+        assert all(event.correlation_id == correlation_id for event in matching), event_type
+
+    messages = runtime.memory.list(mission_id, limit=100)
+    for kind in ("mission_objective", "mission_plan", "task_result"):
+        matching = [message for message in messages if message.kind == kind]
+        assert matching, f"missing mailbox projection: {kind}"
+        assert all(message.correlation_id == correlation_id for message in matching), kind

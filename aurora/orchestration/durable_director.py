@@ -79,10 +79,15 @@ class DurableDirectorService:
         planning_model: str | None = None,
         planning_provider: str | None = None,
         planning_execution_id: str | None = None,
+        correlation_id: str | None = None,
     ) -> MissionSubmission:
         normalized_objective = objective.strip()
         if not normalized_objective:
             raise DurableDirectorError("mission objective is empty")
+        if correlation_id is not None and (
+            not correlation_id.strip() or "\x00" in correlation_id
+        ):
+            raise DurableDirectorError("correlation_id must be non-empty and contain no null byte")
 
         # A caller-supplied mission_id is the idempotency key. If the request was
         # already committed, return its durable receipt instead of invoking the
@@ -111,6 +116,11 @@ class DurableDirectorService:
                 if tasks is not None and submitted.get("requested_tasks_fingerprint") != requested_fingerprint:
                     raise DurableDirectorError(
                         "mission_id is already bound to a different explicit task graph"
+                    )
+                existing_correlation = submitted.get("correlation_id")
+                if correlation_id and existing_correlation != correlation_id:
+                    raise DurableDirectorError(
+                        "mission_id is already bound to a different or missing correlation_id"
                     )
                 restored_tasks = tuple(item.task for item in existing_tasks)
                 restored_plan = DirectorPlan(
@@ -158,6 +168,7 @@ class DurableDirectorService:
                 validated = team_state.tasks
                 initial_events.append({
                     "event_type": "team.formed",
+                    "correlation_id": correlation_id,
                     "payload": {
                         "objective": plan.objective,
                         "roles": [member.role for member in team_state.team.members],
@@ -169,11 +180,13 @@ class DurableDirectorService:
                 validated = self.task_engine.validate(plan.tasks)
             initial_events.append({
                 "event_type": "mission_submitted",
+                "correlation_id": correlation_id,
                 "payload": {
                     "objective": plan.objective,
                     "model": plan.model,
                     "provider": plan.provider,
                     "planning_execution_id": plan.execution_id,
+                    "correlation_id": correlation_id,
                     "task_ids": [task.task_id for task in validated],
                     "requested_tasks_fingerprint": requested_fingerprint,
                     "task_graph": _task_graph_payload(validated),
@@ -181,7 +194,12 @@ class DurableDirectorService:
             })
             # Task records, per-task "enqueued" events, and the submission
             # receipt commit or roll back as one SQLite transaction.
-            self.store.enqueue(mission, validated, initial_events=initial_events)
+            self.store.enqueue(
+                mission,
+                validated,
+                initial_events=initial_events,
+                correlation_id=correlation_id,
+            )
         except Exception as exc:
             raise DurableDirectorError(
                 f"mission could not be durably submitted: {exc}"

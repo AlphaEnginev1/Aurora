@@ -471,3 +471,154 @@ def test_explicit_mission_request_cannot_be_replaced_by_direct_workbench_call(tm
     assert ("director_conversation", ("run_mission",)) in provider.calls
     assert "mission-routing-456" in response.response_text
     assert "explicit_mission_request_without_run_mission_tool_call" in response.response_text
+
+
+def test_multiple_mission_calls_in_one_turn_keep_distinct_order_ids_and_shared_correlation(tmp_path: Path):
+    service, _ = base_service(tmp_path)
+    calls = []
+    completed = {}
+
+    class MultiMissionProvider:
+        provider_id = "nvidia_api"
+
+        def generate(self, *, messages, model, role, tools=()):
+            if role == "director_conversation":
+                return DirectorModelResponse(
+                    content="",
+                    model=model or "nvidia/test-model",
+                    provider="nvidia_api",
+                    request_id="multi-mission-request",
+                    execution_id="multi-mission-execution",
+                    tool_calls=(
+                        DirectorToolCall(
+                            call_id="call-order-alpha",
+                            name="run_mission",
+                            arguments={"objective": "Inspect project Alpha"},
+                        ),
+                        DirectorToolCall(
+                            call_id="call-order-beta",
+                            name="run_mission",
+                            arguments={"objective": "Inspect project Beta"},
+                        ),
+                    ),
+                )
+            return DirectorModelResponse(
+                content="Both durable missions were processed.",
+                model=model or "nvidia/test-model",
+                provider="nvidia_api",
+                request_id="multi-mission-summary",
+                execution_id="multi-mission-summary-execution",
+            )
+
+    service.set_provider(MultiMissionProvider())
+
+    def runner(*, objective, mission_id=None, correlation_id=None, **kwargs):
+        calls.append({
+            "objective": objective,
+            "mission_id": mission_id,
+            "correlation_id": correlation_id,
+        })
+        if mission_id not in completed:
+            completed[mission_id] = SimpleNamespace(
+                submission=SimpleNamespace(
+                    mission_id=mission_id,
+                    plan=SimpleNamespace(
+                        objective=objective,
+                        model="nvidia/test-model",
+                        provider="nvidia_api",
+                        execution_id="planning-execution",
+                    ),
+                ),
+                status=SimpleNamespace(value="succeeded"),
+                tasks=(),
+                events=(),
+            )
+        return completed[mission_id]
+
+    service.mission_runner = runner
+    session = service.create_session()
+    response = service.send_message(
+        session_id=session.session_id,
+        user_input="Plan and execute two missions for Alpha and Beta.",
+    )
+
+    assert response.state == "completed"
+    assert [item["objective"] for item in calls] == [
+        "Inspect project Alpha",
+        "Inspect project Beta",
+    ]
+    assert all(item["mission_id"] for item in calls)
+    assert calls[0]["mission_id"] != calls[1]["mission_id"]
+    assert all(item["correlation_id"] == response.correlation_id for item in calls)
+    assert len(completed) == 2
+    assert '"mission_id":' in response.response_text
+    assert "EVIDENCIA_AUTORITATIVA_DE_EJECUCION (JSON)" in response.response_text
+
+
+def test_replaying_the_same_conversation_tool_call_reuses_its_mission_key(tmp_path: Path):
+    service, _ = base_service(tmp_path)
+    calls = []
+    executed_mission_ids = set()
+    completed = {}
+    provider = ToolProvider()
+    service.set_provider(provider)
+
+    def runner(*, objective, mission_id=None, correlation_id=None, **kwargs):
+        calls.append((mission_id, correlation_id, objective))
+        if mission_id not in executed_mission_ids:
+            executed_mission_ids.add(mission_id)
+            completed[mission_id] = SimpleNamespace(
+                submission=SimpleNamespace(
+                    mission_id=mission_id,
+                    plan=SimpleNamespace(
+                        objective=objective,
+                        model="nvidia/test-model",
+                        provider="nvidia_api",
+                        execution_id="planning-execution",
+                    ),
+                ),
+                status=SimpleNamespace(value="succeeded"),
+                tasks=(),
+                events=(),
+            )
+        return completed[mission_id]
+
+    service.mission_runner = runner
+    response = DirectorModelResponse(
+        content="",
+        model="nvidia/test-model",
+        provider="nvidia_api",
+        request_id="stable-request",
+        execution_id="stable-execution",
+        tool_calls=(
+            DirectorToolCall(
+                call_id="stable-call-id",
+                name="run_mission",
+                arguments={"objective": "Inspect durable queue"},
+            ),
+        ),
+    )
+
+    first = service._execute_conversation_tools(
+        response=response,
+        model="nvidia/test-model",
+        provider_messages=[{"role": "system", "content": service.SYSTEM_PROMPT}],
+        user_input="Run one mission",
+        conversation_turn_id="turn-replay-test",
+        correlation_id="corr-replay-test",
+    )
+    second = service._execute_conversation_tools(
+        response=response,
+        model="nvidia/test-model",
+        provider_messages=[{"role": "system", "content": service.SYSTEM_PROMPT}],
+        user_input="Run one mission",
+        conversation_turn_id="turn-replay-test",
+        correlation_id="corr-replay-test",
+    )
+
+    assert len(calls) == 2
+    assert calls[0][0] == calls[1][0]
+    assert calls[0][1] == calls[1][1] == "corr-replay-test"
+    assert len(executed_mission_ids) == 1
+    assert '"mission_id":' in first.content
+    assert '"mission_id":' in second.content

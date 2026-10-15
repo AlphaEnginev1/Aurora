@@ -899,12 +899,18 @@ def build_director_runtime(*, inference_policy_path: str | Path, autonomy_policy
     def run_durable_conversation_mission(
         *,
         objective: str,
+        mission_id: str | None = None,
+        correlation_id: str | None = None,
         tasks=None,
         planning_model: str | None = None,
         planning_provider: str | None = None,
         planning_execution_id: str | None = None,
     ):
         submission_kwargs = {"objective": objective}
+        if mission_id:
+            submission_kwargs["mission_id"] = mission_id
+        if correlation_id:
+            submission_kwargs["correlation_id"] = correlation_id
         if tasks is not None:
             submission_kwargs.update({
                 "tasks": tasks,

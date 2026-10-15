@@ -74,6 +74,7 @@ class TaskWorker:
         task_engine: TaskEngine,
         mission_id: str,
         worker_id: str,
+        correlation_id: str | None = None,
         policy: WorkerPolicy | None = None,
         event_bus: DurableEventBus | None = None,
         skill_evaluator: SkillEvaluator | None = None,
@@ -89,6 +90,7 @@ class TaskWorker:
         self.task_engine = task_engine
         self.mission_id = mission_id
         self.worker_id = worker_id
+        self.correlation_id = correlation_id
         self.policy = policy or WorkerPolicy()
         self.event_bus = event_bus
         self.skill_evaluator = skill_evaluator
@@ -365,6 +367,7 @@ class TaskWorker:
                 task_id=task_id,
                 event_type=event_type,
                 payload=payload,
+                correlation_id=self.correlation_id,
             )
         except EventBusError:
             # Task state is authoritative in DurableTaskStore. Observability

@@ -175,9 +175,14 @@ class DurableTaskStore:
         *,
         phase: int = 0,
         initial_events: Sequence[Mapping[str, object]] = (),
+        correlation_id: str | None = None,
     ) -> None:
         if not mission_id.strip():
             raise TaskStoreError("mission_id is empty")
+        if correlation_id is not None and (
+            not correlation_id.strip() or "\x00" in correlation_id
+        ):
+            raise TaskStoreError("correlation_id must be non-empty and contain no null byte")
         tasks = tuple(tasks)
         if not tasks:
             raise TaskStoreError("cannot enqueue an empty task plan")
@@ -211,7 +216,7 @@ class DurableTaskStore:
                 "task_id": task_id,
                 "project_id": event.get("project_id"),
                 "agent_role": event.get("agent_role"),
-                "correlation_id": event.get("correlation_id"),
+                "correlation_id": event.get("correlation_id") or correlation_id,
             })
 
         now = self._now()
@@ -251,6 +256,7 @@ class DurableTaskStore:
                             "capability": task.capability,
                             "skills": list(task.skills),
                         },
+                        correlation_id=correlation_id,
                     )
                 # Preserve the existing event chronology (task enqueued events
                 # first, mission receipts afterwards) without splitting commits.
