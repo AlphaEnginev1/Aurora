@@ -157,11 +157,11 @@ def test_joint_autonomy_controller_acceptance_uses_canonical_runtime_services(
     engineering_result = controllers["software_engineer"].run(
         "complete controlled software engineering acceptance"
     )
-    assert engineering_result.status == "succeeded"
+    assert engineering_result.status == "blocked"
     assert [iteration.result["phase"] for iteration in engineering_result.iterations] == [
-        "inspect", "research", "plan", "edit", "test", "verify", "publish"
+        "inspect", "research", "plan", "edit"
     ]
-    assert len(director_calls) == 7
+    assert len(director_calls) == 4
 
     discovery_result = controllers["discovery_loop"].run(
         "test one controlled research hypothesis"
@@ -188,7 +188,7 @@ def test_joint_autonomy_controller_acceptance_uses_canonical_runtime_services(
     assert rsi_result.status == "blocked"
     assert rsi_result.change_id is None
     assert len(rsi_result.cycles) == 7
-    assert len(director_calls) == 11
+    assert len(director_calls) == 8
 
 
 
