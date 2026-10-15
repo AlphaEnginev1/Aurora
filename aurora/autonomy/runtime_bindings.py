@@ -202,18 +202,87 @@ def _mission_summary(director_service, phase: str, objective: str, state: Mappin
             ):
                 rejected_write = True
                 continue
+            raw_parents = commit.get("parents", ()) if isinstance(commit, Mapping) else ()
+            parents = tuple(
+                str(parent.get("sha", "")).strip()
+                for parent in raw_parents
+                if isinstance(parent, Mapping)
+            )
             writes.append({
                 "change_id": commit_sha,
                 "change_repository": repository,
                 "change_branch": branch_name,
+                "commit_parents": parents,
             })
 
-        if saw_write and not rejected_write and len(writes) == 1:
-            summary.update(writes[0])
-            summary["change_write_receipts"] = 1
+        if saw_write and not rejected_write and writes:
+            identities = {
+                (item["change_repository"], item["change_branch"])
+                for item in writes
+            }
+            commit_ids = [item["change_id"] for item in writes]
+            commit_map = {
+                item["change_id"]: item["commit_parents"]
+                for item in writes
+            }
+            valid_chain = len(identities) == 1 and len(set(commit_ids)) == len(commit_ids)
+
+            if len(writes) > 1:
+                # GitHub Contents writes each create a commit. Accept multi-file
+                # edits only if the API receipts prove one linear commit chain.
+                # Parallel/divergent writes have no unambiguous tested head and
+                # must fail closed.
+                valid_chain = valid_chain and all(
+                    len(commit_map[sha]) == 1
+                    and re.fullmatch(r"[0-9a-fA-F]{40}", commit_map[sha][0])
+                    for sha in commit_map
+                )
+                parents = {
+                    sha: values[0]
+                    for sha, values in commit_map.items()
+                    if len(values) == 1
+                }
+                internal_parents = {
+                    parent for parent in parents.values() if parent in commit_map
+                }
+                tips = [sha for sha in commit_map if sha not in internal_parents]
+                if len(tips) != 1:
+                    valid_chain = False
+                else:
+                    visited = set()
+                    current = tips[0]
+                    while current in commit_map and current not in visited:
+                        visited.add(current)
+                        current = parents.get(current, "")
+                    valid_chain = valid_chain and len(visited) == len(commit_map)
+
+                if valid_chain:
+                    tip_sha = tips[0]
+                    tip = next(item for item in writes if item["change_id"] == tip_sha)
+                    summary.update({
+                        "change_id": tip["change_id"],
+                        "change_repository": tip["change_repository"],
+                        "change_branch": tip["change_branch"],
+                        "change_write_receipts": len(writes),
+                    })
+                else:
+                    summary["change_receipt_rejected"] = (
+                        "multiple GitHub file-write receipts must form one proven commit chain "
+                        "on the same non-default branch and repository"
+                    )
+            elif valid_chain:
+                summary.update({
+                    key: value for key, value in writes[0].items()
+                    if key != "commit_parents"
+                })
+                summary["change_write_receipts"] = 1
+            else:
+                summary["change_receipt_rejected"] = (
+                    "GitHub file-write receipts target multiple repositories or branches"
+                )
         elif saw_write:
             summary["change_receipt_rejected"] = (
-                "expected exactly one unambiguous GitHub file-write receipt on one non-default branch"
+                "GitHub file-write receipt missing, invalid, or targets a protected branch"
             )
 
     if phase in {"ci", "verify"}:
