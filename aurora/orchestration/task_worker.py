@@ -230,12 +230,44 @@ class TaskWorker:
         thread = Thread(target=heartbeat, name=f"aurora-heartbeat-{claimed.task.task_id}", daemon=True)
         thread.start()
         try:
-            result = self.task_engine.execute_one(
-                claimed.task,
-                execution_scope=(
-                    f"{self.mission_id}:{claimed.task.task_id}:attempt:{claimed.attempts}"
-                ),
+            execution_scope = (
+                f"{self.mission_id}:{claimed.task.task_id}:attempt:{claimed.attempts}"
             )
+            if claimed.task.depends_on:
+                by_task_id = {
+                    item.task.task_id: item
+                    for item in self.store.list_tasks(self.mission_id)
+                }
+                dependency_context = []
+                for dependency_id in claimed.task.depends_on:
+                    dependency = by_task_id.get(dependency_id)
+                    if dependency is None or dependency.status != "succeeded":
+                        raise TaskWorkerError(
+                            f"dependency result is unavailable: "
+                            f"{self.mission_id}/{dependency_id}"
+                        )
+                    dependency_context.append({
+                        "task_id": dependency.task.task_id,
+                        "role": dependency.task.role,
+                        "objective": dependency.task.objective,
+                        "status": dependency.status,
+                        "error": dependency.last_error,
+                        "result": (
+                            dependency.result
+                            if dependency.result is not None
+                            else {"state": "result_not_persisted"}
+                        ),
+                    })
+                result = self.task_engine.execute_one(
+                    claimed.task,
+                    execution_scope=execution_scope,
+                    dependency_context=tuple(dependency_context),
+                )
+            else:
+                result = self.task_engine.execute_one(
+                    claimed.task,
+                    execution_scope=execution_scope,
+                )
         except Exception as exc:
             result = DelegatedTaskResult(
                 claimed.task,
