@@ -309,9 +309,10 @@ Keep responses useful and concise unless the human asks for depth."""
         user_turn: ConversationTurn,
     ) -> DirectorConversationResponse:
         message = (
-            "Esta solicitud ya está registrada y sigue en curso. No se ha vuelto "
-            "a ejecutar. Consulta el historial de esta conversación para ver la "
-            "respuesta cuando termine. "
+            "Esta solicitud ya tiene un turno duradero registrado, pero su respuesta "
+            "final no está guardada. Aurora no la vuelve a ejecutar automáticamente "
+            "para evitar duplicar órdenes. Comprueba la misión y los eventos de esta "
+            "correlación antes de volver a emitirla. "
             f"correlation_id={user_turn.correlation_id}"
         )
         pending_turn = ConversationTurn(
