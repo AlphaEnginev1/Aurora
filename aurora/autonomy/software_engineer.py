@@ -66,7 +66,10 @@ class AutonomousSoftwareEngineer:
             verdict = self.evaluate(state).strip().lower()
             if verdict in {"succeeded", "success", "complete", "completed"}:
                 return EngineeringMissionResult("succeeded", tuple(iterations), state)
-            if verdict in {"blocked", "failed"} and phase == "verify":
+            if verdict in {"blocked", "failed"}:
+                # A failed prerequisite must stop the loop immediately. Continuing
+                # to later phases can otherwise publish or report success despite
+                # an earlier edit/test/verification failure.
                 return EngineeringMissionResult(verdict, tuple(iterations), state)
             if phase == "publish" and verdict not in {"continue", "repair"}:
                 return EngineeringMissionResult("blocked", tuple(iterations), state)
