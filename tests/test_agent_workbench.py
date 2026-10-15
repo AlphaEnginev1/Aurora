@@ -156,7 +156,7 @@ def test_agent_workbench_tool_calls_use_stable_untrusted_key_override():
         metadata={"role": "engineer", "task_id": "write-task"},
     )
     router.responses = [
-        '{"workbench_calls":[{"capability":"workbench:file:write","arguments":["out.txt","done"],"options":{"work_id":"mission-1","idempotency_key":"model-controlled-key"}}]}',
+        '{"workbench_calls":[{"capability":"workbench:file:write","arguments":["out.txt","done"],"options":{"work_id":"model-controlled-work","idempotency_key":"model-controlled-key"}}]}',
         "The write request was processed.",
     ]
     loop.run(
@@ -169,7 +169,7 @@ def test_agent_workbench_tool_calls_use_stable_untrusted_key_override():
     first_key = workbench.calls[-1].options["idempotency_key"]
 
     router.responses = [
-        '{"workbench_calls":[{"capability":"workbench:file:write","arguments":["out.txt","done"],"options":{"work_id":"mission-1","idempotency_key":"different-model-key"}}]}',
+        '{"workbench_calls":[{"capability":"workbench:file:write","arguments":["out.txt","done"],"options":{"work_id":"another-model-work","idempotency_key":"different-model-key"}}]}',
         "The write request was processed.",
     ]
     loop.run(
@@ -184,3 +184,5 @@ def test_agent_workbench_tool_calls_use_stable_untrusted_key_override():
     assert first_key == second_key
     assert first_key.startswith("task:mission-1:write-task:tool:")
     assert first_key not in {"model-controlled-key", "different-model-key"}
+    assert workbench.calls[0].options["work_id"] == "mission-1"
+    assert workbench.calls[1].options["work_id"] == "mission-1"
