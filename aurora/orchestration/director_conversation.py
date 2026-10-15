@@ -7,6 +7,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 import sqlite3
+import unicodedata
 from typing import Any, Callable, Mapping
 from uuid import uuid4
 
@@ -75,8 +76,9 @@ You are the conversational Director of an autonomous Aurora system.
 Answer the human clearly and naturally.
 Use authoritative Aurora context supplied with the request.
 Never claim that an action, task, tool call, research result, or state change occurred unless authoritative evidence establishes it.
-When the human explicitly asks Aurora to perform real work, use the governed run_mission tool instead of merely describing what could be done.
-When you need direct evidence from Aurora's shared tools, use the governed workbench tool.
+When the human explicitly asks Aurora to plan, delegate, execute, verify, or run a mission, use the governed run_mission tool; do not substitute a direct Workbench lookup for a requested mission.
+Use the direct workbench tool only for one isolated evidence operation when the human has not requested a mission.
+Every Workbench capability must use its fully qualified registered name beginning with 'workbench:'; never omit that prefix.
 When the human is only asking a question or having a conversation, answer directly without creating work.
 Keep responses useful and concise unless the human asks for depth."""
 
@@ -140,7 +142,7 @@ Keep responses useful and concise unless the human asks for depth."""
 
     _WORKBENCH_TOOL = DirectorToolSpec(
         name="workbench",
-        description="Execute one governed Universal Workbench capability directly for inspection or evidence. Use run_mission instead when the human asks Aurora to perform a full mission.",
+        description="Execute one isolated evidence operation through Universal Workbench. capability must be the exact fully qualified registered name prefixed with workbench: (for example workbench:file:read). Never use bare aliases such as file:read. Do not use this tool when the human requests a mission; use run_mission.",
         parameters={
             "type": "object",
             "required": ["capability"],
@@ -324,13 +326,17 @@ Keep responses useful and concise unless the human asks for depth."""
                     messages=provider_messages,
                     model=model,
                     role="director_conversation",
-                    tools=self._conversation_tools(),
+                    tools=self._conversation_tools(user_input=prompt),
                 )
-                if getattr(response, "tool_calls", ()):
+                if getattr(response, "tool_calls", ()) or (
+                    self.mission_runner is not None
+                    and self._requests_mission_execution(prompt)
+                ):
                     response = self._execute_conversation_tools(
                         response=response,
                         model=model,
                         provider_messages=provider_messages,
+                        user_input=prompt,
                     )
         except Exception as exc:
             self._insert_turn(
@@ -412,22 +418,142 @@ Keep responses useful and concise unless the human asks for depth."""
         )
 
 
-    def _conversation_tools(self) -> tuple[DirectorToolSpec, ...]:
+    _CANONICAL_WORKBENCH_CAPABILITIES = frozenset({
+        "workbench:census",
+        "workbench:preflight",
+        "workbench:capability:resolve",
+        "workbench:command",
+        "workbench:research:discover",
+        "workbench:research:retrieve",
+        "workbench:research:retrieve_extract",
+        "workbench:file:list",
+        "workbench:file:read",
+        "workbench:file:write",
+        "workbench:artifact:intake",
+        "workbench:artifact:inspect",
+        "workbench:document:extract",
+        "workbench:github:get",
+        "workbench:github:branch",
+        "workbench:github:file:write",
+        "workbench:github:pr",
+        "workbench:github:merge",
+        "workbench:github:workflow:read",
+        "workbench:project:inspect",
+        "workbench:project:register",
+        "workbench:project:register_github",
+        "workbench:connector:census",
+        "workbench:connector:request",
+        "workbench:browser",
+        "workbench:mcp:list_tools",
+        "workbench:mcp:call",
+        "workbench:computer",
+    })
+
+    @staticmethod
+    def _requests_mission_execution(user_input: str | None) -> bool:
+        text = str(user_input or "").casefold()
+        normalized = "".join(
+            character
+            for character in unicodedata.normalize("NFKD", text)
+            if not unicodedata.combining(character)
+        )
+        mission_markers = (
+            "mision",
+            "mission",
+            "multiagente",
+            "multi-agent",
+            "run_mission",
+            "tarea delegada",
+            "tareas delegadas",
+        )
+        action_markers = (
+            "ejecut",
+            "planifica",
+            "planear",
+            "delega",
+            "delegate",
+            "execute",
+            "run",
+            "launch",
+            "start",
+            "realiza",
+            "haz ",
+        )
+        return (
+            any(marker in normalized for marker in mission_markers)
+            and any(marker in normalized for marker in action_markers)
+        )
+
+    @classmethod
+    def _canonical_workbench_capability(cls, requested: str) -> str:
+        capability = requested.strip()
+        if capability in cls._CANONICAL_WORKBENCH_CAPABILITIES:
+            return capability
+        candidate = f"workbench:{capability}"
+        if candidate in cls._CANONICAL_WORKBENCH_CAPABILITIES:
+            return candidate
+        return capability
+
+    def _conversation_tools(
+        self, *, user_input: str | None = None
+    ) -> tuple[DirectorToolSpec, ...]:
         tools: list[DirectorToolSpec] = []
+        mission_requested = (
+            self.mission_runner is not None
+            and self._requests_mission_execution(user_input)
+        )
         if self.mission_runner is not None:
             tools.append(self._RUN_MISSION_TOOL)
-        if self.workbench is not None:
+        if self.workbench is not None and not mission_requested:
             tools.append(self._WORKBENCH_TOOL)
         return tuple(tools)
 
     def _execute_conversation_tools(
-        self, *, response: Any, model: str | None, provider_messages: list[dict[str, Any]]
+        self,
+        *,
+        response: Any,
+        model: str | None,
+        provider_messages: list[dict[str, Any]],
+        user_input: str | None = None,
     ) -> Any:
         calls = tuple(getattr(response, "tool_calls", ()) or ())
-        if len(calls) > 4:
-            raise DirectorConversationError("Director requested too many conversation tools")
         results: list[dict[str, Any]] = []
         media_parts: list[dict[str, Any]] = []
+
+        mission_requested = (
+            self.mission_runner is not None
+            and self._requests_mission_execution(user_input)
+        )
+        if mission_requested:
+            # A model may ignore the offered tool list and select the direct
+            # Workbench anyway. Never let that silently replace a mission.
+            mission_calls = tuple(
+                call for call in calls if call.name == self._RUN_MISSION_TOOL.name
+            )
+            if mission_calls:
+                calls = mission_calls
+            else:
+                calls = ()
+                objective = str(user_input or "").strip()
+                try:
+                    mission = self.mission_runner(objective=objective)
+                    evidence = self._mission_evidence(mission)
+                    evidence["routing_fallback"] = (
+                        "explicit_mission_request_without_run_mission_tool_call"
+                    )
+                    results.append(evidence)
+                except Exception as exc:
+                    results.append({
+                        "status": "failed",
+                        "objective": objective,
+                        "error": str(exc)[:4000],
+                        "routing_fallback": (
+                            "explicit_mission_request_without_run_mission_tool_call"
+                        ),
+                    })
+
+        if len(calls) > 4:
+            raise DirectorConversationError("Director requested too many conversation tools")
         for call in calls:
             arguments = call.arguments if isinstance(call.arguments, dict) else {}
             if call.name == self._RUN_MISSION_TOOL.name:
@@ -467,10 +593,12 @@ Keep responses useful and concise unless the human asks for depth."""
                     raise DirectorConversationError("workbench arguments must be a string array")
                 if not isinstance(options, dict):
                     raise DirectorConversationError("workbench options must be an object")
+                requested_capability = capability.strip()
+                capability = self._canonical_workbench_capability(requested_capability)
                 try:
                     result = self.workbench.execute(
                         WorkbenchRequest(
-                            capability=capability.strip(),
+                            capability=capability,
                             actor="director",
                             mission_id=f"conversation:{call.call_id}",
                             reason="Director conversation direct Workbench evidence",
@@ -481,11 +609,14 @@ Keep responses useful and concise unless the human asks for depth."""
                     results.append(self._workbench_evidence(result))
                     self._append_media_parts(media_parts, result.output)
                 except Exception as exc:
-                    results.append({
+                    failure = {
                         "status": "failed",
-                        "capability": capability.strip(),
+                        "capability": capability,
                         "error": str(exc)[:4000],
-                    })
+                    }
+                    if requested_capability != capability:
+                        failure["requested_capability"] = requested_capability
+                    results.append(failure)
                 continue
             raise DirectorConversationError(
                 f"Director requested unregistered conversation tool: {call.name}"

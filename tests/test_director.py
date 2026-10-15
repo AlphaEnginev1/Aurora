@@ -185,3 +185,19 @@ def test_director_planner_receives_registered_project_catalog():
     assert "project-a: Project A" in system
     assert "status=active" in system
     assert "state=research phase" in system
+
+
+
+def test_director_planner_prompt_prefers_governed_workbench_for_repository_reads():
+    router = FakeRouter(
+        '{"tasks":[{"task_id":"read","role":"researcher",'
+        '"objective":"Inspect README using governed Workbench reads",'
+        '"capability":null,"args":[],"depends_on":[]}]}' 
+    )
+    DirectorPlanner(router).plan(objective="Inspect the repository read-only.")
+    system = router.requests[0][0].messages[0]["content"]
+
+    assert "fully qualified registered capability beginning with 'workbench:'" in system
+    assert "workbench:file:read" in system
+    assert "Never emit bare aliases such as file:read" in system
+    assert "capability such as tool:rg or python.package:pip" not in system

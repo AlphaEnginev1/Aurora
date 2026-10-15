@@ -107,9 +107,11 @@ Rules:
 - Create at most 16 tasks.
 - Every task_id must be unique, short, and contain no whitespace.
 - role and objective must be non-empty.
-- capability must be null for reasoning-only work, or a named registered Aurora capability such as tool:rg or python.package:pip.
+- capability must be null for reasoning tasks that should use the specialist's governed Workbench tool loop, 'research' only for the dedicated research service, or a fully qualified registered capability beginning with 'workbench:' for a direct Workbench task.
+- For repository inspection and reading local source files, prefer workbench:file:read or workbench:file:list. Do not select legacy tool:rg, tool:fd, shell/system commands, or package acquisition when the Workbench can provide the evidence.
+- Every Workbench capability must use its canonical 'workbench:' prefix. Never emit bare aliases such as file:read.
 - Never invent executable paths, shell commands, URLs, credentials, or unregistered tools.
-- args are passed only to a registered executable and must be plain strings.
+- Workbench task arguments must be plain strings and must match the selected registered operation.
 - Use depends_on to express required ordering.
 - skills may contain registered specialist skills when the task benefits from specialist procedures.
 - Never invent skills; use only registered skills presented in the prompt.
