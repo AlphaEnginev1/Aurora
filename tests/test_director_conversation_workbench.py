@@ -109,7 +109,7 @@ def test_conversation_can_use_shared_workbench_directly(tmp_path: Path):
                         call_id="call-wb-1",
                         name="workbench",
                         arguments={
-                            "capability": "workbench:file:read",
+                            "capability": "file:read",
                             "arguments": ["notes.txt"],
                         },
                     ),
@@ -333,3 +333,91 @@ def test_mission_evidence_preserves_failed_or_blocked_durable_terminal_state():
         )
         evidence = DirectorConversationService._mission_evidence(mission)
         assert evidence["status"] == terminal_state
+
+
+
+def test_explicit_mission_request_cannot_be_replaced_by_direct_workbench_call(tmp_path: Path):
+    service, _ = base_service(tmp_path)
+    provider = ToolProvider()
+    service.set_provider(provider)
+    user_input = (
+        "Quiero que planifiques y ejecutes una misión multiagente nueva "
+        "para revisar la arquitectura de Aurora."
+    )
+
+    class FakeWorkbench:
+        def __init__(self):
+            self.requests = []
+
+        def execute(self, request):
+            self.requests.append(request)
+            raise AssertionError("direct Workbench must not replace a mission request")
+
+    workbench = FakeWorkbench()
+    service.workbench = workbench
+    executed = []
+
+    def runner(*, objective):
+        executed.append(objective)
+        plan = SimpleNamespace(
+            objective=objective,
+            model="nvidia/test-model",
+            provider="nvidia_api",
+            execution_id="mission-planning-exec",
+        )
+        return SimpleNamespace(
+            submission=SimpleNamespace(
+                mission_id="mission-routing-456",
+                plan=plan,
+            ),
+            status=SimpleNamespace(value="succeeded"),
+            tasks=(),
+            events=(),
+        )
+
+    service.mission_runner = runner
+
+    def misrouted_provider(*, messages, model, role, tools=()):
+        provider.calls.append((role, tuple(tool.name for tool in tools)))
+        if role == "director_conversation":
+            return DirectorModelResponse(
+                content="",
+                model=model or "nvidia/test-model",
+                provider="nvidia_api",
+                request_id="request-misrouted-1",
+                execution_id="execution-misrouted-1",
+                tool_calls=(
+                    DirectorToolCall(
+                        call_id="call-misrouted-1",
+                        name="workbench",
+                        arguments={
+                            "capability": "file:read",
+                            "arguments": ["README.md"],
+                        },
+                    ),
+                ),
+            )
+        assert role == "director_conversation_result"
+        final_content = messages[-1]["content"]
+        assert isinstance(final_content, list)
+        assert "mission-routing-456" in final_content[0]["text"]
+        return DirectorModelResponse(
+            content="La misión fue enviada y hay evidencia del runtime.",
+            model=model or "nvidia/test-model",
+            provider="nvidia_api",
+            request_id="request-misrouted-2",
+            execution_id="execution-misrouted-2",
+        )
+
+    provider.generate = misrouted_provider
+    session = service.create_session()
+    response = service.send_message(
+        session_id=session.session_id,
+        user_input=user_input,
+    )
+
+    assert executed == [user_input]
+    assert workbench.requests == []
+    assert ("director_conversation", ("run_mission",)) in provider.calls
+    assert "mission-routing-456" in response.response_text
+    assert "explicit_mission_request_without_run_mission_tool_call" in response.response_text
