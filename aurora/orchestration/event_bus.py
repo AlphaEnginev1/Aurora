@@ -47,6 +47,8 @@ class DurableEventBus:
         correlation_id: str | None = None,
     ) -> TaskEvent:
         try:
+            if correlation_id is None:
+                correlation_id = self.store.mission_correlation_id(mission_id)
             return self.store.append_event(
                 mission_id=mission_id,
                 task_id=task_id,
