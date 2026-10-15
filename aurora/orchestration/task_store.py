@@ -791,6 +791,36 @@ class DurableTaskStore:
             for row in rows
         )
 
+    def mission_correlation_id(self, mission_id: str) -> str | None:
+        """Read the canonical correlation ID from a mission's submission receipt."""
+        if not mission_id.strip():
+            raise TaskStoreError("mission_id is empty")
+        try:
+            with self._connect() as db:
+                row = db.execute(
+                    """
+                    SELECT correlation_id, payload_json
+                    FROM task_events
+                    WHERE mission_id = ? AND event_type = 'mission_submitted'
+                    ORDER BY event_id
+                    LIMIT 1
+                    """,
+                    (mission_id,),
+                ).fetchone()
+        except sqlite3.Error as exc:
+            raise TaskStoreError(f"could not read mission correlation: {exc}") from exc
+        if row is None:
+            return None
+        value = row["correlation_id"]
+        if isinstance(value, str) and value.strip():
+            return value
+        try:
+            payload = json.loads(row["payload_json"])
+        except (TypeError, json.JSONDecodeError):
+            return None
+        value = payload.get("correlation_id") if isinstance(payload, dict) else None
+        return value.strip() if isinstance(value, str) and value.strip() else None
+
     def events_since(
         self,
         *,
