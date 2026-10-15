@@ -117,6 +117,7 @@ class OrchestrationEngine:
                     preferred_models=tuple(model_preferences or ()),
                     router=self._router,
                     capability=capability,
+                    task_id=task_id,
                 )
             elif model_preferences:
                 response = self._router.generate(
@@ -154,6 +155,11 @@ class OrchestrationEngine:
                     reason=request.reason,
                     arguments=tuple(args),
                     options=dict(request.constraints),
+                    idempotency_key=(
+                        str(request.constraints["idempotency_key"])
+                        if request.constraints.get("idempotency_key")
+                        else None
+                    ),
                 )
             )
             return CapabilityTaskResult(
