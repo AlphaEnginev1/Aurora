@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import uuid
-from dataclasses import replace
+from dataclasses import asdict, replace
 import json
 import os
 import shutil
@@ -20,7 +20,7 @@ from aurora.workbench.local_computer import LocalComputerError, LocalComputerGat
 from aurora.workbench.mcp import MCPBridgeError, MCPClientBridge, MCPRegistry
 from aurora.workbench.project_intake import ProjectIntakeError, ProjectIntakeService
 from aurora.workbench.connectors import ConnectorClient, ConnectorError, ConnectorRegistry
-from aurora.workbench.session import WorkSessionStore
+from aurora.workbench.session import WorkSessionInvocationError, WorkSessionStore
 from aurora.autonomy.computer_operator import (
     ComputerAction,
     ComputerOperator,
@@ -36,6 +36,55 @@ from aurora.research.service import ResearchService
 
 class WorkbenchError(RuntimeError):
     """Raised when a Workbench operation cannot be executed safely."""
+
+
+_REPLAY_PROTECTED_CAPABILITIES = frozenset({
+    "workbench:command",
+    "workbench:research:retrieve",
+    "workbench:research:retrieve_extract",
+    "workbench:capability:resolve",
+    "workbench:file:write",
+    "workbench:artifact:intake",
+    "workbench:mcp:call",
+    "workbench:computer",
+    "workbench:github:branch",
+    "workbench:github:file:write",
+    "workbench:github:pr",
+    "workbench:github:merge",
+    "workbench:project:register",
+    "workbench:project:register_github",
+    "workbench:connector:request",
+    "workbench:browser",
+})
+
+
+def _invocation_fingerprint(request: WorkbenchRequest) -> str:
+    """Hash the actual operation payload without volatile invocation metadata."""
+    options = {
+        key: value
+        for key, value in request.options.items()
+        if key != "idempotency_key"
+    }
+    payload = {
+        "capability": request.capability.strip(),
+        "actor": request.actor,
+        "mission_id": request.mission_id,
+        "reason": request.reason,
+        "arguments": list(request.arguments),
+        "options": options,
+    }
+    encoded = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _workbench_result_payload(result: WorkbenchResult) -> dict[str, object]:
+    return asdict(result)
 
 
 class UniversalWorkbench:
@@ -236,106 +285,178 @@ class UniversalWorkbench:
             raise WorkbenchError("UniversalWorkbench only executes workbench:* capabilities")
         if self.policy is not None and not self.policy.allows_capability(capability):
             raise WorkbenchError(f"Workbench capability is denied by policy: {capability}")
+
         work_id = str(request.options.get("work_id") or request.mission_id).strip()
+        idempotency_key = str(request.options.get("idempotency_key") or "").strip()
+        idempotency_active = bool(
+            idempotency_key
+            and capability in _REPLAY_PROTECTED_CAPABILITIES
+        )
+        if idempotency_active and self.session_store is None:
+            raise WorkbenchError(
+                "retry-safe Workbench execution requires a configured durable WorkSessionStore"
+            )
+
         correlation_id = request.correlation_id or f"corr-{uuid.uuid4().hex}"
         receipt_id = f"receipt-{uuid.uuid4().hex}"
-        try:
-            if self.session_store is not None:
-                self.session_store.create_or_get(
+        replayed = False
+        fingerprint = _invocation_fingerprint(request) if idempotency_active else None
+        result: WorkbenchResult | None = None
+
+        if self.session_store is not None:
+            self.session_store.create_or_get(
+                work_id=work_id,
+                mission_id=request.mission_id,
+                actor=request.actor,
+                environment=str(request.options.get("environment", "local")),
+                workspace_root=str(self.repository_root),
+            )
+            self.session_store.record_capability(work_id, capability)
+
+        if idempotency_active:
+            try:
+                reservation = self.session_store.begin_invocation(
                     work_id=work_id,
-                    mission_id=request.mission_id,
-                    actor=request.actor,
-                    environment=str(request.options.get("environment", "local")),
-                    workspace_root=str(self.repository_root),
+                    idempotency_key=idempotency_key,
+                    capability=capability,
+                    fingerprint=str(fingerprint),
                 )
-                self.session_store.record_capability(work_id, capability)
-            if capability == "workbench:command":
-                result = self._command_execute(request)
-            elif capability == "workbench:research:discover":
-                result = self._research_discover(request)
-            elif capability == "workbench:research:retrieve":
-                result = self._research_retrieve(request, extract=False)
-            elif capability == "workbench:research:retrieve_extract":
-                result = self._research_retrieve(request, extract=True)
-            elif capability == "workbench:capability:resolve":
-                result = self._capability_resolve(request)
-            elif capability == "workbench:census":
-                result = WorkbenchResult(
-                    capability,
-                    "census",
-                    "succeeded",
-                    output=[
-                        {
-                            "capability_id": item.capability_id,
-                            "kind": item.kind,
-                            "available": item.available,
-                            "authorized": item.authorized,
-                            "healthy": item.healthy,
-                            "details": item.details,
-                        }
-                        for item in self.census()
-                    ],
-                    provenance="aurora-workbench:census",
-                )
-            elif capability == "workbench:preflight":
-                result = WorkbenchResult(
-                    capability,
-                    "preflight",
-                    "succeeded",
-                    output=self.preflight(),
-                    provenance="aurora-workbench:preflight",
-                )
-            elif capability == "workbench:file:list":
-                result = self._file_list(request)
-            elif capability == "workbench:file:read":
-                result = self._file_read(request)
-            elif capability == "workbench:file:write":
-                result = self._file_write(request)
-            elif capability == "workbench:artifact:intake":
-                result = self._artifact_intake(request)
-            elif capability == "workbench:artifact:inspect":
-                result = self._artifact_inspect(request)
-            elif capability == "workbench:document:extract":
-                result = self._document_extract(request)
-            elif capability == "workbench:mcp:list_tools":
-                result = self._mcp_list_tools(request)
-            elif capability == "workbench:mcp:call":
-                result = self._mcp_call(request)
-            elif capability == "workbench:computer":
-                result = self._computer_action(request)
-            elif capability == "workbench:github:branch":
-                result = self._github_branch(request)
-            elif capability == "workbench:github:file:write":
-                result = self._github_file_write(request)
-            elif capability == "workbench:github:pr":
-                result = self._github_pr(request)
-            elif capability == "workbench:github:merge":
-                result = self._github_merge(request)
-            elif capability == "workbench:github:workflow:read":
-                result = self._github_workflow_runs(request)
-            elif capability == "workbench:project:inspect":
-                result = self._project_inspect(request)
-            elif capability == "workbench:project:register":
-                result = self._project_register(request)
-            elif capability == "workbench:project:register_github":
-                result = self._project_register_github(request)
-            elif capability == "workbench:connector:census":
-                result = self._connector_census(request)
-            elif capability == "workbench:connector:request":
-                result = self._connector_request(request)
-            elif capability == "workbench:github:get":
-                result = self._github_get(request)
-            elif capability == "workbench:browser":
-                result = self._browser_run(request)
-            else:
-                raise WorkbenchError(f"unsupported Workbench capability: {capability}")
-        except (WorkbenchError, GitHubConnectorError, ComputerOperatorError, ArtifactError, MCPBridgeError, LocalComputerError, ProjectIntakeError, ConnectorError) as exc:
-            result = WorkbenchResult(capability, capability, "failed", error=str(exc))
-        result = replace(
-            result,
-            receipt_id=receipt_id,
-            correlation_id=correlation_id,
-        )
+            except WorkSessionInvocationError as exc:
+                raise WorkbenchError(str(exc)) from exc
+            if reservation.get("state") == "completed":
+                stored_result = reservation.get("result")
+                if not isinstance(stored_result, dict):
+                    raise WorkbenchError(
+                        "completed Workbench invocation has no valid stored result; refusing re-execution"
+                    )
+                try:
+                    result = WorkbenchResult(**stored_result)
+                except (TypeError, ValueError) as exc:
+                    raise WorkbenchError(
+                        "completed Workbench invocation result is invalid; refusing re-execution"
+                    ) from exc
+                replayed = True
+                receipt_id = result.receipt_id or receipt_id
+                correlation_id = result.correlation_id or correlation_id
+
+        if not replayed:
+            try:
+                if capability == "workbench:command":
+                    result = self._command_execute(request)
+                elif capability == "workbench:research:discover":
+                    result = self._research_discover(request)
+                elif capability == "workbench:research:retrieve":
+                    result = self._research_retrieve(request, extract=False)
+                elif capability == "workbench:research:retrieve_extract":
+                    result = self._research_retrieve(request, extract=True)
+                elif capability == "workbench:capability:resolve":
+                    result = self._capability_resolve(request)
+                elif capability == "workbench:census":
+                    result = WorkbenchResult(
+                        capability,
+                        "census",
+                        "succeeded",
+                        output=[
+                            {
+                                "capability_id": item.capability_id,
+                                "kind": item.kind,
+                                "available": item.available,
+                                "authorized": item.authorized,
+                                "healthy": item.healthy,
+                                "details": item.details,
+                            }
+                            for item in self.census()
+                        ],
+                        provenance="aurora-workbench:census",
+                    )
+                elif capability == "workbench:preflight":
+                    result = WorkbenchResult(
+                        capability,
+                        "preflight",
+                        "succeeded",
+                        output=self.preflight(),
+                        provenance="aurora-workbench:preflight",
+                    )
+                elif capability == "workbench:file:list":
+                    result = self._file_list(request)
+                elif capability == "workbench:file:read":
+                    result = self._file_read(request)
+                elif capability == "workbench:file:write":
+                    result = self._file_write(request)
+                elif capability == "workbench:artifact:intake":
+                    result = self._artifact_intake(request)
+                elif capability == "workbench:artifact:inspect":
+                    result = self._artifact_inspect(request)
+                elif capability == "workbench:document:extract":
+                    result = self._document_extract(request)
+                elif capability == "workbench:mcp:list_tools":
+                    result = self._mcp_list_tools(request)
+                elif capability == "workbench:mcp:call":
+                    result = self._mcp_call(request)
+                elif capability == "workbench:computer":
+                    result = self._computer_action(request)
+                elif capability == "workbench:github:branch":
+                    result = self._github_branch(request)
+                elif capability == "workbench:github:file:write":
+                    result = self._github_file_write(request)
+                elif capability == "workbench:github:pr":
+                    result = self._github_pr(request)
+                elif capability == "workbench:github:merge":
+                    result = self._github_merge(request)
+                elif capability == "workbench:github:workflow:read":
+                    result = self._github_workflow_runs(request)
+                elif capability == "workbench:project:inspect":
+                    result = self._project_inspect(request)
+                elif capability == "workbench:project:register":
+                    result = self._project_register(request)
+                elif capability == "workbench:project:register_github":
+                    result = self._project_register_github(request)
+                elif capability == "workbench:connector:census":
+                    result = self._connector_census(request)
+                elif capability == "workbench:connector:request":
+                    result = self._connector_request(request)
+                elif capability == "workbench:github:get":
+                    result = self._github_get(request)
+                elif capability == "workbench:browser":
+                    result = self._browser_run(request)
+                else:
+                    raise WorkbenchError(f"unsupported Workbench capability: {capability}")
+            except (
+                WorkbenchError,
+                GitHubConnectorError,
+                ComputerOperatorError,
+                ArtifactError,
+                MCPBridgeError,
+                LocalComputerError,
+                ProjectIntakeError,
+                ConnectorError,
+            ) as exc:
+                result = WorkbenchResult(capability, capability, "failed", error=str(exc))
+
+            result = replace(
+                result,
+                receipt_id=receipt_id,
+                correlation_id=correlation_id,
+            )
+            if idempotency_active:
+                try:
+                    # This is the durable result checkpoint. A crash after the
+                    # external action but before this commit leaves the journal
+                    # in "started"; retries must stop rather than execute again.
+                    self.session_store.complete_invocation(
+                        work_id=work_id,
+                        idempotency_key=idempotency_key,
+                        fingerprint=str(fingerprint),
+                        result=_workbench_result_payload(result),
+                    )
+                except WorkSessionInvocationError as exc:
+                    raise WorkbenchError(
+                        f"Workbench action ran but its durable result checkpoint failed; "
+                        f"retry is blocked to avoid repeating the side effect: {exc}"
+                    ) from exc
+        elif result is None:
+            raise WorkbenchError("Workbench invocation replay produced no result")
+
         if self.session_store is not None:
             try:
                 self.session_store.record_receipt(
@@ -349,6 +470,8 @@ class UniversalWorkbench:
                         "artifact_id": result.artifact_id,
                         "provenance": result.provenance,
                         "error": result.error,
+                        "idempotency_key": idempotency_key or None,
+                        "replayed": replayed,
                     },
                 )
                 if result.artifact_id:
