@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import hashlib
 import json
 import logging
 from pathlib import Path
@@ -189,19 +190,37 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                     raise DashboardConversationAPIError("upload must be between 1 byte and 25 MiB")
                 uploads = self.workbench.runtime_root / "uploads"
                 uploads.mkdir(parents=True, exist_ok=True)
-                destination = uploads / f"{uuid.uuid4().hex}-{re.sub(r'[^A-Za-z0-9._-]', '_', safe_name)}"
                 data = self.rfile.read(content_length)
                 if len(data) != content_length:
                     raise DashboardConversationAPIError("upload body was incomplete")
-                destination.write_bytes(data)
                 mission_id = self.headers.get("X-Aurora-Mission-Id", "").strip() or f"dashboard-upload-{uuid.uuid4().hex}"
+                safe_filename = re.sub(r'[^A-Za-z0-9._-]', '_', safe_name)
+                content_digest = hashlib.sha256(data).hexdigest()
+                mission_digest = hashlib.sha256(mission_id.encode("utf-8")).hexdigest()[:16]
+                # Reusing X-Aurora-Mission-Id for an HTTP retry resolves to the
+                # same staged upload and idempotency key. The artifact-intake
+                # operation can then replay its stored receipt instead of creating
+                # a duplicate copy after a lost HTTP response.
+                destination = uploads / f"{mission_digest}-{content_digest[:24]}-{safe_filename}"
+                if destination.exists():
+                    if destination.read_bytes() != data:
+                        raise DashboardConversationAPIError(
+                            "existing upload path conflicts with request content"
+                        )
+                else:
+                    destination.write_bytes(data)
                 result = self.workbench.execute(
                     __import__("aurora.workbench", fromlist=["WorkbenchRequest"]).WorkbenchRequest(
                         capability="workbench:artifact:intake",
                         actor="dashboard",
                         mission_id=mission_id,
                         arguments=(str(destination),),
-                        options={"work_id": mission_id},
+                        options={
+                            "work_id": mission_id,
+                            "idempotency_key": (
+                                f"dashboard-upload:{mission_id}:{content_digest}:{safe_filename}"
+                            ),
+                        },
                     )
                 )
                 self._json(201, {"artifact": result.output, "mission_id": mission_id})
