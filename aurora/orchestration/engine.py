@@ -158,6 +158,7 @@ class OrchestrationEngine:
                     idempotency_key=(
                         str(request.constraints["idempotency_key"])
                         if request.constraints.get("idempotency_key")
+                        and getattr(self._workbench, "session_store", None) is not None
                         else None
                     ),
                 )
