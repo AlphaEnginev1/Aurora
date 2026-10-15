@@ -600,7 +600,12 @@ Keep responses useful and concise unless the human asks for depth."""
                     # specific direct conversation action. Never trust a key
                     # supplied by model-generated tool arguments.
                     direct_call_id = str(call.call_id)
+                    direct_mission_id = f"conversation:{direct_call_id}"
                     direct_options = dict(options)
+                    # Keep the journal scope under the runtime's control; a
+                    # model-generated work_id must not redirect a replay.
+                    direct_options.pop("work_id", None)
+                    direct_options["work_id"] = direct_mission_id
                     direct_options["idempotency_key"] = (
                         f"conversation-workbench:{direct_call_id}"
                     )
@@ -608,7 +613,7 @@ Keep responses useful and concise unless the human asks for depth."""
                         WorkbenchRequest(
                             capability=capability,
                             actor="director",
-                            mission_id=f"conversation:{direct_call_id}",
+                            mission_id=direct_mission_id,
                             reason="Director conversation direct Workbench evidence",
                             arguments=tuple(call_args),
                             options=direct_options,
