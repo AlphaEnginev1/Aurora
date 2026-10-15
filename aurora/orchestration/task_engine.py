@@ -419,6 +419,7 @@ class TaskEngine:
                 skill_evaluations=evaluations,
                 trusted_research_artifact_ids=result.trusted_research_artifact_ids,
                 research_trust_state=result.research_trust_state,
+                durable_result=result.durable_result,
             )
         except Exception as exc:
             # Learning must never turn a completed task into a false execution
