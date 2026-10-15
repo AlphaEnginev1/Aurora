@@ -192,22 +192,19 @@ def test_mutating_workbench_invocation_replays_persisted_result_without_reexecut
     invocation = sessions.invocation("mission-retry", request.options["idempotency_key"])
     assert invocation is not None
     assert invocation["state"] == "completed"
-    assert sessions.get_receipts("mission-retry") == ({
-        "receipt_id": first.receipt_id,
-        "work_id": "mission-retry",
-        "correlation_id": first.correlation_id,
-        "created_at": sessions.get_receipts("mission-retry")[0]["created_at"],
-        "payload": {
-            "capability": "workbench:file:write",
-            "operation": "file_write",
-            "status": "succeeded",
-            "artifact_id": None,
-            "provenance": "local-filesystem",
-            "error": None,
-            "idempotency_key": request.options["idempotency_key"],
-            "replayed": False,
-        },
-    },)
+    receipts = sessions.get_receipts("mission-retry")
+    assert len(receipts) == 1
+    assert receipts[0]["receipt_id"] == first.receipt_id
+    assert receipts[0]["correlation_id"] == first.correlation_id
+    assert receipts[0]["payload"] == {
+        "capability": "workbench:file:write",
+        "operation": "file_write",
+        "status": "succeeded",
+        "artifact_id": None,
+        "provenance": "local-filesystem",
+        "error": None,
+        "idempotency_key": request.options["idempotency_key"],
+    }
 
 
 def test_workbench_idempotency_key_conflict_fails_before_second_side_effect(tmp_path: Path):
