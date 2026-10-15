@@ -396,6 +396,71 @@ def test_runtime_restarts_and_recovers_running_mission(tmp_path: Path):
     assert any(event.event_type == "requeued" for event in events)
 
 
+def test_runtime_does_not_ack_skill_event_when_memory_projection_fails(tmp_path: Path):
+    from aurora.orchestration.mission_memory import MissionMemoryError
+
+    runtime, store, _planner, _engine = make_runtime(tmp_path)
+    event = store.append_event(
+        mission_id="mission-event-retry",
+        task_id="task-skill",
+        event_type="skill.evaluated",
+        payload={"skill_id": "research", "score": 0.9},
+    )
+    real_append = runtime.memory.append
+
+    def fail_once(**kwargs):
+        if kwargs.get("event_id") == event.event_id:
+            raise MissionMemoryError("temporary mailbox outage")
+        return real_append(**kwargs)
+
+    runtime.memory.append = fail_once
+    runtime.run_once()
+
+    cursor_id = runtime._subscription.cursor_id
+    assert store.get_event_cursor(cursor_id) < event.event_id
+    assert [item.event_id for item in runtime.event_bus.poll(runtime._subscription)] == [
+        event.event_id
+    ]
+
+    runtime.memory.append = real_append
+    runtime.run_once()
+
+    assert store.get_event_cursor(cursor_id) == event.event_id
+    projected = [
+        item for item in runtime.memory.list("mission-event-retry")
+        if item.event_id == event.event_id
+    ]
+    assert len(projected) == 1
+
+
+def test_runtime_reconciles_task_result_after_mailbox_write_failure(tmp_path: Path):
+    from aurora.orchestration.mission_memory import MissionMemoryError
+
+    runtime, _store, _planner, _engine = make_runtime(tmp_path)
+    real_append = runtime.memory.append
+    failed_once = {"value": False}
+
+    def fail_one_result(**kwargs):
+        if kwargs.get("kind") == "task_result" and not failed_once["value"]:
+            failed_once["value"] = True
+            raise MissionMemoryError("temporary task-result projection outage")
+        return real_append(**kwargs)
+
+    runtime.memory.append = fail_one_result
+    submission = runtime.submit_mission(objective="recover missing task results")
+    result = runtime.run_until_terminal(submission)
+
+    assert result.status is TaskStatus.SUCCEEDED
+    assert failed_once["value"] is True
+    task_messages = [
+        message for message in runtime.memory.list(submission.mission_id, limit=500)
+        if message.kind == "task_result"
+    ]
+    ids = [message.metadata.get("task_id") for message in task_messages]
+    assert set(ids) == {"collect", "review"}
+    assert len(ids) == len(set(ids))
+
+
 def test_runtime_stop_event_allows_clean_24x7_shutdown(tmp_path: Path):
     runtime, _, _, _ = make_runtime(tmp_path)
     stop = Event()
