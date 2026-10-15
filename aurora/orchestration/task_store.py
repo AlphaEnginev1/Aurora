@@ -108,6 +108,9 @@ class DurableTaskStore:
 
                 CREATE INDEX IF NOT EXISTS idx_events_mission
                     ON task_events (mission_id, event_id);
+
+                CREATE INDEX IF NOT EXISTS idx_events_mission_type
+                    ON task_events (mission_id, event_type, event_id);
                 """
             )
             columns = {
