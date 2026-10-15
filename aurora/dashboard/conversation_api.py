@@ -48,6 +48,7 @@ class DashboardConversationAPI:
         session_id: str,
         user_input: str,
         model: str | None = None,
+        request_id: str | None = None,
         principal: str = "dashboard",
     ) -> dict[str, Any]:
         self._authorize(
@@ -62,6 +63,7 @@ class DashboardConversationAPI:
                 session_id=session_id,
                 user_input=user_input,
                 model=model,
+                request_id=request_id,
             )
         except DirectorConversationError as exc:
             raise DashboardConversationAPIError(str(exc)) from exc
@@ -70,6 +72,7 @@ class DashboardConversationAPI:
             "turn": asdict(response.turn),
             "response_text": response.response_text,
             "state": response.state,
+            "request_id": request_id,
             "correlation_id": response.correlation_id,
             "context_manifest_id": response.context_manifest_id,
             "model": response.model,
