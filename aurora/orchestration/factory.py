@@ -650,10 +650,30 @@ def build_director_service(*, inference_policy_path: str | Path, autonomy_policy
         capability_runtime=capability_runtime,
         workbench=workbench,
     )
+    # Build one canonical research stack for every DirectorService/DirectorRuntime
+    # entry point. TaskEngine and Workbench must never have separate research stores.
+    research_store=ResearchStore(root/"research.db")
+    research_discovery_endpoint=os.getenv("AURORA_RESEARCH_DISCOVERY_ENDPOINT","").strip()
+    research_discovery=(
+        HttpSearchProvider(gateway,research_discovery_endpoint)
+        if research_discovery_endpoint else None
+    )
+    research_service=ResearchService(gateway,research_store,discovery=research_discovery)
+    workbench.research = research_service
+    research_learning_gate=ResearchLearningGate(research_store)
     learning_path=Path(skill_learning_path).resolve() if skill_learning_path is not None else root/"skill-learning.db"
     learning_store=SkillLearningStore(learning_path)
     model_performance=ModelPerformanceStore(root/"model-performance.db")
-    task_engine=TaskEngine(orchestration,root,organization=organization,skill_registry=skill_registry,skill_learning=learning_store,model_performance=model_performance)
+    task_engine=TaskEngine(
+        orchestration,
+        root,
+        organization=organization,
+        skill_registry=skill_registry,
+        skill_learning=learning_store,
+        model_performance=model_performance,
+        research_service=research_service,
+        research_learning_gate=research_learning_gate,
+    )
     director_provider = _build_director_provider(settings_store, router=router)
 
     planner=DirectorPlanner(
@@ -712,18 +732,14 @@ def build_director_runtime(*, inference_policy_path: str | Path, autonomy_policy
     store_path=Path(task_db_path).resolve() if task_db_path else runtime_root/"tasks.db"
     store=DurableTaskStore(store_path); event_bus=DurableEventBus(store)
     skill_acquisition=SkillAcquisitionRuntime(runtime_root/"skill-acquisition.db")
-    research_store=ResearchStore(runtime_root/"research.db")
-    research_discovery_endpoint=os.getenv("AURORA_RESEARCH_DISCOVERY_ENDPOINT","").strip()
-    research_discovery=(
-        HttpSearchProvider(gateway,research_discovery_endpoint)
-        if research_discovery_endpoint else None
-    )
-    research_service=ResearchService(gateway,research_store,discovery=research_discovery)
-    # Inject the canonical research stack into TaskEngine as well as Workbench.
-    # Research tasks and trusted-artifact context must share this exact store.
-    service.task_engine.research_service = research_service
-    service.task_engine.research_learning_gate = ResearchLearningGate(research_store)
-    service.task_engine.orchestration._workbench.research = research_service
+    # Reuse the research stack created by build_director_service; do not create
+    # a second ResearchService/Gateway/Store for the runtime layer.
+    research_service = service.task_engine.research_service
+    if not isinstance(research_service, ResearchService):
+        raise RuntimeError("canonical TaskEngine research service is not configured")
+    research_store = research_service.store
+    if service.task_engine.research_learning_gate is None:
+        raise RuntimeError("canonical TaskEngine research learning gate is not configured")
     model_candidate_store=ModelCandidateStore(runtime_root/"model-candidates.db")
     if service.planner.router.provider_registry is None or service.planner.router.model_registry is None:
         raise RuntimeError("model registries are not configured")
