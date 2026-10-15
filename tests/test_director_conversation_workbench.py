@@ -714,6 +714,21 @@ def test_retried_conversation_request_id_reuses_saved_response_without_reexecuti
 def test_conversation_request_id_cannot_be_rebound_to_different_input(tmp_path: Path):
     service, _ = base_service(tmp_path)
     service.set_provider(ToolProvider())
+    service.mission_runner = lambda *, objective, **kwargs: SimpleNamespace(
+        objective=objective,
+        submission=SimpleNamespace(
+            mission_id=kwargs.get("mission_id", "mission-request-binding"),
+            plan=SimpleNamespace(
+                objective=objective,
+                model="nvidia/test-model",
+                provider="nvidia_api",
+                execution_id="planning-request-binding",
+            ),
+        ),
+        status=SimpleNamespace(value="succeeded"),
+        tasks=(),
+        events=(),
+    )
     session = service.create_session()
     service.send_message(
         session_id=session.session_id,
