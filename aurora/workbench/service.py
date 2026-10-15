@@ -471,7 +471,6 @@ class UniversalWorkbench:
                         "provenance": result.provenance,
                         "error": result.error,
                         "idempotency_key": idempotency_key or None,
-                        "replayed": replayed,
                     },
                 )
                 if result.artifact_id:
