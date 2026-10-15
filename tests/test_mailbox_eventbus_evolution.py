@@ -381,3 +381,64 @@ def test_mission_memory_is_idempotent_for_replayed_event_ids(tmp_path: Path):
 
     with pytest.raises(MissionMemoryError, match="already bound to a different mailbox projection"):
         memory.append(**{**kwargs, "content": '{"skill_id": "research", "score": 0.1}'})
+
+
+def test_event_bus_inherits_correlation_from_durable_mission_submission(tmp_path: Path):
+    store = DurableTaskStore(tmp_path / "tasks.db")
+    bus = DurableEventBus(store)
+    correlation_id = "corr-conversation-source-of-truth"
+
+    from aurora.orchestration.task_engine import DelegatedTask
+
+    store.enqueue(
+        "mission-correlation-inheritance",
+        [DelegatedTask("task-a", "operator", "execute durable task")],
+        initial_events=[{
+            "event_type": "mission_submitted",
+            "payload": {
+                "objective": "execute durable task",
+                "correlation_id": correlation_id,
+            },
+            "correlation_id": correlation_id,
+        }],
+        correlation_id=correlation_id,
+    )
+
+    # A producer that knows only its mission ID must still attach its event to
+    # the originating order; it must not create an uncorrelated event branch.
+    event = bus.publish(
+        mission_id="mission-correlation-inheritance",
+        event_type="worker.test_receipt",
+        task_id="task-a",
+        payload={"state": "observed"},
+    )
+
+    assert event.correlation_id == correlation_id
+    assert store.mission_correlation_id("mission-correlation-inheritance") == correlation_id
+
+
+def test_event_bus_preserves_explicit_correlation_override(tmp_path: Path):
+    store = DurableTaskStore(tmp_path / "tasks.db")
+    bus = DurableEventBus(store)
+    from aurora.orchestration.task_engine import DelegatedTask
+
+    store.enqueue(
+        "mission-explicit-correlation",
+        [DelegatedTask("task-a", "operator", "execute durable task")],
+        initial_events=[{
+            "event_type": "mission_submitted",
+            "payload": {"objective": "execute durable task", "correlation_id": "corr-root"},
+            "correlation_id": "corr-root",
+        }],
+        correlation_id="corr-root",
+    )
+
+    event = bus.publish(
+        mission_id="mission-explicit-correlation",
+        event_type="worker.subtrace",
+        task_id="task-a",
+        payload={"state": "observed"},
+        correlation_id="corr-child",
+    )
+
+    assert event.correlation_id == "corr-child"
