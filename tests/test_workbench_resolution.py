@@ -125,6 +125,7 @@ def test_factory_wires_capability_resolution_into_runtime_workbench(tmp_path: Pa
     monkeypatch_env = {
         "AURORA_DIRECTOR_PROVIDER": "router",
         "AURORA_WORKBENCH_ROOTS": str(tmp_path),
+        "AURORA_RESEARCH_DISCOVERY_ENDPOINT": "",
     }
     previous = {key: os.environ.get(key) for key in monkeypatch_env}
     try:
@@ -144,6 +145,14 @@ def test_factory_wires_capability_resolution_into_runtime_workbench(tmp_path: Pa
         workbench = service.task_engine.orchestration._workbench
         assert workbench is not None
         assert workbench.resolution is not None
+
+        # The service factory itself must produce a complete, shared research graph.
+        research_service = service.task_engine.research_service
+        assert research_service is not None
+        assert workbench.research is research_service
+        assert research_service.gateway is workbench.gateway
+        assert service.task_engine.research_learning_gate is not None
+        assert service.task_engine.research_learning_gate.store is research_service.store
     finally:
         for key, value in previous.items():
             if value is None:
