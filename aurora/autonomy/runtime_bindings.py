@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 from typing import Any, Mapping
 from uuid import uuid4
@@ -57,28 +58,80 @@ def _json_object(text: str) -> dict[str, Any]:
 
 
 def _mission_summary(director_service, phase: str, objective: str, state: Mapping[str, Any]) -> dict[str, Any]:
+    """Run one Director phase and preserve verifiable GitHub change/CI receipts.
+
+    A successful Director mission is not itself proof that a file was committed
+    or that CI passed. Those facts are derived only from successful canonical
+    Workbench GitHub capability results.
+    """
+    phase_instructions = {
+        "inspect": "Inspect the target and report concrete repository evidence. Do not edit or publish files.",
+        "diagnose": "Identify a specific, bounded root cause and minimal repair. Do not edit or publish files.",
+        "research": "Ground the repair in persisted evidence and identify the exact files and tests needed.",
+        "modify": (
+            "Apply only the minimal repair to a dedicated non-default GitHub branch using "
+            "workbench:github:branch and workbench:github:file:write. Do not write to main/master "
+            "or merge. Return the branch, repository, and resulting commit receipt."
+        ),
+        "edit": (
+            "Apply only the minimal repair to a dedicated non-default GitHub branch using "
+            "workbench:github:branch and workbench:github:file:write. Do not write to main/master "
+            "or merge. Return the branch, repository, and resulting commit receipt."
+        ),
+        "plan": "Produce a bounded implementation plan with validation criteria; do not claim changes were made.",
+        "test": (
+            "Validate the exact candidate change. A successful Director task alone is not proof of CI; "
+            "the later CI phase must read GitHub Actions for the exact commit SHA."
+        ),
+        "ci": (
+            "Use workbench:github:workflow:read to inspect the GitHub Actions workflow named CI. "
+            "Only a completed success run whose head_sha exactly matches the candidate commit proves CI."
+        ),
+        "verify": "Check the produced evidence and report only claims supported by execution receipts.",
+        "publish": (
+            "Open or report a pull request for the verified feature branch when policy permits; never merge "
+            "automatically. Do not claim publication without a successful GitHub PR receipt."
+        ),
+        "learn": (
+            "Summarize reusable lessons only from the exact change whose GitHub CI completed successfully. "
+            "Do not claim the change succeeded without the commit and CI receipts in the supplied state."
+        ),
+    }
+    phase_instruction = phase_instructions.get(
+        phase,
+        "Carry out only the stated phase. Do not claim external actions without execution receipts.",
+    )
     context = [{
         "role": "user",
         "content": json.dumps(
-            {"controller": phase, "objective": objective, "state": dict(state)},
+            {
+                "controller": phase,
+                "objective": objective,
+                "phase_instruction": phase_instruction,
+                "state": dict(state),
+            },
             ensure_ascii=False,
             default=str,
         )[:12000],
     }]
     result = director_service.run_mission(
-        objective=f"Autonomous engineering controller phase '{phase}': {objective}",
+        objective=(
+            f"Autonomous engineering controller phase '{phase}': {objective}. "
+            f"Required contract: {phase_instruction}"
+        ),
         context=context,
     )
     tasks = tuple(getattr(result, "tasks", ()) or ())
     statuses = [
-        str(getattr(item, "status", getattr(item, "state", "unknown"))).strip().lower().rsplit(".", 1)[-1]
+        str(getattr(item, "status", getattr(item, "state", "unknown")))
+        .strip().lower().rsplit(".", 1)[-1]
         for item in tasks
     ]
     success_states = {"success", "succeeded", "complete", "completed"}
     failed_states = {"failed", "error", "blocked", "cancelled", "canceled"}
     succeeded = bool(statuses) and all(item in success_states for item in statuses)
     failed = any(item in failed_states for item in statuses)
-    return {
+    summary: dict[str, Any] = {
         "phase": phase,
         "objective": objective,
         "task_count": len(tasks),
@@ -87,6 +140,133 @@ def _mission_summary(director_service, phase: str, objective: str, state: Mappin
         "phase_failed": failed,
         "mission_objective": str(getattr(result, "objective", objective)),
     }
+
+    def execution_receipt(item):
+        task = getattr(item, "task", None)
+        capability = str(getattr(task, "capability", "") or "")
+        capability_result = getattr(item, "capability_result", None)
+        execution = getattr(capability_result, "execution", capability_result)
+        status = str(getattr(execution, "status", "")).strip().lower().rsplit(".", 1)[-1]
+        output = getattr(execution, "output", None)
+        provenance = getattr(execution, "provenance", None)
+        if status not in success_states or provenance != "github-api" or not isinstance(output, Mapping):
+            return None
+        return task, capability, output
+
+    if phase in {"modify", "edit"}:
+        writes = []
+        saw_write = False
+        rejected_write = False
+        configured_base = os.getenv("AURORA_RSI_BASE_BRANCH", "main").strip().lower() or "main"
+        protected_branches = {configured_base, "main", "master"}
+
+        for item in tasks:
+            receipt = execution_receipt(item)
+            task = getattr(item, "task", None)
+            capability = str(getattr(task, "capability", "") or "")
+            if capability != "workbench:github:file:write":
+                continue
+            saw_write = True
+            receipt = execution_receipt(item)
+            if receipt is None:
+                rejected_write = True
+                continue
+            task, _, output = receipt
+            raw_args = tuple(getattr(task, "args", ()) or ())
+            request = {}
+            for raw in raw_args:
+                if not isinstance(raw, str):
+                    continue
+                try:
+                    parsed = json.loads(raw)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(parsed, dict):
+                    request = parsed
+                    break
+            owner = str(request.get("owner", "")).strip()
+            repository = str(request.get("repo", "")).strip()
+            repository = f"{owner}/{repository}" if owner and repository else ""
+            branch_name = str(request.get("branch", "")).strip()
+            commit = output.get("commit")
+            commit_sha = str(commit.get("sha", "")).strip() if isinstance(commit, Mapping) else ""
+            if (
+                not repository
+                or not branch_name
+                or branch_name.lower() in protected_branches
+                or not re.fullmatch(r"[0-9a-fA-F]{40}", commit_sha)
+            ):
+                rejected_write = True
+                continue
+            writes.append({
+                "change_id": commit_sha,
+                "change_repository": repository,
+                "change_branch": branch_name,
+            })
+
+        if saw_write and not rejected_write and writes:
+            identities = {(item["change_repository"], item["change_branch"]) for item in writes}
+            if len(identities) == 1:
+                # When the phase commits multiple files serially to one branch,
+                # the last returned commit is the candidate head.
+                summary.update(writes[-1])
+                summary["change_write_receipts"] = len(writes)
+            else:
+                summary["change_receipt_rejected"] = "writes target multiple repositories or branches"
+        elif saw_write:
+            summary["change_receipt_rejected"] = "GitHub file-write receipt missing, invalid, or targets a protected branch"
+
+    if phase == "ci":
+        expected_sha = str(state.get("change_id", "")).strip().lower()
+        matched_runs = []
+        relevant_runs = []
+        if expected_sha:
+            for item in tasks:
+                receipt = execution_receipt(item)
+                if receipt is None:
+                    continue
+                _, capability, output = receipt
+                if capability != "workbench:github:workflow:read":
+                    continue
+                runs = output.get("workflow_runs", ())
+                if not isinstance(runs, list):
+                    continue
+                for run in runs:
+                    if not isinstance(run, Mapping):
+                        continue
+                    if str(run.get("name", "")).strip().casefold() != "ci":
+                        continue
+                    if str(run.get("head_sha", "")).strip().lower() != expected_sha:
+                        continue
+                    relevant_runs.append(run)
+                    if (
+                        str(run.get("status", "")).strip().lower() == "completed"
+                        and str(run.get("conclusion", "")).strip().lower() == "success"
+                    ):
+                        matched_runs.append(run)
+        # Treat a completed failed CI run for the same SHA as failure; a
+        # similarly named run for another SHA cannot satisfy this contract.
+        if matched_runs:
+            selected_run = max(
+                matched_runs,
+                key=lambda item: int(item.get("run_number", 0) or 0),
+            )
+            summary.update({
+                "ci_status": "success",
+                "ci_run_id": selected_run.get("id"),
+                "ci_head_sha": expected_sha,
+                "ci_workflow_name": selected_run.get("name"),
+            })
+        elif any(
+            str(item.get("status", "")).strip().lower() == "completed"
+            and str(item.get("conclusion", "")).strip().lower() in {"failure", "cancelled", "timed_out", "action_required"}
+            for item in relevant_runs
+        ):
+            summary.update({"ci_status": "failure", "ci_head_sha": expected_sha})
+        else:
+            summary.update({"ci_status": "insufficient", "ci_head_sha": expected_sha or None})
+
+    return summary
 
 
 def build_autonomy_runtime_bindings(*, director_service, router, workbench, research_service, skill_learning):
