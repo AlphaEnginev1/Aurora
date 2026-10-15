@@ -782,3 +782,64 @@ def test_runtime_reconciles_partial_mailbox_write_from_durable_submission(tmp_pa
         message for message in runtime.memory.list(submission.mission_id)
         if message.kind == "mission_plan"
     ]) == 1
+
+def test_retry_attempt_does_not_mask_the_final_task_result_in_shared_memory(tmp_path: Path):
+    """A retry is an attempt record; the final success must remain projectable."""
+    runtime, store, _planner, engine = make_runtime(tmp_path)
+    attempts = {"collect": 0}
+
+    class FailFirstAttempt:
+        def run_task(self, **kwargs):
+            task_id = kwargs["task_id"]
+            attempts[task_id] = attempts.get(task_id, 0) + 1
+            if task_id == "collect" and attempts[task_id] == 1:
+                raise RuntimeError("controlled transient failure")
+
+            return TaskResult(
+                task_id=task_id,
+                role=kwargs["role"],
+                response=InferenceResponse(
+                    model="fake/model",
+                    provider="fake",
+                    content=f"completed {task_id}",
+                ),
+            )
+
+        def run_capability_task(self, **kwargs):
+            raise AssertionError("capability execution is not expected")
+
+    # Drive the same TaskEngine through its canonical durable worker path.
+    engine.orchestration = FailFirstAttempt()
+    submission = runtime.submit_mission(objective="recover a transient task failure")
+    result = runtime.run_until_terminal(submission)
+
+    assert result.status is TaskStatus.SUCCEEDED
+    assert attempts["collect"] == 2
+    stored = store.get(submission.mission_id, "collect")
+    assert stored is not None
+    assert stored.status == "succeeded"
+    assert stored.attempts == 2
+
+    messages = runtime.memory.list(submission.mission_id, limit=100)
+    collect_attempts = [
+        item for item in messages
+        if item.task_id == "collect" and item.kind == "task_attempt"
+    ]
+    collect_results = [
+        item for item in messages
+        if item.task_id == "collect" and item.kind == "task_result"
+    ]
+
+    assert len(collect_attempts) == 1
+    assert collect_attempts[0].metadata["action"] == "retried"
+    assert collect_attempts[0].metadata["attempt"] == 1
+    assert collect_attempts[0].metadata["status"] == "failed"
+    assert collect_attempts[0].metadata["error"] == "controlled transient failure"
+    assert "controlled transient failure" in collect_attempts[0].content
+    assert len(collect_results) == 1
+    assert collect_results[0].metadata["action"] == "succeeded"
+    assert collect_results[0].metadata["status"] == "succeeded"
+    assert collect_results[0].metadata["attempt"] == 2
+    assert "completed collect" in collect_results[0].content
+    assert "collect" in runtime.memory.task_result_task_ids(submission.mission_id)
+
