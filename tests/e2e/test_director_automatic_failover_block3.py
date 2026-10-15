@@ -424,7 +424,9 @@ def test_gate_8_block_3_eligibility_correlation_keeps_original_epoch_during_race
 
     eligibility_started = Event()
     allow_b_to_finish = Event()
-    original_evaluate = eligibility.evaluate
+    # Each runtime owns its own store wrapper over the same SQLite file;
+    # intercept the loser's wrapper so the test pauses at the intended edge.
+    original_evaluate = runtime_b.director_eligibility.evaluate
 
     def controlled_evaluate(director_id, **kwargs):
         if director_id == "director-B":
@@ -433,7 +435,7 @@ def test_gate_8_block_3_eligibility_correlation_keeps_original_epoch_during_race
                 raise AssertionError("test did not release blocked eligibility evaluation")
         return original_evaluate(director_id, **kwargs)
 
-    eligibility.evaluate = controlled_evaluate
+    runtime_b.director_eligibility.evaluate = controlled_evaluate
     with ThreadPoolExecutor(max_workers=1) as pool:
         loser = pool.submit(
             runtime_b._ensure_mission_ownership,
