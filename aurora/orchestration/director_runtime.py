@@ -967,43 +967,108 @@ class DirectorRuntime:
                 now=self._ownership_now(),
             )
             self._mission_ownership[submission.mission_id] = ownership
-            self.event_bus.publish(
-                mission_id=submission.mission_id,
-                event_type="director_ownership_acquired",
-                payload={
-                    "owner_id": ownership.owner_id,
-                    "fencing_epoch": ownership.fencing_epoch,
-                    "lease_until": ownership.lease_until,
-                },
-            )
+            try:
+                self.event_bus.publish(
+                    mission_id=submission.mission_id,
+                    event_type="director_ownership_acquired",
+                    payload={
+                        "owner_id": ownership.owner_id,
+                        "fencing_epoch": ownership.fencing_epoch,
+                        "lease_until": ownership.lease_until,
+                    },
+                )
+            except Exception:
+                # The mission/task receipt is already committed. A telemetry
+                # failure must not turn an accepted command into a false rejection.
+                logging.getLogger(__name__).exception(
+                    "mission %s accepted but ownership telemetry could not be published",
+                    submission.mission_id,
+                )
         except DirectorOwnershipRejected as exc:
-            raise DirectorRuntimeError(
-                f"mission ownership could not be acquired after submission: {exc}"
-            ) from exc
+            # Ownership can be held by another healthy runtime; the durable
+            # submission remains accepted and that owner is responsible for it.
+            self._mission_ownership.pop(submission.mission_id, None)
+            try:
+                self.event_bus.publish(
+                    mission_id=submission.mission_id,
+                    event_type="director_ownership_rejected",
+                    payload={"owner_id": self.worker_id, "reason": str(exc)},
+                )
+            except Exception:
+                logging.getLogger(__name__).exception(
+                    "mission %s accepted but ownership-rejection telemetry failed",
+                    submission.mission_id,
+                )
+        except Exception:
+            # Ownership/telemetry are post-commit coordination steps. run_once()
+            # rechecks durable ownership, so return the accepted submission and
+            # let reconciliation retry instead of inviting a duplicate order.
+            logging.getLogger(__name__).exception(
+                "mission %s accepted but initial ownership coordination failed; will retry",
+                submission.mission_id,
+            )
+            self._mission_ownership.pop(submission.mission_id, None)
+
         try:
-            self.memory.append(
-                mission_id=submission.mission_id,
-                source="director",
-                kind="mission_objective",
-                content=submission.plan.objective,
-                metadata={
-                    "model": submission.plan.model,
-                    "provider": submission.plan.provider,
-                    "planning_execution_id": submission.plan.execution_id,
-                },
+            self._ensure_mission_memory(submission.mission_id)
+        except Exception:
+            # The event journal has the authoritative objective and task graph.
+            # run_once() retries this projection until the mailbox is repaired.
+            logging.getLogger(__name__).exception(
+                "mission %s accepted but initial mailbox projection failed; will reconcile",
+                submission.mission_id,
             )
-            self.memory.append(
-                mission_id=submission.mission_id,
-                source="director",
-                kind="mission_plan",
-                content=self._plan_text(submission.plan.tasks),
-                metadata={"task_count": len(submission.plan.tasks)},
-            )
-        except MissionMemoryError as exc:
-            raise DirectorRuntimeError(
-                f"mission submitted but memory could not be initialized: {exc}"
-            ) from exc
         return submission
+
+    def _ensure_mission_memory(self, mission_id: str) -> bool:
+        """Reconcile the mailbox projection from the durable submission receipt."""
+        with self._handoff_lock:
+            events = self.store.events(mission_id)
+            submitted = next(
+                (event for event in events if event.event_type == "mission_submitted"),
+                None,
+            )
+            if submitted is None:
+                return False
+            payload = submitted.payload
+            objective = payload.get("objective")
+            if not isinstance(objective, str) or not objective.strip():
+                raise DirectorRuntimeError(
+                    f"mission {mission_id} has an invalid durable submission objective"
+                )
+
+            if self.memory.first_of_kind(mission_id, "mission_objective") is None:
+                self.memory.append(
+                    mission_id=mission_id,
+                    source="director",
+                    kind="mission_objective",
+                    content=objective,
+                    metadata={
+                        "model": payload.get("model"),
+                        "provider": payload.get("provider"),
+                        "planning_execution_id": payload.get("planning_execution_id"),
+                        "submission_event_id": submitted.event_id,
+                    },
+                )
+
+            if self.memory.first_of_kind(mission_id, "mission_plan") is None:
+                stored_tasks = self.store.list_tasks(mission_id)
+                if not stored_tasks:
+                    raise DirectorRuntimeError(
+                        f"mission {mission_id} has a submission receipt but no durable tasks"
+                    )
+                tasks = tuple(item.task for item in stored_tasks)
+                self.memory.append(
+                    mission_id=mission_id,
+                    source="director",
+                    kind="mission_plan",
+                    content=self._plan_text(tasks),
+                    metadata={
+                        "task_count": len(tasks),
+                        "submission_event_id": submitted.event_id,
+                    },
+                )
+            return True
 
     def run_once(self) -> RuntimeCycle:
         """Consume events, execute active tasks, and adapt terminal missions."""
@@ -1015,6 +1080,17 @@ class DirectorRuntime:
             event_missions = {event.mission_id for event in events}
             known_missions = set(self.store.list_missions())
             mission_ids = known_missions | (event_missions & known_missions)
+            # The task/event journal is the source of truth. Recover the mailbox
+            # view from it on every cycle so a transient memory outage cannot
+            # permanently drop the objective or task graph from shared context.
+            for mission_id in sorted(mission_ids):
+                try:
+                    self._ensure_mission_memory(mission_id)
+                except Exception:
+                    logging.getLogger(__name__).exception(
+                        "mission %s mailbox reconciliation failed; will retry next cycle",
+                        mission_id,
+                    )
             active = [
                 mission_id
                 for mission_id in sorted(mission_ids)
