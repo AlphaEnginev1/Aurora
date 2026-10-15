@@ -242,39 +242,39 @@ def build_context_runtime_adapter(
 
 
 def build_context_mailbox_adapter(task_store, *, limit: int = 40) -> Any:
-    """Expose recent durable event-journal entries as the shared startup inbox view."""
+    """Expose shared events globally and strictly project-tagged events per project.
+
+    An event with no project_id is ambiguous: task-store-generated events use
+    NULL too, so it must not be treated as public/global inside a project
+    context. Project-bound model requests therefore see only events explicitly
+    tagged to that project. The Director/global context (project_id=None) keeps
+    the cross-project overview.
+    """
 
     if limit < 1:
         raise DirectorBootstrapError("mailbox limit must be at least 1")
 
-    def mailbox_context(_project_id: str | None) -> tuple[dict[str, object], ...]:
+    def mailbox_context(project_id: str | None) -> tuple[dict[str, object], ...]:
         try:
-            with task_store._connect() as db:
-                rows = db.execute(
-                    """
-                    SELECT event_id, mission_id, task_id, event_type,
-                           payload_json, created_at
-                    FROM task_events
-                    ORDER BY event_id DESC
-                    LIMIT ?
-                    """,
-                    (limit,),
-                ).fetchall()
+            events = task_store.latest_events(limit=limit, project_id=project_id)
         except Exception as exc:
             raise DirectorBootstrapError(
                 f"unable to load shared mailbox index: {exc}"
             ) from exc
         return tuple(
             {
-                "event_id": int(row["event_id"]),
-                "mission_id": str(row["mission_id"]),
-                "task_id": row["task_id"],
-                "event_type": str(row["event_type"]),
-                "payload": json.loads(row["payload_json"]),
-                "created_at": str(row["created_at"]),
+                "event_id": int(event.event_id),
+                "mission_id": str(event.mission_id),
+                "task_id": event.task_id,
+                "event_type": str(event.event_type),
+                "payload": dict(event.payload),
+                "created_at": str(event.created_at),
+                "project_id": event.project_id,
+                "agent_role": event.agent_role,
+                "correlation_id": event.correlation_id,
             }
-            for row in reversed(rows)
-        ) or ({"state": "empty", "event_count": 0},)
+            for event in events
+        ) or ({"state": "empty", "event_count": 0, "project_id": project_id},)
 
     return mailbox_context
 
