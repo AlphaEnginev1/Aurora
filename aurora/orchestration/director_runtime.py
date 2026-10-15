@@ -2671,7 +2671,16 @@ class DirectorRuntime:
             return False
         now = self._ownership_now()
         handoff = self.director_handoff_store.get_active_for_mission(mission_id)
-        current = self.director_ownership.get(mission_id, now=now)
+        # Use one immutable ownership snapshot for the entire eligibility
+        # decision. A competing Director may win the takeover after this read;
+        # rereading an epoch-2 winner as "previous ownership" would incorrectly
+        # relabel the already-started epoch-2 attempt as epoch 3.
+        ownership_snapshot = self.director_ownership.get(mission_id)
+        current = (
+            ownership_snapshot
+            if ownership_snapshot is not None and ownership_snapshot.lease_until > now
+            else None
+        )
 
         if handoff is not None:
             if handoff.state in {"REQUESTED", "QUIESCING"}:
@@ -2833,7 +2842,7 @@ class DirectorRuntime:
         # A lease-expired record is still historical ownership. Preserve it
         # before acquire() advances the fencing epoch so the emitted event
         # distinguishes a real takeover from first acquisition.
-        previous_ownership = self.director_ownership.get(mission_id)
+        previous_ownership = ownership_snapshot
         cached_ownership = self._mission_ownership.get(mission_id)
         # Long-running work can outlive its lease while this same runtime is
         # synchronously executing a specialist. Permit only the exact in-memory

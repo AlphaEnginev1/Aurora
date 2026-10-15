@@ -1,6 +1,6 @@
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from threading import Lock
+from threading import Event, Lock
 
 import pytest
 
@@ -401,6 +401,64 @@ def test_gate_8_block_3_ineligible_candidate_is_filtered_before_takeover(tmp_pat
     assert rejected
     assert rejected[-1].payload["reason"] == "explicit_state_ineligible"
     assert rejected[-1].correlation_id == f"director-failover:{submission.mission_id}:epoch-2"
+
+
+def test_gate_8_block_3_eligibility_correlation_keeps_original_epoch_during_race(
+    tmp_path: Path,
+):
+    store, bus, ownership, eligibility, _, engine, clock, _, submission = _build_state(tmp_path)
+    _register(eligibility, "director-B", state=DirectorEligibilityStore.INELIGIBLE)
+    _register(eligibility, "director-C")
+    clock.value = "2026-01-01T00:00:31+00:00"
+
+    runtime_b, _ = _candidate(
+        store=store, bus=bus, ownership=ownership, eligibility=eligibility,
+        clock=clock, engine=engine, director_id="director-B",
+        event_consumer_id="director-B-events",
+    )
+    runtime_c, _ = _candidate(
+        store=store, bus=bus, ownership=ownership, eligibility=eligibility,
+        clock=clock, engine=engine, director_id="director-C",
+        event_consumer_id="director-C-events",
+    )
+
+    eligibility_started = Event()
+    allow_b_to_finish = Event()
+    # Each runtime owns its own store wrapper over the same SQLite file;
+    # intercept the loser's wrapper so the test pauses at the intended edge.
+    original_evaluate = runtime_b.director_eligibility.evaluate
+
+    def controlled_evaluate(director_id, **kwargs):
+        if director_id == "director-B":
+            eligibility_started.set()
+            if not allow_b_to_finish.wait(timeout=5):
+                raise AssertionError("test did not release blocked eligibility evaluation")
+        return original_evaluate(director_id, **kwargs)
+
+    runtime_b.director_eligibility.evaluate = controlled_evaluate
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        loser = pool.submit(
+            runtime_b._ensure_mission_ownership,
+            submission.mission_id,
+        )
+        assert eligibility_started.wait(timeout=5)
+        assert runtime_c._ensure_mission_ownership(submission.mission_id) is True
+        allow_b_to_finish.set()
+        assert loser.result(timeout=5) is False
+
+    current = ownership.get(submission.mission_id)
+    assert current is not None
+    assert current.owner_id == "director-C"
+    assert current.fencing_epoch == 2
+    rejected = [
+        event for event in store.events(submission.mission_id)
+        if event.event_type == "director_eligibility_rejected"
+        and event.payload.get("director_id") == "director-B"
+    ]
+    assert rejected
+    assert rejected[-1].correlation_id == (
+        f"director-failover:{submission.mission_id}:epoch-2"
+    )
 
 
 def test_gate_8_block_3_stale_candidate_cannot_take_over(tmp_path: Path):
