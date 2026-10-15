@@ -814,7 +814,10 @@ Keep responses useful and concise unless the human asks for depth."""
                             mission_id=direct_workbench_mission_id,
                             reason="Director conversation direct Workbench evidence",
                             arguments=tuple(call_args),
-                            options=dict(options),
+                            options={
+                                **dict(options),
+                                "work_id": direct_workbench_mission_id,
+                            },
                             correlation_id=correlation_id,
                             idempotency_key=(
                                 f"direct-workbench:{direct_workbench_mission_id}"
