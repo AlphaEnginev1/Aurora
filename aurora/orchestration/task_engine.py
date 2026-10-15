@@ -83,6 +83,44 @@ class DelegatedTaskResult:
     research_trust_state: EvidenceState = EvidenceState.INSUFFICIENT
 
 
+def research_learning_is_authorized(result: DelegatedTaskResult) -> bool:
+    """Return whether this task's result may influence durable skill learning.
+
+    Raw research discovery/retrieval is observational, not trusted knowledge.
+    Only the dedicated research result carrying verified knowledge artifacts
+    may cross the research learning boundary.
+    """
+    task = getattr(result, "task", None)
+    capability = str(getattr(task, "capability", "") or "").strip().lower()
+    capability_result = getattr(result, "capability_result", None)
+
+    if capability.startswith("workbench:research:"):
+        # These Workbench operations return discovery/retrieval/extraction
+        # material, not a trust-gated ResearchTaskResult.
+        return False
+    if capability == "research":
+        return (
+            isinstance(capability_result, ResearchTaskResult)
+            and capability_result.learning_authorized
+        )
+    if isinstance(capability_result, ResearchTaskResult):
+        return capability_result.learning_authorized
+    trusted_artifact_ids = tuple(
+        getattr(result, "trusted_research_artifact_ids", ()) or ()
+    )
+    research_trust_state = getattr(
+        result,
+        "research_trust_state",
+        EvidenceState.INSUFFICIENT,
+    )
+    if (
+        trusted_artifact_ids
+        and research_trust_state is not EvidenceState.VERIFIED
+    ):
+        return False
+    return True
+
+
 @dataclass
 class TaskEngine:
     """Execute delegated tasks through OrchestrationEngine."""
@@ -308,6 +346,8 @@ class TaskEngine:
 
     def _learn_from_result(self, result: DelegatedTaskResult) -> DelegatedTaskResult:
         """Evaluate and persist specialist learning immediately after execution."""
+        if not research_learning_is_authorized(result):
+            return result
         if (
             self.skill_learning is None
             or self.skill_registry is None

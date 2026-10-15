@@ -1,11 +1,21 @@
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 from aurora.inference.models import InferenceResponse
 from aurora.orchestration.engine import TaskResult
-from aurora.orchestration.task_engine import DelegatedTask, DelegatedTaskResult, TaskEngine, TaskStatus
+from aurora.orchestration.task_engine import (
+    DelegatedTask,
+    DelegatedTaskResult,
+    ResearchTaskResult,
+    TaskEngine,
+    TaskStatus,
+    research_learning_is_authorized,
+)
 from aurora.orchestration.task_store import DurableTaskStore, TaskStoreError
 from aurora.orchestration.task_worker import TaskWorker, WorkerPolicy
+from aurora.research.models import EvidenceState
+from aurora.skills.learning import SkillLearningStore
 
 
 class FakeOrchestration:
@@ -192,3 +202,143 @@ def test_worker_persists_routing_evidence_for_director_review(tmp_path: Path):
             {"model": "model-b", "score": 0.71},
         ],
     }
+
+
+
+class _CountingEvaluator:
+    def __init__(self):
+        self.calls = 0
+
+    def evaluate(self, **kwargs):
+        self.calls += 1
+        return ()
+
+
+class _CountingLearningStore:
+    def __init__(self):
+        self.records = []
+
+    def record(self, evaluation):
+        self.records.append(evaluation)
+
+
+def _claimed_task_for_learning(tmp_path: Path, task: DelegatedTask):
+    store, worker, _ = make_worker(tmp_path)
+    store.enqueue("mission-1", [task])
+    claimed = store.claim_next("mission-1", "worker-a", lease_seconds=30)
+    assert claimed is not None
+    return store, worker, claimed
+
+
+def test_unverified_research_result_cannot_enter_worker_or_engine_learning(tmp_path: Path):
+    task = DelegatedTask(
+        "research-task",
+        "researcher",
+        "retrieve candidate research",
+        capability="research",
+        skills=("research-skill",),
+    )
+    _, worker, claimed = _claimed_task_for_learning(tmp_path, task)
+    evaluator = _CountingEvaluator()
+    learning = SkillLearningStore(tmp_path / "skill-learning.db")
+    organization = SimpleNamespace(
+        resolve_agent=lambda role: SimpleNamespace(
+            role=role,
+            skill_ids=("research-skill",),
+            capabilities=frozenset(),
+        )
+    )
+    worker.skill_evaluator = evaluator
+    worker.skill_learning = learning
+    worker.task_engine.skill_learning = learning
+    worker.task_engine.skill_registry = object()
+    worker.task_engine.organization = organization
+
+    result = DelegatedTaskResult(
+        task=task,
+        status=TaskStatus.SUCCEEDED,
+        capability_result=ResearchTaskResult(
+            request_id="research-untrusted",
+            source_ids=("source-untrusted",),
+            claim_ids=("claim-unverified",),
+            trust_state=EvidenceState.INSUFFICIENT,
+            knowledge_artifact_ids=(),
+        ),
+    )
+
+    assert not research_learning_is_authorized(result)
+    assert worker.task_engine._learn_from_result(result) is result
+    worker._learn_from_result(claimed, result)
+    # If the worker skipped its trust gate it would invoke this evaluator using
+    # the agent's default skill, despite no trusted knowledge artifact.
+    assert evaluator.calls == 0
+    assert learning.performance("research-skill").evaluations == 0
+
+
+def test_raw_workbench_research_retrieval_cannot_enter_skill_learning(
+    tmp_path: Path, monkeypatch
+):
+    task = DelegatedTask(
+        "workbench-research",
+        "researcher",
+        "retrieve and extract candidate claims",
+        capability="workbench:research:retrieve_extract",
+        skills=("research-skill",),
+    )
+    _, worker, claimed = _claimed_task_for_learning(tmp_path, task)
+    evaluator = _CountingEvaluator()
+    learning = SkillLearningStore(tmp_path / "skill-learning.db")
+    organization = SimpleNamespace(
+        resolve_agent=lambda role: SimpleNamespace(
+            role=role,
+            skill_ids=("research-skill",),
+            capabilities=frozenset(),
+        )
+    )
+    worker.skill_evaluator = evaluator
+    worker.skill_learning = learning
+    worker.task_engine.skill_learning = learning
+    worker.task_engine.skill_registry = object()
+    worker.task_engine.organization = organization
+    monkeypatch.setattr(
+        "aurora.skills.evaluation.SkillEvaluator",
+        lambda registry: evaluator,
+    )
+    result = DelegatedTaskResult(
+        task=task,
+        status=TaskStatus.SUCCEEDED,
+        capability_result=SimpleNamespace(
+            execution=SimpleNamespace(
+                status="succeeded",
+                operation="research_retrieve_extract",
+                output={"claims": [{"claim": "unverified candidate"}]},
+            )
+        ),
+    )
+
+    assert not research_learning_is_authorized(result)
+    assert worker.task_engine._learn_from_result(result) is result
+    worker._learn_from_result(claimed, result)
+    assert evaluator.calls == 0
+    assert learning.performance("research-skill").evaluations == 0
+
+
+def test_verified_research_artifact_may_cross_learning_gate():
+    result = DelegatedTaskResult(
+        task=DelegatedTask(
+            "verified-research",
+            "researcher",
+            "summarize verified knowledge",
+            capability="research",
+        ),
+        status=TaskStatus.SUCCEEDED,
+        capability_result=ResearchTaskResult(
+            request_id="research-verified",
+            source_ids=("source-a", "source-b"),
+            claim_ids=("claim-verified",),
+            trust_state=EvidenceState.VERIFIED,
+            knowledge_artifact_ids=("kart-verified",),
+        ),
+    )
+
+    assert research_learning_is_authorized(result)
