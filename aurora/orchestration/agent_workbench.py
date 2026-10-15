@@ -6,6 +6,7 @@ Director-preplanned capability tasks.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
@@ -104,6 +105,9 @@ If no Workbench action is needed, answer normally.
         ):
             messages.insert(0, {"role": "system", "content": self.INSTRUCTION})
         executed = 0
+        tool_invocation_occurrences: dict[str, int] = {}
+        initial_metadata = dict(request.metadata or {})
+        stable_task_id = str(initial_metadata.get("task_id") or mission_id)
         while True:
             current_metadata = dict(request.metadata or {})
             current_metadata["workbench_tool_loop"] = True
@@ -134,6 +138,31 @@ If no Workbench action is needed, answer normally.
                 raise AgentWorkbenchToolError("Workbench tool-call budget exceeded")
             results: list[dict[str, Any]] = []
             for call in calls:
+                # The model may retry the task after a worker lease expires. Use
+                # a stable operation fingerprint plus occurrence ordinal so the
+                # same mutating tool call is replayed, not executed twice. Never
+                # trust a model-supplied idempotency key.
+                call_options = dict(call.options or {})
+                call_options.pop("idempotency_key", None)
+                fingerprint_material = json.dumps(
+                    {
+                        "capability": call.capability,
+                        "arguments": list(call.arguments),
+                        "options": call_options,
+                    },
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    default=str,
+                )
+                call_fingerprint = hashlib.sha256(
+                    fingerprint_material.encode("utf-8")
+                ).hexdigest()[:24]
+                occurrence = tool_invocation_occurrences.get(call_fingerprint, 0) + 1
+                tool_invocation_occurrences[call_fingerprint] = occurrence
+                call_options["idempotency_key"] = (
+                    f"task:{mission_id}:{stable_task_id}:tool:{call_fingerprint}:{occurrence}"
+                )
                 result = self.workbench.execute(
                     WorkbenchRequest(
                         capability=call.capability,
@@ -141,7 +170,7 @@ If no Workbench action is needed, answer normally.
                         mission_id=mission_id,
                         reason=reason,
                         arguments=call.arguments,
-                        options=dict(call.options or {}),
+                        options=call_options,
                     )
                 )
                 executed += 1
