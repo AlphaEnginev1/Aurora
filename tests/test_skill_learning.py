@@ -152,3 +152,50 @@ def test_task_engine_automatically_evaluates_and_records_skill_learning(tmp_path
     assert len(result.skill_evaluations) == 1
     assert result.skill_evaluations[0].evidence_state == "evidence_complete"
     assert store.performance("research").evaluations == 1
+
+def test_task_engine_learns_agent_default_skills_without_explicit_task_skills(tmp_path: Path):
+    """Default skills are still assigned by TaskEngine when task.skills is empty."""
+    from aurora.orchestration.engine import TaskResult
+    from aurora.orchestration.task_engine import TaskEngine
+
+    skills, org = _registry()
+
+    class FakeOrchestration:
+        def run_task(self, **kwargs):
+            response = InferenceResponse(
+                model="model/a",
+                provider="fake",
+                content=(
+                    "result\\n"
+                    "VERIFY:source_check=pass\\n"
+                    "QUALITY:citation_check=pass"
+                ),
+            )
+            return TaskResult(
+                task_id=kwargs["task_id"],
+                role=kwargs["role"],
+                response=response,
+            )
+
+    store = SkillLearningStore(tmp_path / "runtime-learning-default-skills.db")
+    engine = TaskEngine(
+        FakeOrchestration(),
+        tmp_path,
+        organization=org,
+        skill_registry=skills,
+        skill_learning=store,
+    )
+
+    # The Director is allowed to omit task.skills: agent defaults are resolved
+    # by TaskEngine itself and must flow into the durable learning store.
+    result = engine.execute_one(
+        DelegatedTask("learn-default-1", "researcher", "research")
+    )
+
+    assert result.status is TaskStatus.SUCCEEDED
+    assert result.task.skills == ()
+    assert len(result.skill_evaluations) == 1
+    assert result.skill_evaluations[0].skill_id == "research"
+    assert result.skill_evaluations[0].evidence_state == "evidence_complete"
+    assert store.performance("research").evaluations == 1
+
