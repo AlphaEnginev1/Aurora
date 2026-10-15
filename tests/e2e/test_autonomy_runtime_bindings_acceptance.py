@@ -169,8 +169,9 @@ def test_production_runtime_wires_task_engine_to_canonical_research_stack(
     from aurora.orchestration.task_engine import DelegatedTask, TaskStatus
 
     runtime = _build_runtime(tmp_path, monkeypatch)
+    workbench = runtime.workbench
     task_engine = runtime.director.task_engine
-    research_service = runtime.workbench.research
+    research_service = workbench.research
 
     assert research_service is not None
     assert task_engine.research_service is research_service
