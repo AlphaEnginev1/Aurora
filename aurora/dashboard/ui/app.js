@@ -12,6 +12,7 @@
     conversationApiBase: window.AURORA_CONVERSATION_API_BASE || "/api/conversation",
     conversationSessionId: null,
     conversationInFlight: false,
+    pendingConversationRequest: null,
     activeView: "home",
     settings: null,
     github: null,
@@ -1650,6 +1651,63 @@ async function testProvider(provider) {
     return item;
   }
 
+  function conversationRequestFingerprint(sessionId, content) {
+    // A non-reversible, non-security fingerprint lets a pending retry survive
+    // reload without storing the prompt itself in sessionStorage.
+    const source = sessionId + "\\u0000" + content;
+    let hash = 2166136261;
+    for (let index = 0; index < source.length; index += 1) {
+      hash ^= source.charCodeAt(index);
+      hash = Math.imul(hash, 16777619);
+    }
+    return (hash >>> 0).toString(16) + "-" + source.length;
+  }
+
+  function getStableConversationRequestId(sessionId, content) {
+    const fingerprint = conversationRequestFingerprint(sessionId, content);
+    const storageKey = "aurora.pendingConversationRequest." + sessionId;
+    try {
+      const saved = JSON.parse(window.sessionStorage.getItem(storageKey) || "null");
+      if (saved && saved.fingerprint === fingerprint && typeof saved.request_id === "string") {
+        state.pendingConversationRequest = {
+          storageKey: storageKey,
+          fingerprint: fingerprint,
+          requestId: saved.request_id
+        };
+        return saved.request_id;
+      }
+    } catch (_) {}
+    const requestId = "request-" + (
+      window.crypto && typeof window.crypto.randomUUID === "function"
+        ? window.crypto.randomUUID()
+        : Date.now().toString(36) + "-" + Math.random().toString(36).slice(2)
+    );
+    state.pendingConversationRequest = {
+      storageKey: storageKey,
+      fingerprint: fingerprint,
+      requestId: requestId
+    };
+    try {
+      window.sessionStorage.setItem(storageKey, JSON.stringify({
+        fingerprint: fingerprint,
+        request_id: requestId
+      }));
+    } catch (_) {}
+    return requestId;
+  }
+
+  function clearStableConversationRequest(requestId) {
+    const pending = state.pendingConversationRequest;
+    if (!pending || pending.requestId !== requestId) return;
+    try {
+      const saved = JSON.parse(window.sessionStorage.getItem(pending.storageKey) || "null");
+      if (saved && saved.request_id === requestId) {
+        window.sessionStorage.removeItem(pending.storageKey);
+      }
+    } catch (_) {}
+    state.pendingConversationRequest = null;
+  }
+
   async function sendConversationMessage(rawText) {
     const raw = String(rawText == null ? "" : rawText).trim();
     const attachments = state.pendingAttachments.slice();
@@ -1675,12 +1733,13 @@ async function testProvider(provider) {
 
     try {
       const sessionId = await ensureConversationSession();
+      const requestId = getStableConversationRequestId(sessionId, content);
       const response = await fetch(
         state.conversationApiBase + "/" + encodeURIComponent(sessionId) + "/turn",
         {
           method: "POST",
           headers: { Accept: "application/json", "Content-Type": "application/json" },
-          body: JSON.stringify({ user_input: content })
+          body: JSON.stringify({ user_input: content, request_id: requestId })
         }
       );
       if (!response.ok) {
@@ -1693,13 +1752,22 @@ async function testProvider(provider) {
       }
       const data = await response.json();
       if (!data || typeof data.response_text !== "string") throw new Error("invalid Director response contract");
+      // Any structured HTTP response means the server recognized this request
+      // key. Clear it so a later intentional turn—even with identical wording—
+      // receives a fresh key. Network errors retain it for safe retry.
+      clearStableConversationRequest(requestId);
       $("director-message").value = "";
       $("director-message").style.height = "auto";
       state.pendingAttachments = [];
       renderAttachmentList();
       $("avatar-transcript").textContent = data.response_text;
       $("avatar-transcript").classList.remove("error");
-      setChatStatus("Aurora replied.", false);
+      setChatStatus(
+        data.state === "in_progress"
+          ? "Order already accepted and still running; do not resend it."
+          : "Aurora replied.",
+        false
+      );
 
       if (state.avatarVoice && state.avatarVoice.capabilities.speech_output) {
         try {

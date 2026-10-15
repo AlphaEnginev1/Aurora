@@ -9,6 +9,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 import sqlite3
+from threading import RLock
 import unicodedata
 from typing import Any, Callable, Mapping
 from uuid import uuid4
@@ -177,6 +178,8 @@ Keep responses useful and concise unless the human asks for depth."""
         self.provider: DirectorProvider = provider or InferenceDirectorProvider(router)
         self.mission_runner = mission_runner
         self.workbench = workbench
+        self._session_locks_guard = RLock()
+        self._session_locks: dict[str, RLock] = {}
         self.router.configure_context_gate(bootstrap.context_gate, enforce=True)
         self._initialize_schema()
 
@@ -247,19 +250,165 @@ Keep responses useful and concise unless the human asks for depth."""
             ConversationTurn(**dict(row)) for row in reversed(rows)
         )
 
+    def _session_lock_for(self, session_id: str) -> RLock:
+        # One session must have a total order for concurrent HTTP turns. The lock
+        # also makes duplicate request IDs wait for the original response to be
+        # persisted before attempting to replay it.
+        with self._session_locks_guard:
+            lock = self._session_locks.get(session_id)
+            if lock is None:
+                lock = RLock()
+                self._session_locks[session_id] = lock
+            return lock
+
+    def _get_turn_by_id(
+        self,
+        session_id: str,
+        turn_id: str,
+    ) -> ConversationTurn | None:
+        with self._connect() as db:
+            row = db.execute(
+                """
+                SELECT turn_id, session_id, sequence, role, content, state,
+                       created_at, correlation_id, model, provider,
+                       execution_id, error_code
+                FROM conversation_turns
+                WHERE session_id = ? AND turn_id = ?
+                LIMIT 1
+                """,
+                (session_id, turn_id),
+            ).fetchone()
+        return ConversationTurn(**dict(row)) if row is not None else None
+
+    @staticmethod
+    def _response_from_saved_turn(
+        session: ConversationSession,
+        turn: ConversationTurn,
+    ) -> DirectorConversationResponse:
+        """Replay a completed response without invoking inference or mission tools."""
+        return DirectorConversationResponse(
+            turn=turn,
+            response_text=turn.content,
+            state="completed",
+            correlation_id=turn.correlation_id,
+            context_manifest_id=session.context_manifest_id,
+            model=turn.model or "unknown",
+            provider=turn.provider or "unknown",
+            execution_id=turn.execution_id or "",
+            presentation_hints={
+                "avatar_state": "SPEAKING",
+                "text_available": True,
+                "voice_requested": False,
+                "idempotent_replay": True,
+            },
+        )
+
+    @staticmethod
+    def _in_progress_response(
+        session: ConversationSession,
+        user_turn: ConversationTurn,
+    ) -> DirectorConversationResponse:
+        message = (
+            "Esta solicitud ya tiene un turno duradero registrado, pero su respuesta "
+            "final no está guardada. Aurora no la vuelve a ejecutar automáticamente "
+            "para evitar duplicar órdenes. Comprueba la misión y los eventos de esta "
+            "correlación antes de volver a emitirla. "
+            f"correlation_id={user_turn.correlation_id}"
+        )
+        pending_turn = ConversationTurn(
+            turn_id=f"{user_turn.turn_id}-in-progress",
+            session_id=user_turn.session_id,
+            sequence=user_turn.sequence + 1,
+            role="assistant",
+            content=message,
+            state="processing",
+            created_at=_now(),
+            correlation_id=user_turn.correlation_id,
+        )
+        return DirectorConversationResponse(
+            turn=pending_turn,
+            response_text=message,
+            state="in_progress",
+            correlation_id=user_turn.correlation_id,
+            context_manifest_id=session.context_manifest_id,
+            model="unknown",
+            provider="unknown",
+            execution_id="",
+            presentation_hints={
+                "avatar_state": "THINKING",
+                "text_available": True,
+                "voice_requested": False,
+                "idempotent_replay": True,
+            },
+        )
+
     def send_message(
         self,
         *,
         session_id: str,
         user_input: str,
         model: str | None = None,
+        request_id: str | None = None,
+    ) -> DirectorConversationResponse:
+        _require_identifier(session_id, "session_id")
+        with self._session_lock_for(session_id):
+            return self._send_message_locked(
+                session_id=session_id,
+                user_input=user_input,
+                model=model,
+                request_id=request_id,
+            )
+
+    def _send_message_locked(
+        self,
+        *,
+        session_id: str,
+        user_input: str,
+        model: str | None = None,
+        request_id: str | None = None,
     ) -> DirectorConversationResponse:
         _require_identifier(session_id, "session_id")
         prompt = user_input.strip()
         if not prompt:
             raise DirectorConversationError("user_input is empty")
+        if request_id is not None:
+            if not isinstance(request_id, str):
+                raise DirectorConversationError("request_id must be a string or null")
+            request_id = request_id.strip()
+            if not request_id or len(request_id) > 256 or "\x00" in request_id:
+                raise DirectorConversationError("request_id must contain 1 to 256 non-null characters")
+            digest = hashlib.sha256(
+                f"{session_id}\x00{request_id}".encode("utf-8")
+            ).hexdigest()[:32]
+            turn_id = f"turn-request-{digest}"
+            correlation_id = f"corr-request-{digest}"
+        else:
+            turn_id = f"turn-{uuid4().hex}"
+            correlation_id = f"corr-{uuid4().hex}"
 
         session = self.get_session(session_id)
+        if request_id is not None:
+            existing_user_turn = self._get_turn_by_id(session_id, turn_id)
+            if existing_user_turn is not None:
+                if existing_user_turn.role != "user" or existing_user_turn.content != prompt:
+                    raise DirectorConversationError(
+                        "request_id is already bound to different conversation input"
+                    )
+                existing_response = self._get_turn_by_id(
+                    session_id, f"{turn_id}-response"
+                )
+                if existing_response is not None and existing_response.state == "completed":
+                    return self._response_from_saved_turn(session, existing_response)
+                existing_error = self._get_turn_by_id(
+                    session_id, f"{turn_id}-error"
+                )
+                if existing_error is not None:
+                    raise DirectorConversationError(
+                        "this request_id already failed and will not be re-executed; "
+                        "use a new request_id only to intentionally submit a new turn"
+                    )
+                return self._in_progress_response(session, existing_user_turn)
+
         if session.state != "active":
             raise DirectorConversationError(
                 f"conversation session is not active: {session_id}"
@@ -269,10 +418,7 @@ Keep responses useful and concise unless the human asks for depth."""
         policy = bootstrap_state.director_model_policy
         self._validate_requested_model(model, policy)
 
-        correlation_id = f"corr-{uuid4().hex}"
-        turn_id = f"turn-{uuid4().hex}"
         next_sequence = self._next_sequence(session_id)
-
         self._insert_turn(
             turn_id=turn_id,
             session_id=session_id,

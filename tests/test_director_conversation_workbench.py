@@ -657,3 +657,133 @@ def test_mission_evidence_does_not_mislabel_timed_out_active_mission_as_failed()
     assert evidence["wait_timed_out"] is True
     assert evidence["wait_timeout_seconds"] == 0.01
     assert evidence["mission_id"] == "mission-active-after-wait-timeout"
+
+
+def test_retried_conversation_request_id_reuses_saved_response_without_reexecuting_mission(tmp_path: Path):
+    service, _ = base_service(tmp_path)
+    provider = ToolProvider()
+    service.set_provider(provider)
+    executed = []
+
+    def runner(*, objective, mission_id=None, correlation_id=None, **kwargs):
+        executed.append((objective, mission_id, correlation_id))
+        task = SimpleNamespace(
+            task=SimpleNamespace(task_id="task-idempotent-1", role="engineer", capability="workbench:file:read"),
+            status="succeeded",
+            error=None,
+        )
+        plan = SimpleNamespace(
+            objective=objective,
+            model="nvidia/test-model",
+            provider="nvidia_api",
+            execution_id="planning-execution-idempotent",
+        )
+        return SimpleNamespace(
+            submission=SimpleNamespace(mission_id=mission_id, plan=plan),
+            status=SimpleNamespace(value="succeeded"),
+            tasks=(task,),
+            events=(),
+        )
+
+    service.mission_runner = runner
+    session = service.create_session()
+    first = service.send_message(
+        session_id=session.session_id,
+        user_input="Audita y ejecuta la misma misión.",
+        request_id="http-request-stable-001",
+    )
+    calls_after_first = list(provider.calls)
+    second = service.send_message(
+        session_id=session.session_id,
+        user_input="Audita y ejecuta la misma misión.",
+        request_id="http-request-stable-001",
+    )
+
+    assert len(executed) == 1
+    assert executed[0][1].startswith("mission-conversation-")
+    assert executed[0][2] == first.correlation_id
+    assert first.turn.turn_id == second.turn.turn_id
+    assert first.correlation_id == second.correlation_id
+    assert first.response_text == second.response_text
+    assert provider.calls == calls_after_first
+    assert [item.role for item in service.list_turns(session.session_id)] == [
+        "user", "assistant"
+    ]
+
+
+def test_conversation_request_id_cannot_be_rebound_to_different_input(tmp_path: Path):
+    service, _ = base_service(tmp_path)
+    service.set_provider(ToolProvider())
+    service.mission_runner = lambda *, objective, **kwargs: SimpleNamespace(
+        objective=objective,
+        submission=SimpleNamespace(
+            mission_id=kwargs.get("mission_id", "mission-request-binding"),
+            plan=SimpleNamespace(
+                objective=objective,
+                model="nvidia/test-model",
+                provider="nvidia_api",
+                execution_id="planning-request-binding",
+            ),
+        ),
+        status=SimpleNamespace(value="succeeded"),
+        tasks=(),
+        events=(),
+    )
+    session = service.create_session()
+    service.send_message(
+        session_id=session.session_id,
+        user_input="Inspect the project",
+        request_id="http-request-content-binding-001",
+    )
+
+    try:
+        service.send_message(
+            session_id=session.session_id,
+            user_input="Delete the project",
+            request_id="http-request-content-binding-001",
+        )
+    except Exception as exc:
+        assert "request_id is already bound to different conversation input" in str(exc)
+    else:
+        raise AssertionError("request_id was unexpectedly rebound to different input")
+
+
+def test_duplicate_request_without_saved_response_is_not_executed_again(tmp_path: Path):
+    import hashlib
+
+    service, _ = base_service(tmp_path)
+    provider = ToolProvider()
+    service.set_provider(provider)
+    session = service.create_session()
+    request_id = "http-request-crash-recovery-001"
+    digest = hashlib.sha256(
+        f"{session.session_id}\x00{request_id}".encode("utf-8")
+    ).hexdigest()[:32]
+    turn_id = f"turn-request-{digest}"
+    correlation_id = f"corr-request-{digest}"
+
+    # Simulate process restart after the user request was persisted but before
+    # the assistant response/mission receipt was written.
+    service._insert_turn(
+        turn_id=turn_id,
+        session_id=session.session_id,
+        sequence=1,
+        role="user",
+        content="Run this mission exactly once",
+        state="completed",
+        created_at="2026-10-15T20:00:00+00:00",
+        correlation_id=correlation_id,
+    )
+
+    response = service.send_message(
+        session_id=session.session_id,
+        user_input="Run this mission exactly once",
+        request_id=request_id,
+    )
+
+    assert response.state == "in_progress"
+    assert response.correlation_id == correlation_id
+    assert "no está guardada" in response.response_text
+    assert "no la vuelve a ejecutar automáticamente" in response.response_text
+    assert provider.calls == []
+    assert [item.role for item in service.list_turns(session.session_id)] == ["user"]

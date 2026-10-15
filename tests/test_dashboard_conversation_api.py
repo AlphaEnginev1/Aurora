@@ -121,7 +121,10 @@ def test_http_conversation_round_trip(tmp_path):
         assert response.status == 201
         assert session["state"] == "active"
 
-        body = json.dumps({"user_input": "Hola por HTTP"}).encode("utf-8")
+        body = json.dumps({
+            "user_input": "Hola por HTTP",
+            "request_id": "http-round-trip-stable-request-001",
+        }).encode("utf-8")
         turn_request = Request(
             base + "/api/conversation/" + session["session_id"] + "/turn",
             data=body,
@@ -144,6 +147,22 @@ def test_http_conversation_round_trip(tmp_path):
         assert turn["turn"]["model"] == turn["model"]
         assert turn["turn"]["provider"] == turn["provider"]
         assert turn["turn"]["execution_id"] == turn["execution_id"]
+
+        # A client resend after losing the first HTTP response uses the same
+        # request_id; it must replay the persisted turn instead of inserting
+        # another user turn or calling the provider again.
+        retry_request = Request(
+            base + "/api/conversation/" + session["session_id"] + "/turn",
+            data=body,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urlopen(retry_request, timeout=5) as response:
+            retried_turn = json.loads(response.read().decode("utf-8"))
+        assert response.status == 200
+        assert retried_turn["turn"]["turn_id"] == turn["turn"]["turn_id"]
+        assert retried_turn["correlation_id"] == turn["correlation_id"]
+        assert retried_turn["response_text"] == turn["response_text"]
 
         with urlopen(base + "/api/conversation/" + session["session_id"] + "/turns", timeout=5) as response:
             history = json.loads(response.read().decode("utf-8"))
