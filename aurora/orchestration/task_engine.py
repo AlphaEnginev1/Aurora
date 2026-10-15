@@ -81,6 +81,9 @@ class DelegatedTaskResult:
     skill_evaluations: tuple[object, ...] = ()
     trusted_research_artifact_ids: tuple[str, ...] = ()
     research_trust_state: EvidenceState = EvidenceState.INSUFFICIENT
+    # Bounded JSON payload rehydrated from DurableTaskStore for completed missions.
+    # Typed live execution objects are intentionally not reconstructed from storage.
+    durable_result: dict | None = None
 
 
 def research_learning_is_authorized(result: DelegatedTaskResult) -> bool:
