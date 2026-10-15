@@ -254,12 +254,16 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 model = payload.get("model")
                 if model is not None and not isinstance(model, str):
                     raise DashboardConversationAPIError("model must be a string or null")
+                request_id = payload.get("request_id")
+                if request_id is not None and not isinstance(request_id, str):
+                    raise DashboardConversationAPIError("request_id must be a string or null")
                 self._json(
                     200,
                     self.conversation_api.send_turn(
                         session_id=session_id,
                         user_input=user_input,
                         model=model,
+                        request_id=request_id,
                         principal=self._principal(),
                     ),
                 )
