@@ -72,6 +72,66 @@ def test_worker_executes_dependency_chain_durably(tmp_path: Path):
     assert [call["task_id"] for call in orchestration.calls] == ["a", "b"]
 
 
+def test_worker_loads_persisted_dependency_output_into_dependent_context(tmp_path: Path):
+    class DependencyOrchestration:
+        def __init__(self):
+            self.calls = []
+
+        def run_task(self, **kwargs):
+            self.calls.append(kwargs)
+            content = (
+                "persisted upstream output: schema-v2-record"
+                if kwargs["task_id"] == "producer"
+                else "downstream review complete"
+            )
+            return TaskResult(
+                task_id=kwargs["task_id"],
+                role=kwargs["role"],
+                response=InferenceResponse(
+                    model="fake/model",
+                    provider="fake",
+                    content=content,
+                ),
+            )
+
+        def run_capability_task(self, **kwargs):
+            raise AssertionError("reasoning dependency test should not execute capabilities")
+
+    orchestration = DependencyOrchestration()
+    engine = TaskEngine(orchestration, tmp_path / "workspace")
+    store = DurableTaskStore(tmp_path / "tasks.db")
+    worker = TaskWorker(
+        store=store,
+        task_engine=engine,
+        mission_id="mission-1",
+        worker_id="worker-a",
+        policy=WorkerPolicy(lease_seconds=30, max_attempts=3, idle_sleep_seconds=0),
+    )
+    store.enqueue(
+        "mission-1",
+        (
+            DelegatedTask("producer", "researcher", "produce a schema record"),
+            DelegatedTask(
+                "consumer",
+                "analyst",
+                "review the persisted record",
+                depends_on=("producer",),
+            ),
+        ),
+    )
+
+    cycles = worker.run_until_idle(max_cycles=4)
+
+    assert [cycle.action for cycle in cycles] == ["succeeded", "succeeded", "idle"]
+    consumer_call = next(call for call in orchestration.calls if call["task_id"] == "consumer")
+    dependency_message = "\n".join(
+        str(message.get("content", "")) for message in consumer_call["context"]
+    )
+    assert "producer" in dependency_message
+    assert "schema-v2-record" in dependency_message
+    assert "untrusted task output" in dependency_message
+
+
 def test_worker_retries_transient_failure_without_losing_task(tmp_path: Path):
     store, worker, orchestration = make_worker(
         tmp_path,
