@@ -352,7 +352,6 @@ class TaskEngine:
             self.skill_learning is None
             or self.skill_registry is None
             or self.organization is None
-            or not result.task.skills
         ):
             return result
 
