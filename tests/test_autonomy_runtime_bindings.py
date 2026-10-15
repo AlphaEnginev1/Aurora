@@ -106,8 +106,167 @@ def test_discovery_loop_does_not_promote_two_sources_to_trusted_knowledge():
     assert result.knowledge == ()
 
 
-def test_recursive_self_improvement_fails_closed_without_explicit_ci_evidence():
-    controllers, _, _, _ = build()
+def test_recursive_self_improvement_stops_when_modify_has_no_github_commit_receipt():
+    controllers, director, _, _ = build()
     result = controllers["recursive_self_improvement"].run("improve Aurora")
-    assert result.status == "insufficient"
+    assert result.status == "blocked"
     assert result.change_id is None
+    # Inspect/diagnose/research/modify run, then later phases do not launch
+    # generic Director missions after the missing commit receipt is detected.
+    assert len(director.calls) == 4
+    assert len(result.cycles) == 7
+
+
+def test_rsi_success_requires_feature_branch_commit_and_ci_for_the_exact_sha():
+    import json
+
+    from aurora.autonomy.runtime_bindings import build_autonomy_runtime_bindings
+
+    commit_sha = "a" * 40
+    branch_name = "fix/controlled-rsi-change"
+
+    class EvidenceDirector:
+        def __init__(self):
+            self.calls = []
+
+        def run_mission(self, *, objective, context=None, model=None):
+            self.calls.append(objective)
+            phase = objective.split("phase '", 1)[1].split("'", 1)[0]
+            capability = None
+            output = {}
+            args = ()
+            provenance = None
+            if phase == "modify":
+                capability = "workbench:github:file:write"
+                args = (json.dumps({
+                    "owner": "AlphaEnginev1",
+                    "repo": "Aurora",
+                    "branch": branch_name,
+                    "path": "aurora/controlled.py",
+                    "content": "# controlled change",
+                    "message": "controlled change",
+                }),)
+                output = {"commit": {"sha": commit_sha}}
+                provenance = "github-api"
+            elif phase == "ci":
+                capability = "workbench:github:workflow:read"
+                output = {"workflow_runs": [{
+                    "id": 7654321,
+                    "name": "CI",
+                    "run_number": 17,
+                    "head_sha": commit_sha,
+                    "status": "completed",
+                    "conclusion": "success",
+                }]}
+                provenance = "github-api"
+
+            task = SimpleNamespace(capability=capability, args=args)
+            execution = SimpleNamespace(
+                status="succeeded",
+                provenance=provenance,
+                output=output,
+            )
+            task_result = SimpleNamespace(
+                status="succeeded",
+                task=task,
+                capability_result=SimpleNamespace(execution=execution) if capability else None,
+            )
+            return SimpleNamespace(objective=objective, tasks=(task_result,))
+
+    director = EvidenceDirector()
+    controllers = build_autonomy_runtime_bindings(
+        director_service=director,
+        router=FakeRouter(),
+        workbench=FakeWorkbench(),
+        research_service=FakeResearch(),
+        skill_learning=object(),
+    )
+
+    result = controllers["recursive_self_improvement"].run("improve Aurora under evidence")
+
+    assert result.status == "succeeded"
+    assert result.change_id == commit_sha
+    assert len(director.calls) == 7
+
+
+def test_rsi_rejects_ci_success_for_a_different_commit():
+    from aurora.autonomy.runtime_bindings import _mission_summary
+
+    commit_sha = "a" * 40
+    wrong_sha = "b" * 40
+
+    class Director:
+        def run_mission(self, *, objective, context=None, model=None):
+            task = SimpleNamespace(
+                capability="workbench:github:workflow:read",
+                args=(),
+            )
+            execution = SimpleNamespace(
+                status="succeeded",
+                provenance="github-api",
+                output={"workflow_runs": [{
+                    "id": 7,
+                    "name": "CI",
+                    "run_number": 1,
+                    "head_sha": wrong_sha,
+                    "status": "completed",
+                    "conclusion": "success",
+                }]},
+            )
+            return SimpleNamespace(
+                objective=objective,
+                tasks=(SimpleNamespace(
+                    status="succeeded",
+                    task=task,
+                    capability_result=SimpleNamespace(execution=execution),
+                ),),
+            )
+
+    result = _mission_summary(
+        Director(),
+        "ci",
+        "verify controlled change",
+        {"change_id": commit_sha},
+    )
+    assert result["ci_status"] == "insufficient"
+    assert result["ci_head_sha"] == commit_sha
+    assert "ci_run_id" not in result
+
+
+def test_rsi_rejects_writes_to_the_default_branch(monkeypatch):
+    import json
+
+    from aurora.autonomy.runtime_bindings import _mission_summary
+
+    commit_sha = "c" * 40
+
+    class Director:
+        def run_mission(self, *, objective, context=None, model=None):
+            task = SimpleNamespace(
+                capability="workbench:github:file:write",
+                args=(json.dumps({
+                    "owner": "AlphaEnginev1",
+                    "repo": "Aurora",
+                    "branch": "main",
+                    "path": "aurora/controlled.py",
+                    "content": "# controlled change",
+                    "message": "controlled change",
+                }),),
+            )
+            execution = SimpleNamespace(
+                status="succeeded",
+                provenance="github-api",
+                output={"commit": {"sha": commit_sha}},
+            )
+            return SimpleNamespace(
+                objective=objective,
+                tasks=(SimpleNamespace(
+                    status="succeeded",
+                    task=task,
+                    capability_result=SimpleNamespace(execution=execution),
+                ),),
+            )
+
+    result = _mission_summary(Director(), "modify", "controlled change", {})
+    assert "change_id" not in result
+    assert result["change_receipt_rejected"]
