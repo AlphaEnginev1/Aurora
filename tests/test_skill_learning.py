@@ -166,8 +166,8 @@ def test_task_engine_learns_agent_default_skills_without_explicit_task_skills(tm
                 model="model/a",
                 provider="fake",
                 content=(
-                    "result\\n"
-                    "VERIFY:source_check=pass\\n"
+                    "result\n"
+                    "VERIFY:source_check=pass\n"
                     "QUALITY:citation_check=pass"
                 ),
             )
