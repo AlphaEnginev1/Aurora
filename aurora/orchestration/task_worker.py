@@ -8,7 +8,13 @@ from time import sleep
 from typing import Callable
 
 from .event_bus import DurableEventBus, EventBusError
-from .task_engine import DelegatedTaskResult, ResearchTaskResult, TaskEngine, TaskStatus
+from .task_engine import (
+    DelegatedTaskResult,
+    ResearchTaskResult,
+    TaskEngine,
+    TaskStatus,
+    research_learning_is_authorized,
+)
 from .task_store import DurableTaskStore, StoredTask, TaskStoreError
 from aurora.skills.evaluation import SkillEvaluator
 from aurora.skills.learning import SkillEvolutionEngine, SkillLearningStore
@@ -248,6 +254,11 @@ class TaskWorker:
         return result
 
     def _learn_from_result(self, claimed: StoredTask, result: DelegatedTaskResult) -> None:
+        # The durable worker is a second learning entry point. Apply the same
+        # research trust gate before evaluating defaults or persisting any result.
+        if not research_learning_is_authorized(result):
+            return
+
         # TaskEngine is the authoritative learning sink when it is configured
         # with SkillLearningStore/ModelPerformanceStore. Avoid recording the same
         # evaluation twice from the durable worker.
