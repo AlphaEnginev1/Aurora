@@ -94,6 +94,25 @@ class MissionRuntimeResult:
     status: TaskStatus
     tasks: tuple[DelegatedTaskResult, ...]
     events: tuple[TaskEvent, ...]
+    wait_timed_out: bool = False
+    wait_timeout_seconds: float | None = None
+
+
+class DirectorMissionWaitTimeout(DirectorRuntimeError):
+    """The durable mission was accepted, but it did not finalize before the caller timeout."""
+
+    def __init__(
+        self,
+        result: MissionRuntimeResult,
+        *,
+        timeout_seconds: float,
+    ) -> None:
+        self.result = result
+        self.timeout_seconds = timeout_seconds
+        super().__init__(
+            f"mission was accepted and remains active after {timeout_seconds:g}s: "
+            f"{result.submission.mission_id}"
+        )
 
 
 @dataclass(frozen=True)
@@ -1316,13 +1335,28 @@ class DirectorRuntime:
                 )
             remaining = deadline - monotonic()
             if remaining <= 0:
-                task_states = ", ".join(
-                    f"{item.task.task_id}={item.status}"
-                    for item in self.store.list_tasks(submission.mission_id)
+                # The timer belongs to the caller, not the durable mission.
+                # Recheck terminal state to close the completion/timeout race;
+                # otherwise surface the accepted receipt rather than misreport
+                # a live order as failed or encouraging the caller to resubmit.
+                if self._is_finalized(submission.mission_id):
+                    return MissionRuntimeResult(
+                        submission=submission,
+                        status=self._final_status(submission.mission_id),
+                        tasks=self._results_snapshot(submission.mission_id),
+                        events=self._mission_events(submission.mission_id),
+                    )
+                snapshot = MissionRuntimeResult(
+                    submission=submission,
+                    status=TaskStatus.RUNNING,
+                    tasks=self._results_snapshot(submission.mission_id),
+                    events=self._mission_events(submission.mission_id),
+                    wait_timed_out=True,
+                    wait_timeout_seconds=timeout_seconds,
                 )
-                raise DirectorRuntimeError(
-                    f"mission did not reach final state within {timeout_seconds:g}s: "
-                    f"{submission.mission_id}; tasks=[{task_states}]"
+                raise DirectorMissionWaitTimeout(
+                    snapshot,
+                    timeout_seconds=timeout_seconds,
                 )
             self._sleep(min(poll_interval_seconds, remaining))
 
