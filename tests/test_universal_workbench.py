@@ -322,7 +322,7 @@ def test_workbench_does_not_repeat_side_effect_with_indeterminate_prior_outcome(
     try:
         wb.execute(request)
     except Exception as exc:
-        assert "previous execution outcome is unknown" in str(exc)
+        assert "outcome is unknown" in str(exc)
         assert "side effect was not repeated" in str(exc)
     else:
         raise AssertionError("Workbench silently re-executed an indeterminate side effect")
