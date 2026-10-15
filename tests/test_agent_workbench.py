@@ -143,3 +143,44 @@ def test_agent_receives_native_media_evidence_from_workbench():
     assert isinstance(evidence_message["content"], list)
     assert evidence_message["content"][1]["modality"] == "image"
     assert evidence_message["content"][1]["mime_type"] == "image/png"
+
+
+def test_agent_workbench_tool_calls_use_stable_untrusted_key_override():
+    workbench = FakeWorkbench()
+    router = FakeRouter()
+    loop = AgentWorkbenchToolLoop(workbench)
+    from aurora.inference.models import InferenceRequest
+
+    request = InferenceRequest(
+        messages=[{"role": "user", "content": "Write one controlled task output."}],
+        metadata={"role": "engineer", "task_id": "write-task"},
+    )
+    router.responses = [
+        '{"workbench_calls":[{"capability":"workbench:file:write","arguments":["out.txt","done"],"options":{"work_id":"mission-1","idempotency_key":"model-controlled-key"}}]}',
+        "The write request was processed.",
+    ]
+    loop.run(
+        request=request,
+        actor="engineer",
+        mission_id="mission-1",
+        reason="write a controlled task output",
+        router=router,
+    )
+    first_key = workbench.calls[-1].options["idempotency_key"]
+
+    router.responses = [
+        '{"workbench_calls":[{"capability":"workbench:file:write","arguments":["out.txt","done"],"options":{"work_id":"mission-1","idempotency_key":"different-model-key"}}]}',
+        "The write request was processed.",
+    ]
+    loop.run(
+        request=request,
+        actor="engineer",
+        mission_id="mission-1",
+        reason="write a controlled task output",
+        router=router,
+    )
+    second_key = workbench.calls[-1].options["idempotency_key"]
+
+    assert first_key == second_key
+    assert first_key.startswith("task:mission-1:write-task:tool:")
+    assert first_key not in {"model-controlled-key", "different-model-key"}
