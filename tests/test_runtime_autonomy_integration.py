@@ -51,12 +51,13 @@ def test_conversation_run_mission_uses_durable_runtime_and_returns_terminal_resu
         calls.append(("submit", kwargs))
         return submission
 
-    def run_until_terminal(actual_submission):
-        calls.append(("terminal", actual_submission))
+    def wait_until_terminal(actual_submission, *, timeout_seconds):
+        calls.append(("wait", actual_submission, timeout_seconds))
         return terminal_result
 
     monkeypatch.setattr(runtime, "submit_mission", submit_mission)
-    monkeypatch.setattr(runtime, "run_until_terminal", run_until_terminal)
+    monkeypatch.setattr(runtime, "wait_until_terminal", wait_until_terminal)
+    monkeypatch.setenv("AURORA_CONVERSATION_MISSION_TIMEOUT_SECONDS", "45")
 
     assert runtime.conversation_service is not None
     result = runtime.conversation_service.mission_runner(objective="Run a governed read-only test")
@@ -64,5 +65,5 @@ def test_conversation_run_mission_uses_durable_runtime_and_returns_terminal_resu
     assert result is terminal_result
     assert calls == [
         ("submit", {"objective": "Run a governed read-only test"}),
-        ("terminal", submission),
+        ("wait", submission, 45.0),
     ]
