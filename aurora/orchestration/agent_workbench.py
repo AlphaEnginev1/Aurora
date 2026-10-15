@@ -143,7 +143,12 @@ If no Workbench action is needed, answer normally.
                 # same mutating tool call is replayed, not executed twice. Never
                 # trust a model-supplied idempotency key.
                 call_options = dict(call.options or {})
+                # These are runtime-owned fields, not model-controlled knobs.
+                # Allowing the model to change work_id could bypass a stable
+                # idempotency key by moving retries into a different journal.
                 call_options.pop("idempotency_key", None)
+                call_options.pop("work_id", None)
+                call_options["work_id"] = mission_id
                 fingerprint_material = json.dumps(
                     {
                         "capability": call.capability,
