@@ -218,17 +218,6 @@ class DurableTaskStore:
         with self._connect() as db:
             try:
                 db.execute("BEGIN IMMEDIATE")
-                for event in normalized_events:
-                    self._event_locked(
-                        db,
-                        mission_id,
-                        event["task_id"],
-                        str(event["event_type"]),
-                        dict(event["payload"]),
-                        project_id=event["project_id"],
-                        agent_role=event["agent_role"],
-                        correlation_id=event["correlation_id"],
-                    )
                 for task in tasks:
                     db.execute(
                         """
@@ -262,6 +251,19 @@ class DurableTaskStore:
                             "capability": task.capability,
                             "skills": list(task.skills),
                         },
+                    )
+                # Preserve the existing event chronology (task enqueued events
+                # first, mission receipts afterwards) without splitting commits.
+                for event in normalized_events:
+                    self._event_locked(
+                        db,
+                        mission_id,
+                        event["task_id"],
+                        str(event["event_type"]),
+                        dict(event["payload"]),
+                        project_id=event["project_id"],
+                        agent_role=event["agent_role"],
+                        correlation_id=event["correlation_id"],
                     )
                 db.commit()
             except sqlite3.IntegrityError as exc:
