@@ -628,6 +628,16 @@ class TaskEngine:
                 constraints={
                     "mission_id": mission_identity,
                     "work_id": mission_identity,
+                    "task_id": task.task_id,
+                    **(
+                        {
+                            "idempotency_key": (
+                                f"task:{mission_identity}:{task.task_id}:{task.capability}"
+                            )
+                        }
+                        if task.capability.startswith("workbench:")
+                        else {}
+                    ),
                 },
             )
             return self.orchestration.run_capability_task(
