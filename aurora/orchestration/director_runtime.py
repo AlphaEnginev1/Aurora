@@ -1115,10 +1115,12 @@ class DirectorRuntime:
             # The task/event journal is the source of truth. Recover the mailbox
             # view from it on every cycle so a transient memory outage cannot
             # permanently drop the objective or task graph from shared context.
+            memory_reconciliation_failed: set[str] = set()
             for mission_id in sorted(mission_ids):
                 try:
                     self._ensure_mission_memory(mission_id)
                 except Exception:
+                    memory_reconciliation_failed.add(mission_id)
                     logging.getLogger(__name__).exception(
                         "mission %s mailbox reconciliation failed; will retry next cycle",
                         mission_id,
@@ -1176,6 +1178,21 @@ class DirectorRuntime:
                         if self.store.mission_status(mission_id) in self.TERMINAL:
                             terminal_candidates.append(mission_id)
             for mission_id in sorted(set(terminal_candidates)):
+                # Terminal missions are not reviewed/finalized until their
+                # durable task results have been projected into shared memory.
+                # If a projection fails after a worker completes, this same
+                # cycle keeps the mission recoverable for the next attempt.
+                try:
+                    if not self._ensure_mission_memory(mission_id):
+                        memory_reconciliation_failed.add(mission_id)
+                except Exception:
+                    memory_reconciliation_failed.add(mission_id)
+                    logging.getLogger(__name__).exception(
+                        "mission %s terminal review deferred until mailbox repair",
+                        mission_id,
+                    )
+                if mission_id in memory_reconciliation_failed:
+                    continue
                 if self._ensure_mission_ownership(mission_id):
                     self._review_or_finalize(mission_id)
             observed_missions = set(event_missions) | set(active) | set(terminal_candidates)
