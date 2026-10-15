@@ -364,3 +364,98 @@ def test_rsi_rejects_writes_to_the_default_branch(monkeypatch):
     result = _mission_summary(Director(), "modify", "controlled change", {})
     assert "change_id" not in result
     assert result["change_receipt_rejected"]
+
+def test_autonomy_accepts_multiple_file_writes_when_commit_receipts_form_one_chain():
+    import json
+
+    from aurora.autonomy.runtime_bindings import _mission_summary
+
+    base_sha = "c" * 40
+    first_sha = "a" * 40
+    final_sha = "b" * 40
+
+    class Director:
+        def run_mission(self, *, objective, context=None, model=None):
+            tasks = []
+            for path, sha, parent in (
+                ("aurora/module.py", first_sha, base_sha),
+                ("tests/test_module.py", final_sha, first_sha),
+            ):
+                task = SimpleNamespace(
+                    capability="workbench:github:file:write",
+                    args=(json.dumps({
+                        "owner": "AlphaEnginev1",
+                        "repo": "Aurora",
+                        "branch": "fix/multi-file-change",
+                        "path": path,
+                        "content": "# controlled change",
+                        "message": "controlled change",
+                    }),),
+                )
+                execution = SimpleNamespace(
+                    status="succeeded",
+                    provenance="github-api",
+                    output={"commit": {
+                        "sha": sha,
+                        "parents": [{"sha": parent}],
+                    }},
+                )
+                tasks.append(SimpleNamespace(
+                    status="succeeded",
+                    task=task,
+                    capability_result=SimpleNamespace(execution=execution),
+                ))
+            return SimpleNamespace(objective=objective, tasks=tuple(tasks))
+
+    result = _mission_summary(Director(), "modify", "change code and tests", {})
+    assert result["change_id"] == final_sha
+    assert result["change_repository"] == "AlphaEnginev1/Aurora"
+    assert result["change_branch"] == "fix/multi-file-change"
+    assert result["change_write_receipts"] == 2
+    assert "change_receipt_rejected" not in result
+
+
+def test_autonomy_rejects_divergent_multi_file_commit_receipts():
+    import json
+
+    from aurora.autonomy.runtime_bindings import _mission_summary
+
+    base_sha = "c" * 40
+
+    class Director:
+        def run_mission(self, *, objective, context=None, model=None):
+            tasks = []
+            for path, sha in (
+                ("aurora/module.py", "a" * 40),
+                ("tests/test_module.py", "b" * 40),
+            ):
+                task = SimpleNamespace(
+                    capability="workbench:github:file:write",
+                    args=(json.dumps({
+                        "owner": "AlphaEnginev1",
+                        "repo": "Aurora",
+                        "branch": "fix/divergent-change",
+                        "path": path,
+                        "content": "# controlled change",
+                        "message": "controlled change",
+                    }),),
+                )
+                execution = SimpleNamespace(
+                    status="succeeded",
+                    provenance="github-api",
+                    output={"commit": {
+                        "sha": sha,
+                        "parents": [{"sha": base_sha}],
+                    }},
+                )
+                tasks.append(SimpleNamespace(
+                    status="succeeded",
+                    task=task,
+                    capability_result=SimpleNamespace(execution=execution),
+                ))
+            return SimpleNamespace(objective=objective, tasks=tuple(tasks))
+
+    result = _mission_summary(Director(), "modify", "divergent code writes", {})
+    assert "change_id" not in result
+    assert "linear commit chain" in result["change_receipt_rejected"]
+
