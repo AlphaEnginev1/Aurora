@@ -159,3 +159,53 @@ def test_joint_autonomy_controller_acceptance_uses_canonical_runtime_services(
     assert len(rsi_result.cycles) == 7
     assert len(director_calls) == 14
 
+
+
+
+def test_production_runtime_wires_task_engine_to_canonical_research_stack(
+    tmp_path: Path, monkeypatch
+):
+    """A production-built TaskEngine can execute research through the canonical store."""
+    from aurora.orchestration.task_engine import DelegatedTask, TaskStatus
+
+    runtime = _build_runtime(tmp_path, monkeypatch)
+    task_engine = runtime.director.task_engine
+    research_service = runtime.workbench.research
+
+    assert research_service is not None
+    assert task_engine.research_service is research_service
+    assert task_engine.research_learning_gate is not None
+    assert task_engine.research_learning_gate.store is research_service.store
+
+    calls = []
+
+    def discover(request):
+        calls.append(("discover", request.objective))
+        return ("https://research.example/runtime-wiring",)
+
+    def retrieve_and_extract(request):
+        calls.append(("retrieve_and_extract", request.objective, request.required_sources))
+        return (
+            (SimpleNamespace(source_id="persisted-source"),),
+            (SimpleNamespace(claim_id="persisted-claim"),),
+        )
+
+    # Exercise the actual TaskEngine research dispatch without external network
+    # calls; only the provider-facing discovery/retrieval boundary is controlled.
+    monkeypatch.setattr(research_service, "discover", discover)
+    monkeypatch.setattr(research_service, "retrieve_and_extract", retrieve_and_extract)
+
+    result = task_engine.execute_one(
+        DelegatedTask(
+            task_id="runtime-research-wiring",
+            role="researcher",
+            objective="Verify the canonical research dependency wiring",
+            capability="research",
+        )
+    )
+
+    assert result.status is TaskStatus.SUCCEEDED
+    assert result.capability_result.source_ids == ("persisted-source",)
+    assert result.capability_result.claim_ids == ("persisted-claim",)
+    assert [item[0] for item in calls] == ["discover", "retrieve_and_extract"]
+    assert calls[1][2] == ("https://research.example/runtime-wiring",)

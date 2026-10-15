@@ -27,6 +27,7 @@ from aurora.inference.reserve_pool import DynamicReservePool
 from aurora.inference.ensemble import ModelEnsemble, ModelEnsembleStore
 from aurora.dashboard.gateway import DashboardGateway
 from aurora.research.discovery import HttpSearchProvider, ResearchSourceCatalog
+from aurora.research.learning import ResearchLearningGate
 from aurora.research.models import ResearchRequest
 from aurora.research.service import ResearchService
 from aurora.research.store import ResearchStore
@@ -718,6 +719,10 @@ def build_director_runtime(*, inference_policy_path: str | Path, autonomy_policy
         if research_discovery_endpoint else None
     )
     research_service=ResearchService(gateway,research_store,discovery=research_discovery)
+    # Inject the canonical research stack into TaskEngine as well as Workbench.
+    # Research tasks and trusted-artifact context must share this exact store.
+    service.task_engine.research_service = research_service
+    service.task_engine.research_learning_gate = ResearchLearningGate(research_store)
     service.task_engine.orchestration._workbench.research = research_service
     model_candidate_store=ModelCandidateStore(runtime_root/"model-candidates.db")
     if service.planner.router.provider_registry is None or service.planner.router.model_registry is None:
