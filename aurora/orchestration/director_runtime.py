@@ -21,7 +21,7 @@ def _safe_catalog_error_text(error: BaseException) -> str:
     return _CATALOG_SECRET_PATTERN.sub("***REDACTED***", f"{type(error).__name__}: {error}")[:300]
 
 
-from .director import DirectorPlanError
+from .director import DirectorPlan, DirectorPlanError
 from .director_handoff_store import DirectorHandoff, DirectorHandoffRejected, DirectorHandoffStore
 from .director_eligibility import DirectorEligibilityError, DirectorEligibilityStore
 from .director_ownership import DirectorOwnership, DirectorOwnershipRejected, DirectorOwnershipStore
@@ -1048,6 +1048,57 @@ class DirectorRuntime:
                 submission.mission_id,
             )
         return submission
+
+    def durable_mission_snapshot(
+        self, mission_id: str
+    ) -> MissionRuntimeResult | None:
+        """Read the current durable mission result without claiming or executing work.
+
+        This is used when a browser replays a completed conversation turn whose
+        embedded execution receipt was still running at the caller's timeout.
+        It deliberately reads SQLite only and never starts a worker cycle.
+        """
+        if not isinstance(mission_id, str) or not mission_id.strip():
+            raise DirectorRuntimeError("mission_id is empty")
+        events = self.store.events(mission_id)
+        submitted = next(
+            (event for event in events if event.event_type == "mission_submitted"),
+            None,
+        )
+        if submitted is None:
+            return None
+        payload = submitted.payload
+        objective = payload.get("objective")
+        if not isinstance(objective, str) or not objective.strip():
+            raise DirectorRuntimeError(
+                f"mission {mission_id} has an invalid durable submission objective"
+            )
+        stored_tasks = self.store.list_tasks(mission_id)
+        if not stored_tasks:
+            raise DirectorRuntimeError(
+                f"mission {mission_id} has a submission receipt but no durable tasks"
+            )
+        plan = DirectorPlan(
+            objective=objective,
+            tasks=tuple(item.task for item in stored_tasks),
+            model=str(payload.get("model", "unknown")),
+            provider=(
+                str(payload["provider"])
+                if payload.get("provider") is not None else None
+            ),
+            execution_id=(
+                str(payload["planning_execution_id"])
+                if payload.get("planning_execution_id") is not None else None
+            ),
+        )
+        submission = MissionSubmission(mission_id=mission_id, plan=plan)
+        status = self._final_status(mission_id) if self._is_finalized(mission_id) else TaskStatus.RUNNING
+        return MissionRuntimeResult(
+            submission=submission,
+            status=status,
+            tasks=self._results_snapshot(mission_id),
+            events=self._mission_events(mission_id),
+        )
 
     def _mission_correlation_id(self, mission_id: str) -> str | None:
         """Read a mission's canonical correlation from its durable submission receipt."""
