@@ -246,6 +246,7 @@ class TeamCoordinator:
                     args=task.args,
                     depends_on=task.depends_on,
                     skills=task.skills,
+                    project_id=task.project_id,
                 )
             elif task.role not in allowed_roles:
                 raise TeamCoordinatorError(
