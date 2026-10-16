@@ -12,7 +12,7 @@ This contract covers the boundary between Director conversation, durable mission
 
 ## Recovery contract
 
-A conversation turn persisted without its assistant response is resumed on a retry using the same `request_id`. Mission IDs are deterministic for the durable turn and objective, so a mission already accepted by the durable store is replayed instead of enqueued a second time. Different objectives in one turn receive different mission IDs.
+A conversation turn persisted without its assistant response is resumed on a retry using the same `request_id`. Mission IDs use deterministic call slots within the durable turn, independent of provider-generated tool-call IDs or regenerated arguments. A mission already accepted at a slot is replayed; if a retry changes the objective at that slot, the durable service rejects the conflicting reuse rather than enqueueing a second order. Distinct mission calls in one turn use distinct slots.
 
 ## Regression tests
 
