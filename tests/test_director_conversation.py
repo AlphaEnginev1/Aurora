@@ -308,7 +308,8 @@ def test_information_questions_and_single_reads_do_not_start_a_mission(prompt):
     assert DirectorConversationService._requests_mission_execution(prompt) is False
 
 
-def test_default_router_provider_submits_one_durable_mission_and_returns_evidence(tmp_path):
+@pytest.mark.parametrize("emit_tool_call", [True, False])
+def test_default_router_provider_submits_one_durable_mission_and_returns_evidence(tmp_path, emit_tool_call):
     service, _ = _service(tmp_path)
     session = service.create_session()
     received_requests = []
@@ -318,7 +319,7 @@ def test_default_router_provider_submits_one_durable_mission_and_returns_evidenc
         def generate(self, request, *, selected_model, execution_id):
             received_requests.append(request)
             tool_names = request.metadata.get("director_tools", [])
-            if "run_mission" in tool_names:
+            if "run_mission" in tool_names and emit_tool_call:
                 content = json.dumps({
                     "tool_calls": [{
                         "name": "run_mission",
@@ -372,7 +373,12 @@ def test_default_router_provider_submits_one_durable_mission_and_returns_evidenc
     )
 
     assert len(submitted) == 1
-    assert submitted[0]["objective"] == "audit Aurora links"
+    expected_objective = (
+        "audit Aurora links"
+        if emit_tool_call
+        else "Audita todos los enlaces de Aurora y corrige los que fallen"
+    )
+    assert submitted[0]["objective"] == expected_objective
     assert submitted[0]["mission_id"].startswith("mission-conversation-turn-request-")
     assert submitted[0]["correlation_id"] == response.correlation_id
     assert response.state == "completed"
@@ -381,3 +387,13 @@ def test_default_router_provider_submits_one_durable_mission_and_returns_evidenc
     assert '"mission_id": "' + submitted[0]["mission_id"] + '"' in response.response_text
     assert received_requests[0].metadata["conversation_session_id"] == session.session_id
     assert received_requests[0].metadata["aurora_context_verified"] is True
+
+    # A resend after losing the HTTP response replays the same turn/mission receipt.
+    replay = service.send_message(
+        session_id=session.session_id,
+        user_input="Audita todos los enlaces de Aurora y corrige los que fallen",
+        request_id="durable-tool-routing-regression-001",
+    )
+    assert replay.turn.turn_id == response.turn.turn_id
+    assert replay.correlation_id == response.correlation_id
+    assert len(submitted) == 1
