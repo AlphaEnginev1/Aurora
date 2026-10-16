@@ -194,6 +194,9 @@ def test_durable_mission_persists_and_inherits_canonical_project_scope(tmp_path)
     request = orchestration.capability_calls[0]["request"]
     assert request.constraints["project_id"] == "project-alpha"
     assert request.constraints["project_repository"] == "AlphaEnginev1/alpha"
+    assert request.constraints["idempotency_key"] == (
+        "task:project-alpha:mission-project-alpha:list-project-files"
+    )
 
 
 def test_project_scoped_task_fails_closed_without_registry_or_for_unknown_project(tmp_path):
