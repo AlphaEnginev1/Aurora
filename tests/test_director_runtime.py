@@ -742,7 +742,7 @@ def test_replan_preserves_project_context_and_traceability(tmp_path: Path):
             )
         ]
         assert len(project_messages) == 1
-        canonical = json.loads(project_messages[0].split("\\n", 1)[1])
+        canonical = json.loads(project_messages[0].split("\n", 1)[1])
         assert canonical == {
             "architecture_ref": "docs/architecture.md",
             "current_state": "canonical state for Project A",
