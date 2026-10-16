@@ -1671,8 +1671,14 @@ async function testProvider(provider) {
     if (drawerBody) drawerBody.innerHTML = '<div class="empty-state">Loading durable conversation…</div>';
     try {
       const sessionId = await ensureConversationSession();
+      let storedProject = "";
+      try { storedProject = window.sessionStorage.getItem("aurora.selectedProjectId") || ""; }
+      catch (_) {}
+      const projectScope = state.selectedProjectId || storedProject;
+      const historyUrl = state.conversationApiBase + "/" + encodeURIComponent(sessionId) + "/turns" +
+        (projectScope ? "?project_id=" + encodeURIComponent(projectScope) : "");
       const response = await fetch(
-        state.conversationApiBase + "/" + encodeURIComponent(sessionId) + "/turns",
+        historyUrl,
         { headers: { Accept: "application/json" } }
       );
       if (!response.ok) throw new Error("history " + response.status);
@@ -1916,6 +1922,7 @@ async function testProvider(provider) {
           : "General mode selected; no project scope is attached.",
         false
       );
+      loadConversationHistory().catch(function () {});
     });
     $("attach-file").addEventListener("click", function () {
       $("aurora-file-input").click();
