@@ -2096,7 +2096,9 @@ class DirectorRuntime:
             )
         if len({task.task_id for task in tasks}) != len(tasks):
             raise DirectorRuntimeError("durable follow-up task receipt has duplicate task ids")
-        validated = self.director.task_engine.validate(tuple(tasks))
+        validated = self._validate_phase_task_graph(
+            mission_id, round_number, tuple(tasks)
+        )
         if tuple(validated) != tuple(tasks):
             raise DirectorRuntimeError("durable follow-up task validation changed the saved graph")
         return tuple(validated)
@@ -2310,7 +2312,9 @@ class DirectorRuntime:
                     raise DirectorRuntimeError(
                         "existing follow-up rows lost the mission's project_id"
                     )
-                self.director.task_engine.validate(phase_tasks)
+                phase_tasks = self._validate_phase_task_graph(
+                    mission_id, round_number, phase_tasks
+                )
             else:
                 raise DirectorRuntimeError(
                     "continue decision has no replayable task graph and no durable phase rows"
@@ -3014,17 +3018,62 @@ class DirectorRuntime:
         if review.decision == "continue":
             try:
                 phase_tasks = self._phase_tasks(mission_id, round_number, review.tasks)
+                phase_tasks = self._validate_phase_task_graph(
+                    mission_id, round_number, tuple(phase_tasks)
+                )
+                phase_ids = {task.task_id for task in phase_tasks}
+                external_dependencies = {
+                    task.task_id: tuple(
+                        dependency_id
+                        for dependency_id in task.depends_on
+                        if dependency_id not in phase_ids
+                    )
+                    for task in phase_tasks
+                }
                 coordinator = getattr(self.director, "team_coordinator", None)
                 if coordinator is not None:
+                    # TeamCoordinator validates a self-contained graph; keep
+                    # cross-phase edges aside during team formation and restore
+                    # them to the exact resolved task graph afterwards.
+                    team_tasks = tuple(
+                        replace(
+                            task,
+                            depends_on=tuple(
+                                dependency_id
+                                for dependency_id in task.depends_on
+                                if dependency_id in phase_ids
+                            ),
+                        )
+                        for task in phase_tasks
+                    )
                     team_state = coordinator.prepare(
                         mission_id=mission_id,
                         objective=objective,
-                        tasks=phase_tasks,
+                        tasks=team_tasks,
+                    )
+                    resolved_by_id = {
+                        task.task_id: task for task in team_state.tasks
+                    }
+                    if set(resolved_by_id) != phase_ids:
+                        raise DirectorRuntimeError(
+                            "team reconfiguration changed the follow-up task IDs"
+                        )
+                    phase_tasks = tuple(
+                        replace(
+                            resolved_by_id[task.task_id],
+                            depends_on=tuple(dict.fromkeys((
+                                *resolved_by_id[task.task_id].depends_on,
+                                *external_dependencies[task.task_id],
+                            ))),
+                        )
+                        for task in phase_tasks
                     )
                     phase_tasks = self._bind_project_to_tasks(
-                        mission_id, tuple(team_state.tasks)
+                        mission_id, tuple(phase_tasks)
                     )
-                    phase_tasks = self.director.task_engine.validate(phase_tasks)
+                    phase_tasks = self._validate_phase_task_graph(
+                        mission_id, round_number, tuple(phase_tasks)
+                    )
                     team_reconfiguration = {
                         "round": round_number,
                         "roles": [member.role for member in team_state.team.members],
@@ -3033,9 +3082,11 @@ class DirectorRuntime:
                         **({"project_id": project_id} if project_id is not None else {}),
                     }
                 else:
-                    phase_tasks = self.director.task_engine.validate(phase_tasks)
                     phase_tasks = self._bind_project_to_tasks(
                         mission_id, tuple(phase_tasks)
+                    )
+                    phase_tasks = self._validate_phase_task_graph(
+                        mission_id, round_number, tuple(phase_tasks)
                     )
                 if not phase_tasks:
                     raise DirectorRuntimeError("Director follow-up plan is empty")
@@ -3443,6 +3494,69 @@ class DirectorRuntime:
                 + ", ".join(sorted(external - existing_ids))
             )
         return self._bind_project_to_tasks(mission_id, tuple(result))
+
+    def _validate_phase_task_graph(
+        self,
+        mission_id: str,
+        round_number: int,
+        tasks: tuple[DelegatedTask, ...],
+    ) -> tuple[DelegatedTask, ...]:
+        """Validate a replan graph while allowing only successful earlier-phase dependencies.
+
+        TaskEngine validates a self-contained DAG, whereas durable missions may
+        explicitly carry dependencies from a later phase to a succeeded task in
+        an earlier phase. Validate internal edges as a DAG and resolve external
+        edges against the authoritative durable task journal.
+        """
+        normalized = tuple(tasks)
+        if not normalized:
+            raise DirectorRuntimeError("Director follow-up task graph is empty")
+        task_ids = {task.task_id for task in normalized}
+        if len(task_ids) != len(normalized):
+            raise DirectorRuntimeError("Director follow-up task graph has duplicate task ids")
+
+        prior_tasks = {
+            item.task.task_id: item
+            for item in self.store.list_tasks(mission_id)
+            if item.phase < round_number
+        }
+        for task in normalized:
+            for dependency_id in task.depends_on:
+                if dependency_id in task_ids:
+                    continue
+                prior = prior_tasks.get(dependency_id)
+                if prior is None:
+                    raise DirectorRuntimeError(
+                        f"Director follow-up task {task.task_id} references unknown prior task {dependency_id}"
+                    )
+                if prior.status != TaskStatus.SUCCEEDED.value:
+                    raise DirectorRuntimeError(
+                        f"Director follow-up task {task.task_id} depends on prior task "
+                        f"{dependency_id} with non-succeeded status {prior.status}"
+                    )
+
+        internal_graph = tuple(
+            replace(
+                task,
+                depends_on=tuple(
+                    dependency_id
+                    for dependency_id in task.depends_on
+                    if dependency_id in task_ids
+                ),
+            )
+            for task in normalized
+        )
+        try:
+            validated = self.director.task_engine.validate(internal_graph)
+        except Exception as exc:
+            raise DirectorRuntimeError(
+                f"Director follow-up task graph is invalid: {_safe_catalog_error_text(exc)}"
+            ) from exc
+        if tuple(validated) != internal_graph:
+            raise DirectorRuntimeError(
+                "Director follow-up task validation changed the internal graph"
+            )
+        return normalized
 
     def _review_rounds(self, mission_id: str) -> int:
         """Count completed durable review outcomes, not abandoned start markers."""
