@@ -672,6 +672,79 @@ def test_conversation_mission_evidence_uses_final_director_status_after_recovery
     assert any(event.event_type == "mission_succeeded" for event in store.events(submission.mission_id))
 
 
+def test_runtime_retries_transient_replan_enqueue_failure_from_durable_receipt(
+    tmp_path: Path,
+):
+    runtime, store, planner, _engine = make_runtime(tmp_path)
+    original_enqueue = store.enqueue
+    failures = {"count": 0}
+
+    def fail_first_follow_up_enqueue(
+        mission_id,
+        tasks,
+        *,
+        phase=0,
+        initial_events=(),
+        correlation_id=None,
+    ):
+        if phase == 1 and failures["count"] == 0:
+            failures["count"] += 1
+            raise RuntimeError("controlled transient enqueue failure")
+        return original_enqueue(
+            mission_id,
+            tasks,
+            phase=phase,
+            initial_events=initial_events,
+            correlation_id=correlation_id,
+        )
+
+    store.enqueue = fail_first_follow_up_enqueue
+    submission = runtime.submit_mission(
+        objective="adapt this mission after a transient storage interruption",
+        mission_id="mission-replan-enqueue-retry",
+        correlation_id="corr-replan-enqueue-retry",
+    )
+
+    result = runtime.run_until_terminal(submission)
+
+    assert failures["count"] == 1
+    assert result.status is TaskStatus.SUCCEEDED
+    assert planner.review_calls == 2  # one continue receipt, then the final review
+    assert [item.task.task_id for item in result.tasks] == [
+        "collect", "review", "r1_validate"
+    ]
+    events = store.events(submission.mission_id)
+    assert not any(
+        event.event_type == "mission_blocked"
+        and "could not be durably enqueued" in str(event.payload.get("reason", ""))
+        for event in events
+    )
+    assert sum(
+        event.event_type == "director_review_recovery_deferred"
+        and event.payload.get("round") == 1
+        for event in events
+    ) == 1
+    assert sum(
+        event.event_type == "director_review_recovered"
+        and event.payload.get("round") == 1
+        for event in events
+    ) == 1
+    assert sum(
+        event.event_type == "director_decision_executed"
+        and event.payload.get("round") == 1
+        for event in events
+    ) == 1
+    assert sum(
+        event.event_type == "mission_reopened"
+        and event.payload.get("round") == 1
+        for event in events
+    ) == 1
+    assert sum(
+        item.task.task_id == "r1_validate"
+        for item in result.tasks
+    ) == 1
+
+
 def test_runtime_replays_durable_continue_review_after_restart_without_replanning(tmp_path: Path):
     runtime, store, planner, _engine = make_runtime(tmp_path)
     submission = runtime.submit_mission(
