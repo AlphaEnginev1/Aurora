@@ -598,3 +598,49 @@ def test_task_engine_propagates_failed_workbench_status_instead_of_marking_succe
     assert result.status is TaskStatus.FAILED
     assert result.error == "workbench preflight refused the operation"
     assert result.capability_result.execution.output == {"ready": False}
+
+
+
+def test_durable_workbench_task_uses_same_idempotency_key_across_worker_attempts(tmp_path):
+    class CaptureWorkbenchOrchestration:
+        def __init__(self):
+            self.requests = []
+
+        def run_capability_task(self, **kwargs):
+            self.requests.append(kwargs["request"])
+            return SimpleNamespace(
+                execution=SimpleNamespace(
+                    status="succeeded",
+                    output={"completed": True},
+                )
+            )
+
+        def run_task(self, **kwargs):
+            raise AssertionError("Workbench capability must use the governed capability path")
+
+    orchestration = CaptureWorkbenchOrchestration()
+    task_engine = TaskEngine(orchestration, tmp_path / "workspace")
+    task = DelegatedTask(
+        "write-1",
+        "engineer",
+        "write one deterministic output",
+        capability="workbench:file:write",
+        args=("out.txt", "value"),
+    )
+
+    first = task_engine.execute_one(
+        task,
+        execution_scope="mission-1:write-1:attempt:1",
+    )
+    second = task_engine.execute_one(
+        task,
+        execution_scope="mission-1:write-1:attempt:2",
+    )
+
+    assert first.status is TaskStatus.SUCCEEDED
+    assert second.status is TaskStatus.SUCCEEDED
+    keys = [item.constraints["idempotency_key"] for item in orchestration.requests]
+    assert keys == [
+        "task:mission-1:write-1:workbench:file:write",
+        "task:mission-1:write-1:workbench:file:write",
+    ]
