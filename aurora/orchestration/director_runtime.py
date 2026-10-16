@@ -4189,6 +4189,47 @@ class DirectorRuntime:
                 problems.append(
                     "selected model differs between the inference response and routing receipt"
                 )
+
+            # Model prose is not a substitute for tool execution evidence. When
+            # the agent used Workbench during reasoning, every persisted action
+            # receipt must itself report a successful, non-truncated operation.
+            workbench_receipts = result.get("workbench_receipts")
+            if workbench_receipts is not None:
+                if not isinstance(workbench_receipts, list):
+                    problems.append("model receipt has invalid Workbench receipt collection")
+                else:
+                    for index, receipt in enumerate(workbench_receipts):
+                        if not isinstance(receipt, Mapping):
+                            problems.append(
+                                f"Workbench receipt {index} is not a structured object"
+                            )
+                            continue
+                        status = str(receipt.get("status") or "").strip().lower()
+                        if status != TaskStatus.SUCCEEDED.value:
+                            problems.append(
+                                f"Workbench receipt {index} status is {status or 'missing'}, not succeeded"
+                            )
+                        operation = receipt.get("operation")
+                        if not isinstance(operation, str) or not operation.strip():
+                            problems.append(
+                                f"Workbench receipt {index} is missing operation"
+                            )
+                        if receipt.get("truncated") is True:
+                            problems.append(
+                                f"Workbench receipt {index} is truncated"
+                            )
+                        if receipt.get("error"):
+                            problems.append(
+                                f"Workbench receipt {index} reports an execution error"
+                            )
+                        if receipt.get("output") is None and not any(
+                            isinstance(receipt.get(field), str)
+                            and receipt.get(field).strip()
+                            for field in ("receipt_id", "artifact_id", "provenance")
+                        ):
+                            problems.append(
+                                f"Workbench receipt {index} has no output, receipt, artifact, or provenance"
+                            )
         elif result_type == "research":
             request_id = result.get("request_id")
             if not isinstance(request_id, str) or not request_id.strip():
@@ -4331,6 +4372,30 @@ class DirectorRuntime:
                     result_summary["routing_selected_model"] = routing.get("selected_model")
                 if result_type == "model":
                     result_summary["output"] = self._receipt_value(result.get("content"))
+                    workbench_receipts = result.get("workbench_receipts")
+                    if isinstance(workbench_receipts, list):
+                        result_summary["workbench_receipts"] = [
+                            {
+                                field: (
+                                    self._receipt_value(item.get(field))
+                                    if field == "output" and item.get(field) is not None
+                                    else item.get(field)
+                                )
+                                for field in (
+                                    "capability", "operation", "status", "receipt_id",
+                                    "artifact_id", "provenance", "correlation_id", "error",
+                                    "truncated", "output",
+                                )
+                                if item.get(field) is not None
+                            }
+                            for item in workbench_receipts
+                            if isinstance(item, Mapping)
+                        ]
+                    elif isinstance(workbench_receipts, Mapping):
+                        result_summary["workbench_receipts"] = {
+                            "truncated": bool(workbench_receipts.get("truncated", False)),
+                            "preview": str(workbench_receipts.get("preview", ""))[:1000],
+                        }
                 elif result_type == "workbench":
                     result_summary["output"] = self._receipt_value(result.get("output"))
                 elif result_type == "capability":
