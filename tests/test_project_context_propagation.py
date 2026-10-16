@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from threading import RLock
 from types import SimpleNamespace
 import json
 
@@ -13,6 +14,8 @@ from aurora.orchestration.director import DirectorPlan, DirectorPlanner
 from aurora.orchestration.director_conversation import DirectorConversationService
 from aurora.orchestration.director_provider import DirectorModelResponse
 from aurora.orchestration.durable_director import DurableDirectorService
+from aurora.orchestration.director_runtime import DirectorRuntime
+from aurora.orchestration.mission_memory import MissionMemory
 from aurora.orchestration.engine import OrchestrationEngine
 from aurora.orchestration.task_engine import DelegatedTask, TaskEngine, TaskEngineError, TaskStatus
 from aurora.orchestration.task_store import DurableTaskStore
@@ -749,3 +752,109 @@ def test_project_scoped_workbench_research_overrides_model_project_constraints(t
     assert "project_id=project-beta" not in normalized.constraints
     assert "project_repository=AlphaEnginev1/beta" not in normalized.constraints
     assert "fresh_only=true" in normalized.constraints
+
+
+
+def test_runtime_recovery_reprojects_legacy_mailbox_rows_with_canonical_project_scope(tmp_path):
+    store = DurableTaskStore(tmp_path / "tasks.db")
+    memory = MissionMemory(store)
+    task = DelegatedTask(
+        "inspect",
+        "operator",
+        "Inspect Project Alpha",
+        project_id="project-alpha",
+    )
+    store.enqueue(
+        "mission-project-alpha",
+        (task,),
+        correlation_id="corr-project-alpha",
+        project_id="project-alpha",
+        initial_events=(
+            {
+                "event_type": "mission_submitted",
+                "project_id": "project-alpha",
+                "correlation_id": "corr-project-alpha",
+                "payload": {
+                    "objective": "Inspect Project Alpha",
+                    "project_id": "project-alpha",
+                    "correlation_id": "corr-project-alpha",
+                    "model": "nvidia/planner",
+                    "provider": "nvidia_api",
+                },
+            },
+        ),
+    )
+    claimed = store.claim_next("mission-project-alpha", "worker-test")
+    assert claimed is not None
+    store.complete(
+        "mission-project-alpha",
+        "inspect",
+        status="succeeded",
+        result={
+            "type": "model",
+            "model": "nvidia/reserve",
+            "provider": "nvidia_api",
+            "request_id": "request-task",
+            "execution_id": "execution-task",
+            "content": "The project inspection is complete.",
+        },
+        worker_id="worker-test",
+    )
+
+    # Model a legacy or interrupted projection that wrote to mission memory
+    # before project_id was carried into the mailbox.
+    memory.append(
+        mission_id="mission-project-alpha",
+        source="director",
+        kind="mission_objective",
+        content="Inspect Project Alpha",
+        metadata={"legacy": True},
+    )
+    memory.append(
+        mission_id="mission-project-alpha",
+        source="director",
+        kind="mission_plan",
+        content="Inspect files",
+        metadata={"legacy": True},
+    )
+    memory.append(
+        mission_id="mission-project-alpha",
+        source="worker:legacy",
+        kind="task_result",
+        content="legacy completion",
+        metadata={"task_id": "inspect", "status": "succeeded"},
+        task_id="inspect",
+    )
+
+    runtime = object.__new__(DirectorRuntime)
+    runtime._handoff_lock = RLock()
+    runtime.store = store
+    runtime.memory = memory
+    runtime.worker_id = "worker-recovered"
+
+    assert runtime._ensure_mission_memory("mission-project-alpha") is True
+
+    objective = memory.first_of_kind(
+        "mission-project-alpha", "mission_objective", project_id="project-alpha"
+    )
+    plan = memory.first_of_kind(
+        "mission-project-alpha", "mission_plan", project_id="project-alpha"
+    )
+    task_result = memory.first_of_kind(
+        "mission-project-alpha", "task_result", project_id="project-alpha"
+    )
+    assert objective is not None and objective.project_id == "project-alpha"
+    assert plan is not None and plan.project_id == "project-alpha"
+    assert task_result is not None and task_result.project_id == "project-alpha"
+    assert "nvidia/reserve" in task_result.content
+    assert memory.task_result_task_ids(
+        "mission-project-alpha", project_id="project-alpha"
+    ) == frozenset({"inspect"})
+    assert memory.first_of_kind("mission-project-alpha", "mission_objective").metadata["legacy"] is True
+
+    events = store.events("mission-project-alpha")
+    submitted = next(event for event in events if event.event_type == "mission_submitted")
+    completed = next(event for event in events if event.event_type == "task_completed")
+    assert submitted.project_id == "project-alpha"
+    assert completed.project_id == "project-alpha"
+    assert completed.correlation_id == "corr-project-alpha"
