@@ -1098,4 +1098,6 @@ def test_research_scope_survives_source_claim_evidence_and_trusted_knowledge_per
 
     adapter = build_context_knowledge_adapter(store)
     assert [item["artifact_id"] for item in adapter("project-alpha")] == [artifact.artifact_id]
-    assert [item["artifact_id"] for item in adapter("project-beta")][0] if False else True
+    beta_context = adapter("project-beta")
+    assert not any(item.get("artifact_id") == artifact.artifact_id for item in beta_context)
+    assert beta_context[0]["state"] == "empty"
