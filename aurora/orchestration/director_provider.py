@@ -5,7 +5,7 @@ import ast
 from dataclasses import dataclass
 import json
 import re
-from typing import Any, Protocol
+from typing import Any, Mapping, Protocol
 from uuid import uuid4
 
 from aurora.inference.models import InferenceRequest, InferenceResponse
