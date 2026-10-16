@@ -885,6 +885,14 @@ Keep responses useful and concise unless the human asks for depth."""
                         if conversation_turn_id
                         else f"conversation:adhoc-{uuid4().hex}:{call_index}"
                     )
+                    workbench_options = dict(options)
+                    workbench_options.pop("correlation_id", None)
+                    workbench_options["work_id"] = direct_workbench_mission_id
+                    scoped_project_id = (metadata or {}).get("project_id")
+                    if isinstance(scoped_project_id, str) and scoped_project_id.strip():
+                        # A project-scoped conversation cannot be redirected to a
+                        # different project by model-generated tool options.
+                        workbench_options["project_id"] = scoped_project_id
                     result = self.workbench.execute(
                         WorkbenchRequest(
                             capability=capability,
@@ -892,10 +900,7 @@ Keep responses useful and concise unless the human asks for depth."""
                             mission_id=direct_workbench_mission_id,
                             reason="Director conversation direct Workbench evidence",
                             arguments=tuple(call_args),
-                            options={
-                                **dict(options),
-                                "work_id": direct_workbench_mission_id,
-                            },
+                            options=workbench_options,
                             correlation_id=correlation_id,
                             idempotency_key=(
                                 f"direct-workbench:{direct_workbench_mission_id}"
