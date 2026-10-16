@@ -44,6 +44,10 @@ Simulate process termination after the durable `director_review` receipt is comm
 
 Also simulate termination after `director_review_started` but before `director_review` is written. The restarted Director must reuse that round number instead of consuming a review round that never produced a decision.
 
+### RD-08 — Transient follow-up enqueue failure after a durable decision
+
+Inject a one-time storage error after a valid `continue` decision receipt has committed but before follow-up task rows can be enqueued. The runtime must not write a terminal `mission_blocked` marker. Its next cycle must replay the exact saved graph from the receipt, without asking the planner for the same decision again, and create exactly one follow-up task set plus the missing decision/reopen/recovery markers. A later successful phase must still reach its own Director review and terminal decision.
+
 ## Closure evidence
 
 Block 6 is VERIFIED on the canonical `main` line.
