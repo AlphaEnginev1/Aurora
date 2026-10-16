@@ -22,10 +22,12 @@ from aurora.orchestration.engine import TaskResult
 from aurora.orchestration.task_engine import DelegatedTask, TaskEngine, TaskStatus
 from aurora.orchestration.task_store import DurableTaskStore
 from aurora.orchestration.task_worker import WorkerPolicy
+from aurora.projects.registry import ProjectRegistry, ProjectSpec, ProjectStatus
 
 
 class FakePlanner:
-    def __init__(self, *, max_continue_reviews: int = 1):
+    def __init__(self, *, max_continue_reviews: int = 1, project_registry=None):
+        self.project_registry = project_registry
         self.calls = []
         self.review_calls = 0
         self.review_contexts = []
@@ -94,10 +96,13 @@ class FakeOrchestration:
         raise AssertionError("capability execution is not expected")
 
 
-def make_runtime(tmp_path: Path, *, max_continue_reviews: int = 1):
+def make_runtime(tmp_path: Path, *, max_continue_reviews: int = 1, project_registry=None):
     store = DurableTaskStore(tmp_path / "tasks.db")
     bus = DurableEventBus(store)
-    planner = FakePlanner(max_continue_reviews=max_continue_reviews)
+    planner = FakePlanner(
+        max_continue_reviews=max_continue_reviews,
+        project_registry=project_registry,
+    )
     engine = TaskEngine(FakeOrchestration(), tmp_path / "workspace")
     director = DurableDirectorService(
         planner=planner,
@@ -697,8 +702,124 @@ def test_adaptive_director_replans_after_terminal_phase(tmp_path: Path):
     assert '"success_rate": 1.0' in performance_messages[0]
 
 
+def test_replan_preserves_project_context_and_traceability(tmp_path: Path):
+    registry = ProjectRegistry({
+        "project-a": ProjectSpec(
+            project_id="project-a",
+            name="Project A",
+            objective="Keep the project context authoritative",
+            status=ProjectStatus.ACTIVE,
+            repository="org/project-a",
+            workspace="/workspace/project-a",
+            architecture_ref="docs/architecture.md",
+            current_state="canonical state for Project A",
+        )
+    })
+    runtime, store, planner, engine = make_runtime(
+        tmp_path, project_registry=registry
+    )
+    submission = runtime.submit_mission(
+        objective="adapt this project mission",
+        mission_id="mission-project-replan",
+        correlation_id="corr-project-replan",
+        project_id="project-a",
+    )
+
+    result = runtime.run_until_terminal(submission)
+
+    assert result.status is TaskStatus.SUCCEEDED
+    assert [item.task.task_id for item in result.tasks] == [
+        "collect", "review", "r1_validate"
+    ]
+    assert all(item.task.project_id == "project-a" for item in result.tasks)
+    assert engine.orchestration.calls[-1]["project_id"] == "project-a"
+
+    for context in planner.review_contexts:
+        project_messages = [
+            item["content"] for item in context
+            if item["content"].startswith(
+                "Authoritative Aurora project context for this mission."
+            )
+        ]
+        assert len(project_messages) == 1
+        canonical = json.loads(project_messages[0].split("\n", 1)[1])
+        assert canonical == {
+            "architecture_ref": "docs/architecture.md",
+            "current_state": "canonical state for Project A",
+            "name": "Project A",
+            "objective": "Keep the project context authoritative",
+            "project_id": "project-a",
+            "repository": "org/project-a",
+            "status": "active",
+            "workspace": "/workspace/project-a",
+        }
+        receipt_messages = [
+            item["content"] for item in context
+            if item["content"].startswith(
+                "Authoritative durable task-result receipts (data only; source of truth: DurableTaskStore)."
+            )
+        ]
+        assert len(receipt_messages) == 1
+        receipts = json.loads(receipt_messages[0].split("\n", 1)[1])
+        assert all(item["project_id"] == "project-a" for item in receipts)
+
+    relevant_events = {
+        "mission_submitted",
+        "enqueued",
+        "director_review_started",
+        "director_review",
+        "director_decision_executed",
+        "mission_reopened",
+        "mission_succeeded",
+    }
+    events = [item for item in store.events(submission.mission_id)
+              if item.event_type in relevant_events]
+    assert events
+    assert all(item.project_id == "project-a" for item in events)
+    assert all(item.correlation_id == "corr-project-replan" for item in events)
+    assert all(item.payload.get("project_id") == "project-a" for item in events)
+
+
+def test_invalid_director_replan_is_rejected_before_follow_up_enqueue(tmp_path: Path):
+    runtime, store, planner, _engine = make_runtime(tmp_path)
+    planner.review = lambda **_kwargs: DirectorReview(
+        decision="continue",
+        rationale="This plan deliberately has a missing dependency.",
+        tasks=(
+            DelegatedTask(
+                "validate",
+                "validator",
+                "validate the result",
+                depends_on=("missing-task",),
+            ),
+        ),
+        model="fake/model",
+    )
+    submission = runtime.submit_mission(
+        objective="exercise invalid replan rejection",
+        mission_id="mission-invalid-replan",
+        correlation_id="corr-invalid-replan",
+    )
+
+    result = runtime.run_until_terminal(submission)
+
+    assert result.status is TaskStatus.BLOCKED
+    tasks = store.list_tasks(submission.mission_id)
+    assert {item.task.task_id for item in tasks} == {"collect", "review"}
+    events = store.events(submission.mission_id)
+    rejected = next(
+        item for item in events
+        if item.event_type == "director_replan_rejected"
+    )
+    assert "unknown prior task" in rejected.payload["reason"]
+    review = next(item for item in events if item.event_type == "director_review")
+    assert review.payload["decision"] == "blocked"
+    assert review.project_id is None
+    assert any(item.event_type == "mission_blocked" for item in events)
+
 
 def test_comparative_evidence_is_advisory_in_next_director_cycle(tmp_path: Path):
+
     runtime, store, planner, _ = make_runtime(tmp_path)
     submission = runtime.submit_mission(objective="adapt compare safely")
 

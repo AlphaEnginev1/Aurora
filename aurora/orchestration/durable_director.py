@@ -200,9 +200,11 @@ class DurableDirectorService:
                 validated = team_state.tasks
                 initial_events.append({
                     "event_type": "team.formed",
+                    **({"project_id": project_id} if project_id is not None else {}),
                     "correlation_id": correlation_id,
                     "payload": {
                         "objective": plan.objective,
+                        **({"project_id": project_id} if project_id is not None else {}),
                         "roles": [member.role for member in team_state.team.members],
                         "required_skills": list(team_state.team.required_skills),
                         "covered_skills": list(team_state.team.covered_skills),
@@ -214,7 +216,7 @@ class DurableDirectorService:
                 validated = tuple(replace(task, project_id=project_id) for task in validated)
             initial_events.append({
                 "event_type": "mission_submitted",
-                "project_id": project_id,
+                **({"project_id": project_id} if project_id is not None else {}),
                 "correlation_id": correlation_id,
                 "payload": {
                     "objective": plan.objective,
@@ -222,7 +224,7 @@ class DurableDirectorService:
                     "provider": plan.provider,
                     "planning_execution_id": plan.execution_id,
                     "correlation_id": correlation_id,
-                    "project_id": project_id,
+                    **({"project_id": project_id} if project_id is not None else {}),
                     "task_ids": [task.task_id for task in validated],
                     "requested_tasks_fingerprint": requested_fingerprint,
                     "task_graph": _task_graph_payload(validated),
