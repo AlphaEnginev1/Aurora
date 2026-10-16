@@ -505,6 +505,7 @@ class TaskEngine:
             args=task.args,
             depends_on=task.depends_on,
             skills=task.skills,
+            project_id=task.project_id,
         )
 
     def skill_assignment_for(self, task: DelegatedTask):
