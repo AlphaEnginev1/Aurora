@@ -32,6 +32,7 @@ class KnowledgeArtifact:
     source_content_sha256: tuple[tuple[str, str], ...]
     state: EvidenceState = EvidenceState.VERIFIED
     created_at: str = ""
+    project_id: str | None = None
 
     def __post_init__(self) -> None:
         if self.state is not EvidenceState.VERIFIED:
@@ -42,6 +43,10 @@ class KnowledgeArtifact:
             raise KnowledgeError("trusted knowledge artifact requires evidence and sources")
         if len(self.source_ids) != len(self.source_content_sha256):
             raise KnowledgeError("source provenance must cover every source")
+        if self.project_id is not None and (
+            not self.project_id.strip() or "\x00" in self.project_id
+        ):
+            raise KnowledgeError("project_id must be a non-empty identifier")
         if not self.created_at:
             object.__setattr__(self, "created_at", datetime.now(timezone.utc).isoformat())
 
@@ -112,6 +117,7 @@ class TrustedKnowledgeBuilder:
             evidence_ids=finding.evidence_ids,
             source_ids=source_ids,
             source_content_sha256=tuple(provenance),
+            project_id=finding.project_id,
         )
 
         edges = [
