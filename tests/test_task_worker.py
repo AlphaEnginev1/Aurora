@@ -28,7 +28,20 @@ class FakeOrchestration:
         if self.failures:
             self.failures -= 1
             raise RuntimeError("transient failure")
-        return object()
+        return TaskResult(
+            task_id=kwargs["task_id"],
+            role=kwargs["role"],
+            response=InferenceResponse(
+                model="fake/model",
+                provider="fake",
+                content=f"completed {kwargs['task_id']}",
+                request_id=f"request-{kwargs['task_id']}",
+                execution_id=f"execution-{kwargs['task_id']}",
+                requested_model="fake/model",
+                selected_model="fake/model",
+                reported_model="fake/model",
+            ),
+        )
 
     def run_capability_task(self, **kwargs):
         raise AssertionError("capability path is not expected in this test")
