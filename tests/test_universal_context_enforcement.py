@@ -247,14 +247,14 @@ def test_director_conversation_with_project_id_uses_project_context_not_global(t
             observed.append(request)
             return InferenceResponse(
                 model=selected_model,
-                provider="test",
+                provider="nvidia_api",
                 content="scoped",
                 request_id=request.request_id,
                 execution_id=execution_id,
             )
 
     router.provider_registry = ProviderRegistry((
-        ProviderSpec("test", "Test", ("reasoning",), True, lambda _spec: CaptureProvider()),
+        ProviderSpec("nvidia_api", "Test", ("reasoning",), True, lambda _spec: CaptureProvider()),
     ))
     request = InferenceRequest(
         messages=[{"role": "user", "content": "Inspect Alpha"}],
