@@ -1845,7 +1845,15 @@ async function testProvider(provider) {
     if (attachments.length) {
       content += "\n\nArchivos adjuntos recibidos mediante la entrada de artefactos de Aurora:";
       attachments.forEach(function (item) {
-        content += "\n- " + item.name + (item.mission_id ? " (mission_id=" + item.mission_id + ")" : "");
+        const evidence = [];
+        if (item.project_id) evidence.push("project_id=" + item.project_id);
+        if (item.mission_id) evidence.push("mission_id=" + item.mission_id);
+        const artifact = item.artifact && typeof item.artifact === "object" ? item.artifact : {};
+        if (typeof artifact.artifact_id === "string") evidence.push("artifact_id=" + artifact.artifact_id);
+        if (typeof artifact.path === "string") evidence.push("stored_path=" + artifact.path);
+        content += "\n- " + item.name + (evidence.length ? " (" + evidence.join("; ") + ")" : "");
+      });
+      content += "\n- " + item.name + (item.mission_id ? " (mission_id=" + item.mission_id + ")" : "");
       });
       content += "\nTen en cuenta estos artefactos para responder. No afirmes haber leído un archivo si no puedes acceder realmente a su contenido.";
     }
