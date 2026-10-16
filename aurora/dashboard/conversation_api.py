@@ -49,8 +49,8 @@ class DashboardConversationAPI:
         user_input: str,
         model: str | None = None,
         request_id: str | None = None,
-        project_id: str | None = None,
         principal: str = "dashboard",
+        project_id: str | None = None,
     ) -> dict[str, Any]:
         self._authorize(
             principal,
