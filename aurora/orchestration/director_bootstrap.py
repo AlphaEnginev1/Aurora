@@ -234,8 +234,20 @@ def build_context_runtime_adapter(
 ) -> Any:
     """Create a compact authoritative runtime-state adapter for the Context Plane."""
 
-    def runtime_context(_project_id: str | None) -> dict[str, object]:
+    def runtime_context(project_id: str | None) -> dict[str, object]:
         missions = task_store.list_missions()
+        if project_id is not None:
+            # Task rows are the canonical scope binding. A project-bound
+            # ContextGate must not infer membership from an untagged event or
+            # from another project's mission activity.
+            missions = tuple(
+                mission_id
+                for mission_id in missions
+                if any(
+                    stored.task.project_id == project_id
+                    for stored in task_store.list_tasks(mission_id)
+                )
+            )
         states: dict[str, int] = {
             "pending": 0,
             "running": 0,
@@ -246,10 +258,13 @@ def build_context_runtime_adapter(
         for mission_id in missions:
             status = task_store.mission_status(mission_id)
             states[status] = states.get(status, 0) + 1
-        return {
+        result: dict[str, object] = {
             "mission_count": len(missions),
             "mission_status_counts": states,
         }
+        if project_id is not None:
+            result["project_id"] = project_id
+        return result
 
     return runtime_context
 
