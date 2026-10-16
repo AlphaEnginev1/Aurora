@@ -958,7 +958,7 @@ Keep responses useful and concise unless the human asks for depth."""
                 content=(
                     "La ejecución ya produjo recibos de Aurora, pero no se pudo "
                     "generar el resumen conversacional. Consulta la evidencia "
-                    "autoritatva adjunta para conocer el estado real de la orden."
+                    "autoritativa adjunta para conocer el estado real de la orden."
                 ),
                 model=str(getattr(response, "model", "unknown")),
                 provider=str(getattr(response, "provider", "unknown")),
