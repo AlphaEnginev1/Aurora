@@ -32,6 +32,7 @@ from aurora.workbench.github import GitHubConnector, GitHubConnectorError
 from aurora.workbench.models import WorkbenchCapability, WorkbenchRequest, WorkbenchResult
 from aurora.research.models import ResearchRequest
 from aurora.research.service import ResearchService
+from aurora.projects import ProjectRegistry
 
 
 class WorkbenchError(RuntimeError):
@@ -53,6 +54,7 @@ class UniversalWorkbench:
         resolution: CapabilityResolutionRuntime | None = None,
         capability_runtime: CapabilityRuntime | None = None,
         research: ResearchService | None = None,
+        project_registry: ProjectRegistry | None = None,
         configured_roots: Iterable[str | Path] = (),
     ) -> None:
         self.repository_root = Path(repository_root).resolve()
@@ -63,6 +65,7 @@ class UniversalWorkbench:
         self.resolution = resolution
         self.capability_runtime = capability_runtime
         self.research = research
+        self.project_registry = project_registry
         self.artifacts = ArtifactInspector()
         registry_path = self.repository_root / "config" / "mcp-registry.json"
         if not registry_path.is_file():
@@ -480,22 +483,62 @@ class UniversalWorkbench:
             raise WorkbenchError(result.error or "Workbench operation failed")
         return result
 
-    def _safe_path(self, raw: str, *, must_exist: bool = False) -> Path:
+    def _project_workspace_root(self, request: WorkbenchRequest) -> Path | None:
+        """Resolve a task's registered project scope; never trust caller-supplied paths."""
+        raw_project_id = request.options.get("project_id")
+        if raw_project_id is None or (isinstance(raw_project_id, str) and not raw_project_id.strip()):
+            return None
+        if not isinstance(raw_project_id, str) or "\x00" in raw_project_id:
+            raise WorkbenchError("project_id must be a registered project identifier")
+        if self.project_registry is None:
+            raise WorkbenchError(
+                "project-scoped Workbench operations require the canonical ProjectRegistry"
+            )
+        try:
+            project = self.project_registry.resolve(raw_project_id)
+        except Exception as exc:
+            raise WorkbenchError(f"invalid project scope: {exc}") from exc
+        if project.workspace:
+            configured = Path(project.workspace).expanduser()
+            if not configured.is_absolute():
+                configured = self.runtime_root / configured
+            root = configured.resolve()
+        else:
+            digest = hashlib.sha256(project.project_id.encode("utf-8")).hexdigest()[:24]
+            root = (self.runtime_root / "projects" / digest).resolve()
+        root.mkdir(parents=True, exist_ok=True)
+        return root
+
+    def _safe_path(
+        self,
+        raw: str,
+        *,
+        must_exist: bool = False,
+        request: WorkbenchRequest | None = None,
+    ) -> Path:
         value = raw.strip()
         if not value:
             raise WorkbenchError("path is required")
+        project_root = self._project_workspace_root(request) if request is not None else None
         candidate = Path(value)
-        if not candidate.is_absolute():
-            candidate = self.repository_root / candidate
-        candidate = candidate.resolve()
-        if not any(candidate == root or root in candidate.parents for root in self.roots):
-            raise WorkbenchError("path is outside configured Workbench roots")
+        if project_root is not None:
+            if not candidate.is_absolute():
+                candidate = project_root / candidate
+            candidate = candidate.resolve()
+            if not (candidate == project_root or project_root in candidate.parents):
+                raise WorkbenchError("path is outside the registered project workspace")
+        else:
+            if not candidate.is_absolute():
+                candidate = self.repository_root / candidate
+            candidate = candidate.resolve()
+            if not any(candidate == root or root in candidate.parents for root in self.roots):
+                raise WorkbenchError("path is outside configured Workbench roots")
         if must_exist and not candidate.exists():
             raise WorkbenchError(f"path does not exist: {candidate}")
         return candidate
 
     def _file_list(self, request: WorkbenchRequest) -> WorkbenchResult:
-        root = self._safe_path(request.arguments[0] if request.arguments else ".")
+        root = self._safe_path(request.arguments[0] if request.arguments else ".", request=request)
         if not root.is_dir():
             raise WorkbenchError(f"path is not a directory: {root}")
         entries = []
@@ -513,7 +556,7 @@ class UniversalWorkbench:
     def _file_read(self, request: WorkbenchRequest) -> WorkbenchResult:
         if not request.arguments:
             raise WorkbenchError("workbench:file:read requires a path")
-        path = self._safe_path(request.arguments[0], must_exist=True)
+        path = self._safe_path(request.arguments[0], must_exist=True, request=request)
         if not path.is_file():
             raise WorkbenchError(f"path is not a file: {path}")
         max_bytes = int(request.options.get("max_bytes", 1_048_576))
@@ -537,7 +580,7 @@ class UniversalWorkbench:
     def _file_write(self, request: WorkbenchRequest) -> WorkbenchResult:
         if len(request.arguments) < 2:
             raise WorkbenchError("workbench:file:write requires path and content")
-        path = self._safe_path(request.arguments[0])
+        path = self._safe_path(request.arguments[0], request=request)
         content = request.arguments[1]
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
@@ -632,7 +675,7 @@ class UniversalWorkbench:
     def _artifact_intake(self, request: WorkbenchRequest) -> WorkbenchResult:
         if not request.arguments:
             raise WorkbenchError("workbench:artifact:intake requires a source path")
-        source = self._safe_path(request.arguments[0], must_exist=True)
+        source = self._safe_path(request.arguments[0], must_exist=True, request=request)
         if not source.is_file():
             raise WorkbenchError(f"artifact source is not a file: {source}")
         target_root = self.runtime_root / "artifacts"
@@ -983,8 +1026,9 @@ class UniversalWorkbench:
     def _project_inspect(self, request: WorkbenchRequest) -> WorkbenchResult:
         if not request.arguments:
             raise WorkbenchError("workbench:project:inspect requires a local path")
+        scoped_path = self._safe_path(request.arguments[0], must_exist=True, request=request)
         report = self.project_intake.inspect_local(
-            request.arguments[0],
+            str(scoped_path),
             project_id=str(request.options.get("project_id") or "unregistered"),
         )
         return WorkbenchResult(request.capability, "project_inspect", "succeeded", output=report.__dict__, provenance=report.path)
