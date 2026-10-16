@@ -143,3 +143,45 @@ def test_agent_receives_native_media_evidence_from_workbench():
     assert isinstance(evidence_message["content"], list)
     assert evidence_message["content"][1]["modality"] == "image"
     assert evidence_message["content"][1]["mime_type"] == "image/png"
+
+
+
+def test_agent_workbench_uses_runtime_owned_stable_key_and_work_id_across_retries():
+    workbench = FakeWorkbench()
+    workbench.session_store = object()
+    router = FakeRouter()
+    loop = AgentWorkbenchToolLoop(workbench)
+    from aurora.inference.models import InferenceRequest
+
+    request = InferenceRequest(
+        messages=[{"role": "user", "content": "Write one controlled task output."}],
+        metadata={"role": "engineer", "task_id": "write-task"},
+    )
+    for supplied_key, supplied_work_id in (
+        ("model-key-one", "model-work-one"),
+        ("model-key-two", "model-work-two"),
+    ):
+        router.responses = [
+            '{"workbench_calls":[{"capability":"workbench:file:write","arguments":["out.txt","done"],"options":{"work_id":"'
+            + supplied_work_id
+            + '","idempotency_key":"'
+            + supplied_key
+            + '"}}]}',
+            "The write request was processed.",
+        ]
+        loop.run(
+            request=request,
+            actor="engineer",
+            mission_id="mission-1",
+            reason="write a controlled task output",
+            task_id="write-task",
+            router=router,
+        )
+
+    first, second = workbench.calls
+    assert first.idempotency_key is not None
+    assert first.idempotency_key == second.idempotency_key
+    assert first.idempotency_key.startswith("agent-task:mission-1:write-task:call:")
+    assert first.options["work_id"] == second.options["work_id"] == "mission-1"
+    assert "idempotency_key" not in first.options
+    assert first.idempotency_key not in {"model-key-one", "model-key-two"}

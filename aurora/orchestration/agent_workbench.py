@@ -92,6 +92,7 @@ If no Workbench action is needed, answer normally.
         actor: str,
         mission_id: str,
         reason: str,
+        task_id: str | None = None,
         preferred_models: Sequence[str] = (),
         router,
         capability: str = "reasoning",
@@ -134,6 +135,18 @@ If no Workbench action is needed, answer normally.
                 raise AgentWorkbenchToolError("Workbench tool-call budget exceeded")
             results: list[dict[str, Any]] = []
             for call in calls:
+                # These fields belong to the runtime, not the model. In particular,
+                # never let a model-controlled idempotency_key alter the durable
+                # request fingerprint or redirect an action replay.
+                call_options = dict(call.options or {})
+                call_options.pop("idempotency_key", None)
+                call_options.pop("work_id", None)
+                call_options["work_id"] = mission_id
+                idempotency_key = (
+                    f"agent-task:{mission_id}:{task_id}:call:{executed}"
+                    if task_id and getattr(self.workbench, "session_store", None) is not None
+                    else None
+                )
                 result = self.workbench.execute(
                     WorkbenchRequest(
                         capability=call.capability,
@@ -141,7 +154,8 @@ If no Workbench action is needed, answer normally.
                         mission_id=mission_id,
                         reason=reason,
                         arguments=call.arguments,
-                        options=dict(call.options or {}),
+                        options=call_options,
+                        idempotency_key=idempotency_key,
                     )
                 )
                 executed += 1

@@ -7,6 +7,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
+from uuid import uuid4
 
 
 @dataclass(frozen=True)
@@ -57,6 +58,232 @@ class WorkSessionStore:
                 )
                 """
             )
+            db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS work_session_actions (
+                    idempotency_key TEXT PRIMARY KEY,
+                    work_id TEXT NOT NULL,
+                    mission_id TEXT NOT NULL,
+                    capability_id TEXT NOT NULL,
+                    request_fingerprint TEXT NOT NULL,
+                    state TEXT NOT NULL CHECK (state IN ('started', 'completed', 'indeterminate')),
+                    claim_token TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    result_json TEXT,
+                    error TEXT
+                )
+                """
+            )
+            db.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_work_session_actions_work
+                ON work_session_actions(work_id, created_at)
+                """
+            )
+
+    def begin_action(
+        self,
+        *,
+        idempotency_key: str,
+        work_id: str,
+        mission_id: str,
+        capability_id: str,
+        request_fingerprint: str,
+        replay_safe: bool,
+        stale_after_seconds: float = 900.0,
+    ) -> dict[str, object]:
+        """Claim one Workbench action or return its durable replay decision.
+
+        Side-effecting actions are never re-executed after an ambiguous started
+        record. Read-only actions can be reclaimed after a stale claim. This is
+        deliberately conservative: avoiding a duplicate external side effect
+        takes precedence over pretending an uncertain result succeeded.
+        """
+        for name, value in (
+            ("idempotency_key", idempotency_key),
+            ("work_id", work_id),
+            ("mission_id", mission_id),
+            ("capability_id", capability_id),
+            ("request_fingerprint", request_fingerprint),
+        ):
+            if not isinstance(value, str) or not value.strip() or "\x00" in value:
+                raise ValueError(f"{name} must be non-empty and contain no null byte")
+        if stale_after_seconds <= 0:
+            raise ValueError("stale_after_seconds must be positive")
+
+        now_dt = datetime.now(timezone.utc)
+        now = now_dt.isoformat()
+        with sqlite3.connect(self.path, timeout=30) as db:
+            db.row_factory = sqlite3.Row
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                """
+                SELECT work_id, mission_id, capability_id, request_fingerprint,
+                       state, claim_token, created_at, updated_at, result_json, error
+                FROM work_session_actions
+                WHERE idempotency_key = ?
+                """,
+                (idempotency_key,),
+            ).fetchone()
+            if row is None:
+                claim_token = uuid4().hex
+                db.execute(
+                    """
+                    INSERT INTO work_session_actions (
+                        idempotency_key, work_id, mission_id, capability_id,
+                        request_fingerprint, state, claim_token, created_at,
+                        updated_at, result_json, error
+                    ) VALUES (?, ?, ?, ?, ?, 'started', ?, ?, ?, NULL, NULL)
+                    """,
+                    (
+                        idempotency_key,
+                        work_id,
+                        mission_id,
+                        capability_id,
+                        request_fingerprint,
+                        claim_token,
+                        now,
+                        now,
+                    ),
+                )
+                return {"state": "claimed", "claim_token": claim_token}
+
+            if (
+                row["work_id"] != work_id
+                or row["mission_id"] != mission_id
+                or row["capability_id"] != capability_id
+                or row["request_fingerprint"] != request_fingerprint
+            ):
+                raise ValueError(
+                    "idempotency_key is already bound to a different Workbench action"
+                )
+
+            state = str(row["state"])
+            if state == "completed":
+                return {
+                    "state": "completed",
+                    "result": json.loads(row["result_json"] or "{}"),
+                }
+            if state == "indeterminate":
+                return {
+                    "state": "indeterminate",
+                    "error": row["error"] or "previous action outcome is indeterminate",
+                }
+
+            try:
+                previous_update = datetime.fromisoformat(str(row["updated_at"]))
+                if previous_update.tzinfo is None:
+                    previous_update = previous_update.replace(tzinfo=timezone.utc)
+                age_seconds = max(0.0, (now_dt - previous_update).total_seconds())
+            except (TypeError, ValueError):
+                age_seconds = stale_after_seconds + 1.0
+
+            if age_seconds <= stale_after_seconds:
+                return {
+                    "state": "in_progress",
+                    "error": "the idempotent Workbench action is already in progress",
+                }
+
+            if replay_safe:
+                claim_token = uuid4().hex
+                db.execute(
+                    """
+                    UPDATE work_session_actions
+                    SET claim_token = ?, updated_at = ?
+                    WHERE idempotency_key = ? AND state = 'started'
+                    """,
+                    (claim_token, now, idempotency_key),
+                )
+                return {"state": "claimed", "claim_token": claim_token, "reclaimed": True}
+
+            error = (
+                "previous execution exceeded its durable action lease; outcome is unknown; "
+                "the side effect was not repeated"
+            )
+            db.execute(
+                """
+                UPDATE work_session_actions
+                SET state = 'indeterminate', updated_at = ?, error = ?
+                WHERE idempotency_key = ? AND state = 'started'
+                """,
+                (now, error, idempotency_key),
+            )
+            return {"state": "indeterminate", "error": error}
+
+    def complete_action(
+        self,
+        *,
+        idempotency_key: str,
+        claim_token: str,
+        result: dict[str, object],
+    ) -> None:
+        """Durably cache an action result; reject stale claimants."""
+        if not idempotency_key.strip() or not claim_token.strip():
+            raise ValueError("idempotency_key and claim_token are required")
+        result_json = json.dumps(
+            result,
+            ensure_ascii=False,
+            sort_keys=True,
+            default=str,
+        )
+        now = datetime.now(timezone.utc).isoformat()
+        with sqlite3.connect(self.path, timeout=30) as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                """
+                SELECT state, claim_token FROM work_session_actions
+                WHERE idempotency_key = ?
+                """,
+                (idempotency_key,),
+            ).fetchone()
+            if row is None:
+                raise KeyError(idempotency_key)
+            if row[1] != claim_token:
+                raise ValueError("Workbench action claim was superseded")
+            if row[0] not in {"started", "indeterminate", "completed"}:
+                raise ValueError(f"invalid Workbench action state: {row[0]}")
+            if row[0] == "completed":
+                return
+            db.execute(
+                """
+                UPDATE work_session_actions
+                SET state = 'completed', updated_at = ?, result_json = ?, error = NULL
+                WHERE idempotency_key = ? AND claim_token = ?
+                """,
+                (now, result_json, idempotency_key, claim_token),
+            )
+
+    def get_action(self, idempotency_key: str) -> dict[str, object] | None:
+        """Inspect durable action state for support/reconciliation."""
+        if not idempotency_key.strip():
+            raise ValueError("idempotency_key is empty")
+        with sqlite3.connect(self.path, timeout=30) as db:
+            db.row_factory = sqlite3.Row
+            row = db.execute(
+                """
+                SELECT idempotency_key, work_id, mission_id, capability_id,
+                       request_fingerprint, state, created_at, updated_at,
+                       result_json, error
+                FROM work_session_actions
+                WHERE idempotency_key = ?
+                """,
+                (idempotency_key,),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "idempotency_key": str(row["idempotency_key"]),
+            "work_id": str(row["work_id"]),
+            "mission_id": str(row["mission_id"]),
+            "capability_id": str(row["capability_id"]),
+            "request_fingerprint": str(row["request_fingerprint"]),
+            "state": str(row["state"]),
+            "created_at": str(row["created_at"]),
+            "updated_at": str(row["updated_at"]),
+            "result": json.loads(row["result_json"]) if row["result_json"] else None,
+            "error": row["error"],
+        }
 
     def create_or_get(
         self,

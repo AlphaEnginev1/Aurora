@@ -228,6 +228,55 @@ class UniversalWorkbench:
     def _policy_allows(self, capability: str) -> bool:
         return self.policy is None or self.policy.allows_capability(capability)
 
+    _REPLAY_SAFE_CAPABILITIES = frozenset({
+        "workbench:census",
+        "workbench:preflight",
+        "workbench:research:discover",
+        "workbench:file:list",
+        "workbench:file:read",
+        "workbench:artifact:inspect",
+        "workbench:document:extract",
+        "workbench:github:get",
+        "workbench:github:workflow:read",
+        "workbench:project:inspect",
+        "workbench:connector:census",
+        "workbench:mcp:list_tools",
+    })
+
+    @staticmethod
+    def _workbench_result_payload(result: WorkbenchResult) -> dict[str, Any]:
+        return {
+            "capability": result.capability,
+            "operation": result.operation,
+            "status": result.status,
+            "output": result.output,
+            "artifact_id": result.artifact_id,
+            "provenance": result.provenance,
+            "error": result.error,
+            "receipt_id": result.receipt_id,
+            "correlation_id": result.correlation_id,
+        }
+
+    @staticmethod
+    def _idempotency_fingerprint(request: WorkbenchRequest, capability: str) -> str:
+        fingerprint_payload = {
+            "capability": capability,
+            "actor": request.actor,
+            "mission_id": request.mission_id,
+            "reason": request.reason,
+            "arguments": list(request.arguments),
+            "options": dict(request.options),
+        }
+        return hashlib.sha256(
+            json.dumps(
+                fingerprint_payload,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                default=str,
+            ).encode("utf-8")
+        ).hexdigest()
+
     def execute(self, request: WorkbenchRequest) -> WorkbenchResult:
         if not request.actor.strip() or not request.mission_id.strip():
             raise WorkbenchError("actor and mission_id are required")
@@ -236,19 +285,78 @@ class UniversalWorkbench:
             raise WorkbenchError("UniversalWorkbench only executes workbench:* capabilities")
         if self.policy is not None and not self.policy.allows_capability(capability):
             raise WorkbenchError(f"Workbench capability is denied by policy: {capability}")
+
         work_id = str(request.options.get("work_id") or request.mission_id).strip()
         correlation_id = request.correlation_id or f"corr-{uuid.uuid4().hex}"
         receipt_id = f"receipt-{uuid.uuid4().hex}"
-        try:
-            if self.session_store is not None:
-                self.session_store.create_or_get(
+        claim_token: str | None = None
+        idempotency_key = request.idempotency_key
+        if idempotency_key is not None:
+            if not isinstance(idempotency_key, str) or not idempotency_key.strip() or "\x00" in idempotency_key:
+                raise WorkbenchError("idempotency_key must be non-empty and contain no null byte")
+            idempotency_key = idempotency_key.strip()
+            if self.session_store is None:
+                raise WorkbenchError(
+                    "idempotent Workbench execution requires a configured durable WorkSessionStore"
+                )
+
+        if self.session_store is not None:
+            self.session_store.create_or_get(
+                work_id=work_id,
+                mission_id=request.mission_id,
+                actor=request.actor,
+                environment=str(request.options.get("environment", "local")),
+                workspace_root=str(self.repository_root),
+            )
+            self.session_store.record_capability(work_id, capability)
+
+        if idempotency_key is not None:
+            fingerprint = self._idempotency_fingerprint(request, capability)
+            try:
+                decision = self.session_store.begin_action(
+                    idempotency_key=idempotency_key,
                     work_id=work_id,
                     mission_id=request.mission_id,
-                    actor=request.actor,
-                    environment=str(request.options.get("environment", "local")),
-                    workspace_root=str(self.repository_root),
+                    capability_id=capability,
+                    request_fingerprint=fingerprint,
+                    replay_safe=capability in self._REPLAY_SAFE_CAPABILITIES,
+                    stale_after_seconds=300.0,
                 )
-                self.session_store.record_capability(work_id, capability)
+            except (ValueError, KeyError) as exc:
+                raise WorkbenchError(str(exc)) from exc
+            if decision.get("state") == "completed":
+                saved = decision.get("result")
+                if not isinstance(saved, dict):
+                    raise WorkbenchError(
+                        "durable Workbench action result is corrupt; refusing to re-execute"
+                    )
+                try:
+                    replay = WorkbenchResult(**saved)
+                except TypeError as exc:
+                    raise WorkbenchError(
+                        "durable Workbench action result is invalid; refusing to re-execute"
+                    ) from exc
+                self._audit(request, replay)
+                if replay.status == "failed":
+                    raise WorkbenchError(replay.error or "previous Workbench action failed")
+                return replay
+            if decision.get("state") == "in_progress":
+                raise WorkbenchError(
+                    "Workbench action is already in progress for this idempotency key; "
+                    "it was not executed a second time"
+                )
+            if decision.get("state") == "indeterminate":
+                raise WorkbenchError(
+                    str(decision.get("error") or (
+                        "previous Workbench action outcome is indeterminate; "
+                        "the side effect was not repeated"
+                    ))
+                )
+            claim_token = str(decision.get("claim_token") or "").strip()
+            if not claim_token:
+                raise WorkbenchError("Workbench action claim returned no durable token")
+
+        try:
             if capability == "workbench:command":
                 result = self._command_execute(request)
             elif capability == "workbench:research:discover":
@@ -331,6 +439,7 @@ class UniversalWorkbench:
                 raise WorkbenchError(f"unsupported Workbench capability: {capability}")
         except (WorkbenchError, GitHubConnectorError, ComputerOperatorError, ArtifactError, MCPBridgeError, LocalComputerError, ProjectIntakeError, ConnectorError) as exc:
             result = WorkbenchResult(capability, capability, "failed", error=str(exc))
+
         result = replace(
             result,
             receipt_id=receipt_id,
@@ -358,6 +467,12 @@ class UniversalWorkbench:
                     capability,
                     "healthy" if result.status == "succeeded" else "failed",
                 )
+                if idempotency_key is not None and claim_token is not None:
+                    self.session_store.complete_action(
+                        idempotency_key=idempotency_key,
+                        claim_token=claim_token,
+                        result=self._workbench_result_payload(result),
+                    )
             except Exception as exc:
                 raise WorkbenchError(f"failed to persist Workbench receipt: {exc}") from exc
         self._audit(request, result)

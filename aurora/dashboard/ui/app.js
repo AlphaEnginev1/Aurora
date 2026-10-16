@@ -1286,6 +1286,50 @@ async function testProvider(provider) {
     });
   }
 
+  function uploadFingerprint(file) {
+    const value = [file.name, file.size, file.lastModified].join("\\u0000");
+    let hash = 2166136261;
+    for (let index = 0; index < value.length; index += 1) {
+      hash ^= value.charCodeAt(index);
+      hash = Math.imul(hash, 16777619);
+    }
+    return (hash >>> 0).toString(16) + "-" + value.length;
+  }
+
+  function stableUploadRequest(file) {
+    const fingerprint = uploadFingerprint(file);
+    const storageKey = "aurora.pendingUploadRequest." + fingerprint;
+    try {
+      const saved = JSON.parse(window.sessionStorage.getItem(storageKey) || "null");
+      if (saved && saved.fingerprint === fingerprint && typeof saved.request_id === "string") {
+        return { requestId: saved.request_id, storageKey: storageKey, fingerprint: fingerprint };
+      }
+    } catch (_) {}
+    const requestId = "upload-" + (
+      window.crypto && typeof window.crypto.randomUUID === "function"
+        ? window.crypto.randomUUID()
+        : Date.now().toString(36) + "-" + Math.random().toString(36).slice(2)
+    );
+    const pending = { requestId: requestId, storageKey: storageKey, fingerprint: fingerprint };
+    try {
+      window.sessionStorage.setItem(storageKey, JSON.stringify({
+        fingerprint: fingerprint,
+        request_id: requestId
+      }));
+    } catch (_) {}
+    return pending;
+  }
+
+  function clearStableUploadRequest(pending) {
+    if (!pending) return;
+    try {
+      const saved = JSON.parse(window.sessionStorage.getItem(pending.storageKey) || "null");
+      if (saved && saved.request_id === pending.requestId) {
+        window.sessionStorage.removeItem(pending.storageKey);
+      }
+    } catch (_) {}
+  }
+
   async function uploadAurora(files) {
     const selected = Array.from(files || []);
     if (!selected.length) return;
@@ -1298,15 +1342,23 @@ async function testProvider(provider) {
         if (file.size > 25 * 1024 * 1024) {
           throw new Error(file.name + " exceeds the 25 MiB per-file limit.");
         }
+        const pendingRequest = stableUploadRequest(file);
         const response = await fetch(state.apiBase + "/artifacts", {
           method: "POST",
           headers: {
             Accept: "application/json",
             "Content-Type": file.type || "application/octet-stream",
-            "X-Aurora-Filename": encodeURIComponent(file.name)
+            "X-Aurora-Filename": encodeURIComponent(file.name),
+            "X-Aurora-Request-ID": pendingRequest.requestId
           },
           body: await file.arrayBuffer()
         });
+        // Keep the key on network/5xx failures because the upload or intake
+        // may already have been accepted. Clear it only after success or an
+        // explicit client rejection such as a mismatched payload.
+        if (response.ok || (response.status >= 400 && response.status < 500)) {
+          clearStableUploadRequest(pendingRequest);
+        }
         let data = {};
         try { data = await response.json(); } catch (_) {}
         if (!response.ok) throw new Error(data && data.error ? data.error : "upload failed for " + file.name);
@@ -1665,7 +1717,9 @@ async function testProvider(provider) {
 
   function getStableConversationRequestId(sessionId, content) {
     const fingerprint = conversationRequestFingerprint(sessionId, content);
-    const storageKey = "aurora.pendingConversationRequest." + sessionId;
+    // Keep independent pending request IDs per turn. A still-running order
+    // must not be overwritten when the user sends a different message.
+    const storageKey = "aurora.pendingConversationRequest." + sessionId + "." + fingerprint;
     try {
       const saved = JSON.parse(window.sessionStorage.getItem(storageKey) || "null");
       if (saved && saved.fingerprint === fingerprint && typeof saved.request_id === "string") {
@@ -1752,10 +1806,13 @@ async function testProvider(provider) {
       }
       const data = await response.json();
       if (!data || typeof data.response_text !== "string") throw new Error("invalid Director response contract");
-      // Any structured HTTP response means the server recognized this request
-      // key. Clear it so a later intentional turn—even with identical wording—
-      // receives a fresh key. Network errors retain it for safe retry.
-      clearStableConversationRequest(requestId);
+      // Only clear once a final response is known, or when the server rejects
+      // the request with a client error. A 5xx may happen after a durable side
+      // effect, and an in-progress receipt means the original order is still live.
+      if ((response.ok && data.state !== "in_progress") ||
+          (response.status >= 400 && response.status < 500)) {
+        clearStableConversationRequest(requestId);
+      }
       $("director-message").value = "";
       $("director-message").style.height = "auto";
       state.pendingAttachments = [];

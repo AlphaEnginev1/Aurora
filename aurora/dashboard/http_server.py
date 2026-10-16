@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import hashlib
 import json
 import logging
 from pathlib import Path
@@ -183,25 +184,70 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 safe_name = Path(filename).name
                 if not safe_name or safe_name in {".", ".."} or len(safe_name) > 180:
                     raise DashboardConversationAPIError("invalid upload filename")
+                request_id = self.headers.get("X-Aurora-Request-ID", "").strip() or None
+                if request_id is not None and (
+                    len(request_id) > 256 or "\x00" in request_id
+                ):
+                    raise DashboardConversationAPIError("X-Aurora-Request-ID must be at most 256 non-null characters")
                 content_length = int(self.headers.get("Content-Length", "0"))
                 max_bytes = 25 * 1024 * 1024
                 if content_length <= 0 or content_length > max_bytes:
                     raise DashboardConversationAPIError("upload must be between 1 byte and 25 MiB")
-                uploads = self.workbench.runtime_root / "uploads"
-                uploads.mkdir(parents=True, exist_ok=True)
-                destination = uploads / f"{uuid.uuid4().hex}-{re.sub(r'[^A-Za-z0-9._-]', '_', safe_name)}"
                 data = self.rfile.read(content_length)
                 if len(data) != content_length:
                     raise DashboardConversationAPIError("upload body was incomplete")
-                destination.write_bytes(data)
-                mission_id = self.headers.get("X-Aurora-Mission-Id", "").strip() or f"dashboard-upload-{uuid.uuid4().hex}"
+                content_sha256 = hashlib.sha256(data).hexdigest()
+                uploads = self.workbench.runtime_root / "uploads"
+                uploads.mkdir(parents=True, exist_ok=True)
+                clean_name = re.sub(r"[^A-Za-z0-9._-]", "_", safe_name)
+                if request_id is None:
+                    destination = uploads / f"{uuid.uuid4().hex}-{clean_name}"
+                    destination.write_bytes(data)
+                    request_digest = None
+                else:
+                    request_digest = hashlib.sha256(request_id.encode("utf-8")).hexdigest()[:32]
+                    destination = uploads / f"{request_digest}-{clean_name}"
+                    # Never overwrite a previously accepted request with different
+                    # bytes. Replays are allowed to reuse the exact persisted input.
+                    if destination.exists():
+                        if hashlib.sha256(destination.read_bytes()).hexdigest() != content_sha256:
+                            raise DashboardConversationAPIError(
+                                "X-Aurora-Request-ID was already used for different upload content"
+                            )
+                    else:
+                        try:
+                            with destination.open("xb") as stream:
+                                stream.write(data)
+                        except FileExistsError:
+                            if hashlib.sha256(destination.read_bytes()).hexdigest() != content_sha256:
+                                raise DashboardConversationAPIError(
+                                    "X-Aurora-Request-ID was already used for different upload content"
+                                )
+                mission_id = (
+                    self.headers.get("X-Aurora-Mission-Id", "").strip()
+                    or (
+                        f"dashboard-upload-{request_digest}"
+                        if request_digest
+                        else f"dashboard-upload-{uuid.uuid4().hex}"
+                    )
+                )
+                from aurora.workbench import WorkbenchRequest
                 result = self.workbench.execute(
-                    __import__("aurora.workbench", fromlist=["WorkbenchRequest"]).WorkbenchRequest(
+                    WorkbenchRequest(
                         capability="workbench:artifact:intake",
                         actor="dashboard",
                         mission_id=mission_id,
                         arguments=(str(destination),),
-                        options={"work_id": mission_id},
+                        options={
+                            "work_id": mission_id,
+                            "filename": safe_name,
+                            "upload_sha256": content_sha256,
+                        },
+                        idempotency_key=(
+                            f"dashboard-upload:{request_id}"
+                            if request_id and getattr(self.workbench, "session_store", None) is not None
+                            else None
+                        ),
                     )
                 )
                 self._json(201, {"artifact": result.output, "mission_id": mission_id})

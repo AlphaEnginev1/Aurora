@@ -802,19 +802,28 @@ Keep responses useful and concise unless the human asks for depth."""
                 requested_capability = capability.strip()
                 capability = self._canonical_workbench_capability(requested_capability)
                 try:
+                    direct_workbench_mission_id = (
+                        f"conversation:{conversation_turn_id}:{call.call_id}"
+                        if conversation_turn_id
+                        else f"conversation:adhoc-{uuid4().hex}:{call.call_id}"
+                    )
                     result = self.workbench.execute(
                         WorkbenchRequest(
                             capability=capability,
                             actor="director",
-                            mission_id=(
-                                f"conversation:{conversation_turn_id}:{call.call_id}"
-                                if conversation_turn_id
-                                else f"conversation:adhoc-{uuid4().hex}:{call.call_id}"
-                            ),
+                            mission_id=direct_workbench_mission_id,
                             reason="Director conversation direct Workbench evidence",
                             arguments=tuple(call_args),
-                            options=dict(options),
+                            options={
+                                **dict(options),
+                                "work_id": direct_workbench_mission_id,
+                            },
                             correlation_id=correlation_id,
+                            idempotency_key=(
+                                f"direct-workbench:{direct_workbench_mission_id}"
+                                if getattr(self.workbench, "session_store", None) is not None
+                                else None
+                            ),
                         )
                     )
                     results.append(self._workbench_evidence(result))

@@ -628,6 +628,10 @@ class TaskEngine:
                 constraints={
                     "mission_id": mission_identity,
                     "work_id": mission_identity,
+                    # Stable across the worker's attempt number; a retry must
+                    # resume the same Workbench action rather than repeat an
+                    # external side effect with a new identity.
+                    "idempotency_key": f"task:{mission_identity}:{task.task_id}",
                 },
             )
             return self.orchestration.run_capability_task(
