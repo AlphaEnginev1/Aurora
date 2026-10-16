@@ -1809,7 +1809,8 @@ async function testProvider(provider) {
       // Only clear once a final response is known, or when the server rejects
       // the request with a client error. A 5xx may happen after a durable side
       // effect, and an in-progress receipt means the original order is still live.
-      if ((response.ok && data.state !== "in_progress") ||
+      const executionStillRunning = data.execution_status === "running";
+      if ((response.ok && data.state !== "in_progress" && !executionStillRunning) ||
           (response.status >= 400 && response.status < 500)) {
         clearStableConversationRequest(requestId);
       }
@@ -1820,7 +1821,7 @@ async function testProvider(provider) {
       $("avatar-transcript").textContent = data.response_text;
       $("avatar-transcript").classList.remove("error");
       setChatStatus(
-        data.state === "in_progress"
+        (data.state === "in_progress" || executionStillRunning)
           ? "Order already accepted and still running; do not resend it."
           : "Aurora replied.",
         false
