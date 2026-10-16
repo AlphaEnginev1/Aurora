@@ -5,6 +5,11 @@ import json
 from aurora.inference.models import InferenceResponse
 from aurora.inference.providers.registry import ProviderRegistry, ProviderSpec
 from aurora.orchestration.director_conversation import DirectorConversationService
+from aurora.orchestration.director_provider_failover import (
+    DirectorProviderCandidate,
+    DirectorProviderFailoverController,
+    DirectorProviderFailoverStore,
+)
 from aurora.projects import ProjectRegistry, ProjectSpec, ProjectStatus
 from aurora.orchestration.director_provider import DirectorModelResponse, DirectorToolCall
 from tests.test_director_conversation import _service as base_service
@@ -1168,3 +1173,128 @@ def test_conversation_rejects_unregistered_or_conflicting_selected_project(tmp_p
             user_input="Inspect Project Alpha",
             project_id="project-beta",
         )
+
+
+
+def test_provider_failure_retries_same_conversation_tool_through_durable_mission(tmp_path: Path):
+    service, _ = base_service(tmp_path)
+    service.project_registry = ProjectRegistry({
+        "project-alpha": ProjectSpec(
+            project_id="project-alpha",
+            name="Project Alpha",
+            objective="Owns alpha tasks",
+            status=ProjectStatus.ACTIVE,
+            repository="AlphaEnginev1/alpha",
+            workspace=str(tmp_path / "projects" / "alpha"),
+            current_state="Project is registered",
+            updated_at="2026-10-16T00:00:00Z",
+        ),
+    })
+    executed = []
+
+    class FailoverableProviderError(RuntimeError):
+        failoverable = True
+
+    class PrimaryProvider:
+        provider_id = "primary-provider"
+
+        def __init__(self):
+            self.calls = []
+
+        def generate(self, *, messages, model, role, tools=(), metadata=None):
+            self.calls.append({"role": role, "metadata": metadata})
+            raise FailoverableProviderError("primary provider unavailable")
+
+    class ReserveProvider:
+        provider_id = "reserve-provider"
+
+        def __init__(self):
+            self.calls = []
+
+        def generate(self, *, messages, model, role, tools=(), metadata=None):
+            self.calls.append({
+                "role": role,
+                "metadata": dict(metadata or {}),
+                "tools": tuple(tool.name for tool in tools),
+            })
+            if role == "director_conversation":
+                return DirectorModelResponse(
+                    content="",
+                    model=model or "reserve/model",
+                    provider="reserve-provider",
+                    request_id="reserve-request-1",
+                    execution_id="reserve-execution-1",
+                    tool_calls=(
+                        DirectorToolCall(
+                            call_id="reserve-tool-call",
+                            name="run_mission",
+                            arguments={"objective": "Run the selected project's durable audit"},
+                        ),
+                    ),
+                )
+            return DirectorModelResponse(
+                content="The durable mission was submitted and its evidence returned.",
+                model=model or "reserve/model",
+                provider="reserve-provider",
+                request_id="reserve-request-summary",
+                execution_id="reserve-execution-summary",
+            )
+
+    primary = PrimaryProvider()
+    reserve = ReserveProvider()
+    candidate = DirectorProviderCandidate(
+        provider_id="reserve-provider",
+        model="reserve/model",
+        endpoint="https://reserve.invalid",
+        factory=lambda: reserve,
+    )
+    controller = DirectorProviderFailoverController(
+        active_provider=primary,
+        candidates=(candidate,),
+        store=DirectorProviderFailoverStore(str(tmp_path / "provider-failovers.db")),
+        activate=lambda _candidate, _replacement: None,
+    )
+    service.set_provider(controller)
+
+    def runner(*, objective, mission_id=None, correlation_id=None, project_id=None):
+        executed.append({
+            "objective": objective,
+            "mission_id": mission_id,
+            "correlation_id": correlation_id,
+            "project_id": project_id,
+        })
+        plan = SimpleNamespace(
+            objective=objective,
+            model="reserve/model",
+            provider="reserve-provider",
+            execution_id="durable-planning",
+        )
+        return SimpleNamespace(
+            mission_id=mission_id,
+            project_id=project_id,
+            submission=SimpleNamespace(mission_id=mission_id, project_id=project_id, plan=plan),
+            objective=objective,
+            status=SimpleNamespace(value="succeeded"),
+            tasks=(),
+            wait_timed_out=False,
+            events=(),
+        )
+
+    service.mission_runner = runner
+    session = service.create_session()
+    response = service.send_message(
+        session_id=session.session_id,
+        user_input="Audita el repositorio seleccionado y corrige los problemas encontrados.",
+        request_id="failover-durable-scope-001",
+        project_id="project-alpha",
+    )
+
+    assert primary.calls and primary.calls[0]["role"] == "director_conversation"
+    first_reserve = reserve.calls[0]
+    assert first_reserve["role"] == "director_conversation"
+    assert first_reserve["metadata"]["project_id"] == "project-alpha"
+    assert "run_mission" in first_reserve["tools"]
+    assert len(executed) == 1
+    assert executed[0]["project_id"] == "project-alpha"
+    assert executed[0]["mission_id"]
+    assert "evidence returned" in response.response_text
