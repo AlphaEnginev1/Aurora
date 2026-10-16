@@ -58,6 +58,7 @@ class ConversationTurn:
     provider: str | None = None
     execution_id: str | None = None
     error_code: str | None = None
+    project_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -236,6 +237,43 @@ Keep responses useful and concise unless the human asks for depth."""
             raise DirectorConversationError(f"unknown conversation session: {session_id}")
         return ConversationSession(**dict(row))
 
+    def _list_turns_for_project(
+        self,
+        session_id: str,
+        project_id: str | None,
+        *,
+        limit: int,
+    ) -> tuple[ConversationTurn, ...]:
+        """Load only history belonging to the selected project (or unscoped chat)."""
+        _require_identifier(session_id, "session_id")
+        if limit < 1:
+            raise DirectorConversationError("limit must be at least 1")
+        if project_id is None:
+            query = """
+                SELECT turn_id, session_id, sequence, role, content, state,
+                       created_at, correlation_id, model, provider,
+                       execution_id, error_code, project_id
+                FROM conversation_turns
+                WHERE session_id = ? AND project_id IS NULL
+                ORDER BY sequence DESC
+                LIMIT ?
+            """
+            args = (session_id, limit)
+        else:
+            query = """
+                SELECT turn_id, session_id, sequence, role, content, state,
+                       created_at, correlation_id, model, provider,
+                       execution_id, error_code, project_id
+                FROM conversation_turns
+                WHERE session_id = ? AND project_id = ?
+                ORDER BY sequence DESC
+                LIMIT ?
+            """
+            args = (session_id, project_id, limit)
+        with self._connect() as db:
+            rows = db.execute(query, args).fetchall()
+        return tuple(ConversationTurn(**dict(row)) for row in reversed(rows))
+
     def list_turns(self, session_id: str, *, limit: int | None = None) -> tuple[ConversationTurn, ...]:
         _require_identifier(session_id, "session_id")
         effective_limit = self.max_history_turns if limit is None else limit
@@ -246,7 +284,7 @@ Keep responses useful and concise unless the human asks for depth."""
                 """
                 SELECT turn_id, session_id, sequence, role, content, state,
                        created_at, correlation_id, model, provider,
-                       execution_id, error_code
+                       execution_id, error_code, project_id
                 FROM conversation_turns
                 WHERE session_id = ?
                 ORDER BY sequence DESC
@@ -279,7 +317,7 @@ Keep responses useful and concise unless the human asks for depth."""
                 """
                 SELECT turn_id, session_id, sequence, role, content, state,
                        created_at, correlation_id, model, provider,
-                       execution_id, error_code
+                       execution_id, error_code, project_id
                 FROM conversation_turns
                 WHERE session_id = ? AND turn_id = ?
                 LIMIT 1
@@ -465,11 +503,14 @@ Keep responses useful and concise unless the human asks for depth."""
             state="completed",
             created_at=_now(),
             correlation_id=correlation_id,
+            project_id=project_scope_id,
         )
 
-        history = list(self.list_turns(session_id, limit=self.max_history_turns))
+        history = list(self._list_turns_for_project(
+            session_id, project_scope_id, limit=self.max_history_turns,
+        ))
         messages = [
-            {"role": "system", "content": self._system_prompt()},
+            {"role": "system", "content": self._system_prompt(project_scope_id)},
             *[
                 {"role": item.role, "content": item.content}
                 for item in history
@@ -491,8 +532,8 @@ Keep responses useful and concise unless the human asks for depth."""
         if project_scope_id is not None:
             request_metadata["project_id"] = project_scope_id
         provider_messages = [
-            {"role": "system", "content": self._system_prompt()},
-            *bootstrap_state.messages,
+            {"role": "system", "content": self._system_prompt(project_scope_id)},
+            *(bootstrap_state.messages if project_scope_id is None else ()),
             *[
                 {"role": item.role, "content": item.content}
                 for item in history
@@ -542,6 +583,7 @@ Keep responses useful and concise unless the human asks for depth."""
                 created_at=_now(),
                 correlation_id=correlation_id,
                 error_code=_error_code(exc),
+                project_id=project_scope_id,
             )
             self._touch_session(
                 session_id,
@@ -573,6 +615,7 @@ Keep responses useful and concise unless the human asks for depth."""
             model=getattr(response, "selected_model", None) or response.model,
             provider=response.provider,
             execution_id=response.execution_id,
+            project_id=project_scope_id,
         )
         self._insert_turn(
             turn_id=assistant_turn.turn_id,
@@ -586,6 +629,7 @@ Keep responses useful and concise unless the human asks for depth."""
             model=assistant_turn.model,
             provider=assistant_turn.provider,
             execution_id=assistant_turn.execution_id,
+            project_id=project_scope_id,
         )
         context_manifest_id = self._verified_manifest_id(response, session.context_manifest_id)
         self._touch_session(
@@ -752,15 +796,24 @@ Keep responses useful and concise unless the human asks for depth."""
             return candidate
         return capability
 
-    def _system_prompt(self) -> str:
+    def _system_prompt(self, project_id: str | None = None) -> str:
         prompt = self.SYSTEM_PROMPT
         if self.project_registry is not None:
+            if project_id is None:
+                catalog = self.project_registry.catalog()
+            else:
+                project = self.project_registry.resolve(project_id)
+                catalog = (
+                    f"- {project.project_id}: {project.name}; "
+                    f"status={project.status.value}; objective={project.objective}; "
+                    f"repository={project.repository or 'not recorded'}; "
+                    f"state={project.current_state or 'state not recorded'}"
+                )
             prompt += (
-                "\nRegistered Aurora project catalog (canonical IDs only):\n"
-                + self.project_registry.catalog()
-                + "\nFor project work, pass the exact project_id to run_mission. "
-                "Do not invent project IDs or substitute a different project. If the user "
-                "has not identified a unique project, ask for clarification before scoped execution.\n"
+                "\nRegistered Aurora project context (canonical IDs only):\n"
+                + catalog
+                + "\nFor scoped work, use only the selected active project and its registered repository/workspace. "
+                "Do not substitute another project or expose another project's context.\n"
             )
         return prompt
 
@@ -1528,10 +1581,16 @@ Keep responses useful and concise unless the human asks for depth."""
                     provider TEXT,
                     execution_id TEXT,
                     error_code TEXT,
+                    project_id TEXT,
                     UNIQUE(session_id, sequence)
                 )
                 """
             )
+            columns = {
+                row["name"] for row in db.execute("PRAGMA table_info(conversation_turns)").fetchall()
+            }
+            if "project_id" not in columns:
+                db.execute("ALTER TABLE conversation_turns ADD COLUMN project_id TEXT")
             db.execute(
                 """
                 CREATE INDEX IF NOT EXISTS idx_conversation_turns_session_sequence
@@ -1571,6 +1630,7 @@ Keep responses useful and concise unless the human asks for depth."""
         provider: str | None = None,
         execution_id: str | None = None,
         error_code: str | None = None,
+        project_id: str | None = None,
     ) -> None:
         with self._connect() as db:
             db.execute(
@@ -1578,8 +1638,8 @@ Keep responses useful and concise unless the human asks for depth."""
                 INSERT INTO conversation_turns (
                     turn_id, session_id, sequence, role, content, state,
                     created_at, correlation_id, model, provider,
-                    execution_id, error_code
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    execution_id, error_code, project_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     turn_id,
@@ -1594,6 +1654,7 @@ Keep responses useful and concise unless the human asks for depth."""
                     provider,
                     execution_id,
                     error_code,
+                    project_id,
                 ),
             )
 
