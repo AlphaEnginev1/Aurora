@@ -69,6 +69,7 @@ class DelegatedTask:
     args: tuple[str, ...] = ()
     depends_on: tuple[str, ...] = ()
     skills: tuple[str, ...] = ()
+    project_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -657,12 +658,17 @@ class TaskEngine:
                     "idempotency_key": f"task:{mission_identity}:{task.task_id}",
                 },
             )
+            request_metadata = dict(getattr(request, "metadata", {}) or {})
+            if task.project_id:
+                request_metadata["project_id"] = task.project_id
+                request = CapabilityRequest(**{**request.__dict__, "metadata": request_metadata})
             return self.orchestration.run_capability_task(
                 task_id=task.task_id,
                 role=task.role,
                 request=request,
                 workspace=execution_workspace,
                 args=task.args,
+                project_id=task.project_id,
             )
         skill_context = (
             skill_assignment.render_system_context()
@@ -737,10 +743,11 @@ class TaskEngine:
             task_type=task_type,
             learned_model_scores=learned_model_scores,
             context=(
-                [{"role": "system", "content": skill_context}]
-                if skill_context
-                else None
+                ([{"role": "system", "content": skill_context}] if skill_context else [])
+                + ([{"role": "system", "content": f"Authoritative Aurora project_id: {task.project_id}. Do not use another project's context."}] if task.project_id else [])
+                or None
             ),
+            project_id=task.project_id,
         )
 
     def _workspace_for_task(self, task: DelegatedTask, execution_scope: str | None) -> Path:
