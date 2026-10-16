@@ -276,3 +276,28 @@ def test_director_conversation_with_project_id_uses_project_context_not_global(t
     assert "Project Alpha has a verified current state" in rendered
     assert "Project Beta" not in rendered
     assert "Beta private current state" not in rendered
+
+
+
+def test_router_rejects_project_context_for_inactive_registered_project(tmp_path):
+    inactive = ProjectSpec(
+        project_id="project-paused",
+        name="Paused Project",
+        objective="Must not execute",
+        status=ProjectStatus.PAUSED,
+        repository="AlphaEnginev1/paused",
+        workspace=str(tmp_path / "paused"),
+        current_state="Paused",
+        updated_at="2026-10-16T00:00:00Z",
+    )
+    router = _router_fixture(
+        tmp_path,
+        project_registry=ProjectRegistry({"project-paused": inactive}),
+    )
+    request = InferenceRequest(
+        messages=[{"role": "user", "content": "modify the paused project"}],
+        metadata={"role": "engineer", "project_id": "project-paused"},
+    )
+
+    with pytest.raises(ModelRoutingError, match="requires an active project"):
+        router.generate(request, capability="reasoning")
