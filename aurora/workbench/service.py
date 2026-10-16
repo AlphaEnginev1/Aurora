@@ -293,7 +293,22 @@ class UniversalWorkbench:
         if self.policy is not None and not self.policy.allows_capability(capability):
             raise WorkbenchError(f"Workbench capability is denied by policy: {capability}")
 
-        work_id = str(request.options.get("work_id") or request.mission_id).strip()
+        requested_work_id = str(request.options.get("work_id") or request.mission_id).strip()
+        if not requested_work_id or "\x00" in requested_work_id:
+            raise WorkbenchError("work_id must be non-empty and contain no null byte")
+
+        # Validate project scope before creating a durable Workbench session.
+        # A shared caller work_id must never make two projects share session
+        # state, receipts, workspace roots, or action history.
+        project = self._registered_project(request)
+        project_root = self._project_workspace_root(request) if project is not None else None
+        work_id = requested_work_id
+        session_workspace_root = self.repository_root
+        if project is not None and project_root is not None:
+            project_token = hashlib.sha256(project.project_id.encode("utf-8")).hexdigest()[:16]
+            work_id = f"{requested_work_id}:project:{project_token}"
+            session_workspace_root = project_root
+
         correlation_id = request.correlation_id or f"corr-{uuid.uuid4().hex}"
         receipt_id = f"receipt-{uuid.uuid4().hex}"
         claim_token: str | None = None
@@ -313,7 +328,7 @@ class UniversalWorkbench:
                 mission_id=request.mission_id,
                 actor=request.actor,
                 environment=str(request.options.get("environment", "local")),
-                workspace_root=str(self.repository_root),
+                workspace_root=str(session_workspace_root),
             )
             self.session_store.record_capability(work_id, capability)
 
