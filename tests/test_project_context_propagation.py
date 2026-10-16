@@ -14,6 +14,7 @@ from aurora.orchestration.director import DirectorPlan, DirectorPlanner
 from aurora.orchestration.director_conversation import DirectorConversationService
 from aurora.orchestration.director_provider import DirectorModelResponse
 from aurora.orchestration.durable_director import DurableDirectorService
+from aurora.orchestration.director_bootstrap import build_context_knowledge_adapter
 from aurora.orchestration.director_runtime import DirectorRuntime, DirectorRuntimeError
 from aurora.orchestration.mission_memory import MissionMemory
 from aurora.orchestration.engine import OrchestrationEngine
