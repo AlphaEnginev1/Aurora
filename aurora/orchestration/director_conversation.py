@@ -826,6 +826,9 @@ Keep responses useful and concise unless the human asks for depth."""
         calls = tuple(getattr(response, "tool_calls", ()) or ())
         results: list[dict[str, Any]] = []
         media_parts: list[dict[str, Any]] = []
+        # Deduplicate duplicate run_mission calls in one provider response by
+        # semantic objective/scope, not by provider-generated call_id.
+        seen_mission_specs: dict[str, tuple[str, str | None]] = {}
 
         mission_requested = (
             self.mission_runner is not None
@@ -907,14 +910,65 @@ Keep responses useful and concise unless the human asks for depth."""
                     )
                 project_id = project_id or prompt_project_id
                 try:
-                    call_key = hashlib.sha256(
-                        str(call.call_id).encode("utf-8")
+                    normalized_objective = " ".join(
+                        character
+                        for character in unicodedata.normalize(
+                            "NFKD", objective.casefold()
+                        )
+                        if not unicodedata.combining(character)
+                    )
+                    normalized_objective = " ".join(normalized_objective.split())
+                    mission_signature = json.dumps(
+                        {
+                            "objective": normalized_objective,
+                            "project_id": project_id,
+                        },
+                        ensure_ascii=False,
+                        sort_keys=True,
+                    )
+                    mission_key = hashlib.sha256(
+                        mission_signature.encode("utf-8")
                     ).hexdigest()[:16]
-                    # Distinct tool calls in one user turn are distinct commands;
-                    # retries/replays of the same call keep the same durable ID.
                     mission_id = (
-                        f"mission-conversation-{conversation_turn_id}-{call_key}"
+                        f"mission-conversation-{conversation_turn_id}-{mission_key}"
                         if conversation_turn_id else None
+                    )
+                    if explicit_tasks is None:
+                        graph_signature = "planner-generated"
+                    else:
+                        graph_signature = json.dumps(
+                            [
+                                {
+                                    "task_id": task.task_id,
+                                    "role": task.role,
+                                    "objective": task.objective,
+                                    "capability": task.capability,
+                                    "args": list(task.args),
+                                    "depends_on": list(task.depends_on),
+                                    "skills": list(task.skills),
+                                }
+                                for task in explicit_tasks
+                            ],
+                            ensure_ascii=False,
+                            sort_keys=True,
+                        )
+                    previous = seen_mission_specs.get(mission_signature)
+                    if previous is not None:
+                        previous_graph, previous_mission_id = previous
+                        if previous_graph != graph_signature:
+                            raise DirectorConversationError(
+                                "duplicate run_mission objective returned a conflicting task graph; "
+                                "the second graph was blocked to prevent duplicate side effects"
+                            )
+                        results.append({
+                            "status": "duplicate_tool_call_suppressed",
+                            "objective": objective,
+                            "mission_id": previous_mission_id,
+                            "duplicate_of": previous_mission_id,
+                        })
+                        continue
+                    seen_mission_specs[mission_signature] = (
+                        graph_signature, mission_id
                     )
                     if explicit_tasks is None:
                         mission = self._invoke_mission_runner(
