@@ -69,6 +69,62 @@ class DurableDirectorService:
         self.event_bus = event_bus or DurableEventBus(store)
         self.team_coordinator = team_coordinator
 
+    def _restore_committed_submission(
+        self,
+        *,
+        mission_id: str,
+        objective: str,
+        project_id: str | None,
+        correlation_id: str | None,
+        tasks: Sequence[DelegatedTask] | None,
+        requested_fingerprint: str | None,
+    ) -> MissionSubmission | None:
+        """Read the one authoritative committed receipt for an idempotent order."""
+        existing_tasks = self.store.list_tasks(mission_id)
+        if not existing_tasks:
+            return None
+        existing_events = self.store.events(mission_id)
+        submitted_event = next(
+            (event for event in existing_events if event.event_type == "mission_submitted"),
+            None,
+        )
+        if submitted_event is None:
+            raise DurableDirectorError(
+                "mission_id already has queued tasks but no authoritative submission receipt; "
+                "refusing to create a duplicate mission"
+            )
+        submitted = submitted_event.payload
+        if submitted.get("objective") != objective:
+            raise DurableDirectorError(
+                "mission_id is already bound to a different objective"
+            )
+        if submitted.get("project_id") != project_id:
+            raise DurableDirectorError("mission_id is already bound to a different project_id")
+        if tasks is not None and submitted.get("requested_tasks_fingerprint") != requested_fingerprint:
+            raise DurableDirectorError(
+                "mission_id is already bound to a different explicit task graph"
+            )
+        existing_correlation = submitted.get("correlation_id")
+        if correlation_id and existing_correlation != correlation_id:
+            raise DurableDirectorError(
+                "mission_id is already bound to a different or missing correlation_id"
+            )
+        restored_tasks = tuple(item.task for item in existing_tasks)
+        restored_plan = DirectorPlan(
+            objective=str(submitted.get("objective", objective)),
+            tasks=restored_tasks,
+            model=str(submitted.get("model", "unknown")),
+            provider=(
+                str(submitted["provider"])
+                if submitted.get("provider") is not None else None
+            ),
+            execution_id=(
+                str(submitted["planning_execution_id"])
+                if submitted.get("planning_execution_id") is not None else None
+            ),
+        )
+        return MissionSubmission(mission_id=mission_id, plan=restored_plan)
+
     def submit_mission(
         self,
         *,
@@ -103,49 +159,16 @@ class DurableDirectorService:
             _task_graph_fingerprint(tuple(tasks)) if tasks is not None else None
         )
         if mission_id and mission_id.strip():
-            existing_tasks = self.store.list_tasks(mission_id.strip())
-            if existing_tasks:
-                existing_events = self.store.events(mission_id.strip())
-                submitted_event = next(
-                    (event for event in existing_events if event.event_type == "mission_submitted"),
-                    None,
-                )
-                if submitted_event is None:
-                    raise DurableDirectorError(
-                        "mission_id already has queued tasks but no authoritative submission receipt; "
-                        "refusing to create a duplicate mission"
-                    )
-                submitted = submitted_event.payload
-                if submitted.get("objective") != normalized_objective:
-                    raise DurableDirectorError(
-                        "mission_id is already bound to a different objective"
-                    )
-                if submitted.get("project_id") != project_id:
-                    raise DurableDirectorError("mission_id is already bound to a different project_id")
-                if tasks is not None and submitted.get("requested_tasks_fingerprint") != requested_fingerprint:
-                    raise DurableDirectorError(
-                        "mission_id is already bound to a different explicit task graph"
-                    )
-                existing_correlation = submitted.get("correlation_id")
-                if correlation_id and existing_correlation != correlation_id:
-                    raise DurableDirectorError(
-                        "mission_id is already bound to a different or missing correlation_id"
-                    )
-                restored_tasks = tuple(item.task for item in existing_tasks)
-                restored_plan = DirectorPlan(
-                    objective=str(submitted.get("objective", normalized_objective)),
-                    tasks=restored_tasks,
-                    model=str(submitted.get("model", "unknown")),
-                    provider=(
-                        str(submitted["provider"])
-                        if submitted.get("provider") is not None else None
-                    ),
-                    execution_id=(
-                        str(submitted["planning_execution_id"])
-                        if submitted.get("planning_execution_id") is not None else None
-                    ),
-                )
-                return MissionSubmission(mission_id=mission_id.strip(), plan=restored_plan)
+            existing = self._restore_committed_submission(
+                mission_id=mission_id.strip(),
+                objective=normalized_objective,
+                project_id=project_id,
+                correlation_id=correlation_id,
+                tasks=tasks,
+                requested_fingerprint=requested_fingerprint,
+            )
+            if existing is not None:
+                return existing
 
         if project_id:
             project_registry = getattr(self.planner, "project_registry", None)
@@ -239,6 +262,21 @@ class DurableDirectorService:
                 correlation_id=correlation_id,
             )
         except Exception as exc:
+            # Concurrent callers can both miss the preflight read and plan
+            # before one wins the atomic enqueue. If this caller loses the
+            # uniqueness race, return the matching committed receipt rather
+            # than reporting a false rejection for an already accepted order.
+            if mission_id and mission_id.strip():
+                restored = self._restore_committed_submission(
+                    mission_id=mission_id.strip(),
+                    objective=normalized_objective,
+                    project_id=project_id,
+                    correlation_id=correlation_id,
+                    tasks=tasks,
+                    requested_fingerprint=requested_fingerprint,
+                )
+                if restored is not None:
+                    return restored
             raise DurableDirectorError(
                 f"mission could not be durably submitted: {exc}"
             ) from exc
