@@ -877,6 +877,33 @@ def test_runtime_retries_transient_replan_enqueue_failure_from_durable_receipt(
     ) == 1
 
 
+def test_durable_mission_snapshot_reads_current_state_without_running_workers(
+    tmp_path: Path,
+):
+    runtime, store, planner, engine = make_runtime(tmp_path)
+    submission = runtime.submit_mission(
+        objective="inspect current durable status",
+        mission_id="mission-durable-status-snapshot",
+        correlation_id="corr-durable-status-snapshot",
+    )
+
+    running = runtime.durable_mission_snapshot(submission.mission_id)
+    assert running is not None
+    assert running.status is TaskStatus.RUNNING
+    assert running.submission.mission_id == submission.mission_id
+    assert [item.task.task_id for item in running.tasks] == ["collect", "review"]
+    assert engine.orchestration.calls == []
+
+    terminal = runtime.run_until_terminal(submission)
+    assert terminal.status is TaskStatus.SUCCEEDED
+    refreshed = runtime.durable_mission_snapshot(submission.mission_id)
+    assert refreshed is not None
+    assert refreshed.status is TaskStatus.SUCCEEDED
+    assert refreshed.submission.mission_id == submission.mission_id
+    assert len(engine.orchestration.calls) == 2
+    assert planner.calls and len(planner.calls) == 1
+
+
 def test_runtime_replays_durable_continue_review_after_restart_without_replanning(tmp_path: Path):
     runtime, store, planner, _engine = make_runtime(tmp_path)
     submission = runtime.submit_mission(
