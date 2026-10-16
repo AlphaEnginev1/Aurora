@@ -1,6 +1,6 @@
 """Construct Aurora orchestration and autonomous Director services."""
 from __future__ import annotations
-import json, os
+import json, logging, os
 from pathlib import Path
 from aurora.failure_tracker import report_failure
 from aurora.autonomy.acquisition import AcquisitionManager
