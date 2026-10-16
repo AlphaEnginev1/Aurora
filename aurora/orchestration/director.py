@@ -177,7 +177,12 @@ Rules:
             system += self.skill_registry.catalog() + "\n"
         project_catalog = self._project_catalog(project_id)
         if project_catalog is not None:
-            system += "\nRegistered Aurora project context:\n"
+            catalog_heading = (
+                "Registered Aurora project catalog"
+                if project_id is None
+                else "Registered Aurora project context"
+            )
+            system += f"\n{catalog_heading}:\n"
             system += project_catalog + "\n"
         messages = [
             {"role": "system", "content": system},
@@ -241,9 +246,15 @@ Rules:
         if self.skill_registry is not None:
             system += "\nRegistered specialist skill catalog:\n"
             system += self.skill_registry.catalog() + "\n"
-        if self.project_registry is not None:
-            system += "\nRegistered Aurora project catalog:\n"
-            system += self.project_registry.catalog() + "\n"
+        project_catalog = self._project_catalog(project_id)
+        if project_catalog is not None:
+            catalog_heading = (
+                "Registered Aurora project catalog"
+                if project_id is None
+                else "Registered Aurora project context"
+            )
+            system += f"\n{catalog_heading}:\n"
+            system += project_catalog + "\n"
         messages = [
             {"role": "system", "content": system},
             *(context or []),
