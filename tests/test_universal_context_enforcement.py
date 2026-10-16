@@ -241,7 +241,7 @@ def test_director_conversation_with_project_id_uses_project_context_not_global(t
     observed = []
 
     class CaptureProvider:
-        provider_id = "test"
+        provider_id = "nvidia_api"
 
         def generate(self, request, *, selected_model, execution_id):
             observed.append(request)
