@@ -1300,3 +1300,94 @@ def test_provider_failure_retries_same_conversation_tool_through_durable_mission
     assert executed[0]["project_id"] == "project-alpha"
     assert executed[0]["mission_id"]
     assert "evidence returned" in response.response_text
+
+
+
+def test_conversation_history_isolated_by_project_inside_one_session(tmp_path: Path):
+    service, _ = base_service(tmp_path)
+    projects = ProjectRegistry({
+        "project-alpha": ProjectSpec(
+            project_id="project-alpha",
+            name="Project Alpha",
+            objective="Alpha confidential task context",
+            status=ProjectStatus.ACTIVE,
+            repository="AlphaEnginev1/alpha",
+            workspace=str(tmp_path / "workspace" / "alpha"),
+            current_state="Alpha current state",
+            updated_at="2026-10-16T00:00:00Z",
+        ),
+        "project-beta": ProjectSpec(
+            project_id="project-beta",
+            name="Project Beta",
+            objective="Beta confidential task context",
+            status=ProjectStatus.ACTIVE,
+            repository="AlphaEnginev1/beta",
+            workspace=str(tmp_path / "workspace" / "beta"),
+            current_state="Beta current state",
+            updated_at="2026-10-16T00:00:00Z",
+        ),
+    })
+    service.project_registry = projects
+
+    class CapturingProvider:
+        provider_id = "fake"
+
+        def __init__(self):
+            self.calls = []
+
+        def generate(self, *, messages, model, role, tools=(), metadata=None):
+            self.calls.append({
+                "messages": messages,
+                "role": role,
+                "metadata": dict(metadata or {}),
+            })
+            scope = (metadata or {}).get("project_id") or "global"
+            return DirectorModelResponse(
+                content=f"Summary for {scope}",
+                model=model or "fake/model",
+                provider="fake",
+                request_id=f"request-{scope}",
+                execution_id=f"execution-{scope}-{len(self.calls)}",
+            )
+
+    provider = CapturingProvider()
+    service.set_provider(provider)
+    session = service.create_session()
+
+    alpha = service.send_message(
+        session_id=session.session_id,
+        user_input="What is the status of Project Alpha?",
+        request_id="scope-alpha-turn",
+        project_id="project-alpha",
+    )
+    beta = service.send_message(
+        session_id=session.session_id,
+        user_input="What is the status of Project Beta?",
+        request_id="scope-beta-turn",
+        project_id="project-beta",
+    )
+
+    assert alpha.turn.project_id == "project-alpha"
+    assert beta.turn.project_id == "project-beta"
+    assert provider.calls[0]["metadata"]["project_id"] == "project-alpha"
+    assert provider.calls[1]["metadata"]["project_id"] == "project-beta"
+    beta_prompt = json.dumps(provider.calls[1]["messages"], ensure_ascii=False)
+    assert "Project Beta" in beta_prompt
+    assert "Project Alpha" not in beta_prompt
+    assert "Alpha confidential task context" not in beta_prompt
+
+    alpha_history = service._list_turns_for_project(
+        session.session_id, "project-alpha", limit=20
+    )
+    beta_history = service._list_turns_for_project(
+        session.session_id, "project-beta", limit=20
+    )
+    global_history = service._list_turns_for_project(
+        session.session_id, None, limit=20
+    )
+    assert alpha_history and all(turn.project_id == "project-alpha" for turn in alpha_history)
+    assert beta_history and all(turn.project_id == "project-beta" for turn in beta_history)
+    assert global_history == ()
+    assert {turn.project_id for turn in service.list_turns(session.session_id)} == {
+        "project-alpha", "project-beta"
+    }
