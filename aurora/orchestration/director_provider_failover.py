@@ -73,6 +73,7 @@ class BoundInferenceDirectorProvider:
         model: str | None,
         role: str,
         tools: tuple[DirectorToolSpec, ...] = (),
+        metadata: Mapping[str, Any] | None = None,
     ) -> DirectorModelResponse:
         prompt_messages = list(messages)
         if tools:
@@ -89,7 +90,11 @@ class BoundInferenceDirectorProvider:
             model=self._model if self._model is not None else model,
             temperature=0.0,
             max_tokens=3000,
-            metadata={"role": role, "director_tools": [tool.name for tool in tools]},
+            metadata={
+                **dict(metadata or {}),
+                "role": role,
+                "director_tools": [tool.name for tool in tools],
+            },
         )
         response = self._router.generate(request, capability="reasoning")
         tool_calls = InferenceDirectorProvider._parse_tool_calls(response.content, tools)
