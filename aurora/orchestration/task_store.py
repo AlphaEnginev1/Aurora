@@ -195,8 +195,6 @@ class DurableTaskStore:
         if len(set(ids)) != len(ids):
             raise TaskStoreError("task ids must be unique")
         known = set(ids)
-        if any(dep not in known for task in tasks for dep in task.depends_on):
-            raise TaskStoreError("task plan contains an unknown dependency")
 
         normalized_events: list[dict[str, object]] = []
         for event in initial_events:
@@ -226,6 +224,30 @@ class DurableTaskStore:
         with self._connect() as db:
             try:
                 db.execute("BEGIN IMMEDIATE")
+                existing_dependency_rows = db.execute(
+                    "SELECT task_id, phase, status FROM tasks WHERE mission_id = ?",
+                    (mission_id,),
+                ).fetchall()
+                existing_dependencies = {
+                    row["task_id"]: row for row in existing_dependency_rows
+                }
+                for task in tasks:
+                    for dependency_id in task.depends_on:
+                        if dependency_id in known:
+                            continue
+                        dependency = existing_dependencies.get(dependency_id)
+                        if dependency is None:
+                            raise TaskStoreError(
+                                f"task plan contains an unknown dependency: {dependency_id}"
+                            )
+                        if int(dependency["phase"]) >= phase:
+                            raise TaskStoreError(
+                                f"cross-phase dependency {dependency_id} must belong to an earlier phase"
+                            )
+                        if dependency["status"] != "succeeded":
+                            raise TaskStoreError(
+                                f"cross-phase dependency {dependency_id} must have succeeded"
+                            )
                 for task in tasks:
                     db.execute(
                         """
@@ -1111,6 +1133,80 @@ class DurableTaskStore:
         agent_role: str | None = None,
         correlation_id: str | None = None,
     ) -> int:
+        # Internal task-state transitions bypass DurableEventBus.publish. Resolve
+        # missing envelope fields here so worker claims, lease changes, retries,
+        # completions and dependency blocks remain queryable by canonical mission
+        # and task identity just like Director-published events.
+        task_context = None
+        if task_id is not None and (
+            project_id is None or agent_role is None
+        ):
+            task_context = db.execute(
+                """
+                SELECT project_id, role
+                FROM tasks
+                WHERE mission_id = ? AND task_id = ?
+                """,
+                (mission_id, task_id),
+            ).fetchone()
+            if task_context is not None:
+                if project_id is None:
+                    project_id = task_context["project_id"]
+                if agent_role is None:
+                    agent_role = task_context["role"]
+
+        if project_id is None or correlation_id is None:
+            submitted = db.execute(
+                """
+                SELECT project_id, correlation_id, payload_json
+                FROM task_events
+                WHERE mission_id = ? AND event_type = 'mission_submitted'
+                ORDER BY event_id
+                LIMIT 1
+                """,
+                (mission_id,),
+            ).fetchone()
+            if submitted is not None:
+                try:
+                    submitted_payload = json.loads(submitted["payload_json"])
+                except (TypeError, json.JSONDecodeError):
+                    submitted_payload = {}
+                if project_id is None:
+                    project_id = submitted["project_id"]
+                    if project_id is None and isinstance(submitted_payload, dict):
+                        candidate = submitted_payload.get("project_id")
+                        project_id = candidate if isinstance(candidate, str) and candidate.strip() else None
+                if correlation_id is None:
+                    correlation_id = submitted["correlation_id"]
+                    if correlation_id is None and isinstance(submitted_payload, dict):
+                        candidate = submitted_payload.get("correlation_id")
+                        correlation_id = (
+                            candidate if isinstance(candidate, str) and candidate.strip()
+                            else None
+                        )
+
+        # The submission event itself has no prior receipt to consult, so its
+        # payload is a valid bootstrap source for the envelope fields.
+        if event_type == "mission_submitted" and isinstance(payload, dict):
+            if project_id is None:
+                candidate = payload.get("project_id")
+                project_id = candidate if isinstance(candidate, str) and candidate.strip() else None
+            if correlation_id is None:
+                candidate = payload.get("correlation_id")
+                correlation_id = (
+                    candidate if isinstance(candidate, str) and candidate.strip()
+                    else None
+                )
+
+        if task_id is not None and project_id is not None:
+            payload = dict(payload)
+            payload_project = payload.get("project_id")
+            if payload_project is not None and payload_project != project_id:
+                raise TaskStoreError(
+                    f"task event project_id conflicts with durable task context: {mission_id}/{task_id}"
+                )
+            payload.setdefault("project_id", project_id)
+
         cursor = db.execute(
             """
             INSERT INTO task_events (

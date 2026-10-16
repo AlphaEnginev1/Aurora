@@ -564,6 +564,114 @@ def test_runtime_restarts_and_recovers_running_mission(tmp_path: Path):
     assert any(event.event_type == "requeued" for event in events)
 
 
+def test_runtime_replays_continue_with_succeeded_prior_phase_dependency_after_restart(
+    tmp_path: Path,
+):
+    runtime, store, planner, _engine = make_runtime(tmp_path)
+    original_review = planner.review
+
+    def review_with_prior_dependency(**kwargs):
+        review = original_review(**kwargs)
+        if review.decision == "continue":
+            return DirectorReview(
+                decision="continue",
+                rationale=review.rationale,
+                tasks=(
+                    DelegatedTask(
+                        "validate",
+                        "validator",
+                        "validate prior evidence",
+                        depends_on=("collect",),
+                    ),
+                ),
+                model=review.model,
+                considered_alternatives=review.considered_alternatives,
+            )
+        return review
+
+    planner.review = review_with_prior_dependency
+    submission = runtime.submit_mission(
+        objective="adapt a mission using its prior phase evidence",
+        mission_id="mission-replay-prior-phase-dependency",
+        correlation_id="corr-replay-prior-phase-dependency",
+    )
+    original_append = runtime.memory.append
+
+    def crash_after_durable_review(*args, **kwargs):
+        if kwargs.get("kind") == "review":
+            raise SystemExit("simulated process termination after durable review")
+        return original_append(*args, **kwargs)
+
+    runtime.memory.append = crash_after_durable_review
+    with pytest.raises(SystemExit, match="simulated process termination"):
+        runtime.run_until_terminal(submission)
+
+    receipt = next(
+        event for event in store.events(submission.mission_id)
+        if event.event_type == "director_review"
+    )
+    assert receipt.payload["decision"] == "continue"
+    assert receipt.payload["follow_up_tasks"][0]["depends_on"] == ["collect"]
+    assert not any(item.phase == 1 for item in store.list_tasks(submission.mission_id))
+
+    runtime2, store2, planner2, _engine2 = make_runtime(
+        tmp_path, max_continue_reviews=0
+    )
+    result = runtime2.run_until_terminal(submission)
+
+    assert result.status is TaskStatus.SUCCEEDED
+    follow_up = store2.get(submission.mission_id, "r1_validate")
+    assert follow_up is not None
+    assert follow_up.task.depends_on == ("collect",)
+    assert follow_up.status == "succeeded"
+    assert planner2.review_calls == 1
+    events = store2.events(submission.mission_id)
+    assert sum(
+        event.event_type == "director_review_recovered"
+        and event.payload.get("round") == 1
+        for event in events
+    ) == 1
+    assert sum(
+        event.event_type == "mission_reopened"
+        and event.payload.get("round") == 1
+        for event in events
+    ) == 1
+
+
+def test_conversation_mission_evidence_uses_final_director_status_after_recovery_phase(
+    tmp_path: Path,
+):
+    from aurora.orchestration.director_conversation import DirectorConversationService
+
+    runtime, store, _planner, engine = make_runtime(tmp_path)
+    original_run_task = engine.orchestration.run_task
+
+    def fail_initial_collection_once_per_attempt(**kwargs):
+        if kwargs.get("task_id") == "collect":
+            raise RuntimeError("controlled failure in the first phase")
+        return original_run_task(**kwargs)
+
+    engine.orchestration.run_task = fail_initial_collection_once_per_attempt
+    submission = runtime.submit_mission(
+        objective="adapt this mission after a failed initial phase",
+        mission_id="mission-conversation-evidence-recovery-phase",
+        correlation_id="corr-conversation-evidence-recovery-phase",
+    )
+
+    result = runtime.run_until_terminal(submission)
+
+    assert result.status is TaskStatus.SUCCEEDED
+    assert any(item.status is TaskStatus.FAILED for item in result.tasks)
+    assert any(item.status is TaskStatus.BLOCKED for item in result.tasks)
+    evidence = DirectorConversationService._mission_evidence(result)
+    assert evidence["status"] == "succeeded"
+    assert evidence["accepted"] is True
+    assert evidence["mission_id"] == submission.mission_id
+    assert any(task["status"] == "failed" for task in evidence["tasks"])
+    assert any(task["status"] == "blocked" for task in evidence["tasks"])
+    assert any(event.event_type == "mission_succeeded" for event in store.events(submission.mission_id))
+
+
 def test_runtime_replays_durable_continue_review_after_restart_without_replanning(tmp_path: Path):
     runtime, store, planner, _engine = make_runtime(tmp_path)
     submission = runtime.submit_mission(
@@ -948,6 +1056,23 @@ def test_replan_preserves_project_context_and_traceability(tmp_path: Path):
     assert all(item.project_id == "project-a" for item in events)
     assert all(item.correlation_id == "corr-project-replan" for item in events)
     assert all(item.payload.get("project_id") == "project-a" for item in events)
+
+    # Project mailbox indexing is a separate read path from mission-local
+    # Director context; verify that durable projections remain discoverable
+    # through it after the whole initial/replan/terminal cycle.
+    project_mailbox = [
+        item for item in runtime.memory.list_project("project-a", limit=100)
+        if item.mission_id == submission.mission_id
+    ]
+    assert project_mailbox
+    assert all(item.project_id == "project-a" for item in project_mailbox)
+    for kind in ("mission_objective", "mission_plan", "task_result", "review", "follow_up_plan"):
+        matching = [item for item in project_mailbox if item.kind == kind]
+        assert matching, f"missing project mailbox projection for {kind}"
+        assert all(
+            item.correlation_id == "corr-project-replan"
+            for item in matching
+        ), kind
 
 
 def test_invalid_director_replan_is_rejected_before_follow_up_enqueue(tmp_path: Path):

@@ -876,10 +876,14 @@ Keep responses useful and concise unless the human asks for depth."""
                 requested_capability = capability.strip()
                 capability = self._canonical_workbench_capability(requested_capability)
                 try:
+                    # Provider call IDs may change when an interrupted turn is
+                    # regenerated. Use the deterministic turn slot so a retry reaches
+                    # the same durable Workbench idempotency record and cannot repeat a
+                    # completed or ambiguously-started side effect under a new key.
                     direct_workbench_mission_id = (
-                        f"conversation:{conversation_turn_id}:{call.call_id}"
+                        f"conversation:{conversation_turn_id}:{call_index}"
                         if conversation_turn_id
-                        else f"conversation:adhoc-{uuid4().hex}:{call.call_id}"
+                        else f"conversation:adhoc-{uuid4().hex}:{call_index}"
                     )
                     result = self.workbench.execute(
                         WorkbenchRequest(
@@ -1149,13 +1153,15 @@ Keep responses useful and concise unless the human asks for depth."""
             # DirectorRuntime finalizes the durable order, the conversation must
             # not override this receipt with one task's intermediate failed state.
             status = "running"
+        elif mission_status:
+            # The Director's durable terminal decision governs the mission as a
+            # whole. Failed/blocked tasks from earlier phases remain in the
+            # evidence, but must not contradict a later successful recovery phase.
+            status = str(mission_status)
         elif failed:
             status = "failed"
         elif blocked:
             status = "blocked"
-        elif mission_status:
-            # Report the durable terminal decision, including a final review block.
-            status = str(mission_status)
         elif tasks and all(item["status"] == "succeeded" for item in tasks):
             status = "succeeded"
         else:
@@ -1176,7 +1182,11 @@ Keep responses useful and concise unless the human asks for depth."""
         return {
             "mission_id": mission_id,
             "project_id": next((
-                event.payload.get("project_id")
+                (
+                    event.payload.get("project_id")
+                    if event.payload.get("project_id") is not None
+                    else getattr(event, "project_id", None)
+                )
                 for event in events
                 if getattr(event, "event_type", None) == "mission_submitted"
                 and isinstance(getattr(event, "payload", None), Mapping)
