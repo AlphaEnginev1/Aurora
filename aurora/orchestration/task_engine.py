@@ -658,17 +658,19 @@ class TaskEngine:
                     "idempotency_key": f"task:{mission_identity}:{task.task_id}",
                 },
             )
-            request_metadata = dict(getattr(request, "metadata", {}) or {})
             if task.project_id:
-                request_metadata["project_id"] = task.project_id
-                request = CapabilityRequest(**{**request.__dict__, "metadata": request_metadata})
+                request = CapabilityRequest(
+                    name=request.name,
+                    actor=request.actor,
+                    reason=request.reason,
+                    constraints={**request.constraints, "project_id": task.project_id},
+                )
             return self.orchestration.run_capability_task(
                 task_id=task.task_id,
                 role=task.role,
                 request=request,
                 workspace=execution_workspace,
                 args=task.args,
-                project_id=task.project_id,
             )
         skill_context = (
             skill_assignment.render_system_context()
