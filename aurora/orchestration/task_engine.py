@@ -18,7 +18,7 @@ from aurora.failure_tracker import report_failure
 from aurora.research.models import EvidenceState, ResearchRequest
 from aurora.research.service import ResearchService
 from aurora.research.learning import ResearchLearningGate
-from aurora.projects import ProjectRegistry
+from aurora.projects import ProjectRegistry, ProjectStatus
 
 
 from aurora.autonomy.capability_runtime import CapabilityExecutionError
@@ -218,9 +218,14 @@ class TaskEngine:
                 "project-scoped task requires the canonical ProjectRegistry"
             )
         try:
-            return self.project_registry.resolve(project_id)
+            project = self.project_registry.resolve(project_id)
         except Exception as exc:
             raise TaskEngineError(f"invalid project scope: {exc}") from exc
+        if project.status is not ProjectStatus.ACTIVE:
+            raise TaskEngineError(
+                f"project-scoped execution requires an active project, got {project.status.value}"
+            )
+        return project
 
     def _project_workspace_root(self, project_id: str) -> Path:
         project = self._validate_project_scope(project_id)
