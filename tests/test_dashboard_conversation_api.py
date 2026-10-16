@@ -139,6 +139,8 @@ def test_http_conversation_round_trip(tmp_path):
         assert turn["session"]["session_id"] == session["session_id"]
         assert turn["turn"]["correlation_id"].startswith("corr-")
         assert turn["state"] == "completed"
+        assert "execution_status" in turn
+        assert turn["execution_status"] is None
         assert turn["model"] == "fake/director"
         assert turn["provider"] == "fake"
         assert turn["execution_id"]
