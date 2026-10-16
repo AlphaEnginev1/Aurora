@@ -882,3 +882,89 @@ def test_default_inference_provider_routes_explicit_execution_through_durable_mi
     assert first_request.metadata["role"] == "director_conversation"
     assert first_request.metadata["aurora_context_verified"] is True
     assert any("run_mission" in message["content"] for message in first_request.messages if message["role"] == "system")
+
+
+
+def test_change_order_without_mission_wording_cannot_bypass_durable_runner(tmp_path: Path):
+    service, _ = base_service(tmp_path)
+    executed = []
+
+    class ProviderThatDoesNotCallMissionTool:
+        provider_id = "fake"
+
+        def __init__(self):
+            self.calls = []
+
+        def generate(self, *, messages, model, role, tools=()):
+            self.calls.append((role, tuple(tool.name for tool in tools)))
+            if role == "director_conversation":
+                return DirectorModelResponse(
+                    content="Intentaré corregir el error directamente.",
+                    model=model or "fake/director",
+                    provider="fake",
+                    request_id="request-no-tool",
+                    execution_id="execution-no-tool",
+                )
+            assert role == "director_conversation_result"
+            return DirectorModelResponse(
+                content="La orden quedó registrada y revisada con evidencia.",
+                model=model or "fake/director",
+                provider="fake",
+                request_id="request-final",
+                execution_id="execution-final",
+            )
+
+    provider = ProviderThatDoesNotCallMissionTool()
+    service.set_provider(provider)
+
+    def runner(*, objective, mission_id=None, correlation_id=None, project_id=None):
+        executed.append({
+            "objective": objective,
+            "mission_id": mission_id,
+            "correlation_id": correlation_id,
+            "project_id": project_id,
+        })
+        plan = SimpleNamespace(
+            objective=objective,
+            model="fake/director",
+            provider="fake",
+            execution_id="durable-planning",
+        )
+        return SimpleNamespace(
+            mission_id=mission_id,
+            submission=SimpleNamespace(mission_id=mission_id, plan=plan),
+            objective=objective,
+            status=SimpleNamespace(value="succeeded"),
+            tasks=(),
+        )
+
+    service.mission_runner = runner
+    session = service.create_session()
+    response = service.send_message(
+        session_id=session.session_id,
+        user_input="Corrige el error de OpenRouter y ejecuta las pruebas.",
+    )
+
+    assert len(executed) == 1
+    assert executed[0]["objective"] == "Corrige el error de OpenRouter y ejecuta las pruebas."
+    assert executed[0]["mission_id"]
+    assert executed[0]["correlation_id"]
+    assert ("director_conversation", ("run_mission",)) in provider.calls
+    assert response.response_text.startswith("La orden quedó registrada")
+
+
+def test_execution_classifier_preserves_questions_and_explicit_single_reads():
+    from aurora.orchestration.director_conversation import DirectorConversationService
+
+    assert DirectorConversationService._requests_mission_execution(
+        "Corrige el error de OpenRouter y ejecuta las pruebas."
+    )
+    assert DirectorConversationService._requests_mission_execution(
+        "Audit the repository and fix the failing tests."
+    )
+    assert not DirectorConversationService._requests_mission_execution(
+        "How do I fix the OpenRouter error?"
+    )
+    assert not DirectorConversationService._requests_mission_execution(
+        "Comprueba directamente las notas del proyecto."
+    )
