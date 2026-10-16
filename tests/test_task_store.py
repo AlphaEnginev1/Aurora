@@ -297,6 +297,73 @@ def test_later_phase_rejects_non_succeeded_prior_dependency(tmp_path: Path):
     ]
 
 
+def test_task_lifecycle_events_inherit_project_role_and_correlation_context(
+    tmp_path: Path,
+):
+    store = DurableTaskStore(tmp_path / "event-context.db")
+    mission_id = "mission-event-context"
+    project_id = "project-a"
+    correlation_id = "corr-event-context"
+
+    store.enqueue(
+        mission_id,
+        [
+            DelegatedTask(
+                "project-task",
+                "researcher",
+                "inspect project evidence",
+                project_id=project_id,
+            )
+        ],
+        correlation_id=correlation_id,
+        initial_events=(
+            {
+                "event_type": "mission_submitted",
+                "payload": {
+                    "objective": "inspect project evidence",
+                    "project_id": project_id,
+                    "correlation_id": correlation_id,
+                },
+                "project_id": project_id,
+                "correlation_id": correlation_id,
+            },
+        ),
+    )
+
+    claimed = store.claim_next(mission_id, "worker-a", lease_seconds=30)
+    assert claimed is not None
+    store.renew_lease(
+        mission_id,
+        "project-task",
+        "worker-a",
+        claim_token=claimed.claim_token,
+        lease_seconds=30,
+    )
+    store.complete(
+        mission_id,
+        "project-task",
+        status="succeeded",
+        result={"type": "model", "content": "verified"},
+        worker_id="worker-a",
+        claim_token=claimed.claim_token,
+    )
+
+    lifecycle = [
+        event for event in store.events(mission_id)
+        if event.event_type in {"enqueued", "claimed", "lease_renewed", "succeeded"}
+    ]
+    assert {event.event_type for event in lifecycle} == {
+        "enqueued", "claimed", "lease_renewed", "succeeded"
+    }
+    assert all(event.project_id == project_id for event in lifecycle)
+    assert all(event.agent_role == "researcher" for event in lifecycle)
+    assert all(event.correlation_id == correlation_id for event in lifecycle)
+    scoped = store.latest_events(limit=50, project_id=project_id)
+    assert {event.event_type for event in scoped} >= {
+        "enqueued", "claimed", "lease_renewed", "succeeded"
+    }
+
+
 def test_enqueue_rolls_back_task_rows_and_initial_events_as_one_transaction(tmp_path: Path):
     store = DurableTaskStore(tmp_path / "tasks.db")
     tasks = (
