@@ -854,7 +854,7 @@ def test_runtime_recovery_reprojects_legacy_mailbox_rows_with_canonical_project_
 
     events = store.events("mission-project-alpha")
     submitted = next(event for event in events if event.event_type == "mission_submitted")
-    completed = next(event for event in events if event.event_type == "task_completed")
+    completed = next(event for event in events if event.event_type == "succeeded")
     assert submitted.project_id == "project-alpha"
     assert completed.project_id == "project-alpha"
     assert completed.correlation_id == "corr-project-alpha"
