@@ -510,7 +510,6 @@ class TaskEngine:
             depends_on=task.depends_on,
             skills=task.skills,
             project_id=task.project_id,
-            correlation_id=correlation_id,
         )
 
     def skill_assignment_for(self, task: DelegatedTask):
@@ -756,6 +755,7 @@ class TaskEngine:
                 or None
             ),
             project_id=task.project_id,
+            correlation_id=correlation_id,
         )
 
     def _workspace_for_task(self, task: DelegatedTask, execution_scope: str | None) -> Path:
