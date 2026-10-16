@@ -357,6 +357,7 @@ Keep responses useful and concise unless the human asks for depth."""
         user_input: str,
         model: str | None = None,
         request_id: str | None = None,
+        project_id: str | None = None,
     ) -> DirectorConversationResponse:
         _require_identifier(session_id, "session_id")
         with self._session_lock_for(session_id):
@@ -365,6 +366,7 @@ Keep responses useful and concise unless the human asks for depth."""
                 user_input=user_input,
                 model=model,
                 request_id=request_id,
+                project_id=project_id,
             )
 
     def _send_message_locked(
@@ -374,20 +376,43 @@ Keep responses useful and concise unless the human asks for depth."""
         user_input: str,
         model: str | None = None,
         request_id: str | None = None,
+        project_id: str | None = None,
     ) -> DirectorConversationResponse:
         _require_identifier(session_id, "session_id")
         prompt = user_input.strip()
         if not prompt:
             raise DirectorConversationError("user_input is empty")
+        prompt_project_ids = self._project_ids_in_prompt(prompt)
+        project_scope_id: str | None = None
+        if project_id is not None:
+            if not isinstance(project_id, str) or not project_id.strip() or "\x00" in project_id:
+                raise DirectorConversationError("project_id must be a non-empty registered project ID")
+            if self.project_registry is None:
+                raise DirectorConversationError(
+                    "project selection requires the canonical ProjectRegistry"
+                )
+            project_id = project_id.strip()
+            try:
+                self.project_registry.resolve(project_id)
+            except Exception as exc:
+                raise DirectorConversationError(f"invalid project selection: {exc}") from exc
+            if len(prompt_project_ids) == 1 and project_id not in prompt_project_ids:
+                raise DirectorConversationError(
+                    "selected project_id conflicts with the project explicitly named by the user"
+                )
+            project_scope_id = project_id
+        elif len(prompt_project_ids) == 1:
+            project_scope_id = next(iter(prompt_project_ids))
         if request_id is not None:
             if not isinstance(request_id, str):
                 raise DirectorConversationError("request_id must be a string or null")
             request_id = request_id.strip()
             if not request_id or len(request_id) > 256 or "\x00" in request_id:
                 raise DirectorConversationError("request_id must contain 1 to 256 non-null characters")
-            digest = hashlib.sha256(
-                f"{session_id}\x00{request_id}".encode("utf-8")
-            ).hexdigest()[:32]
+            request_fingerprint = f"{session_id}\x00{request_id}"
+            if project_scope_id is not None:
+                request_fingerprint += f"\x00project:{project_scope_id}"
+            digest = hashlib.sha256(request_fingerprint.encode("utf-8")).hexdigest()[:32]
             turn_id = f"turn-request-{digest}"
             correlation_id = f"corr-request-{digest}"
         else:
@@ -459,9 +484,8 @@ Keep responses useful and concise unless the human asks for depth."""
             "preferred_models": preferred_models,
             "routing_capability": str(policy["default_capability"]),
         }
-        project_scope = self._project_id_from_prompt(prompt)
-        if project_scope is not None:
-            request_metadata["project_id"] = project_scope
+        if project_scope_id is not None:
+            request_metadata["project_id"] = project_scope_id
         provider_messages = [
             {"role": "system", "content": self._system_prompt()},
             *bootstrap_state.messages,
@@ -501,6 +525,7 @@ Keep responses useful and concise unless the human asks for depth."""
                     user_input=prompt,
                     conversation_turn_id=turn_id,
                     correlation_id=correlation_id,
+                    project_scope_id=project_scope_id,
                 )
         except Exception as exc:
             self._insert_turn(
@@ -822,6 +847,7 @@ Keep responses useful and concise unless the human asks for depth."""
         user_input: str | None = None,
         conversation_turn_id: str | None = None,
         correlation_id: str | None = None,
+        project_scope_id: str | None = None,
     ) -> Any:
         calls = tuple(getattr(response, "tool_calls", ()) or ())
         results: list[dict[str, Any]] = []
@@ -849,7 +875,7 @@ Keep responses useful and concise unless the human asks for depth."""
                 if len(prompt_projects) > 1:
                     mission_project_id = None
                 else:
-                    mission_project_id = next(iter(prompt_projects), None)
+                    mission_project_id = project_scope_id or next(iter(prompt_projects), None)
                 try:
                     if len(prompt_projects) > 1:
                         raise DirectorConversationError(
@@ -900,15 +926,23 @@ Keep responses useful and concise unless the human asks for depth."""
                         "mission references multiple registered projects; explicitly scope one project before execution"
                     )
                 prompt_project_id = next(iter(prompt_projects), None)
-                if project_id is not None and prompt_project_id is None:
+                if project_scope_id is not None and prompt_project_id is not None and project_scope_id != prompt_project_id:
                     raise DirectorConversationError(
-                        "the user must explicitly identify one registered project before scoped mission execution"
+                        "selected project_id conflicts with the project explicitly named by the user"
                     )
-                if project_id is not None and project_id != prompt_project_id:
+                if project_scope_id is not None and project_id is not None and project_id != project_scope_id:
+                    raise DirectorConversationError(
+                        "run_mission project_id cannot override the selected project"
+                    )
+                if project_id is not None and prompt_project_id is None and project_scope_id is None:
+                    raise DirectorConversationError(
+                        "the user must explicitly identify or select one registered project before scoped mission execution"
+                    )
+                if project_id is not None and prompt_project_id is not None and project_id != prompt_project_id:
                     raise DirectorConversationError(
                         "run_mission project_id conflicts with the project explicitly named by the user"
                     )
-                project_id = project_id or prompt_project_id
+                project_id = project_scope_id or project_id or prompt_project_id
                 try:
                     normalized_objective = self._normalize_project_reference(objective)
                     normalized_objective = " ".join(normalized_objective.split())
@@ -1014,7 +1048,7 @@ Keep responses useful and concise unless the human asks for depth."""
                         raise DirectorConversationError(
                             "direct Workbench request references multiple registered projects; scope one explicitly"
                         )
-                    canonical_project_id = next(iter(prompt_projects), None)
+                    canonical_project_id = project_scope_id or next(iter(prompt_projects), None)
                     workbench_options = dict(options)
                     # Project routing is runtime-owned. Ignore model-supplied IDs and
                     # accept only the unique project explicitly named by the human.
