@@ -525,6 +525,19 @@ class UniversalWorkbench:
         root.mkdir(parents=True, exist_ok=True)
         return root
 
+    def resolve_project_workspace(self, project_id: str) -> Path:
+        """Return the workspace for a registered active project, fail-closed."""
+        request = WorkbenchRequest(
+            capability="workbench:artifact:intake",
+            actor="dashboard",
+            mission_id="project-workspace-resolution",
+            options={"project_id": project_id},
+        )
+        root = self._project_workspace_root(request)
+        if root is None:
+            raise WorkbenchError("project_id is required to resolve a project workspace")
+        return root
+
     @staticmethod
     def _normalize_repository_reference(value: str | None) -> str | None:
         """Normalize a GitHub repository reference to owner/repo, case-insensitively."""
