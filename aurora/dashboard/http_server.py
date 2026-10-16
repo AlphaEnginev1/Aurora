@@ -262,8 +262,13 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                             **({"project_id": project_id} if project_id is not None else {}),
                         },
                         idempotency_key=(
-                            f"dashboard-upload:{request_digest}"
-                            if request_digest and getattr(self.workbench, "session_store", None) is not None
+                            (
+                                f"dashboard-upload:{request_id}"
+                                if project_id is None
+                                else f"dashboard-upload:{request_digest}"
+                            )
+                            if request_id and request_digest
+                            and getattr(self.workbench, "session_store", None) is not None
                             else None
                         ),
                     )
