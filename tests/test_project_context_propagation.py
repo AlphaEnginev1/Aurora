@@ -721,6 +721,7 @@ def test_project_scoped_research_task_carries_registered_context_and_constraints
     discovery_request = next(request for kind, request in research.requests if kind == "discover")
     retrieval_request = next(request for kind, request in research.requests if kind == "retrieve")
     for request in (discovery_request, retrieval_request):
+        assert request.project_id == "project-alpha"
         assert "project-alpha" in request.objective
         assert "AlphaEnginev1/alpha" in request.objective
         assert "project_id=project-alpha" in request.constraints
@@ -749,6 +750,7 @@ def test_project_scoped_workbench_research_overrides_model_project_constraints(t
 
     normalized = workbench._research_request(request)
 
+    assert normalized.project_id == "project-alpha"
     assert "project-alpha" in normalized.objective
     assert "AlphaEnginev1/alpha" in normalized.objective
     assert "project_id=project-alpha" in normalized.constraints
