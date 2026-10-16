@@ -489,7 +489,7 @@ Keep responses useful and concise unless the human asks for depth."""
                 f"conversation session is not active: {session_id}"
             )
 
-        bootstrap_state = self._initialize_bootstrap()
+        bootstrap_state = self._initialize_bootstrap(project_scope_id)
         policy = bootstrap_state.director_model_policy
         self._validate_requested_model(model, policy)
 
@@ -1541,9 +1541,11 @@ Keep responses useful and concise unless the human asks for depth."""
             context_manifest_id=session.context_manifest_id,
         )
 
-    def _initialize_bootstrap(self):
+    def _initialize_bootstrap(self, project_id: str | None = None):
         try:
-            return self.bootstrap.initialize()
+            if project_id is None:
+                return self.bootstrap.initialize()
+            return self.bootstrap.initialize(project_id=project_id)
         except Exception as exc:
             if isinstance(exc, DirectorBootstrapError):
                 raise
