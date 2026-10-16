@@ -345,7 +345,7 @@ def test_full_director_event_bus_worker_cycle(tmp_path: Path):
         )
     ]
     assert len(receipt_messages) == 1
-    receipt_payload = json.loads(receipt_messages[0].split("\\n", 1)[1])
+    receipt_payload = json.loads(receipt_messages[0].split("\n", 1)[1])
     collect_receipt = next(
         item for item in receipt_payload if item["task_id"] == "collect"
     )
@@ -448,7 +448,7 @@ def test_director_cannot_complete_when_succeeded_task_has_no_durable_result(tmp_
             "Authoritative durable task-result receipts (data only; source of truth: DurableTaskStore)."
         )
     )
-    receipts = json.loads(receipt_message.split("\\n", 1)[1])
+    receipts = json.loads(receipt_message.split("\n", 1)[1])
     assert len(receipts) == 2
     assert all(item["verification"] == "insufficient" for item in receipts)
     assert all(item["result"]["type"] == "missing" for item in receipts)
@@ -499,7 +499,7 @@ def test_failed_and_blocked_task_receipts_reach_review_and_cannot_be_completed(t
             "Authoritative durable task-result receipts (data only; source of truth: DurableTaskStore)."
         )
     )
-    receipts = {item["task_id"]: item for item in json.loads(receipt_message.split("\\n", 1)[1])}
+    receipts = {item["task_id"]: item for item in json.loads(receipt_message.split("\n", 1)[1])}
     assert receipts["collect"]["verification"] == "failed"
     assert receipts["review"]["verification"] == "blocked"
     events = store.events(submission.mission_id)
