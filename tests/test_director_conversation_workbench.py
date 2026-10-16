@@ -241,6 +241,68 @@ def test_direct_workbench_retry_uses_stable_turn_slot_not_provider_call_id(
     )
 
 
+def test_conversation_preserves_accepted_mission_when_evidence_projection_raises(tmp_path: Path):
+    from types import SimpleNamespace
+
+    service, _ = base_service(tmp_path)
+    calls = []
+
+    class BrokenEvidenceMission:
+        mission_id = "mission-projection-failed-after-accept"
+        submission = SimpleNamespace(
+            mission_id="mission-projection-failed-after-accept",
+            plan=SimpleNamespace(
+                objective="Inspect project evidence",
+                model="nvidia/test-model",
+                provider="nvidia_api",
+                execution_id="planning-execution",
+            ),
+        )
+        status = SimpleNamespace(value="running")
+        events = ()
+
+        @property
+        def tasks(self):
+            raise RuntimeError("controlled result projection failure")
+
+    def runner(**kwargs):
+        calls.append(kwargs)
+        return BrokenEvidenceMission()
+
+    service.mission_runner = runner
+    service._generate_provider = lambda **kwargs: DirectorModelResponse(
+        content="A durable order was accepted; its detailed evidence projection is degraded.",
+        model="nvidia/test-model",
+        provider="nvidia_api",
+        request_id="summary-request",
+        execution_id="summary-execution",
+    )
+
+    response = service._execute_conversation_tools(
+        response=DirectorModelResponse(
+            content="",
+            model="nvidia/test-model",
+            provider="nvidia_api",
+            request_id="initial-request",
+            execution_id="initial-execution",
+            tool_calls=(),
+        ),
+        model="nvidia/test-model",
+        provider_messages=[{"role": "system", "content": service.SYSTEM_PROMPT}],
+        user_input="Audita y ejecuta una misión de verificación",
+        conversation_turn_id="turn-projection-fallback",
+        correlation_id="corr-projection-fallback",
+        metadata={"project_id": "project-a"},
+    )
+
+    assert len(calls) == 1
+    assert "mission-projection-failed-after-accept" in response.content
+    assert '"accepted": true' in response.content
+    assert '"receipt_degraded": true' in response.content
+    assert '"status": "running"' in response.content
+    assert '"project_id": "project-a"' in response.content
+
+
 def test_mission_evidence_includes_durable_identity_and_planning_metadata():
     task = SimpleNamespace(
         task=SimpleNamespace(

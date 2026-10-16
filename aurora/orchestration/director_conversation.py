@@ -937,6 +937,7 @@ Keep responses useful and concise unless the human asks for depth."""
             else:
                 calls = ()
                 objective = str(user_input or "").strip()
+                mission = None
                 try:
                     mission = self._invoke_mission_runner(
                         objective=objective,
@@ -953,14 +954,16 @@ Keep responses useful and concise unless the human asks for depth."""
                     )
                     results.append(evidence)
                 except Exception as exc:
-                    results.append({
-                        "status": "failed",
-                        "objective": objective,
-                        "error": str(exc)[:4000],
-                        "routing_fallback": (
-                            "explicit_mission_request_without_run_mission_tool_call"
-                        ),
-                    })
+                    evidence = self._degraded_mission_evidence(
+                        mission,
+                        objective=objective,
+                        project_id=(metadata or {}).get("project_id"),
+                        error=exc,
+                    )
+                    evidence["routing_fallback"] = (
+                        "explicit_mission_request_without_run_mission_tool_call"
+                    )
+                    results.append(evidence)
 
         if len(calls) > 4:
             raise DirectorConversationError("Director requested too many conversation tools")
@@ -970,6 +973,7 @@ Keep responses useful and concise unless the human asks for depth."""
                 if self.mission_runner is None:
                     raise DirectorConversationError("run_mission is unavailable")
                 objective, explicit_tasks = self._normalize_mission_tool_arguments(arguments)
+                mission = None
                 try:
                     # A durable turn slot is stable even if a provider retry
                     # regenerates different tool-call IDs or arguments. Different
@@ -1003,11 +1007,12 @@ Keep responses useful and concise unless the human asks for depth."""
                         )
                     results.append(self._mission_evidence(mission))
                 except Exception as exc:
-                    results.append({
-                        "status": "failed",
-                        "objective": objective,
-                        "error": str(exc)[:4000],
-                    })
+                    results.append(self._degraded_mission_evidence(
+                        mission,
+                        objective=objective,
+                        project_id=(metadata or {}).get("project_id"),
+                        error=exc,
+                    ))
                 continue
             if call.name == self._WORKBENCH_TOOL.name:
                 if self.workbench is None:
@@ -1242,6 +1247,73 @@ Keep responses useful and concise unless the human asks for depth."""
                     "mime_type": mime_type,
                     "data": data,
                 })
+
+    @staticmethod
+    def _degraded_mission_evidence(
+        mission: Any,
+        *,
+        objective: str,
+        project_id: str | None,
+        error: BaseException,
+    ) -> dict[str, Any]:
+        """Preserve accepted mission identity if receipt projection itself fails."""
+        submission = getattr(mission, "submission", None) if mission is not None else None
+        mission_id = (
+            getattr(mission, "mission_id", None) if mission is not None else None
+        ) or getattr(submission, "mission_id", None)
+        if not (
+            isinstance(mission_id, str)
+            and mission_id.strip()
+            and submission is not None
+        ):
+            return {
+                "status": "failed",
+                "objective": objective,
+                "error": str(error)[:4000],
+            }
+
+        raw_status = getattr(mission, "status", "running")
+        raw_status = getattr(raw_status, "value", raw_status)
+        status = str(raw_status or "running").strip().lower()
+        if status not in {"succeeded", "failed", "blocked", "running"}:
+            status = "running"
+
+        resolved_project_id = project_id
+        try:
+            for event in tuple(getattr(mission, "events", ()) or ()):
+                if getattr(event, "event_type", None) != "mission_submitted":
+                    continue
+                payload = getattr(event, "payload", None)
+                if isinstance(payload, Mapping):
+                    candidate = payload.get("project_id") or getattr(
+                        event, "project_id", None
+                    )
+                    if isinstance(candidate, str) and candidate.strip():
+                        resolved_project_id = candidate.strip()
+                        break
+        except Exception:
+            # Projection is already degraded. Preserve the caller's canonical
+            # project binding and the accepted mission ID rather than fail again.
+            pass
+
+        return {
+            "mission_id": mission_id,
+            "project_id": resolved_project_id,
+            "accepted": True,
+            "status": status,
+            "wait_timed_out": False,
+            "objective": objective,
+            "task_count": 0,
+            "tasks": [],
+            "persistence_evidence": {
+                "mission_id_present": True,
+                "task_ids_returned_by_runtime": [],
+                "durable_event_count": 0,
+                "durable_events": [],
+                "projection_error": str(error)[:1000],
+            },
+            "receipt_degraded": True,
+        }
 
     @staticmethod
     def _mission_evidence(mission: Any) -> dict[str, Any]:

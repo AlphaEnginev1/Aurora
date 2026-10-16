@@ -1,6 +1,6 @@
 """Construct Aurora orchestration and autonomous Director services."""
 from __future__ import annotations
-import json, os
+import json, logging, os
 from pathlib import Path
 from aurora.failure_tracker import report_failure
 from aurora.autonomy.acquisition import AcquisitionManager
@@ -67,7 +67,8 @@ from .durable_director import DurableDirectorService
 from .engine import OrchestrationEngine
 from .event_bus import DurableEventBus
 from .mission_memory import MissionMemory
-from .director_runtime import DirectorMissionWaitTimeout, DirectorRuntime
+from .director_runtime import DirectorMissionWaitTimeout, DirectorRuntime, MissionRuntimeResult
+from .task_engine import TaskStatus
 from .director_eligibility import DirectorEligibilityStore
 from .director_conversation import DirectorConversationService
 from .task_engine import TaskEngine
@@ -937,6 +938,37 @@ def build_director_runtime(*, inference_policy_path: str | Path, autonomy_policy
             )
         except DirectorMissionWaitTimeout as exc:
             return exc.result
+        except Exception:
+            # submit_mission has already committed the durable order. A later
+            # status/DB/worker exception must not turn this accepted request into
+            # a failed conversation turn whose request_id cannot be replayed.
+            logging.getLogger(__name__).exception(
+                "mission %s was accepted but waiting for its status failed; "
+                "preserving a conservative durable receipt",
+                submission.mission_id,
+            )
+            try:
+                snapshot = runtime.durable_mission_snapshot(submission.mission_id)
+            except Exception:
+                logging.getLogger(__name__).exception(
+                    "could not read durable snapshot for accepted mission %s",
+                    submission.mission_id,
+                )
+                snapshot = None
+            if snapshot is not None:
+                return snapshot
+
+            # Even if status reads are temporarily unavailable, preserve the
+            # authoritative submission identity and mark it as running/unknown.
+            # The same request_id can later refresh this receipt without resubmitting.
+            return MissionRuntimeResult(
+                submission=submission,
+                status=TaskStatus.RUNNING,
+                tasks=(),
+                events=(),
+                wait_timed_out=False,
+                wait_timeout_seconds=None,
+            )
 
     conversation_service.mission_runner = run_durable_conversation_mission
     conversation_service.mission_status_reader = runtime.durable_mission_snapshot
