@@ -509,6 +509,30 @@ def test_failed_and_blocked_task_receipts_reach_review_and_cannot_be_completed(t
     assert not any(event.event_type == "mission_succeeded" for event in events)
 
 
+def test_capability_receipt_rejects_nonzero_exit_and_timeout_even_with_output():
+    nonzero = {
+        "type": "capability",
+        "returncode": 17,
+        "timed_out": False,
+        "output": {"partial": "data was produced, but the command failed"},
+        "truncated": False,
+    }
+    verified, reasons = DirectorRuntime._verified_result_payload(nonzero)
+    assert verified is False
+    assert any("returncode" in reason for reason in reasons)
+
+    timed_out = {
+        "type": "capability",
+        "returncode": 0,
+        "timed_out": True,
+        "output": {"partial": "data was produced before timeout"},
+        "truncated": False,
+    }
+    verified, reasons = DirectorRuntime._verified_result_payload(timed_out)
+    assert verified is False
+    assert any("timed out" in reason for reason in reasons)
+
+
 def test_runtime_restarts_and_recovers_running_mission(tmp_path: Path):
     runtime, store, planner, engine = make_runtime(tmp_path)
     submission = runtime.submit_mission(objective="recover me")
