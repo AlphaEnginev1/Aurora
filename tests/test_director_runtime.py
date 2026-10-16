@@ -598,7 +598,9 @@ def test_runtime_replays_durable_continue_review_after_restart_without_replannin
         for event in events_after_crash
     )
 
-    runtime2, store2, planner2, _engine2 = make_runtime(tmp_path)
+    runtime2, store2, planner2, _engine2 = make_runtime(
+        tmp_path, max_continue_reviews=0
+    )
     result = runtime2.run_until_terminal(submission)
 
     assert result.status is TaskStatus.SUCCEEDED
