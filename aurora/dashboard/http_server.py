@@ -241,14 +241,25 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                                 raise DashboardConversationAPIError(
                                     "X-Aurora-Request-ID was already used for different upload content"
                                 )
-                mission_id = (
-                    self.headers.get("X-Aurora-Mission-Id", "").strip()
-                    or (
+                requested_mission_id = self.headers.get("X-Aurora-Mission-Id", "").strip() or None
+                if requested_mission_id is not None and (
+                    len(requested_mission_id) > 256 or "\x00" in requested_mission_id
+                ):
+                    raise DashboardConversationAPIError(
+                        "X-Aurora-Mission-Id must be at most 256 non-null characters"
+                    )
+                if requested_mission_id is not None:
+                    if project_id is not None:
+                        scope_token = hashlib.sha256(project_id.encode("utf-8")).hexdigest()[:12]
+                        mission_id = f"{requested_mission_id}:project:{scope_token}"
+                    else:
+                        mission_id = requested_mission_id
+                else:
+                    mission_id = (
                         f"dashboard-upload-{request_digest}"
                         if request_digest
                         else f"dashboard-upload-{uuid.uuid4().hex}"
                     )
-                )
                 result = self.workbench.execute(
                     WorkbenchRequest(
                         capability="workbench:artifact:intake",
