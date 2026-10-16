@@ -139,9 +139,15 @@ If no Workbench action is needed, answer normally.
                 # never let a model-controlled idempotency_key alter the durable
                 # request fingerprint or redirect an action replay.
                 call_options = dict(call.options or {})
+                # Project scope and correlation are runtime-owned execution
+                # identity, not fields a model-generated tool option may replace.
                 call_options.pop("idempotency_key", None)
                 call_options.pop("work_id", None)
+                call_options.pop("correlation_id", None)
                 call_options["work_id"] = mission_id
+                scoped_project_id = current_metadata.get("project_id")
+                if isinstance(scoped_project_id, str) and scoped_project_id.strip():
+                    call_options["project_id"] = scoped_project_id
                 idempotency_key = (
                     f"agent-task:{mission_id}:{task_id}:call:{executed}"
                     if task_id and getattr(self.workbench, "session_store", None) is not None
@@ -155,6 +161,12 @@ If no Workbench action is needed, answer normally.
                         reason=reason,
                         arguments=call.arguments,
                         options=call_options,
+                        correlation_id=(
+                            str(current_metadata["correlation_id"])
+                            if isinstance(current_metadata.get("correlation_id"), str)
+                            and current_metadata["correlation_id"].strip()
+                            else None
+                        ),
                         idempotency_key=idempotency_key,
                     )
                 )
