@@ -94,21 +94,27 @@ class InferenceDirectorProvider:
                 }
             else:
                 prompt_messages.insert(0, {"role": "system", "content": instruction})
+        request_metadata = {
+            **dict(metadata or {}),
+            "role": role,
+            "director_tools": [tool.name for tool in tools],
+        }
         request = InferenceRequest(
             messages=prompt_messages,
             model=model,
             temperature=0.0,
             max_tokens=3000,
-            metadata={
-                **dict(metadata or {}),
-                "role": role,
-                "director_tools": [tool.name for tool in tools],
-            },
+            metadata=request_metadata,
             request_id=uuid4().hex,
         )
+        routing_capability = str(request_metadata.get("routing_capability") or "reasoning")
+        preferred = request_metadata.get("preferred_models") or ()
+        if not isinstance(preferred, (list, tuple)) or not all(isinstance(item, str) for item in preferred):
+            preferred = ()
         response: InferenceResponse = self._router.generate(
             request,
-            capability="reasoning",
+            capability=routing_capability,
+            preferred_models=tuple(preferred),
         )
         tool_calls = self._parse_tool_calls(response.content, tools)
         return DirectorModelResponse(
