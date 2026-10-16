@@ -191,6 +191,19 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                     len(request_id) > 256 or "\x00" in request_id
                 ):
                     raise DashboardConversationAPIError("X-Aurora-Request-ID must be at most 256 non-null characters")
+                project_id = self.headers.get("X-Aurora-Project-ID", "").strip() or None
+                if project_id is not None and (
+                    len(project_id) > 256 or "\x00" in project_id
+                ):
+                    raise DashboardConversationAPIError("X-Aurora-Project-ID must be at most 256 non-null characters")
+                from aurora.workbench import WorkbenchRequest, WorkbenchError
+                if project_id is not None:
+                    try:
+                        upload_root = self.workbench.resolve_project_workspace(project_id) / "uploads"
+                    except WorkbenchError as exc:
+                        raise DashboardConversationAPIError(f"invalid upload project scope: {exc}") from exc
+                else:
+                    upload_root = self.workbench.runtime_root / "uploads"
                 content_length = int(self.headers.get("Content-Length", "0"))
                 max_bytes = 25 * 1024 * 1024
                 if content_length <= 0 or content_length > max_bytes:
@@ -199,7 +212,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 if len(data) != content_length:
                     raise DashboardConversationAPIError("upload body was incomplete")
                 content_sha256 = hashlib.sha256(data).hexdigest()
-                uploads = self.workbench.runtime_root / "uploads"
+                uploads = upload_root.resolve()
                 uploads.mkdir(parents=True, exist_ok=True)
                 clean_name = re.sub(r"[^A-Za-z0-9._-]", "_", safe_name)
                 if request_id is None:
@@ -207,7 +220,10 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                     destination.write_bytes(data)
                     request_digest = None
                 else:
-                    request_digest = hashlib.sha256(request_id.encode("utf-8")).hexdigest()[:32]
+                    scope_key = project_id or "__global__"
+                    request_digest = hashlib.sha256(
+                        f"{scope_key}\x00{request_id}".encode("utf-8")
+                    ).hexdigest()[:32]
                     destination = uploads / f"{request_digest}-{clean_name}"
                     # Never overwrite a previously accepted request with different
                     # bytes. Replays are allowed to reuse the exact persisted input.
@@ -233,7 +249,6 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                         else f"dashboard-upload-{uuid.uuid4().hex}"
                     )
                 )
-                from aurora.workbench import WorkbenchRequest
                 result = self.workbench.execute(
                     WorkbenchRequest(
                         capability="workbench:artifact:intake",
@@ -244,15 +259,20 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                             "work_id": mission_id,
                             "filename": safe_name,
                             "upload_sha256": content_sha256,
+                            **({"project_id": project_id} if project_id is not None else {}),
                         },
                         idempotency_key=(
-                            f"dashboard-upload:{request_id}"
-                            if request_id and getattr(self.workbench, "session_store", None) is not None
+                            f"dashboard-upload:{request_digest}"
+                            if request_digest and getattr(self.workbench, "session_store", None) is not None
                             else None
                         ),
                     )
                 )
-                self._json(201, {"artifact": result.output, "mission_id": mission_id})
+                self._json(201, {
+                    "artifact": result.output,
+                    "mission_id": mission_id,
+                    "project_id": project_id,
+                })
                 return
             payload = self._json_body()
             if parsed.path == "/api/dashboard/update":
