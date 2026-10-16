@@ -223,6 +223,80 @@ def test_later_phase_supersedes_previous_failed_phase(tmp_path: Path):
     assert store.mission_status("mission-1") == "succeeded"
 
 
+def test_later_phase_can_depend_on_succeeded_prior_phase_task(tmp_path: Path):
+    store = DurableTaskStore(tmp_path / "cross-phase-success.db")
+    store.enqueue(
+        "mission-cross-phase",
+        [DelegatedTask("collect", "researcher", "collect evidence")],
+        phase=0,
+    )
+    first = store.claim_next("mission-cross-phase", "worker-a")
+    assert first is not None
+    store.complete(
+        "mission-cross-phase",
+        "collect",
+        status="succeeded",
+        worker_id="worker-a",
+        claim_token=first.claim_token,
+        result={"type": "model", "content": "evidence"},
+    )
+
+    store.enqueue(
+        "mission-cross-phase",
+        [
+            DelegatedTask(
+                "r1_validate",
+                "validator",
+                "validate prior evidence",
+                depends_on=("collect",),
+            )
+        ],
+        phase=1,
+    )
+
+    second = store.claim_next("mission-cross-phase", "worker-b")
+    assert second is not None
+    assert second.task.task_id == "r1_validate"
+    assert second.task.depends_on == ("collect",)
+
+
+def test_later_phase_rejects_non_succeeded_prior_dependency(tmp_path: Path):
+    store = DurableTaskStore(tmp_path / "cross-phase-failed.db")
+    store.enqueue(
+        "mission-cross-phase-failed",
+        [DelegatedTask("collect", "researcher", "collect evidence")],
+        phase=0,
+    )
+    first = store.claim_next("mission-cross-phase-failed", "worker-a")
+    assert first is not None
+    store.complete(
+        "mission-cross-phase-failed",
+        "collect",
+        status="failed",
+        worker_id="worker-a",
+        claim_token=first.claim_token,
+        error="source unavailable",
+    )
+
+    with pytest.raises(TaskStoreError, match="must have succeeded"):
+        store.enqueue(
+            "mission-cross-phase-failed",
+            [
+                DelegatedTask(
+                    "r1_validate",
+                    "validator",
+                    "validate prior evidence",
+                    depends_on=("collect",),
+                )
+            ],
+            phase=1,
+        )
+
+    assert [item.task.task_id for item in store.list_tasks("mission-cross-phase-failed")] == [
+        "collect"
+    ]
+
+
 def test_enqueue_rolls_back_task_rows_and_initial_events_as_one_transaction(tmp_path: Path):
     store = DurableTaskStore(tmp_path / "tasks.db")
     tasks = (
