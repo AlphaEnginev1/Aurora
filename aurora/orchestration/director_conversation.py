@@ -1149,13 +1149,15 @@ Keep responses useful and concise unless the human asks for depth."""
             # DirectorRuntime finalizes the durable order, the conversation must
             # not override this receipt with one task's intermediate failed state.
             status = "running"
+        elif mission_status:
+            # The Director's durable terminal decision governs the mission as a
+            # whole. Failed/blocked tasks from earlier phases remain in the
+            # evidence, but must not contradict a later successful recovery phase.
+            status = str(mission_status)
         elif failed:
             status = "failed"
         elif blocked:
             status = "blocked"
-        elif mission_status:
-            # Report the durable terminal decision, including a final review block.
-            status = str(mission_status)
         elif tasks and all(item["status"] == "succeeded" for item in tasks):
             status = "succeeded"
         else:
