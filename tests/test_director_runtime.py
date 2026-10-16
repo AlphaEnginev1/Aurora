@@ -452,6 +452,34 @@ def test_director_rejects_success_result_bound_to_wrong_correlation_id(tmp_path:
     assert any(event.event_type == "mission_blocked" for event in events)
 
 
+def test_model_result_is_insufficient_when_workbench_receipt_failed():
+    receipt = {
+        "type": "model",
+        "model": "fake/model",
+        "provider": "fake",
+        "request_id": "request-model",
+        "execution_id": "execution-model",
+        "content": "The file was written successfully.",
+        "selected_model": "fake/model",
+        "routing": {"selected_model": "fake/model"},
+        "workbench_receipts": [
+            {
+                "capability": "workbench:file:write",
+                "operation": "file_write",
+                "status": "failed",
+                "receipt_id": "receipt-failed",
+                "error": "controlled write failure",
+            }
+        ],
+    }
+
+    verified, problems = DirectorRuntime._verified_result_payload(receipt)
+
+    assert verified is False
+    assert any("Workbench receipt 0 status is failed" in item for item in problems)
+    assert any("Workbench receipt 0 reports an execution error" in item for item in problems)
+
+
 def test_director_cannot_complete_when_succeeded_task_has_no_durable_result(tmp_path: Path):
     runtime, store, planner, _engine = make_runtime(tmp_path)
     submission = runtime.submit_mission(objective="verify durable result output")
