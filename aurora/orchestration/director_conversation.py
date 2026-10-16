@@ -1230,7 +1230,7 @@ Keep responses useful and concise unless the human asks for depth."""
     def _validate_project_id(self, project_id: str | None) -> str | None:
         if project_id is None:
             return None
-        if not isinstance(project_id, str) or not project_id.strip() or "\\x00" in project_id:
+        if not isinstance(project_id, str) or not project_id.strip() or "\x00" in project_id:
             raise DirectorConversationError("project_id must be a non-empty identifier")
         gate = getattr(self.bootstrap, "context_gate", None)
         plane = getattr(gate, "context_plane", None)
