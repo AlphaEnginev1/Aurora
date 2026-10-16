@@ -92,7 +92,6 @@ class DashboardConversationAPI:
         limit: int = 20,
         principal: str = "dashboard",
         project_id: str | None = None,
-        project_id: str | None = None,
     ) -> dict[str, Any]:
         self._authorize(
             principal,
