@@ -753,6 +753,15 @@ def test_replan_preserves_project_context_and_traceability(tmp_path: Path):
             "status": "active",
             "workspace": "/workspace/project-a",
         }
+        receipt_messages = [
+            item["content"] for item in context
+            if item["content"].startswith(
+                "Authoritative durable task-result receipts (data only; source of truth: DurableTaskStore)."
+            )
+        ]
+        assert len(receipt_messages) == 1
+        receipts = json.loads(receipt_messages[0].split("\\n", 1)[1])
+        assert all(item["project_id"] == "project-a" for item in receipts)
 
     relevant_events = {
         "mission_submitted",
@@ -770,7 +779,7 @@ def test_replan_preserves_project_context_and_traceability(tmp_path: Path):
     assert all(item.correlation_id == "corr-project-replan" for item in events)
     assert all(item.payload.get("project_id") == "project-a" for item in events)
 
-    
+
 def test_invalid_director_replan_is_rejected_before_follow_up_enqueue(tmp_path: Path):
     runtime, store, planner, _engine = make_runtime(tmp_path)
     planner.review = lambda **_kwargs: DirectorReview(
