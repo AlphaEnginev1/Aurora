@@ -48,6 +48,10 @@ Also simulate termination after `director_review_started` but before `director_r
 
 Inject a one-time storage error after a valid `continue` decision receipt has committed but before follow-up task rows can be enqueued. The runtime must not write a terminal `mission_blocked` marker. Its next cycle must replay the exact saved graph from the receipt, without asking the planner for the same decision again, and create exactly one follow-up task set plus the missing decision/reopen/recovery markers. A later successful phase must still reach its own Director review and terminal decision.
 
+### RD-09 — Project and correlation identity across inference and Workbench execution
+
+Run a project-bound task and a project-bound conversation whose model-generated Workbench options deliberately name a different project and correlation ID. Runtime-owned scope must override those options. The inference request, Workbench request, task result receipt, mission correlation, and terminal review must remain bound to the canonical identity. Mutating a versioned durable result receipt to name another correlation or project must cause the Director's completion evidence gate to reject success.
+
 ## Closure evidence
 
 Block 6 is VERIFIED on the canonical `main` line.

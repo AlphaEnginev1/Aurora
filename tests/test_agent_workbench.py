@@ -155,7 +155,12 @@ def test_agent_workbench_uses_runtime_owned_stable_key_and_work_id_across_retrie
 
     request = InferenceRequest(
         messages=[{"role": "user", "content": "Write one controlled task output."}],
-        metadata={"role": "engineer", "task_id": "write-task"},
+        metadata={
+            "role": "engineer",
+            "task_id": "write-task",
+            "project_id": "project-a",
+            "correlation_id": "corr-authoritative",
+        },
     )
     for supplied_key, supplied_work_id in (
         ("model-key-one", "model-work-one"),
@@ -166,7 +171,7 @@ def test_agent_workbench_uses_runtime_owned_stable_key_and_work_id_across_retrie
             + supplied_work_id
             + '","idempotency_key":"'
             + supplied_key
-            + '"}}]}',
+            + '","project_id":"project-b","correlation_id":"model-chosen"}}]}',
             "The write request was processed.",
         ]
         loop.run(
@@ -183,5 +188,8 @@ def test_agent_workbench_uses_runtime_owned_stable_key_and_work_id_across_retrie
     assert first.idempotency_key == second.idempotency_key
     assert first.idempotency_key.startswith("agent-task:mission-1:write-task:call:")
     assert first.options["work_id"] == second.options["work_id"] == "mission-1"
+    assert first.options["project_id"] == second.options["project_id"] == "project-a"
+    assert "correlation_id" not in first.options
+    assert first.correlation_id == second.correlation_id == "corr-authoritative"
     assert "idempotency_key" not in first.options
     assert first.idempotency_key not in {"model-key-one", "model-key-two"}

@@ -287,6 +287,8 @@ class TaskEngine:
         task: DelegatedTask,
         *,
         execution_scope: str | None = None,
+        mission_id: str | None = None,
+        correlation_id: str | None = None,
     ) -> DelegatedTaskResult:
         """Execute one already-dependency-resolved task for a durable worker."""
         self._validate_task_fields(task)
@@ -309,6 +311,8 @@ class TaskEngine:
                 workspace=workspace,
                 trusted_artifact_ids=trusted_artifacts,
                 execution_scope=execution_scope,
+                mission_id=mission_id,
+                correlation_id=correlation_id,
             )
         except (CapabilityExecutionError, RuntimeError, ValueError) as exc:
             result = DelegatedTaskResult(
@@ -563,7 +567,14 @@ class TaskEngine:
         workspace: Path | None = None,
         trusted_artifact_ids: tuple[str, ...] = (),
         execution_scope: str | None = None,
+        mission_id: str | None = None,
+        correlation_id: str | None = None,
     ):
+        mission_identity = mission_id or (
+            execution_scope.split(":", 1)[0]
+            if execution_scope and ":" in execution_scope
+            else execution_scope or task.task_id
+        )
         skill_assignment = None
         if self.skill_registry is not None and self.organization is not None:
             agent = self.organization.resolve_agent(task.role)
@@ -605,8 +616,13 @@ class TaskEngine:
         if task.capability == "research":
             if self.research_service is None:
                 raise TaskEngineError("research task requires a configured research service")
+            request_id = (
+                f"research-{mission_identity}-{task.task_id}"
+                if mission_id is not None
+                else f"research-{task.task_id}"
+            )
             request = ResearchRequest(
-                request_id=f"research-{task.task_id}",
+                request_id=request_id,
                 objective=task.objective,
                 required_sources=tuple(source_args),
                 max_sources=max(1, len(source_args)) if source_args else 10,
@@ -641,31 +657,24 @@ class TaskEngine:
 
         if task.capability:
             execution_workspace = workspace or self.workspace_root
-            mission_identity = (
-                execution_scope.split(":", 1)[0]
-                if execution_scope and ":" in execution_scope
-                else execution_scope or task.task_id
-            )
+            constraints = {
+                "mission_id": mission_identity,
+                "work_id": mission_identity,
+                # Stable across the worker's attempt number; a retry must
+                # resume the same Workbench action rather than repeat an
+                # external side effect with a new identity.
+                "idempotency_key": f"task:{mission_identity}:{task.task_id}",
+            }
+            if task.project_id:
+                constraints["project_id"] = task.project_id
+            if correlation_id:
+                constraints["correlation_id"] = correlation_id
             request = CapabilityRequest(
                 name=task.capability,
                 actor=task.role,
                 reason=task.objective,
-                constraints={
-                    "mission_id": mission_identity,
-                    "work_id": mission_identity,
-                    # Stable across the worker's attempt number; a retry must
-                    # resume the same Workbench action rather than repeat an
-                    # external side effect with a new identity.
-                    "idempotency_key": f"task:{mission_identity}:{task.task_id}",
-                },
+                constraints=constraints,
             )
-            if task.project_id:
-                request = CapabilityRequest(
-                    name=request.name,
-                    actor=request.actor,
-                    reason=request.reason,
-                    constraints={**request.constraints, "project_id": task.project_id},
-                )
             return self.orchestration.run_capability_task(
                 task_id=task.task_id,
                 role=task.role,
@@ -730,11 +739,6 @@ class TaskEngine:
                 "Use only through Aurora's capability boundary; do not bypass it.\n"
                 + manifest
             )
-        mission_identity = (
-            execution_scope.split(":", 1)[0]
-            if execution_scope and ":" in execution_scope
-            else execution_scope or task.task_id
-        )
         return self.orchestration.run_task(
             task_id=task.task_id,
             role=task.role,
@@ -751,6 +755,7 @@ class TaskEngine:
                 or None
             ),
             project_id=task.project_id,
+            correlation_id=correlation_id,
         )
 
     def _workspace_for_task(self, task: DelegatedTask, execution_scope: str | None) -> Path:

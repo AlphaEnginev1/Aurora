@@ -10,6 +10,7 @@ from aurora.orchestration.engine import OrchestrationEngine
 
 class FakeRouter(ModelRouter):
     def generate(self, request, capability=None):
+        self.last_request = request
         assert capability == "reasoning"
         assert request.metadata["task_id"] == "task-1"
         assert request.metadata["role"] == "researcher"
@@ -50,6 +51,27 @@ def test_orchestration_routes_agent_task():
     assert result.task_id == "task-1"
     assert result.role == "researcher"
     assert result.response.content == "verified"
+
+
+def test_orchestration_attaches_canonical_mission_context_to_inference_metadata():
+    router = FakeRouter(
+        [ModelSpec("fake/model", "fake", "https://example.invalid")]
+    )
+    engine = OrchestrationEngine(router)
+    engine.run_task(
+        task_id="task-1",
+        role="researcher",
+        objective="Inspect the scoped project",
+        mission_id="mission-project-a",
+        project_id="project-a",
+        correlation_id="corr-project-a",
+        use_workbench=False,
+    )
+
+    request = router.last_request
+    assert request.metadata["mission_id"] == "mission-project-a"
+    assert request.metadata["project_id"] == "project-a"
+    assert request.metadata["correlation_id"] == "corr-project-a"
 
 
 def test_orchestration_routes_capability_task():

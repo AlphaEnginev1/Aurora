@@ -295,6 +295,42 @@ def test_task_engine_delegates_governed_research(tmp_path):
     assert research.claim_ids == ("claim-1",)
 
 
+def test_research_request_id_includes_mission_identity_for_durable_tasks(tmp_path):
+    requests = []
+
+    class RecordingResearchService:
+        def retrieve_and_extract(self, request):
+            requests.append(request)
+            return (), ()
+
+    engine = TaskEngine(
+        FakeRouter([ModelSpec("fake/model", "fake", "https://example.invalid")]),
+        tmp_path / "workspace",
+        research_service=RecordingResearchService(),
+    )
+    task = DelegatedTask(
+        "research-same-id",
+        "researcher",
+        "investigate the target",
+        capability="research",
+        args=("url:https://example.test/source",),
+    )
+
+    for mission_id in ("mission-a", "mission-b"):
+        result = engine.execute_one(
+            task,
+            execution_scope=f"{mission_id}:research-same-id:attempt:1",
+            mission_id=mission_id,
+            correlation_id=f"corr-{mission_id}",
+        )
+        assert result.status is TaskStatus.SUCCEEDED
+
+    assert [item.request_id for item in requests] == [
+        "research-mission-a-research-same-id",
+        "research-mission-b-research-same-id",
+    ]
+
+
 def test_untrusted_research_reference_fails_closed_before_model_execution(tmp_path):
     from aurora.inference.model_performance import ModelPerformanceStore
     from aurora.organization import AgentSpec, DepartmentSpec, OrganizationRegistry

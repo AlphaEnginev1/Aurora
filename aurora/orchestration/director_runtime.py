@@ -4257,6 +4257,40 @@ class DirectorRuntime:
             "preview_truncated": len(rendered) > limit,
         }
 
+    def _task_result_identity_problems(
+        self,
+        mission_id: str,
+        stored: StoredTask,
+    ) -> tuple[str, ...]:
+        """Check that a versioned result receipt is bound to its durable mission and task."""
+        expected_project = self._mission_project_id(mission_id)
+        expected_correlation = self._mission_correlation_id(mission_id)
+        problems: list[str] = []
+        if expected_project is not None and stored.task.project_id != expected_project:
+            problems.append(
+                f"task project_id {stored.task.project_id!r} differs from mission project_id {expected_project!r}"
+            )
+
+        result = stored.result
+        if not isinstance(result, Mapping) or result.get("identity_version") != 1:
+            # Legacy receipts remain readable; do not pretend they contain identity
+            # fields they were never written with. All new worker receipts are v1.
+            return tuple(problems)
+
+        required_identity = {
+            "mission_id": mission_id,
+            "project_id": stored.task.project_id,
+            "correlation_id": expected_correlation,
+        }
+        for field, expected in required_identity.items():
+            if field not in result:
+                problems.append(f"versioned task result receipt is missing {field}")
+            elif result.get(field) != expected:
+                problems.append(
+                    f"task result {field} {result.get(field)!r} differs from canonical {expected!r}"
+                )
+        return tuple(problems)
+
     def _durable_task_review_receipts(self, mission_id: str) -> list[dict[str, Any]]:
         """Prepare compact, identity-bound task receipts for the Director review."""
         receipts: list[dict[str, Any]] = []
@@ -4264,6 +4298,10 @@ class DirectorRuntime:
             result = stored.result if isinstance(stored.result, Mapping) else None
             result_type = result.get("type") if result is not None else None
             verified, problems = self._verified_result_payload(result)
+            identity_problems = self._task_result_identity_problems(mission_id, stored)
+            if identity_problems:
+                problems = (*problems, *identity_problems)
+                verified = False
             status = stored.status
             if status != TaskStatus.SUCCEEDED.value:
                 verification = status
@@ -4283,7 +4321,7 @@ class DirectorRuntime:
                     "model", "provider", "request_id", "execution_id",
                     "selected_model", "receipt_id", "artifact_id", "provenance",
                     "operation", "status", "returncode", "timed_out", "trust_state",
-                    "correlation_id", "error",
+                    "identity_version", "mission_id", "project_id", "correlation_id", "error",
                 ):
                     value = result.get(field)
                     if value is not None:
@@ -4341,7 +4379,9 @@ class DirectorRuntime:
                 gaps.append(f"task {stored.task.task_id} has status {stored.status}")
                 continue
             verified, problems = self._verified_result_payload(stored.result)
-            if not verified:
+            identity_problems = self._task_result_identity_problems(mission_id, stored)
+            problems = (*problems, *identity_problems)
+            if not verified or identity_problems:
                 detail = ", ".join(problems) or "result evidence could not be verified"
                 gaps.append(f"task {stored.task.task_id}: {detail}")
         return tuple(gaps[:16])

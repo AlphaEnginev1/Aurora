@@ -207,6 +207,10 @@ def test_direct_workbench_retry_uses_stable_turn_slot_not_provider_call_id(
                     arguments={
                         "capability": "file:write",
                         "arguments": ["notes.txt", "stable content"],
+                        "options": {
+                            "project_id": "project-b",
+                            "correlation_id": "model-chosen",
+                        },
                     },
                 ),
             ),
@@ -218,7 +222,7 @@ def test_direct_workbench_retry_uses_stable_turn_slot_not_provider_call_id(
             user_input="Escribe las notas",
             conversation_turn_id=turn_id,
             correlation_id=corr,
-            metadata={},
+            metadata={"project_id": "project-a"},
         )
 
     invoke("provider-call-first")
@@ -228,6 +232,9 @@ def test_direct_workbench_retry_uses_stable_turn_slot_not_provider_call_id(
     first, second = workbench.requests
     assert first.mission_id == second.mission_id == f"conversation:{turn_id}:0"
     assert first.options["work_id"] == second.options["work_id"] == first.mission_id
+    assert first.options["project_id"] == second.options["project_id"] == "project-a"
+    assert "correlation_id" not in first.options
+    assert first.correlation_id == second.correlation_id == corr
     assert first.idempotency_key == second.idempotency_key == (
         f"direct-workbench:{first.mission_id}"
     )
