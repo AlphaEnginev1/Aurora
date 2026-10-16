@@ -5,6 +5,7 @@ import json
 from aurora.inference.models import InferenceResponse
 from aurora.inference.providers.registry import ProviderRegistry, ProviderSpec
 from aurora.orchestration.director_conversation import DirectorConversationService
+from aurora.projects import ProjectRegistry, ProjectSpec, ProjectStatus
 from aurora.orchestration.director_provider import DirectorModelResponse, DirectorToolCall
 from tests.test_director_conversation import _service as base_service
 
@@ -1053,3 +1054,117 @@ def test_duplicate_run_mission_calls_with_different_call_ids_are_suppressed(tmp_
     assert len(executed) == 1
     assert executed[0]["mission_id"].startswith("mission-conversation-")
     assert "duplicate_tool_call_suppressed" in response.response_text
+
+
+
+def test_dashboard_selected_project_flows_into_durable_mission_without_name_in_prompt(tmp_path: Path):
+    service, _ = base_service(tmp_path)
+    service.project_registry = ProjectRegistry({
+        "project-alpha": ProjectSpec(
+            project_id="project-alpha",
+            name="Project Alpha",
+            objective="Owns alpha tasks",
+            status=ProjectStatus.ACTIVE,
+            repository="AlphaEnginev1/alpha",
+            workspace=str(tmp_path / "projects" / "alpha"),
+            current_state="Project is registered",
+            updated_at="2026-10-16T00:00:00Z",
+        ),
+    })
+    provider = ToolProvider()
+    service.set_provider(provider)
+    executed = []
+
+    def runner(*, objective, mission_id=None, correlation_id=None, project_id=None):
+        executed.append({
+            "objective": objective,
+            "mission_id": mission_id,
+            "correlation_id": correlation_id,
+            "project_id": project_id,
+        })
+        plan = SimpleNamespace(
+            objective=objective,
+            model="fake/director",
+            provider="fake",
+            execution_id="planning-selected-project",
+        )
+        return SimpleNamespace(
+            mission_id=mission_id,
+            project_id=project_id,
+            submission=SimpleNamespace(mission_id=mission_id, project_id=project_id, plan=plan),
+            objective=objective,
+            status=SimpleNamespace(value="succeeded"),
+            tasks=(),
+            wait_timed_out=False,
+            events=(),
+        )
+
+    service.mission_runner = runner
+    session = service.create_session()
+    response = service.send_message(
+        session_id=session.session_id,
+        user_input="Audita el repositorio y corrige los problemas encontrados.",
+        request_id="selected-project-scope-001",
+        project_id="project-alpha",
+    )
+
+    assert len(executed) == 1
+    assert executed[0]["project_id"] == "project-alpha"
+    assert executed[0]["mission_id"]
+    assert response.response_text.find('"project_id": "project-alpha"') >= 0
+    assert ("director_conversation", ("run_mission",)) in provider.calls
+
+    # Replaying the same idempotency key in the same selected project reuses
+    # the accepted conversation turn instead of submitting another mission.
+    replay = service.send_message(
+        session_id=session.session_id,
+        user_input="Audita el repositorio y corrige los problemas encontrados.",
+        request_id="selected-project-scope-001",
+        project_id="project-alpha",
+    )
+    assert replay.turn.turn_id == response.turn.turn_id
+    assert len(executed) == 1
+
+
+def test_conversation_rejects_unregistered_or_conflicting_selected_project(tmp_path: Path):
+    service, _ = base_service(tmp_path)
+    service.project_registry = ProjectRegistry({
+        "project-alpha": ProjectSpec(
+            project_id="project-alpha",
+            name="Project Alpha",
+            objective="Owns alpha tasks",
+            status=ProjectStatus.ACTIVE,
+            repository="AlphaEnginev1/alpha",
+            workspace=str(tmp_path / "projects" / "alpha"),
+            current_state="Project is registered",
+            updated_at="2026-10-16T00:00:00Z",
+        ),
+        "project-beta": ProjectSpec(
+            project_id="project-beta",
+            name="Project Beta",
+            objective="Owns beta tasks",
+            status=ProjectStatus.ACTIVE,
+            repository="AlphaEnginev1/beta",
+            workspace=str(tmp_path / "projects" / "beta"),
+            current_state="Project is registered",
+            updated_at="2026-10-16T00:00:00Z",
+        ),
+    })
+    session = service.create_session()
+
+    import pytest
+    from aurora.orchestration.director_conversation import DirectorConversationError
+
+    with pytest.raises(DirectorConversationError, match="invalid project selection"):
+        service.send_message(
+            session_id=session.session_id,
+            user_input="Inspect a task",
+            project_id="not-registered",
+        )
+
+    with pytest.raises(DirectorConversationError, match="conflicts with the project explicitly named"):
+        service.send_message(
+            session_id=session.session_id,
+            user_input="Inspect Project Alpha",
+            project_id="project-beta",
+        )
