@@ -218,7 +218,7 @@ def test_direct_workbench_retry_uses_stable_turn_slot_not_provider_call_id(
             user_input="Escribe las notas",
             conversation_turn_id=turn_id,
             correlation_id=corr,
-            metadata={},
+            metadata={"project_id": "project-a"},
         )
 
     invoke("provider-call-first")
@@ -228,9 +228,73 @@ def test_direct_workbench_retry_uses_stable_turn_slot_not_provider_call_id(
     first, second = workbench.requests
     assert first.mission_id == second.mission_id == f"conversation:{turn_id}:0"
     assert first.options["work_id"] == second.options["work_id"] == first.mission_id
+    assert first.options["project_id"] == second.options["project_id"] == "project-a"
     assert first.idempotency_key == second.idempotency_key == (
         f"direct-workbench:{first.mission_id}"
     )
+
+
+def test_direct_workbench_rejects_project_override_from_conversation_tool(
+    tmp_path: Path,
+):
+    service, _ = base_service(tmp_path)
+    service.set_provider(ToolProvider())
+
+    class FakeWorkbench:
+        def __init__(self):
+            self.calls = 0
+            self.session_store = object()
+
+        def execute(self, request):
+            self.calls += 1
+            raise AssertionError("conflicting project context must be rejected before execution")
+
+    workbench = FakeWorkbench()
+    service.workbench = workbench
+    captured = {}
+
+    def summarize(**kwargs):
+        captured["evidence"] = kwargs["messages"][-1]["content"][0]["text"]
+        return DirectorModelResponse(
+            content="Conflicto de proyecto bloqueado.",
+            model="nvidia/test-model",
+            provider="nvidia_api",
+            request_id="summary",
+            execution_id="summary-exec",
+        )
+
+    service._generate_provider = summarize
+    response = DirectorModelResponse(
+        content="",
+        model="nvidia/test-model",
+        provider="nvidia_api",
+        request_id="workbench-request",
+        execution_id="workbench-exec",
+        tool_calls=(
+            DirectorToolCall(
+                call_id="project-override",
+                name="workbench",
+                arguments={
+                    "capability": "project:inspect",
+                    "arguments": ["/workspace/project-b"],
+                    "options": {"project_id": "project-b"},
+                },
+            ),
+        ),
+    )
+    result = service._execute_conversation_tools(
+        response=response,
+        model="nvidia/test-model",
+        provider_messages=[{"role": "system", "content": service.SYSTEM_PROMPT}],
+        user_input="Inspect current project",
+        conversation_turn_id="turn-project-bound",
+        correlation_id="corr-project-bound",
+        metadata={"project_id": "project-a"},
+    )
+
+    assert workbench.calls == 0
+    assert "conflicts with the authoritative conversation session project" in captured["evidence"]
+    assert result.content.startswith("Conflicto de proyecto bloqueado.")
 
 
 def test_mission_evidence_includes_durable_identity_and_planning_metadata():
