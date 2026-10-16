@@ -260,7 +260,7 @@ class TaskEngine:
         for task in tasks:
             if task.role == "auto":
                 candidates = [
-                    DelegatedTask(task.task_id, role, task.objective, task.capability, task.args, task.depends_on, task.skills)
+                    DelegatedTask(task.task_id, role, task.objective, task.capability, task.args, task.depends_on, task.skills, task.project_id)
                     for role in member_roles
                 ]
                 selected = None
