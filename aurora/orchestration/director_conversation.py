@@ -1115,6 +1115,7 @@ Keep responses useful and concise unless the human asks for depth."""
                 correlation_id = correlation_id or durable_result.get("correlation_id")
             tasks.append({
                 "task_id": getattr(task, "task_id", None),
+                "project_id": getattr(task, "project_id", None),
                 "role": getattr(task, "role", None),
                 "status": str(value),
                 "error": getattr(item, "error", None),
@@ -1164,6 +1165,12 @@ Keep responses useful and concise unless the human asks for depth."""
         ]
         return {
             "mission_id": mission_id,
+            "project_id": next((
+                event.payload.get("project_id")
+                for event in events
+                if getattr(event, "event_type", None) == "mission_submitted"
+                and isinstance(getattr(event, "payload", None), Mapping)
+            ), None),
             "accepted": bool(mission_id and submission is not None),
             "status": status,
             "wait_timed_out": wait_timed_out,
