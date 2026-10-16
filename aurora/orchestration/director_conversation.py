@@ -793,7 +793,7 @@ Keep responses useful and concise unless the human asks for depth."""
                     mission = self._invoke_mission_runner(
                         objective=objective,
                         mission_id=(
-                            f"mission-conversation-{conversation_turn_id}"
+                            f"mission-conversation-{conversation_turn_id}-0"
                             if conversation_turn_id else None
                         ),
                         correlation_id=correlation_id,
