@@ -407,6 +407,50 @@ def test_full_director_event_bus_worker_cycle(tmp_path: Path):
     ]
 
 
+def test_director_rejects_success_result_bound_to_wrong_correlation_id(tmp_path: Path):
+    runtime, store, _planner, _engine = make_runtime(tmp_path)
+    submission = runtime.submit_mission(
+        objective="verify durable result identity",
+        mission_id="mission-result-identity",
+        correlation_id="corr-result-identity",
+    )
+
+    first_cycle = runtime.run_once()
+    collect = store.get(submission.mission_id, "collect")
+    assert collect is not None
+    assert collect.status == "succeeded"
+    assert collect.result is not None
+    assert first_cycle.did_work
+
+    corrupted = dict(collect.result)
+    corrupted["correlation_id"] = "corr-from-another-mission"
+    with store._connect() as db:
+        db.execute(
+            """
+            UPDATE tasks
+            SET result_json = ?
+            WHERE mission_id = ? AND task_id = ?
+            """,
+            (
+                json.dumps(corrupted, sort_keys=True),
+                submission.mission_id,
+                "collect",
+            ),
+        )
+
+    result = runtime.run_until_terminal(submission)
+
+    assert result.status is TaskStatus.BLOCKED
+    events = store.events(submission.mission_id)
+    rejected = next(
+        event for event in events
+        if event.event_type == "director_completion_rejected_insufficient_evidence"
+    )
+    assert any("correlation_id" in item for item in rejected.payload["evidence_gaps"])
+    assert not any(event.event_type == "mission_succeeded" for event in events)
+    assert any(event.event_type == "mission_blocked" for event in events)
+
+
 def test_director_cannot_complete_when_succeeded_task_has_no_durable_result(tmp_path: Path):
     runtime, store, planner, _engine = make_runtime(tmp_path)
     submission = runtime.submit_mission(objective="verify durable result output")
