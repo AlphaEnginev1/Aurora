@@ -938,15 +938,34 @@ Keep responses useful and concise unless the human asks for depth."""
             *provider_messages,
             {"role": "user", "content": evidence_content},
         ]
-        final_response = self._generate_provider(
-            messages=follow_up,
-            model=model,
-            role="director_conversation_result",
-            tools=(),
-            metadata=metadata,
-            capability=capability,
-            preferred_models=preferred_models,
-        )
+        try:
+            final_response = self._generate_provider(
+                messages=follow_up,
+                model=model,
+                role="director_conversation_result",
+                tools=(),
+                metadata=metadata,
+                capability=capability,
+                preferred_models=preferred_models,
+            )
+        except Exception as exc:
+            # Governed execution has already produced durable receipts. A second
+            # provider outage must not turn an accepted order into a failed
+            # conversation turn or hide the mission ID from the caller.
+            # Preserve the initial provider metadata only as provenance; the JSON
+            # execution evidence appended below remains the source of truth.
+            final_response = DirectorModelResponse(
+                content=(
+                    "La ejecución ya produjo recibos de Aurora, pero no se pudo "
+                    "generar el resumen conversacional. Consulta la evidencia "
+                    "autoritatva adjunta para conocer el estado real de la orden."
+                ),
+                model=str(getattr(response, "model", "unknown")),
+                provider=str(getattr(response, "provider", "unknown")),
+                request_id=str(getattr(response, "request_id", "unknown")),
+                execution_id=str(getattr(response, "execution_id", "unknown")),
+                tool_calls=(),
+            )
         # Keep the exact execution receipt in the persisted assistant turn. The
         # summarizing model may explain the result, but cannot omit the authoritative
         # mission ID, task outcomes, errors, planning provenance, or event evidence.
