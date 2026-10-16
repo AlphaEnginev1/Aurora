@@ -23,6 +23,9 @@ from aurora.orchestration.director_conversation import (
     DirectorConversationService,
 )
 from aurora.orchestration.director_provider import DirectorModelResponse
+from aurora.orchestration.director import DirectorPlan
+from aurora.orchestration.durable_director import DurableDirectorService
+from aurora.orchestration.task_engine import DelegatedTask, TaskEngine
 from aurora.orchestration.director_decision_knowledge_store import DirectorDecisionKnowledgeStore
 from aurora.orchestration.director_decision_performance import DirectorDecisionPerformanceStore
 from aurora.orchestration.director_decision_policy_active_store import DirectorDecisionPolicyActiveStore
@@ -348,21 +351,62 @@ def test_default_router_provider_submits_one_durable_mission_and_returns_evidenc
         ),
     ))
 
+    mission_db = tmp_path / "durable-missions.db"
+    mission_store = DurableTaskStore(mission_db)
+    planner_calls = []
+
+    class RecordingPlanner:
+        def plan(self, *, objective, context=None, model=None):
+            planner_calls.append({
+                "objective": objective,
+                "context": context,
+                "model": model,
+            })
+            return DirectorPlan(
+                objective=objective,
+                tasks=(
+                    DelegatedTask(
+                        task_id="durable-ingress-task",
+                        role="support",
+                        objective="Perform the requested project audit",
+                    ),
+                ),
+                model="fake/director",
+                provider="fake",
+                execution_id="planning-execution-123",
+            )
+
+    class NoExecutionOrchestration:
+        def run_task(self, **_kwargs):
+            raise AssertionError("submission test must not start worker execution")
+
+        def run_capability_task(self, **_kwargs):
+            raise AssertionError("submission test must not execute capabilities")
+
+    durable_director = DurableDirectorService(
+        planner=RecordingPlanner(),
+        task_engine=TaskEngine(
+            NoExecutionOrchestration(),
+            tmp_path / "durable-workspace",
+        ),
+        store=mission_store,
+    )
+
     def mission_runner(**kwargs):
         submitted.append(dict(kwargs))
-        mission_id = kwargs["mission_id"]
-        plan = SimpleNamespace(
+        submission = durable_director.submit_mission(
             objective=kwargs["objective"],
-            model="fake/director",
-            provider="fake",
-            execution_id="planning-execution-123",
+            mission_id=kwargs["mission_id"],
+            correlation_id=kwargs["correlation_id"],
         )
-        submission = SimpleNamespace(mission_id=mission_id, plan=plan)
+        # Mirror the receipt shape produced by the canonical runtime while
+        # leaving workers stopped: this regression verifies durable ingress,
+        # not downstream task completion.
         return SimpleNamespace(
-            mission_id=mission_id,
+            mission_id=submission.mission_id,
             submission=submission,
             objective=kwargs["objective"],
-            status="succeeded",
+            status="running",
             tasks=(),
             events=(),
         )
@@ -389,6 +433,19 @@ def test_default_router_provider_submits_one_durable_mission_and_returns_evidenc
     assert '"mission_id": "' + submitted[0]["mission_id"] + '"' in response.response_text
     assert received_requests[0].metadata["conversation_session_id"] == session.session_id
     assert received_requests[0].metadata["aurora_context_verified"] is True
+
+    # The real durable director committed one task graph and one submission receipt.
+    mission_id = submitted[0]["mission_id"]
+    persisted_tasks = mission_store.list_tasks(mission_id)
+    assert [item.task.task_id for item in persisted_tasks] == ["durable-ingress-task"]
+    submission_events = [
+        event for event in mission_store.events(mission_id)
+        if event.event_type == "mission_submitted"
+    ]
+    assert len(submission_events) == 1
+    assert submission_events[0].payload["correlation_id"] == response.correlation_id
+    assert submission_events[0].payload["task_ids"] == ["durable-ingress-task"]
+    assert len(planner_calls) == 1
 
     # A resend after losing the HTTP response replays the same turn/mission receipt.
     replay = service.send_message(
