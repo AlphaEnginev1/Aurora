@@ -768,7 +768,22 @@ Keep responses useful and concise unless the human asks for depth."""
             else:
                 calls = ()
                 objective = str(user_input or "").strip()
+                prompt_projects = self._project_ids_in_prompt(user_input)
+                if len(prompt_projects) > 1:
+                    results.append({
+                        "status": "blocked",
+                        "objective": objective,
+                        "error": "mission references multiple registered projects; explicitly scope one project before execution",
+                        "routing_fallback": "ambiguous_project_scope",
+                    })
+                    mission_project_id = None
+                else:
+                    mission_project_id = next(iter(prompt_projects), None)
                 try:
+                    if len(prompt_projects) > 1:
+                        raise DirectorConversationError(
+                            "mission references multiple registered projects; explicitly scope one project before execution"
+                        )
                     mission = self._invoke_mission_runner(
                         objective=objective,
                         mission_id=(
@@ -776,6 +791,7 @@ Keep responses useful and concise unless the human asks for depth."""
                             if conversation_turn_id else None
                         ),
                         correlation_id=correlation_id,
+                        project_id=mission_project_id,
                     )
                     evidence = self._mission_evidence(mission)
                     evidence["routing_fallback"] = (
