@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import hashlib
 import inspect
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 import sqlite3
@@ -447,17 +448,21 @@ Keep responses useful and concise unless the human asks for depth."""
             ],
         ]
 
+        request_metadata = {
+            "role": "director_conversation",
+            "conversation_session_id": session_id,
+            "conversation_turn_id": turn_id,
+            "correlation_id": correlation_id,
+            "task_type": "conversation",
+            "allowed_models": self._preferred_models(policy),
+        }
+        project_scope = self._project_id_from_prompt(prompt)
+        if project_scope is not None:
+            request_metadata["project_id"] = project_scope
         request = InferenceRequest(
             messages=messages,
             model=model,
-            metadata={
-                "role": "director_conversation",
-                "conversation_session_id": session_id,
-                "conversation_turn_id": turn_id,
-                "correlation_id": correlation_id,
-                "task_type": "conversation",
-                "allowed_models": self._preferred_models(policy),
-            },
+            metadata=request_metadata,
         )
 
         try:
@@ -655,13 +660,40 @@ Keep responses useful and concise unless the human asks for depth."""
         prompt = self.SYSTEM_PROMPT
         if self.project_registry is not None:
             prompt += (
-                "\\nRegistered Aurora project catalog (canonical IDs only):\\n"
+                "\nRegistered Aurora project catalog (canonical IDs only):\n"
                 + self.project_registry.catalog()
-                + "\\nFor project work, pass the exact project_id to run_mission. "
+                + "\nFor project work, pass the exact project_id to run_mission. "
                 "Do not invent project IDs or substitute a different project. If the user "
-                "has not identified a unique project, ask for clarification before scoped execution.\\n"
+                "has not identified a unique project, ask for clarification before scoped execution.\n"
             )
         return prompt
+
+    @staticmethod
+    def _normalize_project_reference(value: str) -> str:
+        decomposed = unicodedata.normalize("NFKD", value.casefold())
+        return "".join(character for character in decomposed if not unicodedata.combining(character))
+
+    def _project_ids_in_prompt(self, user_input: str | None) -> set[str]:
+        if self.project_registry is None:
+            return set()
+        prompt = self._normalize_project_reference(str(user_input or ""))
+        if not prompt:
+            return set()
+        matches: set[str] = set()
+        for project in self.project_registry.projects.values():
+            for reference in (project.project_id, project.name):
+                normalized = self._normalize_project_reference(reference.strip())
+                if not normalized:
+                    continue
+                pattern = r"(?<![\\w])" + re.escape(normalized) + r"(?![\\w])"
+                if re.search(pattern, prompt):
+                    matches.add(project.project_id)
+                    break
+        return matches
+
+    def _project_id_from_prompt(self, user_input: str | None) -> str | None:
+        matches = self._project_ids_in_prompt(user_input)
+        return next(iter(matches)) if len(matches) == 1 else None
 
     def _conversation_tools(
         self, *, user_input: str | None = None
@@ -775,6 +807,17 @@ Keep responses useful and concise unless the human asks for depth."""
                     raise DirectorConversationError(
                         "run_mission project_id must be a non-empty registered project ID"
                     )
+                prompt_projects = self._project_ids_in_prompt(user_input)
+                if len(prompt_projects) > 1:
+                    raise DirectorConversationError(
+                        "mission references multiple registered projects; explicitly scope one project before execution"
+                    )
+                prompt_project_id = next(iter(prompt_projects), None)
+                if project_id is not None and prompt_project_id is not None and project_id != prompt_project_id:
+                    raise DirectorConversationError(
+                        "run_mission project_id conflicts with the project explicitly named by the user"
+                    )
+                project_id = project_id or prompt_project_id
                 try:
                     call_key = hashlib.sha256(
                         str(call.call_id).encode("utf-8")
