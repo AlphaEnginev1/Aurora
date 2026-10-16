@@ -54,6 +54,9 @@ class DirectorProvider(Protocol):
         model: str | None,
         role: str,
         tools: tuple[DirectorToolSpec, ...] = (),
+        metadata: Mapping[str, Any] | None = None,
+        capability: str = "reasoning",
+        preferred_models: tuple[str, ...] = (),
     ) -> DirectorModelResponse:
         ...
 
@@ -82,6 +85,9 @@ class InferenceDirectorProvider:
         model: str | None,
         role: str,
         tools: tuple[DirectorToolSpec, ...] = (),
+        metadata: Mapping[str, Any] | None = None,
+        capability: str = "reasoning",
+        preferred_models: tuple[str, ...] = (),
     ) -> DirectorModelResponse:
         prompt_messages = list(messages)
         if tools:
@@ -98,12 +104,17 @@ class InferenceDirectorProvider:
             model=model,
             temperature=0.0,
             max_tokens=3000,
-            metadata={"role": role, "director_tools": [tool.name for tool in tools]},
+            metadata={
+                **dict(metadata or {}),
+                "role": role,
+                "director_tools": [tool.name for tool in tools],
+            },
             request_id=uuid4().hex,
         )
         response: InferenceResponse = self._router.generate(
             request,
-            capability="reasoning",
+            capability=capability,
+            preferred_models=preferred_models or None,
         )
         tool_calls = self._parse_tool_calls(response.content, tools)
         return DirectorModelResponse(
