@@ -48,6 +48,7 @@ class UniversalWorkbench:
         repository_root: str | Path,
         runtime_root: str | Path,
         gateway,
+        workspace_root: str | Path | None = None,
         policy: Policy | None = None,
         session_store: WorkSessionStore | None = None,
         audit_path: str | Path | None = None,
@@ -59,6 +60,9 @@ class UniversalWorkbench:
     ) -> None:
         self.repository_root = Path(repository_root).resolve()
         self.runtime_root = Path(runtime_root).resolve()
+        # Relative project workspaces must resolve identically in TaskEngine
+        # and Workbench. The factory passes the canonical execution workspace.
+        self.workspace_root = Path(workspace_root or runtime_root).resolve()
         self.gateway = gateway
         self.policy = policy
         self.session_store = session_store
@@ -513,11 +517,11 @@ class UniversalWorkbench:
         if project.workspace:
             configured = Path(project.workspace).expanduser()
             if not configured.is_absolute():
-                configured = self.runtime_root / configured
+                configured = self.workspace_root / configured
             root = configured.resolve()
         else:
             digest = hashlib.sha256(project.project_id.encode("utf-8")).hexdigest()[:24]
-            root = (self.runtime_root / "projects" / digest).resolve()
+            root = (self.workspace_root / "projects" / digest).resolve()
         root.mkdir(parents=True, exist_ok=True)
         return root
 
