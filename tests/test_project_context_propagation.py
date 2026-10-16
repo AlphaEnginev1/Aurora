@@ -237,9 +237,11 @@ def test_project_id_reaches_model_router_request_metadata():
         role="engineer",
         objective="Inspect alpha",
         project_id="project-alpha",
+        mission_id="mission-alpha",
         use_workbench=False,
     )
     assert router.requests[0].metadata["project_id"] == "project-alpha"
+    assert router.requests[0].metadata["mission_id"] == "mission-alpha"
 
 
 def test_director_planner_passes_project_scope_metadata_to_provider(tmp_path):
