@@ -665,6 +665,7 @@ class TaskEngine:
                     required_sources=urls,
                     constraints=request.constraints,
                     max_sources=request.max_sources,
+                    project_id=request.project_id,
                 )
                 sources, claims = self.research_service.retrieve_and_extract(discovered)
             trust_state = EvidenceState.INSUFFICIENT
