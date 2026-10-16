@@ -303,7 +303,8 @@
     const select = $("director-project-scope");
     if (!select) return;
     const registered = safeArray(projects).filter(function (project) {
-      return project && typeof project.project_id === "string" && project.project_id.trim();
+      return project && project.status === "active" &&
+        typeof project.project_id === "string" && project.project_id.trim();
     });
     const signature = registered.map(function (project) { return project.project_id; }).join("|");
     let stored = "";
@@ -333,7 +334,9 @@
         ? "Delegated tasks and tools are restricted to the selected registered project."
         : registered.length
           ? "General mode has no project scope. Choose one above before project-specific work."
-          : "No projects are registered. Register a project before project-scoped execution.";
+          : safeArray(projects).length
+            ? "No active projects are available. Activate a registered project before project-scoped execution."
+            : "No projects are registered. Register a project before project-scoped execution.";
     }
     if (!exists && currentValue) {
       try { window.sessionStorage.removeItem("aurora.selectedProjectId"); } catch (_) {}
