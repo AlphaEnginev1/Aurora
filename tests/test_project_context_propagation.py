@@ -503,3 +503,38 @@ def test_project_scoped_command_passes_registered_identity_to_capability_runtime
     assert workspace == alpha_root.resolve()
     assert executed_request.constraints["project_id"] == "project-alpha"
     assert executed_request.constraints["project_repository"] == "AlphaEnginev1/alpha"
+
+
+
+def test_project_scoped_artifact_intake_can_be_inspected_within_same_project(tmp_path):
+    registry = make_registry(tmp_path)
+    alpha_root = Path(registry.resolve("project-alpha").workspace)
+    alpha_root.mkdir(parents=True)
+    source = alpha_root / "source.txt"
+    source.write_text("project-scoped artifact", encoding="utf-8")
+
+    workbench = UniversalWorkbench(
+        repository_root=tmp_path / "repo",
+        runtime_root=tmp_path / "runtime",
+        gateway=None,
+        project_registry=registry,
+    )
+    intake = workbench.execute(WorkbenchRequest(
+        capability="workbench:artifact:intake",
+        actor="operator",
+        mission_id="mission-alpha",
+        arguments=(str(source),),
+        options={"project_id": "project-alpha"},
+    ))
+    artifact_path = Path(intake.output["path"])
+    assert artifact_path.is_relative_to(alpha_root.resolve())
+
+    inspected = workbench.execute(WorkbenchRequest(
+        capability="workbench:artifact:inspect",
+        actor="operator",
+        mission_id="mission-alpha",
+        arguments=(str(artifact_path),),
+        options={"project_id": "project-alpha"},
+    ))
+    assert inspected.status == "succeeded"
+    assert inspected.output["filename"] == source.name
