@@ -1853,8 +1853,6 @@ async function testProvider(provider) {
         if (typeof artifact.path === "string") evidence.push("stored_path=" + artifact.path);
         content += "\n- " + item.name + (evidence.length ? " (" + evidence.join("; ") + ")" : "");
       });
-      content += "\n- " + item.name + (item.mission_id ? " (mission_id=" + item.mission_id + ")" : "");
-      });
       content += "\nTen en cuenta estos artefactos para responder. No afirmes haber leído un archivo si no puedes acceder realmente a su contenido.";
     }
 
