@@ -24,6 +24,7 @@ from .director_provider import (
 )
 from .task_engine import DelegatedTask
 from aurora.workbench import UniversalWorkbench, WorkbenchRequest
+from aurora.projects import ProjectRegistry
 
 from .director_bootstrap import DirectorBootstrap, DirectorBootstrapError
 
@@ -103,6 +104,10 @@ Keep responses useful and concise unless the human asks for depth."""
                 "name": {"type": "string"},
                 "title": {"type": "string"},
                 "description": {"type": "string"},
+                "project_id": {
+                    "type": "string",
+                    "description": "Canonical ID of the registered Aurora project that owns this mission.",
+                },
                 "tasks": {
                     "type": "array",
                     "minItems": 1,
@@ -168,6 +173,7 @@ Keep responses useful and concise unless the human asks for depth."""
         provider: DirectorProvider | None = None,
         mission_runner: Callable[..., Any] | None = None,
         workbench: UniversalWorkbench | None = None,
+        project_registry: ProjectRegistry | None = None,
     ) -> None:
         if max_history_turns < 1:
             raise DirectorConversationError("max_history_turns must be at least 1")
@@ -178,6 +184,7 @@ Keep responses useful and concise unless the human asks for depth."""
         self.provider: DirectorProvider = provider or InferenceDirectorProvider(router)
         self.mission_runner = mission_runner
         self.workbench = workbench
+        self.project_registry = project_registry
         self._session_locks_guard = RLock()
         self._session_locks: dict[str, RLock] = {}
         self.router.configure_context_gate(bootstrap.context_gate, enforce=True)
@@ -432,7 +439,7 @@ Keep responses useful and concise unless the human asks for depth."""
 
         history = list(self.list_turns(session_id, limit=self.max_history_turns))
         messages = [
-            {"role": "system", "content": self.SYSTEM_PROMPT},
+            {"role": "system", "content": self._system_prompt()},
             *[
                 {"role": item.role, "content": item.content}
                 for item in history
@@ -644,6 +651,18 @@ Keep responses useful and concise unless the human asks for depth."""
             return candidate
         return capability
 
+    def _system_prompt(self) -> str:
+        prompt = self.SYSTEM_PROMPT
+        if self.project_registry is not None:
+            prompt += (
+                "\\nRegistered Aurora project catalog (canonical IDs only):\\n"
+                + self.project_registry.catalog()
+                + "\\nFor project work, pass the exact project_id to run_mission. "
+                "Do not invent project IDs or substitute a different project. If the user "
+                "has not identified a unique project, ask for clarification before scoped execution.\\n"
+            )
+        return prompt
+
     def _conversation_tools(
         self, *, user_input: str | None = None
     ) -> tuple[DirectorToolSpec, ...]:
@@ -749,6 +768,13 @@ Keep responses useful and concise unless the human asks for depth."""
                 if self.mission_runner is None:
                     raise DirectorConversationError("run_mission is unavailable")
                 objective, explicit_tasks = self._normalize_mission_tool_arguments(arguments)
+                project_id = arguments.get("project_id")
+                if project_id is not None and (
+                    not isinstance(project_id, str) or not project_id.strip()
+                ):
+                    raise DirectorConversationError(
+                        "run_mission project_id must be a non-empty registered project ID"
+                    )
                 try:
                     call_key = hashlib.sha256(
                         str(call.call_id).encode("utf-8")
@@ -764,6 +790,7 @@ Keep responses useful and concise unless the human asks for depth."""
                             objective=objective,
                             mission_id=mission_id,
                             correlation_id=correlation_id,
+                            project_id=project_id,
                         )
                     else:
                         # All missions emitted by one conversation turn share a
@@ -778,6 +805,7 @@ Keep responses useful and concise unless the human asks for depth."""
                             planning_model=getattr(response, "model", None),
                             planning_provider=getattr(response, "provider", None),
                             planning_execution_id=getattr(response, "execution_id", None),
+                            project_id=project_id,
                         )
                     results.append(self._mission_evidence(mission))
                 except Exception as exc:
