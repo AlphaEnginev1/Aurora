@@ -742,6 +742,15 @@ Keep responses useful and concise unless the human asks for depth."""
             item.kind is inspect.Parameter.VAR_KEYWORD
             for item in parameters.values()
         )
+        # Only pass optional context fields to callbacks that explicitly support
+        # them. This preserves older/test adapters while the canonical runtime
+        # receives project_id and correlation identity.
+        if not accepts_extra and parameters:
+            call_kwargs = {
+                key: value
+                for key, value in call_kwargs.items()
+                if key in parameters
+            }
         if mission_id and (accepts_extra or "mission_id" in parameters):
             call_kwargs["mission_id"] = mission_id
         if correlation_id and (accepts_extra or "correlation_id" in parameters):
