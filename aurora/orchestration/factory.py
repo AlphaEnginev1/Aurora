@@ -966,8 +966,8 @@ def build_director_runtime(*, inference_policy_path: str | Path, autonomy_policy
                 status=TaskStatus.RUNNING,
                 tasks=(),
                 events=(),
-                wait_timed_out=True,
-                wait_timeout_seconds=timeout_seconds,
+                wait_timed_out=False,
+                wait_timeout_seconds=None,
             )
 
     conversation_service.mission_runner = run_durable_conversation_mission
