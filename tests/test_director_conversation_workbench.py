@@ -968,3 +968,79 @@ def test_execution_classifier_preserves_questions_and_explicit_single_reads():
     assert not DirectorConversationService._requests_mission_execution(
         "Comprueba directamente las notas del proyecto."
     )
+
+
+
+def test_duplicate_run_mission_calls_with_different_call_ids_are_suppressed(tmp_path: Path):
+    service, _ = base_service(tmp_path)
+    executed = []
+
+    class DuplicateMissionProvider:
+        provider_id = "fake"
+
+        def generate(self, *, messages, model, role, tools=()):
+            if role == "director_conversation":
+                return DirectorModelResponse(
+                    content="",
+                    model=model or "fake/model",
+                    provider="fake",
+                    request_id="request-duplicate",
+                    execution_id="execution-duplicate",
+                    tool_calls=(
+                        DirectorToolCall(
+                            call_id="provider-call-1",
+                            name="run_mission",
+                            arguments={"objective": "Inspect Project Alpha"},
+                        ),
+                        DirectorToolCall(
+                            call_id="provider-call-2",
+                            name="run_mission",
+                            arguments={"objective": "Inspect Project Alpha"},
+                        ),
+                    ),
+                )
+            return DirectorModelResponse(
+                content="The durable mission was accepted once.",
+                model=model or "fake/model",
+                provider="fake",
+                request_id="request-summary",
+                execution_id="execution-summary",
+            )
+
+    service.set_provider(DuplicateMissionProvider())
+
+    def runner(*, objective, mission_id=None, correlation_id=None, project_id=None):
+        executed.append({
+            "objective": objective,
+            "mission_id": mission_id,
+            "correlation_id": correlation_id,
+            "project_id": project_id,
+        })
+        plan = SimpleNamespace(
+            objective=objective,
+            model="fake/model",
+            provider="fake",
+            execution_id="planning-1",
+        )
+        submission = SimpleNamespace(mission_id=mission_id, project_id=project_id, plan=plan)
+        return SimpleNamespace(
+            mission_id=mission_id,
+            project_id=project_id,
+            submission=submission,
+            objective=objective,
+            status=SimpleNamespace(value="succeeded"),
+            tasks=(),
+            wait_timed_out=False,
+            events=(),
+        )
+
+    service.mission_runner = runner
+    session = service.create_session()
+    response = service.send_message(
+        session_id=session.session_id,
+        user_input="Audita Project Alpha y realiza las correcciones necesarias.",
+    )
+
+    assert len(executed) == 1
+    assert executed[0]["mission_id"].startswith("mission-conversation-")
+    assert "duplicate_tool_call_suppressed" in response.response_text
