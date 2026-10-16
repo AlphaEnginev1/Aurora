@@ -3361,7 +3361,13 @@ class DirectorRuntime:
             else:
                 verification = "verified" if verified else "insufficient"
 
-            result_summary: dict[str, Any] = {"type": result_type}
+            # A null result_json is itself material evidence. Do not serialize
+            # it as an absent field, because that makes a terminal row look as if
+            # the result type was merely unknown rather than missing.
+            if result is None:
+                result_summary: dict[str, Any] = {"type": "missing"}
+            else:
+                result_summary = {"type": result_type}
             if result is not None:
                 for field in (
                     "model", "provider", "request_id", "execution_id",
