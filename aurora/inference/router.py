@@ -280,12 +280,15 @@ class ModelRouter:
         project_id = str(metadata.get("project_id", "")).strip() or None
         task_id = str(metadata.get("task_id", "")).strip() or None
 
-        if role.startswith("director"):
+        if project_id is not None:
+            # An explicit project binding takes precedence over the generic
+            # Director role. Otherwise project-scoped Director inference would
+            # silently receive only global context.
+            scope = ContextScope.PROJECT
+            agent_role = None if role.startswith("director") else role or None
+        elif role.startswith("director"):
             scope = ContextScope.DIRECTOR
             agent_role = None
-        elif project_id is not None:
-            scope = ContextScope.PROJECT
-            agent_role = role or None
         else:
             scope = ContextScope.GLOBAL
             agent_role = role or None

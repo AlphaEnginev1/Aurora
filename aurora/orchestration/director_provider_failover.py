@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import inspect
 import sqlite3
 from threading import RLock
 from typing import Any, Callable, Mapping
@@ -73,6 +74,7 @@ class BoundInferenceDirectorProvider:
         model: str | None,
         role: str,
         tools: tuple[DirectorToolSpec, ...] = (),
+        metadata: Mapping[str, Any] | None = None,
     ) -> DirectorModelResponse:
         prompt_messages = list(messages)
         if tools:
@@ -84,14 +86,36 @@ class BoundInferenceDirectorProvider:
                 }
             else:
                 prompt_messages.insert(0, {"role": "system", "content": instruction})
+        request_metadata = {
+            **dict(metadata or {}),
+            "role": role,
+            "director_tools": [tool.name for tool in tools],
+        }
         request = InferenceRequest(
             messages=prompt_messages,
             model=self._model if self._model is not None else model,
             temperature=0.0,
             max_tokens=3000,
-            metadata={"role": role, "director_tools": [tool.name for tool in tools]},
+            metadata=request_metadata,
         )
-        response = self._router.generate(request, capability="reasoning")
+        routing_capability = str(request_metadata.get("routing_capability") or "reasoning")
+        preferred = request_metadata.get("preferred_models") or ()
+        if not isinstance(preferred, (list, tuple)) or not all(isinstance(item, str) for item in preferred):
+            preferred = ()
+        try:
+            router_parameters = inspect.signature(self._router.generate).parameters
+        except (TypeError, ValueError):
+            router_parameters = {}
+        accepts_extra = any(
+            item.kind is inspect.Parameter.VAR_KEYWORD
+            for item in router_parameters.values()
+        )
+        routing_kwargs: dict[str, Any] = {}
+        if "capability" in router_parameters or accepts_extra or not router_parameters:
+            routing_kwargs["capability"] = routing_capability
+        if preferred and ("preferred_models" in router_parameters or accepts_extra):
+            routing_kwargs["preferred_models"] = tuple(preferred)
+        response = self._router.generate(request, **routing_kwargs)
         tool_calls = InferenceDirectorProvider._parse_tool_calls(response.content, tools)
         return DirectorModelResponse(
             content=response.content if not tool_calls else "",
@@ -264,6 +288,31 @@ class DirectorProviderFailoverController:
     ) -> None:
         self._context_provider = context_provider
 
+    @staticmethod
+    def _generate_with_scope(
+        provider: DirectorProvider,
+        *,
+        messages: list[dict[str, Any]],
+        model: str | None,
+        role: str,
+        tools: tuple[DirectorToolSpec, ...],
+        metadata: Mapping[str, Any] | None,
+    ) -> DirectorModelResponse:
+        kwargs: dict[str, Any] = {
+            "messages": messages,
+            "model": model,
+            "role": role,
+            "tools": tools,
+        }
+        if metadata is not None:
+            parameters = inspect.signature(provider.generate).parameters
+            if "metadata" in parameters or any(
+                item.kind is inspect.Parameter.VAR_KEYWORD
+                for item in parameters.values()
+            ):
+                kwargs["metadata"] = metadata
+        return provider.generate(**kwargs)
+
     def generate(
         self,
         *,
@@ -271,15 +320,18 @@ class DirectorProviderFailoverController:
         model: str | None,
         role: str,
         tools: tuple[DirectorToolSpec, ...] = (),
+        metadata: Mapping[str, Any] | None = None,
     ) -> DirectorModelResponse:
         with self._lock:
             active = self._active_provider
             try:
-                response = active.generate(
+                response = self._generate_with_scope(
+                    active,
                     messages=messages,
                     model=model,
                     role=role,
                     tools=tools,
+                    metadata=metadata,
                 )
                 if self._health_store is not None:
                     self._health_store.record_success(
@@ -369,11 +421,13 @@ class DirectorProviderFailoverController:
                     )
                     try:
                         replacement = candidate.factory()
-                        response = replacement.generate(
+                        response = self._generate_with_scope(
+                            replacement,
                             messages=messages,
                             model=candidate.model,
                             role=role,
                             tools=tools,
+                            metadata=metadata,
                         )
                         if self._health_store is not None:
                             self._health_store.record_success(

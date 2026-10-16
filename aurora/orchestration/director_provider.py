@@ -3,9 +3,10 @@ from __future__ import annotations
 
 import ast
 from dataclasses import dataclass
+import inspect
 import json
 import re
-from typing import Any, Protocol
+from typing import Any, Mapping, Protocol
 from uuid import uuid4
 
 from aurora.inference.models import InferenceRequest, InferenceResponse
@@ -82,6 +83,7 @@ class InferenceDirectorProvider:
         model: str | None,
         role: str,
         tools: tuple[DirectorToolSpec, ...] = (),
+        metadata: Mapping[str, Any] | None = None,
     ) -> DirectorModelResponse:
         prompt_messages = list(messages)
         if tools:
@@ -93,18 +95,37 @@ class InferenceDirectorProvider:
                 }
             else:
                 prompt_messages.insert(0, {"role": "system", "content": instruction})
+        request_metadata = {
+            **dict(metadata or {}),
+            "role": role,
+            "director_tools": [tool.name for tool in tools],
+        }
         request = InferenceRequest(
             messages=prompt_messages,
             model=model,
             temperature=0.0,
             max_tokens=3000,
-            metadata={"role": role, "director_tools": [tool.name for tool in tools]},
+            metadata=request_metadata,
             request_id=uuid4().hex,
         )
-        response: InferenceResponse = self._router.generate(
-            request,
-            capability="reasoning",
+        routing_capability = str(request_metadata.get("routing_capability") or "reasoning")
+        preferred = request_metadata.get("preferred_models") or ()
+        if not isinstance(preferred, (list, tuple)) or not all(isinstance(item, str) for item in preferred):
+            preferred = ()
+        try:
+            router_parameters = inspect.signature(self._router.generate).parameters
+        except (TypeError, ValueError):
+            router_parameters = {}
+        accepts_extra = any(
+            item.kind is inspect.Parameter.VAR_KEYWORD
+            for item in router_parameters.values()
         )
+        routing_kwargs: dict[str, Any] = {}
+        if "capability" in router_parameters or accepts_extra or not router_parameters:
+            routing_kwargs["capability"] = routing_capability
+        if preferred and ("preferred_models" in router_parameters or accepts_extra):
+            routing_kwargs["preferred_models"] = tuple(preferred)
+        response: InferenceResponse = self._router.generate(request, **routing_kwargs)
         tool_calls = self._parse_tool_calls(response.content, tools)
         return DirectorModelResponse(
             content=response.content if not tool_calls else "",

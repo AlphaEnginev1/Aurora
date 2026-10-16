@@ -13,6 +13,7 @@
     conversationSessionId: null,
     conversationInFlight: false,
     pendingConversationRequest: null,
+    selectedProjectId: null,
     activeView: "home",
     settings: null,
     github: null,
@@ -142,6 +143,7 @@
       : "unknown";
 
     const projects = safeArray(data.projects);
+    renderProjectScope(projects);
     const agents = safeArray(data.organization && data.organization.agents);
     const runtime = safeObject(data.runtime);
     const counts = safeObject(runtime.task_status_counts);
@@ -295,6 +297,50 @@
       openInspector("Project Inspector", project.name || project.project_id, fetchProject(project.project_id));
     });
     return item;
+  }
+
+  function renderProjectScope(projects) {
+    const select = $("director-project-scope");
+    if (!select) return;
+    const registered = safeArray(projects).filter(function (project) {
+      return project && project.status === "active" &&
+        typeof project.project_id === "string" && project.project_id.trim();
+    });
+    const signature = registered.map(function (project) { return project.project_id; }).join("|");
+    let stored = "";
+    try { stored = window.sessionStorage.getItem("aurora.selectedProjectId") || ""; }
+    catch (_) {}
+    const currentValue = state.selectedProjectId || select.value || stored;
+    if (select.dataset.projectSignature !== signature) {
+      select.innerHTML = "";
+      const general = document.createElement("option");
+      general.value = "";
+      general.textContent = "General · no project selected";
+      select.appendChild(general);
+      registered.forEach(function (project) {
+        const option = document.createElement("option");
+        option.value = project.project_id;
+        option.textContent = (project.name || project.project_id) + " · " + project.project_id;
+        select.appendChild(option);
+      });
+      select.dataset.projectSignature = signature;
+    }
+    const exists = registered.some(function (project) { return project.project_id === currentValue; });
+    state.selectedProjectId = exists ? currentValue : null;
+    select.value = state.selectedProjectId || "";
+    const hint = $("director-project-scope-hint");
+    if (hint) {
+      hint.textContent = state.selectedProjectId
+        ? "Delegated tasks and tools are restricted to the selected registered project."
+        : registered.length
+          ? "General mode has no project scope. Choose one above before project-specific work."
+          : safeArray(projects).length
+            ? "No active projects are available. Activate a registered project before project-scoped execution."
+            : "No projects are registered. Register a project before project-scoped execution.";
+    }
+    if (!exists && currentValue) {
+      try { window.sessionStorage.removeItem("aurora.selectedProjectId"); } catch (_) {}
+    }
   }
 
   function renderProjects(projects, target, compact) {
@@ -1286,8 +1332,8 @@ async function testProvider(provider) {
     });
   }
 
-  function uploadFingerprint(file) {
-    const value = [file.name, file.size, file.lastModified].join("\\u0000");
+  function uploadFingerprint(file, projectId) {
+    const value = [projectId || "__global__", file.name, file.size, file.lastModified].join("\\u0000");
     let hash = 2166136261;
     for (let index = 0; index < value.length; index += 1) {
       hash ^= value.charCodeAt(index);
@@ -1296,8 +1342,8 @@ async function testProvider(provider) {
     return (hash >>> 0).toString(16) + "-" + value.length;
   }
 
-  function stableUploadRequest(file) {
-    const fingerprint = uploadFingerprint(file);
+  function stableUploadRequest(file, projectId) {
+    const fingerprint = uploadFingerprint(file, projectId);
     const storageKey = "aurora.pendingUploadRequest." + fingerprint;
     try {
       const saved = JSON.parse(window.sessionStorage.getItem(storageKey) || "null");
@@ -1334,23 +1380,30 @@ async function testProvider(provider) {
     const selected = Array.from(files || []);
     if (!selected.length) return;
     const button = $("attach-file");
+    const projectId = state.selectedProjectId;
     button.disabled = true;
-    setChatStatus("Uploading " + selected.length + " attachment(s) to Aurora…", false);
+    setChatStatus(
+      "Uploading " + selected.length + " attachment(s) to Aurora" +
+      (projectId ? " for project " + projectId : " in general mode") + "…",
+      false
+    );
     try {
       for (const file of selected) {
         if (!file.size) throw new Error(file.name + " is empty.");
         if (file.size > 25 * 1024 * 1024) {
           throw new Error(file.name + " exceeds the 25 MiB per-file limit.");
         }
-        const pendingRequest = stableUploadRequest(file);
+        const pendingRequest = stableUploadRequest(file, projectId);
+        const uploadHeaders = {
+          Accept: "application/json",
+          "Content-Type": file.type || "application/octet-stream",
+          "X-Aurora-Filename": encodeURIComponent(file.name),
+          "X-Aurora-Request-ID": pendingRequest.requestId
+        };
+        if (projectId) uploadHeaders["X-Aurora-Project-ID"] = projectId;
         const response = await fetch(state.apiBase + "/artifacts", {
           method: "POST",
-          headers: {
-            Accept: "application/json",
-            "Content-Type": file.type || "application/octet-stream",
-            "X-Aurora-Filename": encodeURIComponent(file.name),
-            "X-Aurora-Request-ID": pendingRequest.requestId
-          },
+          headers: uploadHeaders,
           body: await file.arrayBuffer()
         });
         // Keep the key on network/5xx failures because the upload or intake
@@ -1366,6 +1419,7 @@ async function testProvider(provider) {
           name: file.name,
           size: file.size,
           mission_id: data.mission_id || "",
+          project_id: data.project_id || null,
           artifact: data.artifact || null
         });
       }
@@ -1625,8 +1679,14 @@ async function testProvider(provider) {
     if (drawerBody) drawerBody.innerHTML = '<div class="empty-state">Loading durable conversation…</div>';
     try {
       const sessionId = await ensureConversationSession();
+      let storedProject = "";
+      try { storedProject = window.sessionStorage.getItem("aurora.selectedProjectId") || ""; }
+      catch (_) {}
+      const projectScope = state.selectedProjectId || storedProject;
+      const historyUrl = state.conversationApiBase + "/" + encodeURIComponent(sessionId) + "/turns" +
+        (projectScope ? "?project_id=" + encodeURIComponent(projectScope) : "");
       const response = await fetch(
-        state.conversationApiBase + "/" + encodeURIComponent(sessionId) + "/turns",
+        historyUrl,
         { headers: { Accept: "application/json" } }
       );
       if (!response.ok) throw new Error("history " + response.status);
@@ -1703,10 +1763,12 @@ async function testProvider(provider) {
     return item;
   }
 
-  function conversationRequestFingerprint(sessionId, content) {
+  function conversationRequestFingerprint(sessionId, content, projectId) {
     // A non-reversible, non-security fingerprint lets a pending retry survive
-    // reload without storing the prompt itself in sessionStorage.
-    const source = sessionId + "\\u0000" + content;
+    // reload without storing the prompt itself in sessionStorage. Scope is part
+    // of the identity so retry receipts cannot be reused across projects.
+    const source = sessionId + "\\u0000" + content +
+      (projectId ? "\\u0000project:" + projectId : "");
     let hash = 2166136261;
     for (let index = 0; index < source.length; index += 1) {
       hash ^= source.charCodeAt(index);
@@ -1715,8 +1777,8 @@ async function testProvider(provider) {
     return (hash >>> 0).toString(16) + "-" + source.length;
   }
 
-  function getStableConversationRequestId(sessionId, content) {
-    const fingerprint = conversationRequestFingerprint(sessionId, content);
+  function getStableConversationRequestId(sessionId, content, projectId) {
+    const fingerprint = conversationRequestFingerprint(sessionId, content, projectId);
     // Keep independent pending request IDs per turn. A still-running order
     // must not be overwritten when the user sends a different message.
     const storageKey = "aurora.pendingConversationRequest." + sessionId + "." + fingerprint;
@@ -1766,12 +1828,30 @@ async function testProvider(provider) {
     const raw = String(rawText == null ? "" : rawText).trim();
     const attachments = state.pendingAttachments.slice();
     if ((!raw && !attachments.length) || state.conversationInFlight) return;
+    const projectId = state.selectedProjectId;
+    const mismatchedAttachment = attachments.find(function (item) {
+      return (item.project_id || null) !== (projectId || null);
+    });
+    if (mismatchedAttachment) {
+      setChatStatus(
+        "Attachment " + mismatchedAttachment.name +
+        " was uploaded for a different project scope. Select its original project or remove and upload it again.",
+        true
+      );
+      return;
+    }
 
     let content = raw || "Revisa los archivos adjuntos recibidos por Aurora y resume qué has podido extraer. Si no puedes acceder al contenido de algún archivo, indícalo explícitamente.";
     if (attachments.length) {
       content += "\n\nArchivos adjuntos recibidos mediante la entrada de artefactos de Aurora:";
       attachments.forEach(function (item) {
-        content += "\n- " + item.name + (item.mission_id ? " (mission_id=" + item.mission_id + ")" : "");
+        const evidence = [];
+        if (item.project_id) evidence.push("project_id=" + item.project_id);
+        if (item.mission_id) evidence.push("mission_id=" + item.mission_id);
+        const artifact = item.artifact && typeof item.artifact === "object" ? item.artifact : {};
+        if (typeof artifact.artifact_id === "string") evidence.push("artifact_id=" + artifact.artifact_id);
+        if (typeof artifact.path === "string") evidence.push("stored_path=" + artifact.path);
+        content += "\n- " + item.name + (evidence.length ? " (" + evidence.join("; ") + ")" : "");
       });
       content += "\nTen en cuenta estos artefactos para responder. No afirmes haber leído un archivo si no puedes acceder realmente a su contenido.";
     }
@@ -1787,13 +1867,15 @@ async function testProvider(provider) {
 
     try {
       const sessionId = await ensureConversationSession();
-      const requestId = getStableConversationRequestId(sessionId, content);
+      const requestId = getStableConversationRequestId(sessionId, content, projectId);
+      const turnPayload = { user_input: content, request_id: requestId };
+      if (projectId) turnPayload.project_id = projectId;
       const response = await fetch(
         state.conversationApiBase + "/" + encodeURIComponent(sessionId) + "/turn",
         {
           method: "POST",
           headers: { Accept: "application/json", "Content-Type": "application/json" },
-          body: JSON.stringify({ user_input: content, request_id: requestId })
+          body: JSON.stringify(turnPayload)
         }
       );
       if (!response.ok) {
@@ -1849,6 +1931,24 @@ async function testProvider(provider) {
     }
   }
   function setupConversation() {
+    $("director-project-scope").addEventListener("change", function (event) {
+      const value = String(event.currentTarget.value || "").trim();
+      state.selectedProjectId = value || null;
+      try {
+        if (state.selectedProjectId) {
+          window.sessionStorage.setItem("aurora.selectedProjectId", state.selectedProjectId);
+        } else {
+          window.sessionStorage.removeItem("aurora.selectedProjectId");
+        }
+      } catch (_) {}
+      setChatStatus(
+        state.selectedProjectId
+          ? "Project scope selected: " + state.selectedProjectId
+          : "General mode selected; no project scope is attached.",
+        false
+      );
+      loadConversationHistory().catch(function () {});
+    });
     $("attach-file").addEventListener("click", function () {
       $("aurora-file-input").click();
     });

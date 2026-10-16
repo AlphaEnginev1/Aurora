@@ -405,20 +405,32 @@ class MissionMemory:
             )
         )
 
-    def task_result_task_ids(self, mission_id: str) -> frozenset[str]:
-        """Return task IDs with a task_result mailbox projection for this mission."""
+    def task_result_task_ids(
+        self, mission_id: str, *, project_id: str | None = None
+    ) -> frozenset[str]:
+        """Return task IDs projected for this mission and, when supplied, project."""
         if not mission_id.strip():
             raise MissionMemoryError("mission_id is empty")
         try:
             with self.store._connect() as db:
-                rows = db.execute(
-                    """
-                    SELECT metadata_json, task_id
-                    FROM mission_messages
-                    WHERE mission_id = ? AND kind = 'task_result'
-                    """,
-                    (mission_id,),
-                ).fetchall()
+                if project_id is None:
+                    rows = db.execute(
+                        """
+                        SELECT metadata_json, task_id
+                        FROM mission_messages
+                        WHERE mission_id = ? AND kind = 'task_result'
+                        """,
+                        (mission_id,),
+                    ).fetchall()
+                else:
+                    rows = db.execute(
+                        """
+                        SELECT metadata_json, task_id
+                        FROM mission_messages
+                        WHERE mission_id = ? AND kind = 'task_result' AND project_id = ?
+                        """,
+                        (mission_id, project_id),
+                    ).fetchall()
         except sqlite3.Error as exc:
             raise MissionMemoryError(f"could not read task result projections: {exc}") from exc
         result: set[str] = set()
@@ -430,23 +442,43 @@ class MissionMemory:
                 result.add(task_id)
         return frozenset(result)
 
-    def first_of_kind(self, mission_id: str, kind: str) -> MissionMessage | None:
+    def first_of_kind(
+        self,
+        mission_id: str,
+        kind: str,
+        *,
+        project_id: str | None = None,
+    ) -> MissionMessage | None:
         if not kind.strip():
             raise MissionMemoryError("kind is empty")
         try:
             with self.store._connect() as db:
-                row = db.execute(
-                    """
-                    SELECT message_id, mission_id, source, kind, content,
-                           metadata_json, created_at, scope, project_id,
-                           agent_role, task_id, event_id, correlation_id
-                    FROM mission_messages
-                    WHERE mission_id = ? AND kind = ?
-                    ORDER BY message_id
-                    LIMIT 1
-                    """,
-                    (mission_id, kind),
-                ).fetchone()
+                if project_id is None:
+                    row = db.execute(
+                        """
+                        SELECT message_id, mission_id, source, kind, content,
+                               metadata_json, created_at, scope, project_id,
+                               agent_role, task_id, event_id, correlation_id
+                        FROM mission_messages
+                        WHERE mission_id = ? AND kind = ?
+                        ORDER BY message_id
+                        LIMIT 1
+                        """,
+                        (mission_id, kind),
+                    ).fetchone()
+                else:
+                    row = db.execute(
+                        """
+                        SELECT message_id, mission_id, source, kind, content,
+                               metadata_json, created_at, scope, project_id,
+                               agent_role, task_id, event_id, correlation_id
+                        FROM mission_messages
+                        WHERE mission_id = ? AND kind = ? AND project_id = ?
+                        ORDER BY message_id
+                        LIMIT 1
+                        """,
+                        (mission_id, kind, project_id),
+                    ).fetchone()
         except sqlite3.Error as exc:
             raise MissionMemoryError(f"could not read mission message: {exc}") from exc
         if row is None:

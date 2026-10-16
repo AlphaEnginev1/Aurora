@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import inspect
 from dataclasses import dataclass, replace
 from typing import Any
 
@@ -14,7 +15,7 @@ from .director_provider import (
     InferenceDirectorProvider,
 )
 from aurora.organization import OrganizationConfigError, OrganizationRegistry
-from aurora.projects import ProjectRegistry
+from aurora.projects import ProjectRegistry, ProjectStatus
 from aurora.skills import SkillRegistry, SkillRegistryError
 from .task_engine import DelegatedTask, DelegatedTaskResult, TaskEngine
 
@@ -132,12 +133,36 @@ Rules:
         self.skill_registry = skill_registry
         self.project_registry = project_registry
 
+    def _project_catalog(self, project_id: str | None) -> str | None:
+        if self.project_registry is None:
+            return None
+        if project_id is None:
+            return self.project_registry.catalog()
+        try:
+            project = self.project_registry.resolve(project_id)
+        except Exception as exc:
+            raise DirectorPlanError(f"invalid project scope: {exc}") from exc
+        if project.status is not ProjectStatus.ACTIVE:
+            raise DirectorPlanError(
+                f"project-scoped planning requires an active project, got {project.status.value}"
+            )
+        # Never append the global project catalog to a project-bound plan or
+        # review. That would bypass ContextGate's per-project isolation.
+        return (
+            f"- {project.project_id}: {project.name}; "
+            f"status={project.status.value}; objective={project.objective}; "
+            f"repository={project.repository or 'not recorded'}; "
+            f"workspace={project.workspace or 'not recorded'}; "
+            f"state={project.current_state or 'state not recorded'}"
+        )
+
     def plan(
         self,
         *,
         objective: str,
         context: list[dict[str, Any]] | None = None,
         model: str | None = None,
+        project_id: str | None = None,
     ) -> DirectorPlan:
         objective = objective.strip()
         if not objective:
@@ -150,20 +175,35 @@ Rules:
         if self.skill_registry is not None:
             system += "\nRegistered specialist skill catalog:\n"
             system += self.skill_registry.catalog() + "\n"
-        if self.project_registry is not None:
-            system += "\nRegistered Aurora project catalog:\n"
-            system += self.project_registry.catalog() + "\n"
+        project_catalog = self._project_catalog(project_id)
+        if project_catalog is not None:
+            catalog_heading = (
+                "Registered Aurora project catalog"
+                if project_id is None
+                else "Registered Aurora project context"
+            )
+            system += f"\n{catalog_heading}:\n"
+            system += project_catalog + "\n"
         messages = [
             {"role": "system", "content": system},
             *(context or []),
             {"role": "user", "content": objective},
         ]
-        response = self.provider.generate(
-            messages=messages,
-            model=model,
-            role="director_planner",
-            tools=(self._DELEGATE_TOOL,),
-        )
+        provider_kwargs: dict[str, Any] = {
+            "messages": messages,
+            "model": model,
+            "role": "director_planner",
+            "tools": (self._DELEGATE_TOOL,),
+        }
+        if project_id is not None:
+            parameters = inspect.signature(self.provider.generate).parameters
+            accepts_metadata = "metadata" in parameters or any(
+                item.kind is inspect.Parameter.VAR_KEYWORD
+                for item in parameters.values()
+            )
+            if accepts_metadata:
+                provider_kwargs["metadata"] = {"project_id": project_id}
+        response = self.provider.generate(**provider_kwargs)
         tasks = (
             self._parse_tool_calls(response.tool_calls)
             if response.tool_calls
@@ -194,6 +234,7 @@ Rules:
         objective: str,
         context: list[dict[str, Any]] | None = None,
         model: str | None = None,
+        project_id: str | None = None,
     ) -> DirectorReview:
         objective = objective.strip()
         if not objective:
@@ -205,20 +246,35 @@ Rules:
         if self.skill_registry is not None:
             system += "\nRegistered specialist skill catalog:\n"
             system += self.skill_registry.catalog() + "\n"
-        if self.project_registry is not None:
-            system += "\nRegistered Aurora project catalog:\n"
-            system += self.project_registry.catalog() + "\n"
+        project_catalog = self._project_catalog(project_id)
+        if project_catalog is not None:
+            catalog_heading = (
+                "Registered Aurora project catalog"
+                if project_id is None
+                else "Registered Aurora project context"
+            )
+            system += f"\n{catalog_heading}:\n"
+            system += project_catalog + "\n"
         messages = [
             {"role": "system", "content": system},
             *(context or []),
             {"role": "user", "content": objective},
         ]
-        response = self.provider.generate(
-            messages=messages,
-            model=model,
-            role="director_reviewer",
-            tools=(self._DELEGATE_TOOL,),
-        )
+        provider_kwargs: dict[str, Any] = {
+            "messages": messages,
+            "model": model,
+            "role": "director_reviewer",
+            "tools": (self._DELEGATE_TOOL,),
+        }
+        if project_id is not None:
+            parameters = inspect.signature(self.provider.generate).parameters
+            accepts_metadata = "metadata" in parameters or any(
+                item.kind is inspect.Parameter.VAR_KEYWORD
+                for item in parameters.values()
+            )
+            if accepts_metadata:
+                provider_kwargs["metadata"] = {"project_id": project_id}
+        response = self.provider.generate(**provider_kwargs)
         if response.tool_calls:
             decision, rationale, tasks, considered_alternatives = self._parse_review_tool_calls(response.tool_calls)
         else:

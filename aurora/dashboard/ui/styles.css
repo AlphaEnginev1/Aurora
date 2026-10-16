@@ -1243,6 +1243,39 @@ body {
   opacity: .45;
   cursor: wait;
 }
+.chat-project-scope {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 9px;
+  width: min(100%, 860px);
+  margin: 0 auto 8px;
+  color: #999;
+  font-size: 10px;
+}
+.chat-project-scope label {
+  color: #aaa;
+  font-size: 10px;
+  letter-spacing: .04em;
+}
+.chat-project-scope select {
+  max-width: min(100%, 320px);
+  min-width: 180px;
+  padding: 7px 30px 7px 10px;
+  border: 1px solid #333;
+  border-radius: 9px;
+  background: #111;
+  color: #e6e6e6;
+  font: inherit;
+}
+.chat-project-scope select:focus-visible {
+  outline: 1px solid #8b8b8b;
+  outline-offset: 2px;
+}
+.chat-project-scope span {
+  color: #686868;
+  font-size: 9px;
+}
 .chat-composer-footnote {
   width: min(100%, 860px);
   margin: 7px auto 0;

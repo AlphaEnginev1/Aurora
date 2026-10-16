@@ -106,10 +106,23 @@ class DirectorBootstrap:
     policy_contract_store: DirectorDecisionPolicyContractStore
     decision_knowledge_store: DirectorDecisionKnowledgeStore
 
-    def initialize(self) -> DirectorBootstrapState:
+    def initialize(self, *, project_id: str | None = None) -> DirectorBootstrapState:
         policy = self._load_model_policy()
+        if project_id is not None:
+            project_id = project_id.strip()
+            if not project_id:
+                raise DirectorBootstrapError("project_id must be non-empty")
+            try:
+                project = self.context_gate.plane.project_registry.resolve(project_id)
+            except Exception as exc:
+                raise DirectorBootstrapError(f"invalid project scope: {exc}") from exc
+            if project.status.value != "active":
+                raise DirectorBootstrapError(
+                    f"project-scoped bootstrap requires an active project, got {project.status.value}"
+                )
         context = self.context_gate.prepare(
-            scope=ContextScope.DIRECTOR,
+            scope=ContextScope.PROJECT if project_id is not None else ContextScope.DIRECTOR,
+            project_id=project_id,
             require_mailbox=True,
             require_knowledge=True,
         )
@@ -221,8 +234,35 @@ def build_context_runtime_adapter(
 ) -> Any:
     """Create a compact authoritative runtime-state adapter for the Context Plane."""
 
-    def runtime_context(_project_id: str | None) -> dict[str, object]:
+    def runtime_context(project_id: str | None) -> dict[str, object]:
         missions = task_store.list_missions()
+        if project_id is not None:
+            # Prefer task rows as the canonical scope binding. For legacy rows
+            # created before the tasks.project_id migration, recover scope only
+            # from the durable mission_submitted receipt; never infer it from
+            # unrelated or untagged task activity.
+            scoped_missions: list[str] = []
+            for mission_id in missions:
+                stored_tasks = task_store.list_tasks(mission_id)
+                explicit_scopes = {
+                    stored.task.project_id
+                    for stored in stored_tasks
+                    if stored.task.project_id is not None
+                }
+                if explicit_scopes:
+                    if explicit_scopes == {project_id}:
+                        scoped_missions.append(mission_id)
+                    continue
+                for event in task_store.events(mission_id):
+                    if event.event_type != "mission_submitted":
+                        continue
+                    receipt_project_id = (
+                        event.project_id or event.payload.get("project_id")
+                    )
+                    if receipt_project_id == project_id:
+                        scoped_missions.append(mission_id)
+                    break
+            missions = tuple(scoped_missions)
         states: dict[str, int] = {
             "pending": 0,
             "running": 0,
@@ -233,10 +273,13 @@ def build_context_runtime_adapter(
         for mission_id in missions:
             status = task_store.mission_status(mission_id)
             states[status] = states.get(status, 0) + 1
-        return {
+        result: dict[str, object] = {
             "mission_count": len(missions),
             "mission_status_counts": states,
         }
+        if project_id is not None:
+            result["project_id"] = project_id
+        return result
 
     return runtime_context
 
@@ -280,24 +323,41 @@ def build_context_mailbox_adapter(task_store, *, limit: int = 40) -> Any:
 
 
 def build_context_knowledge_adapter(research_store, *, limit: int = 50) -> Any:
-    """Expose the research knowledge/evidence index without injecting full documents."""
+    """Expose knowledge for the requested project without cross-project leakage."""
 
     if limit < 1:
         raise DirectorBootstrapError("knowledge limit must be at least 1")
 
-    def knowledge_context(_project_id: str | None) -> tuple[dict[str, object], ...]:
+    def knowledge_context(project_id: str | None) -> tuple[dict[str, object], ...]:
         try:
             with research_store._connect() as db:
-                rows = db.execute(
-                    """
-                    SELECT artifact_id, finding_id, claim, evidence_ids,
-                           source_ids, state, created_at
-                    FROM knowledge_artifacts
-                    ORDER BY created_at DESC, artifact_id
-                    LIMIT ?
-                    """,
-                    (limit,),
-                ).fetchall()
+                if project_id is None:
+                    # Global Director context may consult the full Aurora index.
+                    rows = db.execute(
+                        """
+                        SELECT artifact_id, finding_id, claim, evidence_ids,
+                               source_ids, state, created_at, project_id
+                        FROM knowledge_artifacts
+                        ORDER BY created_at DESC, artifact_id
+                        LIMIT ?
+                        """,
+                        (limit,),
+                    ).fetchall()
+                else:
+                    # Project-bound model calls may only see artifacts that carry
+                    # the exact canonical project tag. Legacy NULL records are
+                    # not assumed to belong to any project.
+                    rows = db.execute(
+                        """
+                        SELECT artifact_id, finding_id, claim, evidence_ids,
+                               source_ids, state, created_at, project_id
+                        FROM knowledge_artifacts
+                        WHERE project_id = ?
+                        ORDER BY created_at DESC, artifact_id
+                        LIMIT ?
+                        """,
+                        (project_id, limit),
+                    ).fetchall()
         except Exception as exc:
             raise DirectorBootstrapError(
                 f"unable to load knowledge/evidence index: {exc}"
@@ -311,12 +371,12 @@ def build_context_knowledge_adapter(research_store, *, limit: int = 50) -> Any:
                 "source_count": len(json.loads(row["source_ids"] or "[]")),
                 "state": str(row["state"]),
                 "created_at": str(row["created_at"]),
+                "project_id": row["project_id"],
             }
             for row in rows
-        ) or ({"state": "empty", "artifact_count": 0},)
+        ) or ({"state": "empty", "artifact_count": 0, "project_id": project_id},)
 
     return knowledge_context
-
 
 __all__ = [
     "DirectorBootstrap",

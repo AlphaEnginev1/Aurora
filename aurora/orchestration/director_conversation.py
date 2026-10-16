@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import hashlib
 import inspect
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 import sqlite3
@@ -24,6 +25,7 @@ from .director_provider import (
 )
 from .task_engine import DelegatedTask
 from aurora.workbench import UniversalWorkbench, WorkbenchRequest
+from aurora.projects import ProjectRegistry, ProjectStatus
 
 from .director_bootstrap import DirectorBootstrap, DirectorBootstrapError
 
@@ -56,6 +58,7 @@ class ConversationTurn:
     provider: str | None = None
     execution_id: str | None = None
     error_code: str | None = None
+    project_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -103,6 +106,10 @@ Keep responses useful and concise unless the human asks for depth."""
                 "name": {"type": "string"},
                 "title": {"type": "string"},
                 "description": {"type": "string"},
+                "project_id": {
+                    "type": "string",
+                    "description": "Canonical ID of the registered Aurora project that owns this mission.",
+                },
                 "tasks": {
                     "type": "array",
                     "minItems": 1,
@@ -168,6 +175,7 @@ Keep responses useful and concise unless the human asks for depth."""
         provider: DirectorProvider | None = None,
         mission_runner: Callable[..., Any] | None = None,
         workbench: UniversalWorkbench | None = None,
+        project_registry: ProjectRegistry | None = None,
     ) -> None:
         if max_history_turns < 1:
             raise DirectorConversationError("max_history_turns must be at least 1")
@@ -178,6 +186,7 @@ Keep responses useful and concise unless the human asks for depth."""
         self.provider: DirectorProvider = provider or InferenceDirectorProvider(router)
         self.mission_runner = mission_runner
         self.workbench = workbench
+        self.project_registry = project_registry
         self._session_locks_guard = RLock()
         self._session_locks: dict[str, RLock] = {}
         self.router.configure_context_gate(bootstrap.context_gate, enforce=True)
@@ -228,6 +237,43 @@ Keep responses useful and concise unless the human asks for depth."""
             raise DirectorConversationError(f"unknown conversation session: {session_id}")
         return ConversationSession(**dict(row))
 
+    def _list_turns_for_project(
+        self,
+        session_id: str,
+        project_id: str | None,
+        *,
+        limit: int,
+    ) -> tuple[ConversationTurn, ...]:
+        """Load only history belonging to the selected project (or unscoped chat)."""
+        _require_identifier(session_id, "session_id")
+        if limit < 1:
+            raise DirectorConversationError("limit must be at least 1")
+        if project_id is None:
+            query = """
+                SELECT turn_id, session_id, sequence, role, content, state,
+                       created_at, correlation_id, model, provider,
+                       execution_id, error_code, project_id
+                FROM conversation_turns
+                WHERE session_id = ? AND project_id IS NULL
+                ORDER BY sequence DESC
+                LIMIT ?
+            """
+            args = (session_id, limit)
+        else:
+            query = """
+                SELECT turn_id, session_id, sequence, role, content, state,
+                       created_at, correlation_id, model, provider,
+                       execution_id, error_code, project_id
+                FROM conversation_turns
+                WHERE session_id = ? AND project_id = ?
+                ORDER BY sequence DESC
+                LIMIT ?
+            """
+            args = (session_id, project_id, limit)
+        with self._connect() as db:
+            rows = db.execute(query, args).fetchall()
+        return tuple(ConversationTurn(**dict(row)) for row in reversed(rows))
+
     def list_turns(self, session_id: str, *, limit: int | None = None) -> tuple[ConversationTurn, ...]:
         _require_identifier(session_id, "session_id")
         effective_limit = self.max_history_turns if limit is None else limit
@@ -238,7 +284,7 @@ Keep responses useful and concise unless the human asks for depth."""
                 """
                 SELECT turn_id, session_id, sequence, role, content, state,
                        created_at, correlation_id, model, provider,
-                       execution_id, error_code
+                       execution_id, error_code, project_id
                 FROM conversation_turns
                 WHERE session_id = ?
                 ORDER BY sequence DESC
@@ -271,7 +317,7 @@ Keep responses useful and concise unless the human asks for depth."""
                 """
                 SELECT turn_id, session_id, sequence, role, content, state,
                        created_at, correlation_id, model, provider,
-                       execution_id, error_code
+                       execution_id, error_code, project_id
                 FROM conversation_turns
                 WHERE session_id = ? AND turn_id = ?
                 LIMIT 1
@@ -349,6 +395,7 @@ Keep responses useful and concise unless the human asks for depth."""
         user_input: str,
         model: str | None = None,
         request_id: str | None = None,
+        project_id: str | None = None,
     ) -> DirectorConversationResponse:
         _require_identifier(session_id, "session_id")
         with self._session_lock_for(session_id):
@@ -357,6 +404,7 @@ Keep responses useful and concise unless the human asks for depth."""
                 user_input=user_input,
                 model=model,
                 request_id=request_id,
+                project_id=project_id,
             )
 
     def _send_message_locked(
@@ -366,20 +414,47 @@ Keep responses useful and concise unless the human asks for depth."""
         user_input: str,
         model: str | None = None,
         request_id: str | None = None,
+        project_id: str | None = None,
     ) -> DirectorConversationResponse:
         _require_identifier(session_id, "session_id")
         prompt = user_input.strip()
         if not prompt:
             raise DirectorConversationError("user_input is empty")
+        prompt_project_ids = self._project_ids_in_prompt(prompt)
+        project_scope_id: str | None = None
+        if project_id is not None:
+            if not isinstance(project_id, str) or not project_id.strip() or "\x00" in project_id:
+                raise DirectorConversationError("project_id must be a non-empty registered project ID")
+            if self.project_registry is None:
+                raise DirectorConversationError(
+                    "project selection requires the canonical ProjectRegistry"
+                )
+            project_id = project_id.strip()
+            try:
+                selected_project = self.project_registry.resolve(project_id)
+            except Exception as exc:
+                raise DirectorConversationError(f"invalid project selection: {exc}") from exc
+            if selected_project.status is not ProjectStatus.ACTIVE:
+                raise DirectorConversationError(
+                    f"selected project is not active: {selected_project.status.value}"
+                )
+            if len(prompt_project_ids) == 1 and project_id not in prompt_project_ids:
+                raise DirectorConversationError(
+                    "selected project_id conflicts with the project explicitly named by the user"
+                )
+            project_scope_id = project_id
+        elif len(prompt_project_ids) == 1:
+            project_scope_id = next(iter(prompt_project_ids))
         if request_id is not None:
             if not isinstance(request_id, str):
                 raise DirectorConversationError("request_id must be a string or null")
             request_id = request_id.strip()
             if not request_id or len(request_id) > 256 or "\x00" in request_id:
                 raise DirectorConversationError("request_id must contain 1 to 256 non-null characters")
-            digest = hashlib.sha256(
-                f"{session_id}\x00{request_id}".encode("utf-8")
-            ).hexdigest()[:32]
+            request_fingerprint = f"{session_id}\x00{request_id}"
+            if project_scope_id is not None:
+                request_fingerprint += f"\x00project:{project_scope_id}"
+            digest = hashlib.sha256(request_fingerprint.encode("utf-8")).hexdigest()[:32]
             turn_id = f"turn-request-{digest}"
             correlation_id = f"corr-request-{digest}"
         else:
@@ -414,7 +489,7 @@ Keep responses useful and concise unless the human asks for depth."""
                 f"conversation session is not active: {session_id}"
             )
 
-        bootstrap_state = self._initialize_bootstrap()
+        bootstrap_state = self._initialize_bootstrap(project_scope_id)
         policy = bootstrap_state.director_model_policy
         self._validate_requested_model(model, policy)
 
@@ -428,11 +503,14 @@ Keep responses useful and concise unless the human asks for depth."""
             state="completed",
             created_at=_now(),
             correlation_id=correlation_id,
+            project_id=project_scope_id,
         )
 
-        history = list(self.list_turns(session_id, limit=self.max_history_turns))
+        history = list(self._list_turns_for_project(
+            session_id, project_scope_id, limit=self.max_history_turns,
+        ))
         messages = [
-            {"role": "system", "content": self.SYSTEM_PROMPT},
+            {"role": "system", "content": self._system_prompt(project_scope_id)},
             *[
                 {"role": item.role, "content": item.content}
                 for item in history
@@ -440,54 +518,60 @@ Keep responses useful and concise unless the human asks for depth."""
             ],
         ]
 
-        request = InferenceRequest(
-            messages=messages,
-            model=model,
-            metadata={
-                "role": "director_conversation",
-                "conversation_session_id": session_id,
-                "conversation_turn_id": turn_id,
-                "correlation_id": correlation_id,
-                "task_type": "conversation",
-                "allowed_models": self._preferred_models(policy),
-            },
-        )
+        preferred_models = self._preferred_models(policy)
+        request_metadata = {
+            "role": "director_conversation",
+            "conversation_session_id": session_id,
+            "conversation_turn_id": turn_id,
+            "correlation_id": correlation_id,
+            "task_type": "conversation",
+            "allowed_models": preferred_models,
+            "preferred_models": preferred_models,
+            "routing_capability": str(policy["default_capability"]),
+        }
+        if project_scope_id is not None:
+            request_metadata["project_id"] = project_scope_id
+        provider_messages = [
+            {"role": "system", "content": self._system_prompt(project_scope_id)},
+            *(bootstrap_state.messages if project_scope_id is None else ()),
+            *[
+                {"role": item.role, "content": item.content}
+                for item in history
+                if item.state == "completed" and item.role in {"user", "assistant"}
+            ],
+        ]
 
         try:
-            if isinstance(self.provider, InferenceDirectorProvider):
-                response = self.router.generate(
-                    request,
-                    capability=str(policy["default_capability"]),
-                    preferred_models=self._preferred_models(policy),
-                )
-            else:
-                provider_messages = [
-                    {"role": "system", "content": self.SYSTEM_PROMPT},
-                    *bootstrap_state.messages,
-                    *[
-                        {"role": item.role, "content": item.content}
-                        for item in history
-                        if item.state == "completed" and item.role in {"user", "assistant"}
-                    ],
-                ]
-                response = self.provider.generate(
-                    messages=provider_messages,
+            provider_kwargs: dict[str, Any] = {
+                "messages": provider_messages,
+                "model": model,
+                "role": "director_conversation",
+                "tools": self._conversation_tools(user_input=prompt),
+            }
+            try:
+                provider_parameters = inspect.signature(self.provider.generate).parameters
+            except (TypeError, ValueError):
+                provider_parameters = {}
+            accepts_extra = any(
+                item.kind is inspect.Parameter.VAR_KEYWORD
+                for item in provider_parameters.values()
+            )
+            if "metadata" in provider_parameters or accepts_extra:
+                provider_kwargs["metadata"] = request_metadata
+            response = self.provider.generate(**provider_kwargs)
+            if getattr(response, "tool_calls", ()) or (
+                self.mission_runner is not None
+                and self._requests_mission_execution(prompt)
+            ):
+                response = self._execute_conversation_tools(
+                    response=response,
                     model=model,
-                    role="director_conversation",
-                    tools=self._conversation_tools(user_input=prompt),
+                    provider_messages=provider_messages,
+                    user_input=prompt,
+                    conversation_turn_id=turn_id,
+                    correlation_id=correlation_id,
+                    project_scope_id=project_scope_id,
                 )
-                if getattr(response, "tool_calls", ()) or (
-                    self.mission_runner is not None
-                    and self._requests_mission_execution(prompt)
-                ):
-                    response = self._execute_conversation_tools(
-                        response=response,
-                        model=model,
-                        provider_messages=provider_messages,
-                        user_input=prompt,
-                        conversation_turn_id=turn_id,
-                        correlation_id=correlation_id,
-                    )
         except Exception as exc:
             self._insert_turn(
                 turn_id=f"{turn_id}-error",
@@ -499,6 +583,7 @@ Keep responses useful and concise unless the human asks for depth."""
                 created_at=_now(),
                 correlation_id=correlation_id,
                 error_code=_error_code(exc),
+                project_id=project_scope_id,
             )
             self._touch_session(
                 session_id,
@@ -530,6 +615,7 @@ Keep responses useful and concise unless the human asks for depth."""
             model=getattr(response, "selected_model", None) or response.model,
             provider=response.provider,
             execution_id=response.execution_id,
+            project_id=project_scope_id,
         )
         self._insert_turn(
             turn_id=assistant_turn.turn_id,
@@ -543,6 +629,7 @@ Keep responses useful and concise unless the human asks for depth."""
             model=assistant_turn.model,
             provider=assistant_turn.provider,
             execution_id=assistant_turn.execution_id,
+            project_id=project_scope_id,
         )
         context_manifest_id = self._verified_manifest_id(response, session.context_manifest_id)
         self._touch_session(
@@ -601,12 +688,37 @@ Keep responses useful and concise unless the human asks for depth."""
 
     @staticmethod
     def _requests_mission_execution(user_input: str | None) -> bool:
+        """Classify explicit work orders independently from provider/tool compliance."""
         text = str(user_input or "").casefold()
         normalized = "".join(
             character
             for character in unicodedata.normalize("NFKD", text)
             if not unicodedata.combining(character)
+        ).strip()
+        if not normalized:
+            return False
+
+        # Questions asking for instructions are not themselves an order to act.
+        informational_prefixes = (
+            "como puedo ",
+            "como se ",
+            "como compruebo ",
+            "como verifico ",
+            "como inspecciono ",
+            "que es ",
+            "explicame ",
+            "how do i ",
+            "how can i ",
+            "how do i check ",
+            "how do i verify ",
+            "how to ",
+            "what is ",
+            "what should i do ",
+            "explain how ",
         )
+        if normalized.startswith(informational_prefixes):
+            return False
+
         mission_markers = (
             "mision",
             "mission",
@@ -629,10 +741,50 @@ Keep responses useful and concise unless the human asks for depth."""
             "realiza",
             "haz ",
         )
-        return (
+        if (
             any(marker in normalized for marker in mission_markers)
             and any(marker in normalized for marker in action_markers)
+        ):
+            return True
+
+        # Concrete engineering, investigation, validation, and repository-change
+        # requests must enter the durable mission path even when the user does
+        # not know Aurora's internal term "mission" and regardless of which
+        # model/provider is active.
+        explicit_work_verbs = (
+            "corrig", "arregl", "solucion", "implement", "modific", "crea ",
+            "constru", "anad", "actualiz", "escrib", "refactor", "desarroll",
+            "repar", "prueb", "test ", "audita", "investig", "analiz", "revisa",
+            "comprueb", "verific", "valid", "demuestr", "inspeccion", "examin",
+            "diagnostic", "depur", "evalua", "confirma", "continua", "sigue con",
+            "completa", "deploy", "configur", "instala", "migrat", "prueba",
+            "fix ", "repair", "implement", "modify", "create ", "build ",
+            "add ", "update ", "write ", "refactor", "develop", "test ",
+            "audit ", "investigate", "analyz", "review ", "verify", "validat",
+            "demonstrat", "inspect", "examine", "diagnos", "debug", "troubleshoot",
+            "ensure", "check ", "confirm", "prove", "assess", "deploy", "configure",
+            "install", "migrate", "continue with",
         )
+        has_explicit_work = any(marker in normalized for marker in explicit_work_verbs)
+
+        # Preserve explicit single-operation reads ("check this file directly")
+        # as Workbench calls, unless the same request also asks for a change.
+        direct_read = (
+            "directamente" in normalized or "directly" in normalized
+        ) and any(
+            marker in normalized
+            for marker in (
+                "comprueb", "verific", "inspeccion", "lee ", "abre ", "lista ",
+                "consulta ", "read ", "check ", "verify ", "inspect ", "examine ",
+                "open ", "list ", "confirm ",
+            )
+        )
+        if direct_read and not any(
+            marker in normalized
+            for marker in ("corrig", "arregl", "solucion", "modific", "implement", "write ", "fix ", "repair", "update ", "create ")
+        ):
+            return False
+        return has_explicit_work
 
     @classmethod
     def _canonical_workbench_capability(cls, requested: str) -> str:
@@ -643,6 +795,56 @@ Keep responses useful and concise unless the human asks for depth."""
         if candidate in cls._CANONICAL_WORKBENCH_CAPABILITIES:
             return candidate
         return capability
+
+    def _system_prompt(self, project_id: str | None = None) -> str:
+        prompt = self.SYSTEM_PROMPT
+        if self.project_registry is not None:
+            if project_id is None:
+                catalog = self.project_registry.catalog()
+            else:
+                project = self.project_registry.resolve(project_id)
+                catalog = (
+                    f"- {project.project_id}: {project.name}; "
+                    f"status={project.status.value}; objective={project.objective}; "
+                    f"repository={project.repository or 'not recorded'}; "
+                    f"state={project.current_state or 'state not recorded'}"
+                )
+            prompt += (
+                "\nRegistered Aurora project context (canonical IDs only):\n"
+                + catalog
+                + "\nFor scoped work, use only the selected active project and its registered repository/workspace. "
+                "Do not substitute another project or expose another project's context.\n"
+            )
+        return prompt
+
+    @staticmethod
+    def _normalize_project_reference(value: str) -> str:
+        decomposed = unicodedata.normalize("NFKD", value.casefold())
+        return "".join(character for character in decomposed if not unicodedata.combining(character))
+
+    def _project_ids_in_prompt(self, user_input: str | None) -> set[str]:
+        if self.project_registry is None:
+            return set()
+        prompt = self._normalize_project_reference(str(user_input or ""))
+        if not prompt:
+            return set()
+        matches: set[str] = set()
+        for project in self.project_registry.projects.values():
+            if project.status is not ProjectStatus.ACTIVE:
+                continue
+            for reference in (project.project_id, project.name):
+                normalized = self._normalize_project_reference(reference.strip())
+                if not normalized:
+                    continue
+                pattern = r"(?<![\w])" + re.escape(normalized) + r"(?![\w])"
+                if re.search(pattern, prompt):
+                    matches.add(project.project_id)
+                    break
+        return matches
+
+    def _project_id_from_prompt(self, user_input: str | None) -> str | None:
+        matches = self._project_ids_in_prompt(user_input)
+        return next(iter(matches)) if len(matches) == 1 else None
 
     def _conversation_tools(
         self, *, user_input: str | None = None
@@ -686,6 +888,13 @@ Keep responses useful and concise unless the human asks for depth."""
             call_kwargs["mission_id"] = mission_id
         if correlation_id and (accepts_extra or "correlation_id" in parameters):
             call_kwargs["correlation_id"] = correlation_id
+        # The durable factory accepts the new project_id kwarg, but older
+        # callbacks and test integrations may not. Keep the boundary compatible
+        # without silently dropping the project scope on the canonical path.
+        if not accepts_extra:
+            for key in tuple(call_kwargs):
+                if key != "objective" and key not in parameters:
+                    call_kwargs.pop(key, None)
         return self.mission_runner(**call_kwargs)
 
     def _execute_conversation_tools(
@@ -697,10 +906,14 @@ Keep responses useful and concise unless the human asks for depth."""
         user_input: str | None = None,
         conversation_turn_id: str | None = None,
         correlation_id: str | None = None,
+        project_scope_id: str | None = None,
     ) -> Any:
         calls = tuple(getattr(response, "tool_calls", ()) or ())
         results: list[dict[str, Any]] = []
         media_parts: list[dict[str, Any]] = []
+        # Deduplicate duplicate run_mission calls in one provider response by
+        # semantic objective/scope, not by provider-generated call_id.
+        seen_mission_specs: dict[str, tuple[str, str | None]] = {}
 
         mission_requested = (
             self.mission_runner is not None
@@ -717,7 +930,16 @@ Keep responses useful and concise unless the human asks for depth."""
             else:
                 calls = ()
                 objective = str(user_input or "").strip()
+                prompt_projects = self._project_ids_in_prompt(user_input)
+                if len(prompt_projects) > 1:
+                    mission_project_id = None
+                else:
+                    mission_project_id = project_scope_id or next(iter(prompt_projects), None)
                 try:
+                    if len(prompt_projects) > 1:
+                        raise DirectorConversationError(
+                            "mission references multiple registered projects; explicitly scope one project before execution"
+                        )
                     mission = self._invoke_mission_runner(
                         objective=objective,
                         mission_id=(
@@ -725,6 +947,7 @@ Keep responses useful and concise unless the human asks for depth."""
                             if conversation_turn_id else None
                         ),
                         correlation_id=correlation_id,
+                        project_id=mission_project_id,
                     )
                     evidence = self._mission_evidence(mission)
                     evidence["routing_fallback"] = (
@@ -749,21 +972,97 @@ Keep responses useful and concise unless the human asks for depth."""
                 if self.mission_runner is None:
                     raise DirectorConversationError("run_mission is unavailable")
                 objective, explicit_tasks = self._normalize_mission_tool_arguments(arguments)
+                project_id = arguments.get("project_id")
+                if project_id is not None and (
+                    not isinstance(project_id, str) or not project_id.strip()
+                ):
+                    raise DirectorConversationError(
+                        "run_mission project_id must be a non-empty registered project ID"
+                    )
+                prompt_projects = self._project_ids_in_prompt(user_input)
+                if len(prompt_projects) > 1:
+                    raise DirectorConversationError(
+                        "mission references multiple registered projects; explicitly scope one project before execution"
+                    )
+                prompt_project_id = next(iter(prompt_projects), None)
+                if project_scope_id is not None and prompt_project_id is not None and project_scope_id != prompt_project_id:
+                    raise DirectorConversationError(
+                        "selected project_id conflicts with the project explicitly named by the user"
+                    )
+                if project_scope_id is not None and project_id is not None and project_id != project_scope_id:
+                    raise DirectorConversationError(
+                        "run_mission project_id cannot override the selected project"
+                    )
+                if project_id is not None and prompt_project_id is None and project_scope_id is None:
+                    raise DirectorConversationError(
+                        "the user must explicitly identify or select one registered project before scoped mission execution"
+                    )
+                if project_id is not None and prompt_project_id is not None and project_id != prompt_project_id:
+                    raise DirectorConversationError(
+                        "run_mission project_id conflicts with the project explicitly named by the user"
+                    )
+                project_id = project_scope_id or project_id or prompt_project_id
                 try:
-                    call_key = hashlib.sha256(
-                        str(call.call_id).encode("utf-8")
+                    normalized_objective = self._normalize_project_reference(objective)
+                    normalized_objective = " ".join(normalized_objective.split())
+                    mission_signature = json.dumps(
+                        {
+                            "objective": normalized_objective,
+                            "project_id": project_id,
+                        },
+                        ensure_ascii=False,
+                        sort_keys=True,
+                    )
+                    mission_key = hashlib.sha256(
+                        mission_signature.encode("utf-8")
                     ).hexdigest()[:16]
-                    # Distinct tool calls in one user turn are distinct commands;
-                    # retries/replays of the same call keep the same durable ID.
                     mission_id = (
-                        f"mission-conversation-{conversation_turn_id}-{call_key}"
+                        f"mission-conversation-{conversation_turn_id}-{mission_key}"
                         if conversation_turn_id else None
+                    )
+                    if explicit_tasks is None:
+                        graph_signature = "planner-generated"
+                    else:
+                        graph_signature = json.dumps(
+                            [
+                                {
+                                    "task_id": task.task_id,
+                                    "role": task.role,
+                                    "objective": task.objective,
+                                    "capability": task.capability,
+                                    "args": list(task.args),
+                                    "depends_on": list(task.depends_on),
+                                    "skills": list(task.skills),
+                                }
+                                for task in explicit_tasks
+                            ],
+                            ensure_ascii=False,
+                            sort_keys=True,
+                        )
+                    previous = seen_mission_specs.get(mission_signature)
+                    if previous is not None:
+                        previous_graph, previous_mission_id = previous
+                        if previous_graph != graph_signature:
+                            raise DirectorConversationError(
+                                "duplicate run_mission objective returned a conflicting task graph; "
+                                "the second graph was blocked to prevent duplicate side effects"
+                            )
+                        results.append({
+                            "status": "duplicate_tool_call_suppressed",
+                            "objective": objective,
+                            "mission_id": previous_mission_id,
+                            "duplicate_of": previous_mission_id,
+                        })
+                        continue
+                    seen_mission_specs[mission_signature] = (
+                        graph_signature, mission_id
                     )
                     if explicit_tasks is None:
                         mission = self._invoke_mission_runner(
                             objective=objective,
                             mission_id=mission_id,
                             correlation_id=correlation_id,
+                            project_id=project_id,
                         )
                     else:
                         # All missions emitted by one conversation turn share a
@@ -778,6 +1077,7 @@ Keep responses useful and concise unless the human asks for depth."""
                             planning_model=getattr(response, "model", None),
                             planning_provider=getattr(response, "provider", None),
                             planning_execution_id=getattr(response, "execution_id", None),
+                            project_id=project_id,
                         )
                     results.append(self._mission_evidence(mission))
                 except Exception as exc:
@@ -802,6 +1102,18 @@ Keep responses useful and concise unless the human asks for depth."""
                 requested_capability = capability.strip()
                 capability = self._canonical_workbench_capability(requested_capability)
                 try:
+                    prompt_projects = self._project_ids_in_prompt(user_input)
+                    if len(prompt_projects) > 1:
+                        raise DirectorConversationError(
+                            "direct Workbench request references multiple registered projects; scope one explicitly"
+                        )
+                    canonical_project_id = project_scope_id or next(iter(prompt_projects), None)
+                    workbench_options = dict(options)
+                    # Project routing is runtime-owned. Ignore model-supplied IDs and
+                    # accept only the unique project explicitly named by the human.
+                    workbench_options.pop("project_id", None)
+                    if canonical_project_id is not None:
+                        workbench_options["project_id"] = canonical_project_id
                     direct_workbench_mission_id = (
                         f"conversation:{conversation_turn_id}:{call.call_id}"
                         if conversation_turn_id
@@ -815,7 +1127,7 @@ Keep responses useful and concise unless the human asks for depth."""
                             reason="Director conversation direct Workbench evidence",
                             arguments=tuple(call_args),
                             options={
-                                **dict(options),
+                                **workbench_options,
                                 "work_id": direct_workbench_mission_id,
                             },
                             correlation_id=correlation_id,
@@ -855,12 +1167,27 @@ Keep responses useful and concise unless the human asks for depth."""
             *provider_messages,
             {"role": "user", "content": evidence_content},
         ]
-        final_response = self.provider.generate(
-            messages=follow_up,
-            model=model,
-            role="director_conversation_result",
-            tools=(),
+        final_kwargs: dict[str, Any] = {
+            "messages": follow_up,
+            "model": model,
+            "role": "director_conversation_result",
+            "tools": (),
+        }
+        try:
+            final_parameters = inspect.signature(self.provider.generate).parameters
+        except (TypeError, ValueError):
+            final_parameters = {}
+        final_accepts_extra = any(
+            item.kind is inspect.Parameter.VAR_KEYWORD
+            for item in final_parameters.values()
         )
+        if "metadata" in final_parameters or final_accepts_extra:
+            final_kwargs["metadata"] = {
+                "role": "director_conversation_result",
+                "task_type": "conversation_result",
+                **({"project_id": project_scope_id} if project_scope_id is not None else {}),
+            }
+        final_response = self.provider.generate(**final_kwargs)
         # Keep the exact execution receipt in the persisted assistant turn. The
         # summarizing model may explain the result, but cannot omit the authoritative
         # mission ID, task outcomes, errors, planning provenance, or event evidence.
@@ -998,6 +1325,7 @@ Keep responses useful and concise unless the human asks for depth."""
         plan = getattr(submission, "plan", None) or getattr(mission, "plan", None)
         mission_id = getattr(mission, "mission_id", None) or getattr(submission, "mission_id", None)
         objective = getattr(mission, "objective", None) or getattr(plan, "objective", None) or ""
+        project_id = getattr(mission, "project_id", None) or getattr(submission, "project_id", None)
         tasks: list[dict[str, Any]] = []
         for item in tuple(getattr(mission, "tasks", ()) or ()):
             task = getattr(item, "task", None)
@@ -1007,9 +1335,13 @@ Keep responses useful and concise unless the human asks for depth."""
             execution = getattr(capability_result, "execution", capability_result)
             output = getattr(execution, "output", None)
             model_result = getattr(item, "model_result", None)
+            model_response = (
+                getattr(model_result, "response", None)
+                if model_result is not None
+                else None
+            )
             durable_result = getattr(item, "durable_result", None)
-            if output is None and model_result is not None:
-                model_response = getattr(model_result, "response", None)
+            if output is None and model_response is not None:
                 output = getattr(model_response, "content", None)
 
             # DurableRuntime reconstructs completed tasks from SQLite; typed
@@ -1046,12 +1378,54 @@ Keep responses useful and concise unless the human asks for depth."""
                 receipt_id = receipt_id or durable_result.get("receipt_id")
                 provenance = provenance or durable_result.get("provenance")
                 correlation_id = correlation_id or durable_result.get("correlation_id")
+            execution_model = getattr(model_response, "model", None)
+            execution_provider = getattr(model_response, "provider", None)
+            request_id = getattr(model_response, "request_id", None)
+            execution_id = getattr(model_response, "execution_id", None)
+            requested_model = getattr(model_response, "requested_model", None)
+            selected_model = getattr(model_response, "selected_model", None)
+            reported_model = getattr(model_response, "reported_model", None)
+            routing = None
+            result_type = None
+            result_truncated = None
+            if isinstance(durable_result, Mapping):
+                execution_model = execution_model or durable_result.get("model")
+                execution_provider = execution_provider or durable_result.get("provider")
+                request_id = request_id or durable_result.get("request_id")
+                execution_id = execution_id or durable_result.get("execution_id")
+                requested_model = requested_model or durable_result.get("requested_model")
+                selected_model = selected_model or durable_result.get("selected_model")
+                reported_model = reported_model or durable_result.get("reported_model")
+                routing = durable_result.get("routing")
+                result_type = durable_result.get("type")
+                result_truncated = durable_result.get("truncated")
+            if routing is None and model_response is not None:
+                routing = {
+                    "selected_model": selected_model or execution_model,
+                    "score": getattr(model_response, "routing_score", None),
+                    "factors": getattr(model_response, "routing_factors", {}),
+                    "candidates": [
+                        {"model": candidate, "score": score}
+                        for candidate, score in getattr(model_response, "routing_candidates", ())
+                    ],
+                }
             tasks.append({
                 "task_id": getattr(task, "task_id", None),
                 "role": getattr(task, "role", None),
+                "project_id": getattr(task, "project_id", None),
                 "status": str(value),
                 "error": getattr(item, "error", None),
                 "capability": getattr(task, "capability", None),
+                "result_type": result_type,
+                "model": execution_model,
+                "provider": execution_provider,
+                "request_id": request_id,
+                "execution_id": execution_id,
+                "requested_model": requested_model,
+                "selected_model": selected_model,
+                "reported_model": reported_model,
+                "routing": DirectorConversationService._bound_evidence_value(routing, max_chars=2500),
+                "result_truncated": result_truncated,
                 "depends_on": list(getattr(task, "depends_on", ()) or ()),
                 "result": DirectorConversationService._bound_evidence_value(output),
                 "artifact_id": artifact_id,
@@ -1060,24 +1434,33 @@ Keep responses useful and concise unless the human asks for depth."""
                 "correlation_id": correlation_id,
             })
 
+        if project_id is None:
+            project_id = next((item.get("project_id") for item in tasks if item.get("project_id")), None)
+
         wait_timed_out = bool(getattr(mission, "wait_timed_out", False))
         wait_timeout_seconds = getattr(mission, "wait_timeout_seconds", None)
         failed = any(item["status"] == "failed" for item in tasks)
         blocked = any(item["status"] == "blocked" for item in tasks)
         mission_status = getattr(mission, "status", None)
         mission_status = getattr(mission_status, "value", mission_status)
+        terminal_mission_status = (
+            str(mission_status)
+            if mission_status in {"succeeded", "failed", "blocked"}
+            else None
+        )
         if wait_timed_out:
             # The request's wait timer expired, not the accepted mission. Until
             # DirectorRuntime finalizes the durable order, the conversation must
             # not override this receipt with one task's intermediate failed state.
             status = "running"
+        elif terminal_mission_status is not None:
+            # The final Director decision is authoritative: an earlier phase may
+            # have failed but been superseded by a successful replanned phase.
+            status = terminal_mission_status
         elif failed:
             status = "failed"
         elif blocked:
             status = "blocked"
-        elif mission_status:
-            # Report the durable terminal decision, including a final review block.
-            status = str(mission_status)
         elif tasks and all(item["status"] == "succeeded" for item in tasks):
             status = "succeeded"
         else:
@@ -1097,6 +1480,7 @@ Keep responses useful and concise unless the human asks for depth."""
         ]
         return {
             "mission_id": mission_id,
+            "project_id": project_id,
             "accepted": bool(mission_id and submission is not None),
             "status": status,
             "wait_timed_out": wait_timed_out,
@@ -1157,9 +1541,11 @@ Keep responses useful and concise unless the human asks for depth."""
             context_manifest_id=session.context_manifest_id,
         )
 
-    def _initialize_bootstrap(self):
+    def _initialize_bootstrap(self, project_id: str | None = None):
         try:
-            return self.bootstrap.initialize()
+            if project_id is None:
+                return self.bootstrap.initialize()
+            return self.bootstrap.initialize(project_id=project_id)
         except Exception as exc:
             if isinstance(exc, DirectorBootstrapError):
                 raise
@@ -1197,10 +1583,16 @@ Keep responses useful and concise unless the human asks for depth."""
                     provider TEXT,
                     execution_id TEXT,
                     error_code TEXT,
+                    project_id TEXT,
                     UNIQUE(session_id, sequence)
                 )
                 """
             )
+            columns = {
+                row["name"] for row in db.execute("PRAGMA table_info(conversation_turns)").fetchall()
+            }
+            if "project_id" not in columns:
+                db.execute("ALTER TABLE conversation_turns ADD COLUMN project_id TEXT")
             db.execute(
                 """
                 CREATE INDEX IF NOT EXISTS idx_conversation_turns_session_sequence
@@ -1240,6 +1632,7 @@ Keep responses useful and concise unless the human asks for depth."""
         provider: str | None = None,
         execution_id: str | None = None,
         error_code: str | None = None,
+        project_id: str | None = None,
     ) -> None:
         with self._connect() as db:
             db.execute(
@@ -1247,8 +1640,8 @@ Keep responses useful and concise unless the human asks for depth."""
                 INSERT INTO conversation_turns (
                     turn_id, session_id, sequence, role, content, state,
                     created_at, correlation_id, model, provider,
-                    execution_id, error_code
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    execution_id, error_code, project_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     turn_id,
@@ -1263,6 +1656,7 @@ Keep responses useful and concise unless the human asks for depth."""
                     provider,
                     execution_id,
                     error_code,
+                    project_id,
                 ),
             )
 

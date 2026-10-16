@@ -154,6 +154,12 @@ def test_home_chat_attachments_and_live_roadmap_office_contract():
     assert "state.pendingAttachments" in js
     assert "mission_id" in js
     assert '$("attach-file").addEventListener' in js
+    assert 'uploadHeaders["X-Aurora-Project-ID"] = projectId' in js
+    assert 'project_id: data.project_id || null' in js
+    assert "was uploaded for a different project scope" in js
+    assert 'function uploadFingerprint(file, projectId)' in js
+    assert 'evidence.push("artifact_id=" + artifact.artifact_id)' in js
+    assert 'evidence.push("stored_path=" + artifact.path)' in js
 
 
 

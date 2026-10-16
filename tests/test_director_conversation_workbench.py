@@ -1,7 +1,16 @@
 from pathlib import Path
 from types import SimpleNamespace
+import json
 
+from aurora.inference.models import InferenceResponse
+from aurora.inference.providers.registry import ProviderRegistry, ProviderSpec
 from aurora.orchestration.director_conversation import DirectorConversationService
+from aurora.orchestration.director_provider_failover import (
+    DirectorProviderCandidate,
+    DirectorProviderFailoverController,
+    DirectorProviderFailoverStore,
+)
+from aurora.projects import ProjectRegistry, ProjectSpec, ProjectStatus
 from aurora.orchestration.director_provider import DirectorModelResponse, DirectorToolCall
 from tests.test_director_conversation import _service as base_service
 
@@ -798,3 +807,591 @@ def test_duplicate_request_without_saved_response_is_not_executed_again(tmp_path
     assert "no la vuelve a ejecutar automáticamente" in response.response_text
     assert provider.calls == []
     assert [item.role for item in service.list_turns(session.session_id)] == ["user"]
+
+
+
+def test_default_inference_provider_routes_explicit_execution_through_durable_mission(tmp_path: Path):
+    service, seen = base_service(tmp_path)
+    executed = []
+
+    class ToolInferenceProvider:
+        provider_id = "fake"
+
+        def generate(self, request, *, selected_model, execution_id):
+            seen.append((request, selected_model, execution_id))
+            role = request.metadata.get("role")
+            if role == "director_conversation":
+                content = json.dumps({
+                    "tool_calls": [{
+                        "name": "run_mission",
+                        "arguments": {"objective": "Execute the durable audit"},
+                    }],
+                })
+            else:
+                content = "Aurora received the durable mission and returned its evidence."
+            return InferenceResponse(
+                model=selected_model,
+                provider="fake",
+                content=content,
+                request_id=request.request_id,
+                execution_id=execution_id,
+                selected_model=selected_model,
+                provider_model=selected_model,
+                reported_model=selected_model,
+            )
+
+    service.router.provider_registry = ProviderRegistry((
+        ProviderSpec(
+            "fake",
+            "Fake",
+            ("chat", "reasoning"),
+            True,
+            lambda spec: ToolInferenceProvider(),
+        ),
+    ))
+
+    def runner(*, objective, mission_id=None, correlation_id=None, project_id=None):
+        executed.append({
+            "objective": objective,
+            "mission_id": mission_id,
+            "correlation_id": correlation_id,
+            "project_id": project_id,
+        })
+        plan = SimpleNamespace(
+            objective=objective,
+            model="fake/director",
+            provider="fake",
+            execution_id="durable-planning-execution",
+        )
+        submission = SimpleNamespace(mission_id=mission_id, plan=plan)
+        return SimpleNamespace(
+            mission_id=mission_id,
+            submission=submission,
+            objective=objective,
+            status=SimpleNamespace(value="succeeded"),
+            tasks=(),
+        )
+
+    service.mission_runner = runner
+    session = service.create_session()
+    response = service.send_message(
+        session_id=session.session_id,
+        user_input="Ejecuta la auditoría del repositorio y delega el trabajo necesario.",
+    )
+
+    assert len(executed) == 1
+    assert executed[0]["objective"] == "Execute the durable audit"
+    assert executed[0]["mission_id"]
+    assert executed[0]["correlation_id"]
+    assert response.response_text.startswith("Aurora received the durable mission")
+    first_request = seen[0][0]
+    assert first_request.metadata["role"] == "director_conversation"
+    assert first_request.metadata["aurora_context_verified"] is True
+    assert any("run_mission" in message["content"] for message in first_request.messages if message["role"] == "system")
+
+
+
+def test_change_order_without_mission_wording_cannot_bypass_durable_runner(tmp_path: Path):
+    service, _ = base_service(tmp_path)
+    executed = []
+
+    class ProviderThatDoesNotCallMissionTool:
+        provider_id = "fake"
+
+        def __init__(self):
+            self.calls = []
+
+        def generate(self, *, messages, model, role, tools=()):
+            self.calls.append((role, tuple(tool.name for tool in tools)))
+            if role == "director_conversation":
+                return DirectorModelResponse(
+                    content="Intentaré corregir el error directamente.",
+                    model=model or "fake/director",
+                    provider="fake",
+                    request_id="request-no-tool",
+                    execution_id="execution-no-tool",
+                )
+            assert role == "director_conversation_result"
+            return DirectorModelResponse(
+                content="La orden quedó registrada y revisada con evidencia.",
+                model=model or "fake/director",
+                provider="fake",
+                request_id="request-final",
+                execution_id="execution-final",
+            )
+
+    provider = ProviderThatDoesNotCallMissionTool()
+    service.set_provider(provider)
+
+    def runner(*, objective, mission_id=None, correlation_id=None, project_id=None):
+        executed.append({
+            "objective": objective,
+            "mission_id": mission_id,
+            "correlation_id": correlation_id,
+            "project_id": project_id,
+        })
+        plan = SimpleNamespace(
+            objective=objective,
+            model="fake/director",
+            provider="fake",
+            execution_id="durable-planning",
+        )
+        return SimpleNamespace(
+            mission_id=mission_id,
+            submission=SimpleNamespace(mission_id=mission_id, plan=plan),
+            objective=objective,
+            status=SimpleNamespace(value="succeeded"),
+            tasks=(),
+        )
+
+    service.mission_runner = runner
+    session = service.create_session()
+    response = service.send_message(
+        session_id=session.session_id,
+        user_input="Corrige el error de OpenRouter y ejecuta las pruebas.",
+    )
+
+    assert len(executed) == 1
+    assert executed[0]["objective"] == "Corrige el error de OpenRouter y ejecuta las pruebas."
+    assert executed[0]["mission_id"]
+    assert executed[0]["correlation_id"]
+    assert ("director_conversation", ("run_mission",)) in provider.calls
+    assert response.response_text.startswith("La orden quedó registrada")
+
+
+def test_execution_classifier_preserves_questions_and_explicit_single_reads():
+    from aurora.orchestration.director_conversation import DirectorConversationService
+
+    assert DirectorConversationService._requests_mission_execution(
+        "Corrige el error de OpenRouter y ejecuta las pruebas."
+    )
+    assert DirectorConversationService._requests_mission_execution(
+        "Audit the repository and fix the failing tests."
+    )
+    assert not DirectorConversationService._requests_mission_execution(
+        "How do I fix the OpenRouter error?"
+    )
+    assert not DirectorConversationService._requests_mission_execution(
+        "Comprueba directamente las notas del proyecto."
+    )
+    assert DirectorConversationService._requests_mission_execution(
+        "Verifica que todas las conexiones de Aurora funcionan y corrige los errores."
+    )
+    assert DirectorConversationService._requests_mission_execution(
+        "Inspect the project end-to-end and validate the outputs."
+    )
+    assert not DirectorConversationService._requests_mission_execution(
+        "How do I verify that the router works?"
+    )
+
+
+
+def test_duplicate_run_mission_calls_with_different_call_ids_are_suppressed(tmp_path: Path):
+    service, _ = base_service(tmp_path)
+    executed = []
+
+    class DuplicateMissionProvider:
+        provider_id = "fake"
+
+        def generate(self, *, messages, model, role, tools=()):
+            if role == "director_conversation":
+                return DirectorModelResponse(
+                    content="",
+                    model=model or "fake/model",
+                    provider="fake",
+                    request_id="request-duplicate",
+                    execution_id="execution-duplicate",
+                    tool_calls=(
+                        DirectorToolCall(
+                            call_id="provider-call-1",
+                            name="run_mission",
+                            arguments={"objective": "Inspect Project Alpha"},
+                        ),
+                        DirectorToolCall(
+                            call_id="provider-call-2",
+                            name="run_mission",
+                            arguments={"objective": "Inspect Project Alpha"},
+                        ),
+                    ),
+                )
+            return DirectorModelResponse(
+                content="The durable mission was accepted once.",
+                model=model or "fake/model",
+                provider="fake",
+                request_id="request-summary",
+                execution_id="execution-summary",
+            )
+
+    service.set_provider(DuplicateMissionProvider())
+
+    def runner(*, objective, mission_id=None, correlation_id=None, project_id=None):
+        executed.append({
+            "objective": objective,
+            "mission_id": mission_id,
+            "correlation_id": correlation_id,
+            "project_id": project_id,
+        })
+        plan = SimpleNamespace(
+            objective=objective,
+            model="fake/model",
+            provider="fake",
+            execution_id="planning-1",
+        )
+        submission = SimpleNamespace(mission_id=mission_id, project_id=project_id, plan=plan)
+        return SimpleNamespace(
+            mission_id=mission_id,
+            project_id=project_id,
+            submission=submission,
+            objective=objective,
+            status=SimpleNamespace(value="succeeded"),
+            tasks=(),
+            wait_timed_out=False,
+            events=(),
+        )
+
+    service.mission_runner = runner
+    session = service.create_session()
+    response = service.send_message(
+        session_id=session.session_id,
+        user_input="Audita Project Alpha y realiza las correcciones necesarias.",
+    )
+
+    assert len(executed) == 1
+    assert executed[0]["mission_id"].startswith("mission-conversation-")
+    assert "duplicate_tool_call_suppressed" in response.response_text
+
+
+
+def test_dashboard_selected_project_flows_into_durable_mission_without_name_in_prompt(tmp_path: Path):
+    service, _ = base_service(tmp_path)
+    service.project_registry = ProjectRegistry({
+        "project-alpha": ProjectSpec(
+            project_id="project-alpha",
+            name="Project Alpha",
+            objective="Owns alpha tasks",
+            status=ProjectStatus.ACTIVE,
+            repository="AlphaEnginev1/alpha",
+            workspace=str(tmp_path / "projects" / "alpha"),
+            current_state="Project is registered",
+            updated_at="2026-10-16T00:00:00Z",
+        ),
+    })
+    service.bootstrap.context_gate.plane.project_registry = service.project_registry
+    provider = ToolProvider()
+    service.set_provider(provider)
+    executed = []
+
+    def runner(*, objective, mission_id=None, correlation_id=None, project_id=None):
+        executed.append({
+            "objective": objective,
+            "mission_id": mission_id,
+            "correlation_id": correlation_id,
+            "project_id": project_id,
+        })
+        plan = SimpleNamespace(
+            objective=objective,
+            model="fake/director",
+            provider="fake",
+            execution_id="planning-selected-project",
+        )
+        return SimpleNamespace(
+            mission_id=mission_id,
+            project_id=project_id,
+            submission=SimpleNamespace(mission_id=mission_id, project_id=project_id, plan=plan),
+            objective=objective,
+            status=SimpleNamespace(value="succeeded"),
+            tasks=(),
+            wait_timed_out=False,
+            events=(),
+        )
+
+    service.mission_runner = runner
+    session = service.create_session()
+    response = service.send_message(
+        session_id=session.session_id,
+        user_input="Audita el repositorio y corrige los problemas encontrados.",
+        request_id="selected-project-scope-001",
+        project_id="project-alpha",
+    )
+
+    assert len(executed) == 1
+    assert executed[0]["project_id"] == "project-alpha"
+    assert executed[0]["mission_id"]
+    assert response.response_text.find('"project_id": "project-alpha"') >= 0
+    assert ("director_conversation", ("run_mission",)) in provider.calls
+
+    # Replaying the same idempotency key in the same selected project reuses
+    # the accepted conversation turn instead of submitting another mission.
+    replay = service.send_message(
+        session_id=session.session_id,
+        user_input="Audita el repositorio y corrige los problemas encontrados.",
+        request_id="selected-project-scope-001",
+        project_id="project-alpha",
+    )
+    assert replay.turn.turn_id == response.turn.turn_id
+    assert len(executed) == 1
+
+
+def test_conversation_rejects_unregistered_or_conflicting_selected_project(tmp_path: Path):
+    service, _ = base_service(tmp_path)
+    service.project_registry = ProjectRegistry({
+        "project-alpha": ProjectSpec(
+            project_id="project-alpha",
+            name="Project Alpha",
+            objective="Owns alpha tasks",
+            status=ProjectStatus.ACTIVE,
+            repository="AlphaEnginev1/alpha",
+            workspace=str(tmp_path / "projects" / "alpha"),
+            current_state="Project is registered",
+            updated_at="2026-10-16T00:00:00Z",
+        ),
+        "project-beta": ProjectSpec(
+            project_id="project-beta",
+            name="Project Beta",
+            objective="Owns beta tasks",
+            status=ProjectStatus.ACTIVE,
+            repository="AlphaEnginev1/beta",
+            workspace=str(tmp_path / "projects" / "beta"),
+            current_state="Project is registered",
+            updated_at="2026-10-16T00:00:00Z",
+        ),
+    })
+    service.bootstrap.context_gate.plane.project_registry = service.project_registry
+    session = service.create_session()
+
+    import pytest
+    from aurora.orchestration.director_conversation import DirectorConversationError
+
+    with pytest.raises(DirectorConversationError, match="invalid project selection"):
+        service.send_message(
+            session_id=session.session_id,
+            user_input="Inspect a task",
+            project_id="not-registered",
+        )
+
+    with pytest.raises(DirectorConversationError, match="conflicts with the project explicitly named"):
+        service.send_message(
+            session_id=session.session_id,
+            user_input="Inspect Project Alpha",
+            project_id="project-beta",
+        )
+
+
+
+def test_provider_failure_retries_same_conversation_tool_through_durable_mission(tmp_path: Path):
+    service, _ = base_service(tmp_path)
+    service.project_registry = ProjectRegistry({
+        "project-alpha": ProjectSpec(
+            project_id="project-alpha",
+            name="Project Alpha",
+            objective="Owns alpha tasks",
+            status=ProjectStatus.ACTIVE,
+            repository="AlphaEnginev1/alpha",
+            workspace=str(tmp_path / "projects" / "alpha"),
+            current_state="Project is registered",
+            updated_at="2026-10-16T00:00:00Z",
+        ),
+    })
+    service.bootstrap.context_gate.plane.project_registry = service.project_registry
+    executed = []
+
+    class FailoverableProviderError(RuntimeError):
+        failoverable = True
+
+    class PrimaryProvider:
+        provider_id = "primary-provider"
+
+        def __init__(self):
+            self.calls = []
+
+        def generate(self, *, messages, model, role, tools=(), metadata=None):
+            self.calls.append({"role": role, "metadata": metadata})
+            raise FailoverableProviderError("primary provider unavailable")
+
+    class ReserveProvider:
+        provider_id = "reserve-provider"
+
+        def __init__(self):
+            self.calls = []
+
+        def generate(self, *, messages, model, role, tools=(), metadata=None):
+            self.calls.append({
+                "role": role,
+                "metadata": dict(metadata or {}),
+                "tools": tuple(tool.name for tool in tools),
+            })
+            if role == "director_conversation":
+                return DirectorModelResponse(
+                    content="",
+                    model=model or "reserve/model",
+                    provider="reserve-provider",
+                    request_id="reserve-request-1",
+                    execution_id="reserve-execution-1",
+                    tool_calls=(
+                        DirectorToolCall(
+                            call_id="reserve-tool-call",
+                            name="run_mission",
+                            arguments={"objective": "Run the selected project's durable audit"},
+                        ),
+                    ),
+                )
+            return DirectorModelResponse(
+                content="The durable mission was submitted and its evidence returned.",
+                model=model or "reserve/model",
+                provider="reserve-provider",
+                request_id="reserve-request-summary",
+                execution_id="reserve-execution-summary",
+            )
+
+    primary = PrimaryProvider()
+    reserve = ReserveProvider()
+    candidate = DirectorProviderCandidate(
+        provider_id="reserve-provider",
+        model="reserve/model",
+        endpoint="https://reserve.invalid",
+        factory=lambda: reserve,
+    )
+    controller = DirectorProviderFailoverController(
+        active_provider=primary,
+        candidates=(candidate,),
+        store=DirectorProviderFailoverStore(str(tmp_path / "provider-failovers.db")),
+        activate=lambda _candidate, _replacement: None,
+    )
+    service.set_provider(controller)
+
+    def runner(*, objective, mission_id=None, correlation_id=None, project_id=None):
+        executed.append({
+            "objective": objective,
+            "mission_id": mission_id,
+            "correlation_id": correlation_id,
+            "project_id": project_id,
+        })
+        plan = SimpleNamespace(
+            objective=objective,
+            model="reserve/model",
+            provider="reserve-provider",
+            execution_id="durable-planning",
+        )
+        return SimpleNamespace(
+            mission_id=mission_id,
+            project_id=project_id,
+            submission=SimpleNamespace(mission_id=mission_id, project_id=project_id, plan=plan),
+            objective=objective,
+            status=SimpleNamespace(value="succeeded"),
+            tasks=(),
+            wait_timed_out=False,
+            events=(),
+        )
+
+    service.mission_runner = runner
+    session = service.create_session()
+    response = service.send_message(
+        session_id=session.session_id,
+        user_input="Audita el repositorio seleccionado y corrige los problemas encontrados.",
+        request_id="failover-durable-scope-001",
+        project_id="project-alpha",
+    )
+
+    assert primary.calls and primary.calls[0]["role"] == "director_conversation"
+    first_reserve = reserve.calls[0]
+    assert first_reserve["role"] == "director_conversation"
+    assert first_reserve["metadata"]["project_id"] == "project-alpha"
+    assert "run_mission" in first_reserve["tools"]
+    result_reserve = next(call for call in reserve.calls if call["role"] == "director_conversation_result")
+    assert result_reserve["metadata"]["project_id"] == "project-alpha"
+    assert len(executed) == 1
+    assert executed[0]["project_id"] == "project-alpha"
+    assert executed[0]["mission_id"]
+    assert "evidence returned" in response.response_text
+
+
+
+def test_conversation_history_isolated_by_project_inside_one_session(tmp_path: Path):
+    service, _ = base_service(tmp_path)
+    projects = ProjectRegistry({
+        "project-alpha": ProjectSpec(
+            project_id="project-alpha",
+            name="Project Alpha",
+            objective="Alpha confidential task context",
+            status=ProjectStatus.ACTIVE,
+            repository="AlphaEnginev1/alpha",
+            workspace=str(tmp_path / "workspace" / "alpha"),
+            current_state="Alpha current state",
+            updated_at="2026-10-16T00:00:00Z",
+        ),
+        "project-beta": ProjectSpec(
+            project_id="project-beta",
+            name="Project Beta",
+            objective="Beta confidential task context",
+            status=ProjectStatus.ACTIVE,
+            repository="AlphaEnginev1/beta",
+            workspace=str(tmp_path / "workspace" / "beta"),
+            current_state="Beta current state",
+            updated_at="2026-10-16T00:00:00Z",
+        ),
+    })
+    service.project_registry = projects
+    service.bootstrap.context_gate.plane.project_registry = projects
+
+    class CapturingProvider:
+        provider_id = "fake"
+
+        def __init__(self):
+            self.calls = []
+
+        def generate(self, *, messages, model, role, tools=(), metadata=None):
+            self.calls.append({
+                "messages": messages,
+                "role": role,
+                "metadata": dict(metadata or {}),
+            })
+            scope = (metadata or {}).get("project_id") or "global"
+            return DirectorModelResponse(
+                content=f"Summary for {scope}",
+                model=model or "fake/model",
+                provider="fake",
+                request_id=f"request-{scope}",
+                execution_id=f"execution-{scope}-{len(self.calls)}",
+            )
+
+    provider = CapturingProvider()
+    service.set_provider(provider)
+    session = service.create_session()
+
+    alpha = service.send_message(
+        session_id=session.session_id,
+        user_input="What is the status of Project Alpha?",
+        request_id="scope-alpha-turn",
+        project_id="project-alpha",
+    )
+    beta = service.send_message(
+        session_id=session.session_id,
+        user_input="What is the status of Project Beta?",
+        request_id="scope-beta-turn",
+        project_id="project-beta",
+    )
+
+    assert alpha.turn.project_id == "project-alpha"
+    assert beta.turn.project_id == "project-beta"
+    assert provider.calls[0]["metadata"]["project_id"] == "project-alpha"
+    assert provider.calls[1]["metadata"]["project_id"] == "project-beta"
+    beta_prompt = json.dumps(provider.calls[1]["messages"], ensure_ascii=False)
+    assert "Project Beta" in beta_prompt
+    assert "Project Alpha" not in beta_prompt
+    assert "Alpha confidential task context" not in beta_prompt
+
+    alpha_history = service._list_turns_for_project(
+        session.session_id, "project-alpha", limit=20
+    )
+    beta_history = service._list_turns_for_project(
+        session.session_id, "project-beta", limit=20
+    )
+    global_history = service._list_turns_for_project(
+        session.session_id, None, limit=20
+    )
+    assert alpha_history and all(turn.project_id == "project-alpha" for turn in alpha_history)
+    assert beta_history and all(turn.project_id == "project-beta" for turn in beta_history)
+    assert global_history == ()
+    assert {turn.project_id for turn in service.list_turns(session.session_id)} == {
+        "project-alpha", "project-beta"
+    }

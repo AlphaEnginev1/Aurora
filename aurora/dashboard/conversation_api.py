@@ -50,12 +50,14 @@ class DashboardConversationAPI:
         model: str | None = None,
         request_id: str | None = None,
         principal: str = "dashboard",
+        project_id: str | None = None,
     ) -> dict[str, Any]:
         self._authorize(
             principal,
             {
                 "operation": "conversation.send_turn",
                 "session_id": session_id,
+                "project_id": project_id,
             },
         )
         try:
@@ -64,6 +66,7 @@ class DashboardConversationAPI:
                 user_input=user_input,
                 model=model,
                 request_id=request_id,
+                project_id=project_id,
             )
         except DirectorConversationError as exc:
             raise DashboardConversationAPIError(str(exc)) from exc
@@ -73,6 +76,7 @@ class DashboardConversationAPI:
             "response_text": response.response_text,
             "state": response.state,
             "request_id": request_id,
+            "project_id": response.turn.project_id,
             "correlation_id": response.correlation_id,
             "context_manifest_id": response.context_manifest_id,
             "model": response.model,
@@ -87,17 +91,25 @@ class DashboardConversationAPI:
         session_id: str,
         limit: int = 20,
         principal: str = "dashboard",
+        project_id: str | None = None,
     ) -> dict[str, Any]:
         self._authorize(
             principal,
             {
                 "operation": "conversation.get_turns",
                 "session_id": session_id,
+                "project_id": project_id,
             },
         )
         try:
             session = self.service.get_session(session_id)
-            turns = self.service.list_turns(session_id, limit=limit)
+            if project_id is not None:
+                if self.service.project_registry is None:
+                    raise DirectorConversationError("project history requires the canonical ProjectRegistry")
+                self.service.project_registry.resolve(project_id)
+            turns = self.service._list_turns_for_project(
+                session_id, project_id, limit=limit
+            )
         except DirectorConversationError as exc:
             raise DashboardConversationAPIError(str(exc)) from exc
         return {

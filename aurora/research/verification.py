@@ -128,6 +128,7 @@ class ResearchVerifier:
                 claim=claim.claim,
                 state=state,
                 verification_notes=assessment.rationale,
+                project_id=claim.project_id,
             ))
         return tuple(records)
 

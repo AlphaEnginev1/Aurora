@@ -1,6 +1,7 @@
 """Governed research retrieval orchestration."""
 from __future__ import annotations
 import hashlib
+from dataclasses import replace
 from datetime import datetime, timezone
 from uuid import uuid4
 from aurora.autonomy.internet import InternetGateway, InternetPolicyError, InternetResponse
@@ -58,6 +59,7 @@ class ResearchService:
                     RedirectHop(hop.source_url, hop.target_url, hop.status_code)
                     for hop in response.redirects
                 ),
+                project_id=request.project_id,
             )
             self.store.record_source(source)
             sources.append(source)
@@ -66,7 +68,10 @@ class ResearchService:
     def extract_claims(self, source: SourceRecord) -> tuple[ClaimRecord, ...]:
         """Parse one retrieved source and durably retain candidate claims."""
         parsed = parse_source(source)
-        claims = extract_claims(parsed)
+        claims = tuple(
+            replace(claim, project_id=source.project_id)
+            for claim in extract_claims(parsed)
+        )
         for claim in claims:
             self.store.record_claim(claim)
         return claims
@@ -105,6 +110,7 @@ class ResearchService:
                 objective=claim.claim,
                 required_sources=unique_urls,
                 max_sources=len(unique_urls),
+                project_id=claim.project_id,
             )
         )
         relations = []
@@ -123,4 +129,7 @@ class ResearchService:
         return assessment
 
     def empty_report(self,request:ResearchRequest)->ResearchReport:
-        return ResearchReport(request_id=request.request_id,findings=(),source_ids=())
+        return ResearchReport(
+            request_id=request.request_id, findings=(), source_ids=(),
+            project_id=request.project_id,
+        )

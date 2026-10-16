@@ -17,21 +17,24 @@ class ResearchStore:
                 source_id TEXT PRIMARY KEY,url TEXT NOT NULL,retrieved_at TEXT NOT NULL,
                 content_sha256 TEXT NOT NULL,status_code INTEGER NOT NULL,content_type TEXT,title TEXT,
                 content_text TEXT NOT NULL DEFAULT '',
-                final_url TEXT,redirect_chain_json TEXT NOT NULL DEFAULT '[]'
+                final_url TEXT,redirect_chain_json TEXT NOT NULL DEFAULT '[]',
+                project_id TEXT
             );
             CREATE TABLE IF NOT EXISTS claims (
                 claim_id TEXT PRIMARY KEY,source_id TEXT NOT NULL,source_content_sha256 TEXT NOT NULL,
                 claim TEXT NOT NULL,start_offset INTEGER NOT NULL,end_offset INTEGER NOT NULL,
                 extraction_confidence REAL NOT NULL,state TEXT NOT NULL,
+                project_id TEXT,
                 FOREIGN KEY(source_id) REFERENCES sources(source_id)
             );
             CREATE TABLE IF NOT EXISTS evidence (
                 evidence_id TEXT PRIMARY KEY,source_id TEXT NOT NULL,claim TEXT NOT NULL,state TEXT NOT NULL,
-                verification_notes TEXT NOT NULL,verified_at TEXT,FOREIGN KEY(source_id) REFERENCES sources(source_id)
+                verification_notes TEXT NOT NULL,verified_at TEXT,project_id TEXT,
+                FOREIGN KEY(source_id) REFERENCES sources(source_id)
             );
             CREATE TABLE IF NOT EXISTS findings (
                 finding_id TEXT PRIMARY KEY,claim TEXT NOT NULL,evidence_ids TEXT NOT NULL,
-                confidence REAL NOT NULL,state TEXT NOT NULL
+                confidence REAL NOT NULL,state TEXT NOT NULL,project_id TEXT
             );
             CREATE TABLE IF NOT EXISTS knowledge_artifacts (
                 artifact_id TEXT PRIMARY KEY,
@@ -41,7 +44,8 @@ class ResearchStore:
                 source_ids TEXT NOT NULL,
                 source_content_sha256 TEXT NOT NULL,
                 state TEXT NOT NULL,
-                created_at TEXT NOT NULL
+                created_at TEXT NOT NULL,
+                project_id TEXT
             );
             CREATE TABLE IF NOT EXISTS citation_edges (
                 edge_id TEXT PRIMARY KEY,
@@ -59,6 +63,14 @@ class ResearchStore:
                 db.execute("ALTER TABLE sources ADD COLUMN final_url TEXT")
             if "redirect_chain_json" not in columns:
                 db.execute("ALTER TABLE sources ADD COLUMN redirect_chain_json TEXT NOT NULL DEFAULT '[]'")
+            if "project_id" not in columns:
+                db.execute("ALTER TABLE sources ADD COLUMN project_id TEXT")
+            for table in ("claims", "evidence", "findings", "knowledge_artifacts"):
+                table_columns = {
+                    row["name"] for row in db.execute(f"PRAGMA table_info({table})").fetchall()
+                }
+                if "project_id" not in table_columns:
+                    db.execute(f"ALTER TABLE {table} ADD COLUMN project_id TEXT")
 
     def record_source(self, source: SourceRecord):
         redirect_chain=json.dumps([
@@ -68,32 +80,32 @@ class ResearchStore:
         with self._connect() as db:
             db.execute("""
             INSERT OR REPLACE INTO sources
-            (source_id,url,retrieved_at,content_sha256,status_code,content_type,title,content_text,final_url,redirect_chain_json)
-            VALUES (?,?,?,?,?,?,?,?,?,?)
+            (source_id,url,retrieved_at,content_sha256,status_code,content_type,title,content_text,final_url,redirect_chain_json,project_id)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?)
             """,(source.source_id,source.url,source.retrieved_at,source.content_sha256,source.status_code,
-                 source.content_type,source.title,source.content_text,source.final_url,redirect_chain))
+                 source.content_type,source.title,source.content_text,source.final_url,redirect_chain,source.project_id))
 
     def record_claim(self, claim: ClaimRecord):
         with self._connect() as db:
             db.execute("""
             INSERT OR REPLACE INTO claims
-            (claim_id,source_id,source_content_sha256,claim,start_offset,end_offset,extraction_confidence,state)
-            VALUES (?,?,?,?,?,?,?,?)
+            (claim_id,source_id,source_content_sha256,claim,start_offset,end_offset,extraction_confidence,state,project_id)
+            VALUES (?,?,?,?,?,?,?,?,?)
             """,(claim.claim_id,claim.source_id,claim.source_content_sha256,claim.claim,claim.start_offset,
-                 claim.end_offset,claim.extraction_confidence,claim.state.value))
+                 claim.end_offset,claim.extraction_confidence,claim.state.value,claim.project_id))
 
     def claims_for_source(self, source_id: str):
         with self._connect() as db:
             rows=db.execute("""
                 SELECT claim_id,source_id,source_content_sha256,claim,start_offset,end_offset,
-                       extraction_confidence,state
+                       extraction_confidence,state,project_id
                 FROM claims WHERE source_id=? ORDER BY start_offset,claim_id
             """,(source_id,)).fetchall()
         return tuple(
             ClaimRecord(
                 row["claim_id"],row["source_id"],row["source_content_sha256"],row["claim"],
                 row["start_offset"],row["end_offset"],row["extraction_confidence"],
-                EvidenceState(row["state"])
+                EvidenceState(row["state"]),row["project_id"]
             )
             for row in rows
         )
@@ -102,25 +114,25 @@ class ResearchStore:
         with self._connect() as db:
             db.execute("""
             INSERT OR REPLACE INTO evidence
-            (evidence_id,source_id,claim,state,verification_notes,verified_at) VALUES (?,?,?,?,?,?)
-            """,(evidence.evidence_id,evidence.source_id,evidence.claim,evidence.state.value,evidence.verification_notes,evidence.verified_at))
+            (evidence_id,source_id,claim,state,verification_notes,verified_at,project_id) VALUES (?,?,?,?,?,?,?)
+            """,(evidence.evidence_id,evidence.source_id,evidence.claim,evidence.state.value,evidence.verification_notes,evidence.verified_at,evidence.project_id))
 
     def record_finding(self,finding:ResearchFinding):
         with self._connect() as db:
-            db.execute("INSERT OR REPLACE INTO findings (finding_id,claim,evidence_ids,confidence,state) VALUES (?,?,?,?,?)",
-                       (finding.finding_id,finding.claim,json.dumps(finding.evidence_ids),finding.confidence,finding.state.value))
+            db.execute("INSERT OR REPLACE INTO findings (finding_id,claim,evidence_ids,confidence,state,project_id) VALUES (?,?,?,?,?,?)",
+                       (finding.finding_id,finding.claim,json.dumps(finding.evidence_ids),finding.confidence,finding.state.value,finding.project_id))
 
     def record_knowledge_artifact(self, artifact) -> None:
         with self._connect() as db:
             db.execute("""
             INSERT OR REPLACE INTO knowledge_artifacts
-            (artifact_id,finding_id,claim,evidence_ids,source_ids,source_content_sha256,state,created_at)
-            VALUES (?,?,?,?,?,?,?,?)
+            (artifact_id,finding_id,claim,evidence_ids,source_ids,source_content_sha256,state,created_at,project_id)
+            VALUES (?,?,?,?,?,?,?,?,?)
             """,(
                 artifact.artifact_id, artifact.finding_id, artifact.claim,
                 json.dumps(artifact.evidence_ids), json.dumps(artifact.source_ids),
                 json.dumps(artifact.source_content_sha256), artifact.state.value,
-                artifact.created_at,
+                artifact.created_at, artifact.project_id,
             ))
 
     def record_citation_edge(self, edge) -> None:
@@ -135,7 +147,7 @@ class ResearchStore:
         with self._connect() as db:
             row=db.execute("""
                 SELECT artifact_id,finding_id,claim,evidence_ids,source_ids,
-                       source_content_sha256,state,created_at
+                       source_content_sha256,state,created_at,project_id
                 FROM knowledge_artifacts WHERE artifact_id=?
             """,(artifact_id,)).fetchone()
         if row is None:
@@ -149,6 +161,7 @@ class ResearchStore:
             source_content_sha256=tuple(tuple(item) for item in json.loads(row["source_content_sha256"])),
             state=EvidenceState(row["state"]),
             created_at=row["created_at"],
+            project_id=row["project_id"],
         )
 
     def citation_edges(self, artifact_id: str):
@@ -169,14 +182,14 @@ class ResearchStore:
 
     def evidence_for_source(self,source_id:str):
         with self._connect() as db:
-            rows=db.execute("SELECT evidence_id,source_id,claim,state,verification_notes,verified_at FROM evidence WHERE source_id=? ORDER BY evidence_id",(source_id,)).fetchall()
-        return tuple(EvidenceRecord(row["evidence_id"],row["source_id"],row["claim"],EvidenceState(row["state"]),row["verification_notes"],row["verified_at"]) for row in rows)
+            rows=db.execute("SELECT evidence_id,source_id,claim,state,verification_notes,verified_at,project_id FROM evidence WHERE source_id=? ORDER BY evidence_id",(source_id,)).fetchall()
+        return tuple(EvidenceRecord(row["evidence_id"],row["source_id"],row["claim"],EvidenceState(row["state"]),row["verification_notes"],row["verified_at"],row["project_id"]) for row in rows)
 
     def source(self, source_id: str) -> SourceRecord | None:
         with self._connect() as db:
             row=db.execute("""
                 SELECT source_id,url,retrieved_at,content_sha256,status_code,content_type,title,
-                       content_text,final_url,redirect_chain_json
+                       content_text,final_url,redirect_chain_json,project_id
                 FROM sources WHERE source_id=?
             """,(source_id,)).fetchone()
         if row is None:
@@ -189,5 +202,5 @@ class ResearchStore:
             source_id=row["source_id"],url=row["url"],retrieved_at=row["retrieved_at"],
             content_sha256=row["content_sha256"],status_code=row["status_code"],
             content_type=row["content_type"],title=row["title"],content_text=row["content_text"],
-            final_url=row["final_url"],redirect_chain=hops,
+            final_url=row["final_url"],redirect_chain=hops,project_id=row["project_id"],
         )

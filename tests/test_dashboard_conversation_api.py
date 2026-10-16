@@ -22,7 +22,7 @@ from aurora.orchestration.director_decision_performance import DirectorDecisionP
 from aurora.orchestration.director_decision_policy_active_store import DirectorDecisionPolicyActiveStore
 from aurora.orchestration.director_decision_policy_contract_store import DirectorDecisionPolicyContractStore
 from aurora.orchestration.director_decision_policy_proposal_store import DirectorDecisionPolicyProposalStore
-from aurora.projects import ProjectRegistry
+from aurora.projects import ProjectRegistry, ProjectSpec, ProjectStatus
 from aurora.research.store import ResearchStore
 from aurora.skills import SkillRegistry
 from aurora.orchestration.task_store import DurableTaskStore
@@ -44,8 +44,9 @@ class FakeProvider:
         )
 
 
-def _conversation(tmp_path: Path):
+def _conversation(tmp_path: Path, project_registry: ProjectRegistry | None = None):
     task_db = tmp_path / "tasks.db"
+    projects = project_registry or ProjectRegistry({})
     tasks = DurableTaskStore(task_db)
     research = ResearchStore(tmp_path / "research.db")
     organization = OrganizationRegistry(
@@ -54,7 +55,7 @@ def _conversation(tmp_path: Path):
     )
     model = ModelSpec("fake/director", "fake", "https://example.invalid", capabilities=("reasoning",))
     plane = AuroraContextPlane(
-        ProjectRegistry({}), organization, SkillRegistry({}), (model,),
+        projects, organization, SkillRegistry({}), (model,),
         runtime_context=build_context_runtime_adapter(tasks),
         mailbox_context=build_context_mailbox_adapter(tasks),
         knowledge_context=build_context_knowledge_adapter(research),
@@ -83,7 +84,12 @@ def _conversation(tmp_path: Path):
         policy_contract_store=DirectorDecisionPolicyContractStore(task_db),
         decision_knowledge_store=DirectorDecisionKnowledgeStore(task_db),
     )
-    service = DirectorConversationService(router=router, bootstrap=bootstrap, db_path=tmp_path / "conversation.db")
+    service = DirectorConversationService(
+        router=router,
+        bootstrap=bootstrap,
+        db_path=tmp_path / "conversation.db",
+        project_registry=projects,
+    )
     return service
 
 
@@ -262,3 +268,73 @@ def test_http_serves_canonical_portrait_asset(tmp_path):
     finally:
         server.shutdown()
         server.server_close()
+
+
+
+def test_http_conversation_turn_accepts_and_returns_selected_project_id(tmp_path):
+    projects = ProjectRegistry({
+        "project-http": ProjectSpec(
+            project_id="project-http",
+            name="HTTP Project",
+            objective="Owns HTTP-scoped conversation",
+            status=ProjectStatus.ACTIVE,
+            repository="AlphaEnginev1/http-project",
+            workspace=str(tmp_path / "projects" / "http-project"),
+            current_state="Registered test project",
+            updated_at="2026-10-16T00:00:00Z",
+        ),
+    })
+    conversation = _conversation(tmp_path, projects)
+    api = DashboardConversationAPI(conversation)
+
+    class Gateway:
+        def snapshot(self):
+            return {"read_only": True}
+        def project(self, project_id):
+            return {"project": {"project_id": project_id}}
+        def agent(self, role):
+            return {"identity": {"role": role}}
+
+    server = create_dashboard_server(
+        dashboard_gateway=Gateway(),
+        conversation_api=api,
+        host="127.0.0.1",
+        port=0,
+    )
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = "http://127.0.0.1:" + str(server.server_address[1])
+    try:
+        with urlopen(
+            Request(
+                base + "/api/conversation/session",
+                data=b"{}",
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            ),
+            timeout=5,
+        ) as response:
+            session = json.loads(response.read().decode("utf-8"))
+        body = json.dumps({
+            "user_input": "Hola, contexto del proyecto HTTP.",
+            "request_id": "http-selected-project-001",
+            "project_id": "project-http",
+        }).encode("utf-8")
+        with urlopen(
+            Request(
+                base + "/api/conversation/" + session["session_id"] + "/turn",
+                data=body,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            ),
+            timeout=5,
+        ) as response:
+            turn = json.loads(response.read().decode("utf-8"))
+        assert response.status == 200
+        assert turn["project_id"] == "project-http"
+        assert turn["state"] == "completed"
+        assert turn["turn"]["model"] == turn["model"]
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
