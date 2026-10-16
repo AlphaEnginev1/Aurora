@@ -4,6 +4,7 @@ from __future__ import annotations
 import ast
 from dataclasses import dataclass
 import json
+import inspect
 import re
 from typing import Any, Mapping, Protocol
 from uuid import uuid4
@@ -61,6 +62,28 @@ class DirectorProvider(Protocol):
         ...
 
 
+def _router_generate_compatible(
+    router: ModelRouter,
+    request: InferenceRequest,
+    *,
+    capability: str,
+    preferred_models: tuple[str, ...],
+) -> InferenceResponse:
+    """Forward optional routing preferences only when supported by this router."""
+    kwargs: dict[str, Any] = {"capability": capability}
+    try:
+        parameters = inspect.signature(router.generate).parameters
+    except (TypeError, ValueError):
+        parameters = {}
+    accepts_extra = any(
+        item.kind is inspect.Parameter.VAR_KEYWORD
+        for item in parameters.values()
+    )
+    if "preferred_models" in parameters or accepts_extra:
+        kwargs["preferred_models"] = preferred_models or None
+    return router.generate(request, **kwargs)
+
+
 class InferenceDirectorProvider:
     """Compatibility adapter from Aurora's inference fabric to DirectorProvider."""
 
@@ -111,10 +134,11 @@ class InferenceDirectorProvider:
             },
             request_id=uuid4().hex,
         )
-        response: InferenceResponse = self._router.generate(
+        response: InferenceResponse = _router_generate_compatible(
+            self._router,
             request,
             capability=capability,
-            preferred_models=preferred_models or None,
+            preferred_models=preferred_models,
         )
         tool_calls = self._parse_tool_calls(response.content, tools)
         return DirectorModelResponse(
