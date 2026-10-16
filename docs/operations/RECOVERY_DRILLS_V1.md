@@ -51,6 +51,8 @@ Block 6 is VERIFIED on the canonical `main` line.
 - CI 1396: Recovery Drills branch — `test` PASS, `e2e-network` PASS.
 - CI 1398: canonical `main` after merge — `test` PASS, `e2e-network` PASS.
 - RD-01..RD-05 are green.
+- RD-07 is green in PR #278 CI run 38918770649: 832 unit tests passed; 57 E2E passed and 4 skipped.
+- RD-07 verifies replay of a saved continuation, replay of a terminal decision, and reuse of an uncompleted review round after restart.
 - Existing acquisition transaction reconciliation remains covered by its established recovery tests.
 - No new recovery subsystem was introduced; the drills verify the already-integrated durable recovery mechanisms.
 - Recovery remains idempotent and claim-token safe, and restart evidence is preserved in the durable task/event state.
