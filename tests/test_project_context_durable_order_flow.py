@@ -7,6 +7,8 @@ from aurora.orchestration.durable_director import DurableDirectorError, DurableD
 from aurora.inference.models import InferenceResponse
 from aurora.orchestration.engine import TaskResult
 from aurora.orchestration.task_engine import DelegatedTask, TaskEngine
+from aurora.orchestration.team_runtime import TeamCoordinator
+from aurora.organization.agent_team import AgentTeam, TeamMember
 from aurora.orchestration.task_store import DurableTaskStore
 from aurora.projects.registry import ProjectRegistry, ProjectSpec, ProjectStatus
 
@@ -112,8 +114,101 @@ def test_mission_idempotency_cannot_switch_project(tmp_path: Path):
         )
     assert len(store.list_tasks("mission-project-bound")) == 1
 
+def test_task_engine_auto_role_resolution_preserves_project_id(
+    tmp_path: Path, monkeypatch
+):
+    from aurora.organization import agent_selection
+
+    class FixedSelector:
+        def __init__(self, *_args):
+            pass
+
+        def select(self, **_kwargs):
+            return "researcher"
+
+    monkeypatch.setattr(agent_selection, "AgentSelector", FixedSelector)
+    engine = TaskEngine(_Orchestration(), tmp_path / "workspace", organization=object())
+    resolved = engine._resolve_agent_task(
+        DelegatedTask(
+            "auto-task",
+            "auto",
+            "Inspect project A",
+            project_id="project-a",
+        )
+    )
+    assert resolved.role == "researcher"
+    assert resolved.project_id == "project-a"
+
+
+def test_team_coordinator_auto_role_resolution_preserves_project_id(
+    monkeypatch,
+):
+    import aurora.orchestration.team_runtime as team_runtime
+
+    class FakeOrganization:
+        @staticmethod
+        def resolve_agent(role):
+            return type("Agent", (), {"department": "engineering"})()
+
+    class FakeAgentSelector:
+        organization = FakeOrganization()
+
+        @staticmethod
+        def route(**_kwargs):
+            return type("Route", (), {"selected_role": "researcher"})()
+
+    class FakeTaskEngine:
+        @staticmethod
+        def validate(tasks):
+            return tuple(tasks)
+
+    class FakeTeamSelector:
+        def __init__(self, *_args):
+            pass
+
+        @staticmethod
+        def form(**kwargs):
+            return AgentTeam(
+                objective=kwargs["objective"],
+                members=(
+                    TeamMember(
+                        role="researcher",
+                        score=1.0,
+                        covered_skills=(),
+                        department="engineering",
+                    ),
+                ),
+                required_skills=tuple(kwargs.get("required_skill_ids", ())),
+                covered_skills=(),
+                missing_skills=(),
+                max_members=4,
+            )
+
+    monkeypatch.setattr(
+        team_runtime, "DynamicAgentTeamSelector", FakeTeamSelector
+    )
+    coordinator = TeamCoordinator(
+        task_engine=FakeTaskEngine(),
+        agent_selector=FakeAgentSelector(),
+    )
+    state = coordinator.prepare(
+        mission_id="mission-auto-project",
+        objective="Inspect project A",
+        tasks=(
+            DelegatedTask(
+                "auto-task",
+                "auto",
+                "Inspect project A",
+                project_id="project-a",
+            ),
+        ),
+    )
+    assert state.tasks[0].role == "researcher"
+    assert state.tasks[0].project_id == "project-a"
+
 
 def test_project_id_reaches_model_inference_metadata(tmp_path: Path):
+
     class RecordingOrchestration(_Orchestration):
         def __init__(self):
             self.kwargs = None
