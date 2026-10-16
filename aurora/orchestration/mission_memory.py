@@ -173,12 +173,37 @@ class MissionMemory:
         if event_id is not None and event_id < 1:
             raise MissionMemoryError("event_id must be positive")
 
-        # A mission mailbox entry inherits the mission's canonical project and
-        # correlation identifiers unless the caller supplies an event-specific
-        # correlation. Task-linked entries additionally inherit the durable task
-        # project and role. This keeps reconstructed and live projections aligned.
+        # Resolve event/task/mission identity before validating scoped writes.
+        # Event-specific correlation takes precedence over the mission default.
         try:
             with self.store._connect() as context_db:
+                source_event = None
+                if event_id is not None:
+                    source_event = context_db.execute(
+                        """
+                        SELECT event_id, mission_id, task_id, project_id,
+                               agent_role, correlation_id
+                        FROM task_events WHERE event_id = ?
+                        """,
+                        (event_id,),
+                    ).fetchone()
+                if source_event is not None:
+                    if source_event["mission_id"] != mission_id:
+                        raise MissionMemoryError(
+                            f"event_id {event_id} belongs to another mission"
+                        )
+                    source_task_id = source_event["task_id"]
+                    if (
+                        task_id is not None
+                        and source_task_id is not None
+                        and task_id != source_task_id
+                    ):
+                        raise MissionMemoryError(
+                            f"event_id {event_id} task_id conflicts with the mailbox projection"
+                        )
+                    if task_id is None and source_task_id is not None:
+                        task_id = str(source_task_id)
+
                 task_context = None
                 if task_id is not None:
                     task_context = context_db.execute(
@@ -208,39 +233,45 @@ class MissionMemory:
                 submitted_payload = json.loads(submitted["payload_json"])
             except (TypeError, json.JSONDecodeError):
                 submitted_payload = {}
-        canonical_project = (
-            submitted["project_id"] if submitted is not None else None
-        )
+        canonical_project = submitted["project_id"] if submitted is not None else None
         if canonical_project is None and isinstance(submitted_payload, dict):
             value = submitted_payload.get("project_id")
             canonical_project = value if isinstance(value, str) and value.strip() else None
-        if (
-            canonical_project is not None
-            and project_id is not None
-            and project_id != canonical_project
-        ):
+
+        event_project = source_event["project_id"] if source_event is not None else None
+        task_project = (
+            str(task_context["project_id"])
+            if task_context is not None and task_context["project_id"] is not None
+            else None
+        )
+        known_projects = {
+            value for value in (canonical_project, event_project, task_project) if value is not None
+        }
+        if len(known_projects) > 1:
             raise MissionMemoryError(
-                "mission mailbox project_id conflicts with the durable submission receipt"
+                "durable event/task project_id conflicts with the mission submission receipt"
             )
-        if task_context is not None and task_context["project_id"] is not None:
-            task_project_id = str(task_context["project_id"])
-            if canonical_project is not None and task_project_id != canonical_project:
-                raise MissionMemoryError(
-                    "durable task project_id conflicts with the mission submission receipt"
-                )
-            if project_id is None:
-                project_id = task_project_id
-            if agent_role is None:
-                agent_role = str(task_context["role"])
+        if project_id is not None and known_projects and project_id not in known_projects:
+            raise MissionMemoryError(
+                "mission mailbox project_id conflicts with durable mission/task context"
+            )
         if project_id is None:
-            project_id = canonical_project
-        if correlation_id is None and submitted is not None:
-            correlation_id = submitted["correlation_id"]
-            if correlation_id is None and isinstance(submitted_payload, dict):
+            project_id = (
+                event_project or task_project or canonical_project
+            )
+        if agent_role is None:
+            if source_event is not None and source_event["agent_role"] is not None:
+                agent_role = str(source_event["agent_role"])
+            elif task_context is not None:
+                agent_role = str(task_context["role"])
+        if correlation_id is None:
+            if source_event is not None and source_event["correlation_id"] is not None:
+                correlation_id = str(source_event["correlation_id"])
+            elif submitted is not None and submitted["correlation_id"] is not None:
+                correlation_id = str(submitted["correlation_id"])
+            elif isinstance(submitted_payload, dict):
                 value = submitted_payload.get("correlation_id")
-                correlation_id = (
-                    value if isinstance(value, str) and value.strip() else None
-                )
+                correlation_id = value if isinstance(value, str) and value.strip() else None
 
         if scope is MailboxScope.PROJECT and not (project_id and project_id.strip()):
             raise MissionMemoryError("project scope requires project_id")
@@ -248,6 +279,11 @@ class MissionMemory:
             raise MissionMemoryError("agent scope requires agent_role")
         if scope is MailboxScope.TASK and not (task_id and task_id.strip()):
             raise MissionMemoryError("task scope requires task_id")
+        resolved_identifiers = (
+            mission_id, source, kind, content, project_id, agent_role, task_id, correlation_id
+        )
+        if any(value is not None and "\x00" in value for value in resolved_identifiers):
+            raise MissionMemoryError("resolved mission message contains a null byte")
 
         now = datetime.now(timezone.utc).isoformat()
         payload = json.dumps(dict(metadata or {}), sort_keys=True)
@@ -266,24 +302,48 @@ class MissionMemory:
                         (event_id,),
                     ).fetchone()
                     if existing is not None:
-                        same_projection = (
+                        same_content = (
                             existing["mission_id"] == mission_id
                             and existing["source"] == source
                             and existing["kind"] == kind
                             and existing["content"] == content
                             and existing["metadata_json"] == payload
                             and existing["scope"] == scope.value
-                            and existing["project_id"] == project_id
-                            and existing["agent_role"] == agent_role
-                            and existing["task_id"] == task_id
-                            and existing["correlation_id"] == correlation_id
                         )
-                        if not same_projection:
+                        compatible_context = all(
+                            old_value is None
+                            or new_value is None
+                            or old_value == new_value
+                            for old_value, new_value in (
+                                (existing["project_id"], project_id),
+                                (existing["agent_role"], agent_role),
+                                (existing["task_id"], task_id),
+                                (existing["correlation_id"], correlation_id),
+                            )
+                        )
+                        if not same_content or not compatible_context:
                             db.rollback()
                             raise MissionMemoryError(
                                 f"event_id {event_id} is already bound to a different mailbox projection"
                             )
-                        db.rollback()
+                        # An older projection may lack context columns that can
+                        # now be reconstructed from the durable event/task journal.
+                        # Enrich only NULLs; never rewrite a non-NULL identity.
+                        db.execute(
+                            """
+                            UPDATE mission_messages
+                            SET project_id = COALESCE(project_id, ?),
+                                agent_role = COALESCE(agent_role, ?),
+                                task_id = COALESCE(task_id, ?),
+                                correlation_id = COALESCE(correlation_id, ?)
+                            WHERE message_id = ?
+                            """,
+                            (
+                                project_id, agent_role, task_id, correlation_id,
+                                int(existing["message_id"]),
+                            ),
+                        )
+                        db.commit()
                         return MissionMessage(
                             message_id=int(existing["message_id"]),
                             mission_id=str(existing["mission_id"]),
@@ -293,11 +353,11 @@ class MissionMemory:
                             metadata=json.loads(existing["metadata_json"]),
                             created_at=str(existing["created_at"]),
                             scope=MailboxScope(existing["scope"]),
-                            project_id=existing["project_id"],
-                            agent_role=existing["agent_role"],
-                            task_id=existing["task_id"],
+                            project_id=existing["project_id"] or project_id,
+                            agent_role=existing["agent_role"] or agent_role,
+                            task_id=existing["task_id"] or task_id,
                             event_id=int(existing["event_id"]),
-                            correlation_id=existing["correlation_id"],
+                            correlation_id=existing["correlation_id"] or correlation_id,
                         )
                 cursor = db.execute(
                     """
