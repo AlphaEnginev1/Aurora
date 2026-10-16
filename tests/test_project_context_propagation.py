@@ -755,8 +755,9 @@ def test_project_scoped_workbench_research_overrides_model_project_constraints(t
 
 
 
-def test_runtime_recovery_reprojects_legacy_mailbox_rows_with_canonical_project_scope(tmp_path):
-    store = DurableTaskStore(tmp_path / "tasks.db")
+def test_runtime_restart_reprojects_legacy_mailbox_rows_with_canonical_project_scope(tmp_path):
+    database_path = tmp_path / "tasks.db"
+    store = DurableTaskStore(database_path)
     memory = MissionMemory(store)
     task = DelegatedTask(
         "inspect",
@@ -826,33 +827,36 @@ def test_runtime_recovery_reprojects_legacy_mailbox_rows_with_canonical_project_
         task_id="inspect",
     )
 
+    # Re-open the SQLite store as a fresh process would do after a daemon restart.
+    recovered_store = DurableTaskStore(database_path)
+    recovered_memory = MissionMemory(recovered_store)
     runtime = object.__new__(DirectorRuntime)
     runtime._handoff_lock = RLock()
-    runtime.store = store
-    runtime.memory = memory
+    runtime.store = recovered_store
+    runtime.memory = recovered_memory
     runtime.worker_id = "worker-recovered"
 
     assert runtime._ensure_mission_memory("mission-project-alpha") is True
 
-    objective = memory.first_of_kind(
+    objective = recovered_memory.first_of_kind(
         "mission-project-alpha", "mission_objective", project_id="project-alpha"
     )
-    plan = memory.first_of_kind(
+    plan = recovered_memory.first_of_kind(
         "mission-project-alpha", "mission_plan", project_id="project-alpha"
     )
-    task_result = memory.first_of_kind(
+    task_result = recovered_memory.first_of_kind(
         "mission-project-alpha", "task_result", project_id="project-alpha"
     )
     assert objective is not None and objective.project_id == "project-alpha"
     assert plan is not None and plan.project_id == "project-alpha"
     assert task_result is not None and task_result.project_id == "project-alpha"
     assert "nvidia/reserve" in task_result.content
-    assert memory.task_result_task_ids(
+    assert recovered_memory.task_result_task_ids(
         "mission-project-alpha", project_id="project-alpha"
     ) == frozenset({"inspect"})
-    assert memory.first_of_kind("mission-project-alpha", "mission_objective").metadata["legacy"] is True
+    assert recovered_memory.first_of_kind("mission-project-alpha", "mission_objective").metadata["legacy"] is True
 
-    events = store.events("mission-project-alpha")
+    events = recovered_store.events("mission-project-alpha")
     submitted = next(event for event in events if event.event_type == "mission_submitted")
     completed = next(event for event in events if event.event_type == "succeeded")
     assert submitted.project_id == "project-alpha"
