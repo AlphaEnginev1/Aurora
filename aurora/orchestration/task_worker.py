@@ -115,7 +115,7 @@ class TaskWorker:
 
         result = self._execute_claimed(claimed)
         if result.status is TaskStatus.SUCCEEDED:
-            result_payload = self._result_payload(result)
+            result_payload = self._durable_result_payload(result)
             self.store.complete(
                 self.mission_id,
                 claimed.task.task_id,
@@ -164,7 +164,7 @@ class TaskWorker:
                     "error": error,
                 },
             )
-            attempt_payload = dict(self._result_payload(result))
+            attempt_payload = dict(self._durable_result_payload(result))
             attempt_payload.update({"error": error, "attempt": claimed.attempts})
             return WorkerCycle(
                 action="retried",
@@ -177,7 +177,7 @@ class TaskWorker:
                 result_payload=attempt_payload,
             )
 
-        failure_payload = dict(self._result_payload(result))
+        failure_payload = dict(self._durable_result_payload(result))
         failure_payload.update({"error": error, "attempt": claimed.attempts})
         self.store.complete(
             self.mission_id,
@@ -258,6 +258,8 @@ class TaskWorker:
                 execution_scope=(
                     f"{self.mission_id}:{claimed.task.task_id}:attempt:{claimed.attempts}"
                 ),
+                mission_id=self.mission_id,
+                correlation_id=self.correlation_id,
             )
         except Exception as exc:
             result = DelegatedTaskResult(
@@ -380,6 +382,14 @@ class TaskWorker:
             # Task state is authoritative in DurableTaskStore. Observability
             # events must never turn a committed task transition into a retry.
             return
+
+    def _durable_result_payload(self, result: DelegatedTaskResult) -> dict:
+        """Add immutable mission/task identity around the typed execution result."""
+        payload = self._result_payload(result)
+        payload["mission_id"] = self.mission_id
+        payload["project_id"] = result.task.project_id
+        payload["correlation_id"] = self.correlation_id
+        return payload
 
     @staticmethod
     def _result_payload(result: DelegatedTaskResult) -> dict:
