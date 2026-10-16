@@ -752,7 +752,12 @@ class UniversalWorkbench:
         source = self._safe_path(request.arguments[0], must_exist=True, request=request)
         if not source.is_file():
             raise WorkbenchError(f"artifact source is not a file: {source}")
-        target_root = self.runtime_root / "artifacts"
+        project_root = self._project_workspace_root(request)
+        target_root = (
+            project_root / "artifacts"
+            if project_root is not None
+            else self.runtime_root / "artifacts"
+        )
         target_root.mkdir(parents=True, exist_ok=True)
         digest = self._sha256(source)
         target = target_root / f"{digest[:24]}-{source.name}"
