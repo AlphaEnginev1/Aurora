@@ -875,6 +875,26 @@ Keep responses useful and concise unless the human asks for depth."""
                     raise DirectorConversationError("workbench options must be an object")
                 requested_capability = capability.strip()
                 capability = self._canonical_workbench_capability(requested_capability)
+                workbench_options = dict(options)
+                session_project_id = (metadata or {}).get("project_id")
+                if isinstance(session_project_id, str) and session_project_id.strip():
+                    requested_project_id = workbench_options.get("project_id")
+                    if (
+                        requested_project_id is not None
+                        and requested_project_id != session_project_id
+                    ):
+                        results.append({
+                            "status": "failed",
+                            "capability": capability,
+                            "error": (
+                                "direct Workbench project_id conflicts with the "
+                                "authoritative conversation session project"
+                            ),
+                            "requested_project_id": requested_project_id,
+                            "project_id": session_project_id,
+                        })
+                        continue
+                    workbench_options["project_id"] = session_project_id
                 try:
                     # Provider call IDs may change when an interrupted turn is
                     # regenerated. Use the deterministic turn slot so a retry reaches
@@ -893,7 +913,7 @@ Keep responses useful and concise unless the human asks for depth."""
                             reason="Director conversation direct Workbench evidence",
                             arguments=tuple(call_args),
                             options={
-                                **dict(options),
+                                **workbench_options,
                                 "work_id": direct_workbench_mission_id,
                             },
                             correlation_id=correlation_id,
