@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import sqlite3
 from threading import RLock
 from types import SimpleNamespace
 import json
@@ -1224,3 +1225,55 @@ def test_project_runtime_context_recovers_scope_from_legacy_submission_receipt(t
 
     assert alpha["mission_count"] == 1
     assert beta["mission_count"] == 0
+
+
+
+def test_workbench_sessions_are_project_scoped_even_when_callers_reuse_work_id(tmp_path):
+    registry = make_registry(tmp_path)
+    runtime_root = tmp_path / "runtime"
+    workspace_root = runtime_root / "workspace"
+    alpha_root = Path(registry.resolve("project-alpha").workspace)
+    beta_root = Path(registry.resolve("project-beta").workspace)
+    alpha_root.mkdir(parents=True)
+    beta_root.mkdir(parents=True)
+    (alpha_root / "alpha-only.txt").write_text("alpha", encoding="utf-8")
+    (beta_root / "beta-only.txt").write_text("beta", encoding="utf-8")
+    sessions = WorkSessionStore(runtime_root / "work-sessions.db")
+    workbench = UniversalWorkbench(
+        repository_root=tmp_path / "repo",
+        runtime_root=runtime_root,
+        workspace_root=workspace_root,
+        gateway=None,
+        session_store=sessions,
+        project_registry=registry,
+    )
+
+    def request(project_id):
+        return WorkbenchRequest(
+            capability="workbench:file:list",
+            actor="operator",
+            mission_id="same-mission-label",
+            arguments=(".",),
+            options={"work_id": "same-work-id", "project_id": project_id},
+        )
+
+    alpha_result = workbench.execute(request("project-alpha"))
+    beta_result = workbench.execute(request("project-beta"))
+    alpha_names = {item["name"] for item in alpha_result.output}
+    beta_names = {item["name"] for item in beta_result.output}
+    assert "alpha-only.txt" in alpha_names
+    assert "beta-only.txt" not in alpha_names
+    assert "beta-only.txt" in beta_names
+    assert "alpha-only.txt" not in beta_names
+
+    with sqlite3.connect(sessions.path) as db:
+        persisted = [
+            json.loads(row[0])
+            for row in db.execute("SELECT payload FROM work_sessions ORDER BY work_id")
+        ]
+    assert len(persisted) == 2
+    alpha_session = next(item for item in persisted if item["workspace_root"] == str(alpha_root.resolve()))
+    beta_session = next(item for item in persisted if item["workspace_root"] == str(beta_root.resolve()))
+    assert alpha_session["work_id"] != beta_session["work_id"]
+    assert alpha_session["work_id"].startswith("same-work-id:project:")
+    assert beta_session["work_id"].startswith("same-work-id:project:")
