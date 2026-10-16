@@ -737,6 +737,13 @@ Keep responses useful and concise unless the human asks for depth."""
             call_kwargs["mission_id"] = mission_id
         if correlation_id and (accepts_extra or "correlation_id" in parameters):
             call_kwargs["correlation_id"] = correlation_id
+        # The durable factory accepts the new project_id kwarg, but older
+        # callbacks and test integrations may not. Keep the boundary compatible
+        # without silently dropping the project scope on the canonical path.
+        if not accepts_extra:
+            for key in tuple(call_kwargs):
+                if key != "objective" and key not in parameters:
+                    call_kwargs.pop(key, None)
         return self.mission_runner(**call_kwargs)
 
     def _execute_conversation_tools(
