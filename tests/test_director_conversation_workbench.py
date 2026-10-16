@@ -792,9 +792,10 @@ def test_duplicate_request_without_saved_response_is_not_executed_again(tmp_path
         request_id=request_id,
     )
 
-    assert response.state == "in_progress"
+    assert response.state == "completed"
     assert response.correlation_id == correlation_id
-    assert "no está guardada" in response.response_text
-    assert "no la vuelve a ejecutar automáticamente" in response.response_text
-    assert provider.calls == []
-    assert [item.role for item in service.list_turns(session.session_id)] == ["user"]
+    assert provider.calls, "an interrupted turn must be resumed instead of remaining stuck"
+    turns = service.list_turns(session.session_id)
+    assert [item.role for item in turns] == ["user", "assistant"]
+    assert turns[0].turn_id == turn_id
+    assert turns[1].turn_id == f"{turn_id}-response"
