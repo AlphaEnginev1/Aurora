@@ -5,7 +5,7 @@ import ast
 from dataclasses import dataclass
 import json
 import re
-from typing import Any, Protocol
+from typing import Any, Mapping, Protocol
 from uuid import uuid4
 
 from aurora.inference.models import InferenceRequest, InferenceResponse
@@ -82,6 +82,7 @@ class InferenceDirectorProvider:
         model: str | None,
         role: str,
         tools: tuple[DirectorToolSpec, ...] = (),
+        metadata: Mapping[str, Any] | None = None,
     ) -> DirectorModelResponse:
         prompt_messages = list(messages)
         if tools:
@@ -98,7 +99,11 @@ class InferenceDirectorProvider:
             model=model,
             temperature=0.0,
             max_tokens=3000,
-            metadata={"role": role, "director_tools": [tool.name for tool in tools]},
+            metadata={
+                **dict(metadata or {}),
+                "role": role,
+                "director_tools": [tool.name for tool in tools],
+            },
             request_id=uuid4().hex,
         )
         response: InferenceResponse = self._router.generate(
