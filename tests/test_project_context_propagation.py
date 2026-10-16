@@ -259,6 +259,11 @@ def test_director_planner_passes_project_scope_metadata_to_provider(tmp_path):
 
     assert plan.tasks[0].task_id == "inspect"
     assert provider.calls[0]["metadata"] == {"project_id": "project-alpha"}
+    planner_system = provider.calls[0]["messages"][0]["content"]
+    assert "Project Alpha" in planner_system
+    assert "AlphaEnginev1/alpha" in planner_system
+    assert "Project Beta" not in planner_system
+    assert "AlphaEnginev1/beta" not in planner_system
 
 
 def test_workbench_project_scope_cannot_escape_registered_workspace(tmp_path):
@@ -1104,3 +1109,52 @@ def test_research_scope_survives_source_claim_evidence_and_trusted_knowledge_per
     beta_context = adapter("project-beta")
     assert not any(item.get("artifact_id") == artifact.artifact_id for item in beta_context)
     assert beta_context[0]["state"] == "empty"
+
+
+
+def test_director_review_uses_selected_project_catalog_only(tmp_path):
+    registry = make_registry(tmp_path)
+
+    class ReviewProvider:
+        def __init__(self):
+            self.calls = []
+
+        def generate(self, *, messages, model, role, tools=(), metadata=None):
+            self.calls.append({
+                "messages": messages,
+                "model": model,
+                "role": role,
+                "tools": tools,
+                "metadata": metadata,
+            })
+            return DirectorModelResponse(
+                content=json.dumps({
+                    "decision": "complete",
+                    "rationale": "The selected project's evidence is sufficient.",
+                    "considered_alternatives": [],
+                    "tasks": [],
+                }),
+                model="fake/model",
+                provider="fake",
+                request_id="review-project-scope-request",
+                execution_id="review-project-scope-execution",
+            )
+
+    provider = ReviewProvider()
+    planner = DirectorPlanner(
+        ModelRouter([ModelSpec("fake/model", "fake", "https://example.invalid")]),
+        project_registry=registry,
+        provider=provider,
+    )
+    review = planner.review(
+        objective="Check Project Alpha completion",
+        project_id="project-alpha",
+    )
+
+    assert review.decision == "complete"
+    prompt = str(provider.calls[0]["messages"])
+    assert "AlphaEnginev1/alpha" in prompt
+    assert "Project Alpha" in prompt
+    assert "Project Beta" not in prompt
+    assert "AlphaEnginev1/beta" not in prompt
+    assert provider.calls[0]["metadata"] == {"project_id": "project-alpha"}
