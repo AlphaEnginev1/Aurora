@@ -25,7 +25,7 @@ from .director_provider import (
 )
 from .task_engine import DelegatedTask
 from aurora.workbench import UniversalWorkbench, WorkbenchRequest
-from aurora.projects import ProjectRegistry
+from aurora.projects import ProjectRegistry, ProjectStatus
 
 from .director_bootstrap import DirectorBootstrap, DirectorBootstrapError
 
@@ -393,9 +393,13 @@ Keep responses useful and concise unless the human asks for depth."""
                 )
             project_id = project_id.strip()
             try:
-                self.project_registry.resolve(project_id)
+                selected_project = self.project_registry.resolve(project_id)
             except Exception as exc:
                 raise DirectorConversationError(f"invalid project selection: {exc}") from exc
+            if selected_project.status is not ProjectStatus.ACTIVE:
+                raise DirectorConversationError(
+                    f"selected project is not active: {selected_project.status.value}"
+                )
             if len(prompt_project_ids) == 1 and project_id not in prompt_project_ids:
                 raise DirectorConversationError(
                     "selected project_id conflicts with the project explicitly named by the user"
@@ -772,7 +776,7 @@ Keep responses useful and concise unless the human asks for depth."""
         if not prompt:
             return set()
         matches: set[str] = set()
-        for project in self.project_registry.projects.values():
+        for project in self.project_registry.active():
             for reference in (project.project_id, project.name):
                 normalized = self._normalize_project_reference(reference.strip())
                 if not normalized:
