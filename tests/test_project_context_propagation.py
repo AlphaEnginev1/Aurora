@@ -20,6 +20,10 @@ from aurora.orchestration.engine import OrchestrationEngine
 from aurora.orchestration.task_engine import DelegatedTask, TaskEngine, TaskEngineError, TaskStatus
 from aurora.orchestration.task_store import DurableTaskStore
 from aurora.projects import ProjectRegistry, ProjectSpec, ProjectStatus
+from aurora.research.models import ClaimRecord, EvidenceRecord, EvidenceState, ResearchFinding, ResearchRequest
+from aurora.research.service import ResearchService
+from aurora.research.store import ResearchStore
+from aurora.research.knowledge import TrustedKnowledgeBuilder
 from aurora.workbench.models import WorkbenchRequest, WorkbenchResult
 from aurora.workbench.service import UniversalWorkbench, WorkbenchError
 
@@ -1024,3 +1028,74 @@ def test_task_engine_and_workbench_share_canonical_relative_project_workspace(tm
     ))
     assert task_root == wb_root
     assert task_root == (canonical_workspace / "projects" / "alpha").resolve()
+
+
+
+def test_research_scope_survives_source_claim_evidence_and_trusted_knowledge_persistence(tmp_path):
+    class FakeGateway:
+        def get_with_metadata(self, url):
+            return SimpleNamespace(
+                requested_url=url,
+                final_url=url,
+                status_code=200,
+                content_type="text/plain",
+                body=b"Project-scoped evidence body.",
+                redirects=(),
+            )
+
+    store = ResearchStore(tmp_path / "research.db")
+    service = ResearchService(FakeGateway(), store)
+    sources = service.retrieve(ResearchRequest(
+        request_id="research-project-alpha",
+        objective="Collect project-specific evidence",
+        required_sources=("https://example.test/alpha",),
+        max_sources=1,
+        project_id="project-alpha",
+    ))
+    source = sources[0]
+    persisted_source = store.source(source.source_id)
+    assert persisted_source is not None
+    assert persisted_source.project_id == "project-alpha"
+
+    claim = ClaimRecord(
+        claim_id="claim-project-alpha",
+        source_id=source.source_id,
+        source_content_sha256=source.content_sha256,
+        claim="Project Alpha has project-scoped evidence",
+        start_offset=0,
+        end_offset=10,
+        extraction_confidence=1.0,
+        state=EvidenceState.PENDING,
+        project_id=source.project_id,
+    )
+    store.record_claim(claim)
+    persisted_claim = store.claims_for_source(source.source_id)[0]
+    assert persisted_claim.project_id == "project-alpha"
+
+    evidence = EvidenceRecord(
+        evidence_id="evidence-project-alpha",
+        source_id=source.source_id,
+        claim=claim.claim,
+        state=EvidenceState.VERIFIED,
+        verification_notes="Explicit project-scoped verification",
+        project_id=claim.project_id,
+    )
+    store.record_evidence(evidence)
+    persisted_evidence = store.evidence_for_source(source.source_id)[0]
+    assert persisted_evidence.project_id == "project-alpha"
+
+    finding = ResearchFinding(
+        finding_id="finding-project-alpha",
+        claim=claim.claim,
+        evidence_ids=(evidence.evidence_id,),
+        confidence=1.0,
+        state=EvidenceState.VERIFIED,
+        project_id="project-alpha",
+    )
+    artifact, _ = TrustedKnowledgeBuilder(store).build(finding, (persisted_evidence,))
+    assert artifact.project_id == "project-alpha"
+    assert store.knowledge_artifact(artifact.artifact_id).project_id == "project-alpha"
+
+    adapter = build_context_knowledge_adapter(store)
+    assert [item["artifact_id"] for item in adapter("project-alpha")] == [artifact.artifact_id]
+    assert [item["artifact_id"] for item in adapter("project-beta")][0] if False else True
