@@ -14,7 +14,7 @@ from aurora.orchestration.director import DirectorPlan, DirectorPlanner
 from aurora.orchestration.director_conversation import DirectorConversationService
 from aurora.orchestration.director_provider import DirectorModelResponse
 from aurora.orchestration.durable_director import DurableDirectorService
-from aurora.orchestration.director_bootstrap import build_context_knowledge_adapter
+from aurora.orchestration.director_bootstrap import build_context_knowledge_adapter, build_context_runtime_adapter
 from aurora.orchestration.director_runtime import DirectorRuntime, DirectorRuntimeError
 from aurora.orchestration.mission_memory import MissionMemory
 from aurora.orchestration.engine import OrchestrationEngine
@@ -1158,3 +1158,33 @@ def test_director_review_uses_selected_project_catalog_only(tmp_path):
     assert "Project Beta" not in prompt
     assert "AlphaEnginev1/beta" not in prompt
     assert provider.calls[0]["metadata"] == {"project_id": "project-alpha"}
+
+
+
+def test_project_scoped_runtime_context_excludes_other_missions(tmp_path):
+    store = DurableTaskStore(tmp_path / "runtime-context.db")
+    store.enqueue(
+        "mission-alpha",
+        (DelegatedTask("alpha-task", "engineer", "Inspect alpha", project_id="project-alpha"),),
+        project_id="project-alpha",
+    )
+    store.enqueue(
+        "mission-beta",
+        (DelegatedTask("beta-task", "engineer", "Inspect beta", project_id="project-beta"),),
+        project_id="project-beta",
+    )
+    store.enqueue(
+        "mission-unscoped",
+        (DelegatedTask("general-task", "operator", "General task"),),
+    )
+
+    adapter = build_context_runtime_adapter(store)
+    alpha = adapter("project-alpha")
+    beta = adapter("project-beta")
+    global_context = adapter(None)
+
+    assert alpha["project_id"] == "project-alpha"
+    assert alpha["mission_count"] == 1
+    assert beta["project_id"] == "project-beta"
+    assert beta["mission_count"] == 1
+    assert global_context["mission_count"] == 3
