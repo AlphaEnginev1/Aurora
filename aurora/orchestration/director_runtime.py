@@ -53,8 +53,7 @@ from .director_decision_policy_lifecycle import DirectorDecisionPolicyActivation
 from .durable_director import DurableDirectorService, MissionSubmission
 from .event_bus import DurableEventBus, EventSubscription
 from .mission_memory import MissionMemory, MissionMemoryError
-from .task_engine import DelegatedTask, DelegatedTaskResult, TaskEngineError, TaskStatus
-from .team_runtime import TeamCoordinatorError
+from .task_engine import DelegatedTask, DelegatedTaskResult, TaskStatus
 from .task_store import DurableTaskStore, TaskEvent, TaskStoreError
 from .task_worker import TaskWorker, WorkerCycle, WorkerPolicy
 from aurora.observability import ProductionObservability
