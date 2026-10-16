@@ -501,6 +501,15 @@ Keep responses useful and concise unless the human asks for depth."""
         prompt = user_input.strip()
         if not prompt:
             raise DirectorConversationError("user_input is empty")
+        if (
+            request_id is None
+            and self.mission_runner is not None
+            and self._requests_mission_execution(prompt)
+        ):
+            raise DirectorConversationError(
+                "request_id is required for durable mission execution so retries "
+                "can replay the accepted order without creating a duplicate"
+            )
         if request_id is not None:
             if not isinstance(request_id, str):
                 raise DirectorConversationError("request_id must be a string or null")
@@ -614,6 +623,17 @@ Keep responses useful and concise unless the human asks for depth."""
                 capability=str(policy["default_capability"]),
                 preferred_models=self._preferred_models(policy),
             )
+            if (
+                request_id is None
+                and self.mission_runner is not None
+                and any(
+                    getattr(call, "name", None) == self._RUN_MISSION_TOOL.name
+                    for call in (getattr(response, "tool_calls", ()) or ())
+                )
+            ):
+                raise DirectorConversationError(
+                    "request_id is required before executing a provider-requested mission"
+                )
             if getattr(response, "tool_calls", ()) or (
                 self.mission_runner is not None
                 and self._requests_mission_execution(prompt)
