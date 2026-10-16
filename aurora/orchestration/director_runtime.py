@@ -1643,6 +1643,7 @@ class DirectorRuntime:
     def _adversarial_review_evidence(self, mission_id: str) -> str:
         payload = {
             "objective": self._objective_from_memory(mission_id),
+            "project_context": self._canonical_project_context(mission_id),
             "task_state": self._task_state_text(mission_id),
             "team_state": self._team_state_text(mission_id),
             "routing_evidence": self._routing_evidence(mission_id),
