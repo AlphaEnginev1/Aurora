@@ -1060,6 +1060,50 @@ class DirectorRuntime:
             return value.strip() if isinstance(value, str) and value.strip() else None
         return None
 
+    def _mission_project_id(self, mission_id: str) -> str | None:
+        """Read the immutable project binding from the durable submission receipt."""
+        submitted = next(
+            (
+                event
+                for event in self.store.events(mission_id)
+                if event.event_type == "mission_submitted"
+            ),
+            None,
+        )
+        if submitted is None:
+            return None
+        value = submitted.payload.get("project_id") or submitted.project_id
+        return value.strip() if isinstance(value, str) and value.strip() else None
+
+    def _project_context_for_mission(self, mission_id: str) -> dict[str, Any] | None:
+        """Resolve canonical project state before any Director follow-up review."""
+        project_id = self._mission_project_id(mission_id)
+        if project_id is None:
+            return None
+        registry = getattr(self.director.planner, "project_registry", None)
+        if registry is None:
+            raise DirectorRuntimeError(
+                f"project-scoped mission {mission_id} cannot be replanned without "
+                "the canonical project registry"
+            )
+        try:
+            project = registry.resolve(project_id)
+        except Exception as exc:
+            raise DirectorRuntimeError(
+                f"project-scoped mission {mission_id} lost canonical project {project_id}"
+            ) from exc
+        status = getattr(project, "status", None)
+        return {
+            "project_id": project.project_id,
+            "name": project.name,
+            "objective": project.objective,
+            "status": status.value if hasattr(status, "value") else str(status),
+            "repository": getattr(project, "repository", None),
+            "workspace": getattr(project, "workspace", None),
+            "architecture_ref": getattr(project, "architecture_ref", None),
+            "current_state": getattr(project, "current_state", None),
+        }
+
     def _ensure_mission_memory(self, mission_id: str) -> bool:
         """Reconcile the mailbox projection from the durable submission receipt."""
         with self._handoff_lock:
@@ -1942,6 +1986,19 @@ class DirectorRuntime:
 
         objective = self._objective_from_memory(mission_id)
         context = self.memory.context(mission_id, limit=50)
+        project_context = self._project_context_for_mission(mission_id)
+        if project_context is not None:
+            context.append(
+                {
+                    "role": "system",
+                    "content": (
+                        "Authoritative Aurora project context for this mission. Keep all "
+                        "follow-up tasks inside this project; do not substitute another "
+                        "project or rely on a guessed project identity:\n"
+                        + json.dumps(project_context, ensure_ascii=False, sort_keys=True)
+                    ),
+                }
+            )
         context.append(
             {
                 "role": "user",
@@ -2639,7 +2696,16 @@ class DirectorRuntime:
         if existing & set(mapping.values()):
             raise DirectorRuntimeError("Director follow-up task ids already exist")
         result = []
+        canonical_project_id = self._mission_project_id(mission_id)
         for task in tasks:
+            if (
+                canonical_project_id is not None
+                and task.project_id is not None
+                and task.project_id != canonical_project_id
+            ):
+                raise DirectorRuntimeError(
+                    f"Director follow-up task {task.task_id} attempted to switch project_id"
+                )
             result.append(
                 DelegatedTask(
                     task_id=mapping[task.task_id],
@@ -2649,6 +2715,7 @@ class DirectorRuntime:
                     args=task.args,
                     depends_on=tuple(mapping.get(dep, dep) for dep in task.depends_on),
                     skills=task.skills,
+                    project_id=canonical_project_id or task.project_id,
                 )
             )
         external = {
@@ -2666,12 +2733,16 @@ class DirectorRuntime:
         return tuple(result)
 
     def _review_rounds(self, mission_id: str) -> int:
-        """Count durable Director review attempts, including failed attempts."""
-        return sum(
-            1
+        """Count durable review outcomes, not abandoned start markers."""
+        rounds = [
+            event.payload.get("round")
             for event in self.store.events(mission_id)
-            if event.event_type == "director_review_started"
-        )
+            if event.event_type in {"director_review", "director_review_failed"}
+            and isinstance(event.payload.get("round"), int)
+            and not isinstance(event.payload.get("round"), bool)
+            and event.payload.get("round") >= 1
+        ]
+        return max(rounds, default=0)
 
     def _recovery_fail_closed(self, mission_id: str) -> bool:
         """Validate durable recovery authorities before any Director mutation."""
