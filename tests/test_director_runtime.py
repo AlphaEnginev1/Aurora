@@ -409,6 +409,7 @@ def test_full_director_event_bus_worker_cycle(tmp_path: Path):
 
 def test_director_rejects_success_result_bound_to_wrong_correlation_id(tmp_path: Path):
     runtime, store, _planner, _engine = make_runtime(tmp_path)
+    runtime.worker_concurrency = 1
     submission = runtime.submit_mission(
         objective="verify durable result identity",
         mission_id="mission-result-identity",
