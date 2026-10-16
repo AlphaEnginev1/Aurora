@@ -316,6 +316,8 @@ def test_default_router_provider_submits_one_durable_mission_and_returns_evidenc
     submitted = []
 
     class ToolCallingProvider:
+        provider_id = "fake"
+
         def generate(self, request, *, selected_model, execution_id):
             received_requests.append(request)
             tool_names = request.metadata.get("director_tools", [])
