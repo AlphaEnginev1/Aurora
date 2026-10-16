@@ -104,6 +104,18 @@ class AuroraContextPlane:
             except Exception as exc:
                 raise AuroraContextError(str(exc)) from exc
 
+        if normalized_project is not None and selected_project is not None:
+            # A project-bound request must not receive names, objectives, or
+            # current state for unrelated projects through the global catalog.
+            project_catalog = (
+                f"- {selected_project.project_id}: {selected_project.name}; "
+                f"status={selected_project.status.value}; objective={selected_project.objective}"
+            )
+        elif scope is ContextScope.PROJECT:
+            project_catalog = "Project-scoped context has no valid selected project."
+        else:
+            project_catalog = self.project_registry.catalog()
+
         fragments: list[ContextFragment] = [
             self._fragment(
                 source="aurora.identity",
@@ -113,7 +125,7 @@ class AuroraContextPlane:
             self._fragment(
                 source="projects.catalog",
                 scope=scope,
-                content=self.project_registry.catalog(),
+                content=project_catalog,
             ),
             self._fragment(
                 source="organization.catalog",
