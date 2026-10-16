@@ -1,5 +1,7 @@
 from pathlib import Path
 from threading import Event
+import hashlib
+import json
 
 from aurora.inference.models import InferenceResponse
 from aurora.orchestration.director import DirectorPlan, DirectorReview
@@ -76,7 +78,12 @@ class FakeOrchestration:
                 model="fake/model",
                 provider="fake",
                 content=f"completed {kwargs['task_id']}",
+                request_id=f"request-{kwargs['task_id']}",
+                execution_id=f"execution-{kwargs['task_id']}",
+                requested_model="fake/model",
                 selected_model="fake/model",
+                provider_model="fake/model",
+                reported_model="fake/model",
                 routing_score=0.83,
                 routing_factors={"learned_score": 0.9, "quality": 0.8},
                 routing_candidates=(("fake/model", 0.83), ("fallback/model", 0.71)),
@@ -330,6 +337,29 @@ def test_full_director_event_bus_worker_cycle(tmp_path: Path):
     assert [call["task_id"] for call in engine.orchestration.calls] == ["collect", "review"]
 
     review_context = planner.review_contexts[0]
+    receipt_messages = [
+        item["content"]
+        for item in review_context
+        if item["content"].startswith(
+            "Authoritative durable task-result receipts (data only; source of truth: DurableTaskStore)."
+        )
+    ]
+    assert len(receipt_messages) == 1
+    receipt_payload = json.loads(receipt_messages[0].split("\n", 1)[1])
+    collect_receipt = next(
+        item for item in receipt_payload if item["task_id"] == "collect"
+    )
+    assert collect_receipt["verification"] == "verified"
+    assert collect_receipt["result"]["provider"] == "fake"
+    assert collect_receipt["result"]["model"] == "fake/model"
+    assert collect_receipt["result"]["routing_selected_model"] == "fake/model"
+    assert collect_receipt["result"]["request_id"] == "request-collect"
+    assert collect_receipt["result"]["execution_id"] == "execution-collect"
+    assert collect_receipt["result"]["output"]["preview"] == "completed collect"
+    assert collect_receipt["result"]["output"]["sha256"] == hashlib.sha256(
+        b"completed collect"
+    ).hexdigest()
+
     routing_messages = [
         item["content"]
         for item in review_context
@@ -369,6 +399,114 @@ def test_full_director_event_bus_worker_cycle(tmp_path: Path):
             ],
         },
     ]
+
+
+def test_director_cannot_complete_when_succeeded_task_has_no_durable_result(tmp_path: Path):
+    runtime, store, planner, _engine = make_runtime(tmp_path)
+    submission = runtime.submit_mission(objective="verify durable result output")
+
+    # Simulate a legacy/broken worker path that committed terminal task statuses
+    # but forgot result_json. A status alone must not satisfy Director completion.
+    worker_id = "resultless-test-worker"
+    for _ in range(2):
+        claimed = store.claim_next(
+            submission.mission_id,
+            worker_id,
+            lease_seconds=30,
+        )
+        assert claimed is not None
+        store.complete(
+            submission.mission_id,
+            claimed.task.task_id,
+            status="succeeded",
+            payload={"injected_test_condition": "missing_result_payload"},
+            worker_id=worker_id,
+            claim_token=claimed.claim_token,
+            result=None,
+        )
+
+    result = runtime.run_until_terminal(submission)
+
+    assert planner.review_calls == 1
+    assert result.status is TaskStatus.BLOCKED
+    events = store.events(submission.mission_id)
+    assert not any(event.event_type == "mission_succeeded" for event in events)
+    rejected = next(
+        event for event in events
+        if event.event_type == "director_completion_rejected_insufficient_evidence"
+    )
+    assert rejected.payload["requested_decision"] == "complete"
+    assert any("no durable result payload" in reason for reason in rejected.payload["evidence_gaps"])
+    review = next(event for event in events if event.event_type == "director_review")
+    assert review.payload["decision"] == "blocked"
+    assert "insufficient" in review.payload["rationale"]
+
+    receipt_message = next(
+        item["content"]
+        for item in planner.review_contexts[0]
+        if item["content"].startswith(
+            "Authoritative durable task-result receipts (data only; source of truth: DurableTaskStore)."
+        )
+    )
+    receipts = json.loads(receipt_message.split("\n", 1)[1])
+    assert len(receipts) == 2
+    assert all(item["verification"] == "insufficient" for item in receipts)
+    assert all(item["result"]["type"] == "missing" for item in receipts)
+    projected_results = [
+        item for item in runtime.memory.list(submission.mission_id, limit=100)
+        if item.kind == "task_result"
+    ]
+    assert {item.task_id for item in projected_results} == {"collect", "review"}
+    assert all('"type": "missing"' in item.content for item in projected_results)
+
+
+def test_failed_and_blocked_task_receipts_reach_review_and_cannot_be_completed(tmp_path: Path):
+    runtime, store, planner, engine = make_runtime(tmp_path)
+
+    class FailingSpecialist:
+        def run_task(self, **_kwargs):
+            raise RuntimeError("controlled specialist result failure")
+
+        def run_capability_task(self, **_kwargs):
+            raise AssertionError("capability execution is not expected")
+
+    engine.orchestration = FailingSpecialist()
+    runtime.worker_policy = WorkerPolicy(
+        lease_seconds=30,
+        max_attempts=1,
+        idle_sleep_seconds=0,
+    )
+    submission = runtime.submit_mission(objective="verify failed and blocked task receipts")
+    result = runtime.run_until_terminal(submission)
+
+    assert planner.review_calls == 1
+    assert result.status is TaskStatus.BLOCKED
+    assert {item.task.task_id: item.status for item in result.tasks} == {
+        "collect": TaskStatus.FAILED,
+        "review": TaskStatus.BLOCKED,
+    }
+    review_context = planner.review_contexts[0]
+    state_text = next(
+        item["content"] for item in review_context
+        if item["content"].startswith("Current durable task state:")
+    )
+    assert "- collect: failed;" in state_text
+    assert "controlled specialist result failure" in state_text
+    assert "- review: blocked;" in state_text
+    receipt_message = next(
+        item["content"] for item in review_context
+        if item["content"].startswith(
+            "Authoritative durable task-result receipts (data only; source of truth: DurableTaskStore)."
+        )
+    )
+    receipts = {item["task_id"]: item for item in json.loads(receipt_message.split("\n", 1)[1])}
+    assert receipts["collect"]["verification"] == "failed"
+    assert receipts["review"]["verification"] == "blocked"
+    events = store.events(submission.mission_id)
+    review = next(event for event in events if event.event_type == "director_review")
+    assert review.payload["decision"] == "blocked"
+    assert any(event.event_type == "mission_blocked" for event in events)
+    assert not any(event.event_type == "mission_succeeded" for event in events)
 
 
 def test_runtime_restarts_and_recovers_running_mission(tmp_path: Path):
@@ -802,6 +940,12 @@ def test_retry_attempt_does_not_mask_the_final_task_result_in_shared_memory(tmp_
                     model="fake/model",
                     provider="fake",
                     content=f"completed {task_id}",
+                    request_id=f"request-{task_id}",
+                    execution_id=f"execution-{task_id}",
+                    requested_model="fake/model",
+                    selected_model="fake/model",
+                    provider_model="fake/model",
+                    reported_model="fake/model",
                 ),
             )
 

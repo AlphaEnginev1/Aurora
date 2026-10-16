@@ -140,6 +140,12 @@ class FakeOrchestration:
                 model=f"model/{kwargs['role']}",
                 provider="fake",
                 content=content,
+                request_id=f"request-{kwargs['task_id']}",
+                execution_id=f"execution-{kwargs['task_id']}",
+                requested_model=f"model/{kwargs['role']}",
+                selected_model=f"model/{kwargs['role']}",
+                provider_model=f"model/{kwargs['role']}",
+                reported_model=f"model/{kwargs['role']}",
             ),
         )
 
