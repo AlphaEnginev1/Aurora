@@ -396,7 +396,20 @@ class UniversalWorkbench:
                     output=self.preflight(),
                     provenance="aurora-workbench:preflight",
                 )
-            elif capability == "workbench:file:list":
+            self._enforce_project_repository_scope(request)
+            if capability == "workbench:command":
+                project_root = self._project_workspace_root(request)
+                if project_root is not None:
+                    # Workspace must be anchored in the registered project, even
+                    # when the command payload was proposed by a model.
+                    request = replace(
+                        request,
+                        options={
+                            **dict(request.options),
+                            "project_workspace_root": str(project_root),
+                        },
+                    )
+            if capability == "workbench:file:list":
                 result = self._file_list(request)
             elif capability == "workbench:file:read":
                 result = self._file_read(request)
@@ -483,8 +496,8 @@ class UniversalWorkbench:
             raise WorkbenchError(result.error or "Workbench operation failed")
         return result
 
-    def _project_workspace_root(self, request: WorkbenchRequest) -> Path | None:
-        """Resolve a task's registered project scope; never trust caller-supplied paths."""
+    def _registered_project(self, request: WorkbenchRequest):
+        """Resolve project identity from the canonical registry, never from model paths."""
         raw_project_id = request.options.get("project_id")
         if raw_project_id is None or (isinstance(raw_project_id, str) and not raw_project_id.strip()):
             return None
@@ -495,9 +508,15 @@ class UniversalWorkbench:
                 "project-scoped Workbench operations require the canonical ProjectRegistry"
             )
         try:
-            project = self.project_registry.resolve(raw_project_id)
+            return self.project_registry.resolve(raw_project_id)
         except Exception as exc:
             raise WorkbenchError(f"invalid project scope: {exc}") from exc
+
+    def _project_workspace_root(self, request: WorkbenchRequest) -> Path | None:
+        """Resolve a task's registered project workspace."""
+        project = self._registered_project(request)
+        if project is None:
+            return None
         if project.workspace:
             configured = Path(project.workspace).expanduser()
             if not configured.is_absolute():
@@ -508,6 +527,73 @@ class UniversalWorkbench:
             root = (self.runtime_root / "projects" / digest).resolve()
         root.mkdir(parents=True, exist_ok=True)
         return root
+
+    @staticmethod
+    def _normalize_repository_reference(value: str | None) -> str | None:
+        """Normalize a GitHub repository reference to owner/repo, case-insensitively."""
+        if not isinstance(value, str) or not value.strip():
+            return None
+        raw = value.strip()
+        if raw.startswith("repo:"):
+            raw = raw.removeprefix("repo:")
+        parsed = urlparse(raw)
+        if parsed.scheme and parsed.netloc:
+            host = (parsed.hostname or "").casefold()
+            if host not in {"github.com", "api.github.com"}:
+                return None
+            parts = [part for part in parsed.path.split("/") if part]
+            if host == "api.github.com":
+                if len(parts) < 3 or parts[0] != "repos":
+                    return None
+                parts = parts[1:]
+        else:
+            parts = [part for part in raw.split("/") if part]
+        if len(parts) < 2:
+            return None
+        owner, repository = parts[0], parts[1]
+        if repository.endswith(".git"):
+            repository = repository[:-4]
+        if not owner or not repository or any(ch in owner + repository for ch in ("\\", "\x00")):
+            return None
+        return f"{owner}/{repository}".casefold()
+
+    def _enforce_project_repository_scope(self, request: WorkbenchRequest) -> None:
+        """Reject project-scoped GitHub calls whose target is not the registered repo."""
+        capability = request.capability.strip()
+        if not capability.startswith("workbench:github:"):
+            return
+        project = self._registered_project(request)
+        if project is None:
+            return
+        expected = self._normalize_repository_reference(project.repository)
+        if expected is None:
+            raise WorkbenchError(
+                "project-scoped GitHub operations require a registered owner/repository"
+            )
+        if capability == "workbench:github:get":
+            if not request.arguments:
+                raise WorkbenchError("workbench:github:get requires an API path")
+            target = request.arguments[0].strip()
+            actual = self._normalize_repository_reference(target)
+            if actual is None:
+                # Accept only repository-scoped API paths when a project is bound.
+                if target.startswith("/repos/"):
+                    actual = self._normalize_repository_reference(target.removeprefix("/repos/"))
+                elif target.startswith("repos/"):
+                    actual = self._normalize_repository_reference(target.removeprefix("repos/"))
+            if actual != expected:
+                raise WorkbenchError(
+                    "GitHub target is outside the registered project repository"
+                )
+            return
+        value = self._github_json_arg(request)
+        actual = self._normalize_repository_reference(
+            f"{value.get('owner', '')}/{value.get('repo', '')}"
+        )
+        if actual != expected:
+            raise WorkbenchError(
+                "GitHub target is outside the registered project repository"
+            )
 
     def _safe_path(
         self,
@@ -634,7 +720,7 @@ class UniversalWorkbench:
     def _artifact_inspect(self, request: WorkbenchRequest) -> WorkbenchResult:
         if not request.arguments:
             raise WorkbenchError("workbench:artifact:inspect requires a source path")
-        path = self._safe_path(request.arguments[0], must_exist=True)
+        path = self._safe_path(request.arguments[0], must_exist=True, request=request)
         descriptor = self.artifacts.inspect(path)
         return WorkbenchResult(
             request.capability,
@@ -655,7 +741,7 @@ class UniversalWorkbench:
     def _document_extract(self, request: WorkbenchRequest) -> WorkbenchResult:
         if not request.arguments:
             raise WorkbenchError("workbench:document:extract requires a source path")
-        path = self._safe_path(request.arguments[0], must_exist=True)
+        path = self._safe_path(request.arguments[0], must_exist=True, request=request)
         max_chars = int(request.options.get("max_chars", 2_000_000))
         content = self.artifacts.extract_text(path, max_chars=max_chars)
         descriptor = self.artifacts.inspect(path)
@@ -779,7 +865,18 @@ class UniversalWorkbench:
             )
         args = value.get("args", [])
         environment = value.get("environment")
-        workspace = str(value.get("workspace") or self.repository_root)
+        project_root = self._project_workspace_root(request)
+        raw_workspace = value.get("workspace")
+        if project_root is not None:
+            candidate_workspace = Path(str(raw_workspace)).expanduser() if raw_workspace else project_root
+            if not candidate_workspace.is_absolute():
+                candidate_workspace = project_root / candidate_workspace
+            candidate_workspace = candidate_workspace.resolve()
+            if not (candidate_workspace == project_root or project_root in candidate_workspace.parents):
+                raise WorkbenchError("command workspace is outside the registered project workspace")
+            workspace = str(candidate_workspace)
+        else:
+            workspace = str(raw_workspace or self.repository_root)
         if not isinstance(args, list) or not all(isinstance(item, str) for item in args):
             raise WorkbenchError("command args must be a string array")
         if environment is not None and (
