@@ -221,9 +221,22 @@ def test_director_conversation_with_project_id_uses_project_context_not_global(t
         current_state="Project Alpha has a verified current state",
         updated_at="2026-10-16T00:00:00Z",
     )
+    beta = ProjectSpec(
+        project_id="project-beta",
+        name="Project Beta",
+        objective="Beta must remain outside Alpha context",
+        status=ProjectStatus.ACTIVE,
+        repository="AlphaEnginev1/beta",
+        workspace=str(tmp_path / "workspace" / "beta"),
+        current_state="Beta private current state",
+        updated_at="2026-10-16T00:00:00Z",
+    )
     router = _router_fixture(
         tmp_path,
-        project_registry=ProjectRegistry({"project-alpha": project}),
+        project_registry=ProjectRegistry({
+            "project-alpha": project,
+            "project-beta": beta,
+        }),
     )
     observed = []
 
@@ -261,3 +274,5 @@ def test_director_conversation_with_project_id_uses_project_context_not_global(t
     rendered = str(routed.messages)
     assert "Alpha-only project context" in rendered
     assert "Project Alpha has a verified current state" in rendered
+    assert "Project Beta" not in rendered
+    assert "Beta private current state" not in rendered
