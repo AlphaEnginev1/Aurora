@@ -1084,6 +1084,14 @@ def test_replan_preserves_project_context_and_traceability(tmp_path: Path):
     ]
     assert all(item.task.project_id == "project-a" for item in result.tasks)
     assert engine.orchestration.calls[-1]["project_id"] == "project-a"
+    assert engine.orchestration.calls[-1]["mission_id"] == submission.mission_id
+    assert engine.orchestration.calls[-1]["correlation_id"] == "corr-project-replan"
+    stored_results = store.list_tasks(submission.mission_id)
+    assert stored_results
+    assert all(item.result is not None for item in stored_results)
+    assert all(item.result["mission_id"] == submission.mission_id for item in stored_results)
+    assert all(item.result["project_id"] == "project-a" for item in stored_results)
+    assert all(item.result["correlation_id"] == "corr-project-replan" for item in stored_results)
 
     for context in planner.review_contexts:
         project_messages = [
