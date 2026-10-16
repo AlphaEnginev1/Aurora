@@ -1,4 +1,6 @@
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Barrier
 
 import pytest
 
@@ -144,6 +146,43 @@ def test_durable_director_submission_is_idempotent_for_same_mission_id(tmp_path:
         event for event in store.events("mission-idempotent")
         if event.event_type == "mission_submitted"
     ]) == 1
+
+
+def test_concurrent_identical_durable_submissions_both_replay_one_committed_order(
+    tmp_path: Path,
+):
+    service, store, planner = make_service(tmp_path)
+    barrier = Barrier(2)
+    original_plan = planner.plan
+
+    def synchronized_plan(**kwargs):
+        plan = original_plan(**kwargs)
+        barrier.wait(timeout=10)
+        return plan
+
+    planner.plan = synchronized_plan
+
+    def submit():
+        return service.submit_mission(
+            objective="test mission",
+            mission_id="mission-concurrent-idempotent",
+            correlation_id="corr-concurrent-idempotent",
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first, second = tuple(pool.map(lambda _index: submit(), range(2)))
+
+    assert first.mission_id == second.mission_id == "mission-concurrent-idempotent"
+    assert first.plan.tasks == second.plan.tasks
+    assert len(store.list_tasks("mission-concurrent-idempotent")) == 2
+    assert len([
+        event for event in store.events("mission-concurrent-idempotent")
+        if event.event_type == "mission_submitted"
+    ]) == 1
+    assert len([
+        event for event in store.events("mission-concurrent-idempotent")
+        if event.event_type == "enqueued"
+    ]) == 2
 
 
 def test_durable_director_rejects_reuse_of_mission_id_for_different_objective(tmp_path: Path):
