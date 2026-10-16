@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import inspect
 import json
 from threading import Event, Thread
 from time import sleep
@@ -253,13 +254,32 @@ class TaskWorker:
         thread = Thread(target=heartbeat, name=f"aurora-heartbeat-{claimed.task.task_id}", daemon=True)
         thread.start()
         try:
-            result = self.task_engine.execute_one(
-                claimed.task,
-                execution_scope=(
+            execute_kwargs = {
+                "execution_scope": (
                     f"{self.mission_id}:{claimed.task.task_id}:attempt:{claimed.attempts}"
                 ),
-                mission_id=self.mission_id,
-                correlation_id=self.correlation_id,
+                "mission_id": self.mission_id,
+                "correlation_id": self.correlation_id,
+            }
+            try:
+                parameters = inspect.signature(
+                    self.task_engine.execute_one
+                ).parameters
+            except (TypeError, ValueError):
+                parameters = {}
+            accepts_extra = any(
+                item.kind is inspect.Parameter.VAR_KEYWORD
+                for item in parameters.values()
+            )
+            if parameters and not accepts_extra:
+                execute_kwargs = {
+                    key: value
+                    for key, value in execute_kwargs.items()
+                    if key in parameters
+                }
+            result = self.task_engine.execute_one(
+                claimed.task,
+                **execute_kwargs,
             )
         except Exception as exc:
             result = DelegatedTaskResult(
