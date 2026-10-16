@@ -1133,6 +1133,58 @@ class DurableTaskStore:
         agent_role: str | None = None,
         correlation_id: str | None = None,
     ) -> int:
+        # Internal task-state transitions bypass DurableEventBus.publish. Resolve
+        # missing envelope fields here so worker claims, lease changes, retries,
+        # completions and dependency blocks remain queryable by canonical mission
+        # and task identity just like Director-published events.
+        task_context = None
+        if task_id is not None and (
+            project_id is None or agent_role is None
+        ):
+            task_context = db.execute(
+                """
+                SELECT project_id, role
+                FROM tasks
+                WHERE mission_id = ? AND task_id = ?
+                """,
+                (mission_id, task_id),
+            ).fetchone()
+            if task_context is not None:
+                if project_id is None:
+                    project_id = task_context["project_id"]
+                if agent_role is None:
+                    agent_role = task_context["role"]
+
+        if project_id is None or correlation_id is None:
+            submitted = db.execute(
+                """
+                SELECT project_id, correlation_id, payload_json
+                FROM task_events
+                WHERE mission_id = ? AND event_type = 'mission_submitted'
+                ORDER BY event_id
+                LIMIT 1
+                """,
+                (mission_id,),
+            ).fetchone()
+            if submitted is not None:
+                try:
+                    submitted_payload = json.loads(submitted["payload_json"])
+                except (TypeError, json.JSONDecodeError):
+                    submitted_payload = {}
+                if project_id is None:
+                    project_id = submitted["project_id"]
+                    if project_id is None and isinstance(submitted_payload, dict):
+                        candidate = submitted_payload.get("project_id")
+                        project_id = candidate if isinstance(candidate, str) else None
+                if correlation_id is None:
+                    correlation_id = submitted["correlation_id"]
+                    if correlation_id is None and isinstance(submitted_payload, dict):
+                        candidate = submitted_payload.get("correlation_id")
+                        correlation_id = (
+                            candidate if isinstance(candidate, str) and candidate.strip()
+                            else None
+                        )
+
         cursor = db.execute(
             """
             INSERT INTO task_events (
