@@ -164,6 +164,8 @@ class TaskWorker:
                     "error": error,
                 },
             )
+            attempt_payload = dict(self._result_payload(result))
+            attempt_payload.update({"error": error, "attempt": claimed.attempts})
             return WorkerCycle(
                 action="retried",
                 task_id=claimed.task.task_id,
@@ -172,16 +174,21 @@ class TaskWorker:
                 blocked_tasks=blocked,
                 attempt=claimed.attempts,
                 error=error,
-                result_payload={"error": error, "attempt": claimed.attempts},
+                result_payload=attempt_payload,
             )
 
+        failure_payload = dict(self._result_payload(result))
+        failure_payload.update({"error": error, "attempt": claimed.attempts})
         self.store.complete(
             self.mission_id,
             claimed.task.task_id,
             status="failed",
             error=error,
-            payload={"attempt": claimed.attempts},
-            result={"error": error, "attempt": claimed.attempts},
+            payload={
+                "attempt": claimed.attempts,
+                "result_type": self._result_type(result),
+            },
+            result=failure_payload,
             worker_id=self.worker_id,
             claim_token=claimed.claim_token,
         )
@@ -204,7 +211,7 @@ class TaskWorker:
             blocked_tasks=blocked + newly_blocked,
             attempt=claimed.attempts,
             error=error,
-            result_payload={"error": error, "attempt": claimed.attempts},
+            result_payload=failure_payload,
         )
 
     def run_until_idle(self, *, max_cycles: int = 1000) -> tuple[WorkerCycle, ...]:
@@ -431,8 +438,9 @@ class TaskWorker:
                         else {"truncated": True, "preview": serialized[:limit]}
                     )
                     raw_status = getattr(execution, "status", None)
-                    return {
-                        "type": "workbench" if not hasattr(execution, "returncode") else "capability",
+                    has_returncode = hasattr(execution, "returncode")
+                    payload = {
+                        "type": "capability" if has_returncode else "workbench",
                         "status": getattr(raw_status, "value", raw_status),
                         "operation": getattr(execution, "operation", None),
                         "output": output_value,
@@ -440,11 +448,17 @@ class TaskWorker:
                         "provenance": getattr(execution, "provenance", None),
                         "receipt_id": getattr(execution, "receipt_id", None),
                         "correlation_id": getattr(execution, "correlation_id", None),
+                        "error": getattr(execution, "error", None),
                         "truncated": len(serialized) > limit,
                     }
+                    if has_returncode:
+                        payload["returncode"] = getattr(execution, "returncode", None)
+                        payload["timed_out"] = bool(getattr(execution, "timed_out", False))
+                    return payload
                 return {
                     "type": "capability",
                     "returncode": getattr(execution, "returncode", None),
+                    "timed_out": bool(getattr(execution, "timed_out", False)),
                     "stdout": stdout,
                     "stderr": stderr,
                     "truncated": (
