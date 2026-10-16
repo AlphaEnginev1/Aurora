@@ -1,0 +1,357 @@
+from __future__ import annotations
+
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+from aurora.inference.models import InferenceResponse, ModelSpec
+from aurora.inference.router import ModelRouter
+from aurora.orchestration.agent_workbench import AgentWorkbenchToolLoop
+from aurora.orchestration.director import DirectorPlan, DirectorPlanner
+from aurora.orchestration.director_conversation import DirectorConversationService
+from aurora.orchestration.director_provider import DirectorModelResponse
+from aurora.orchestration.durable_director import DurableDirectorService
+from aurora.orchestration.engine import OrchestrationEngine
+from aurora.orchestration.task_engine import DelegatedTask, TaskEngine, TaskEngineError
+from aurora.orchestration.task_store import DurableTaskStore
+from aurora.projects import ProjectRegistry, ProjectSpec, ProjectStatus
+from aurora.workbench.models import WorkbenchRequest, WorkbenchResult
+from aurora.workbench.service import UniversalWorkbench, WorkbenchError
+
+
+def make_registry(tmp_path: Path) -> ProjectRegistry:
+    alpha_workspace = tmp_path / "runtime" / "projects" / "alpha"
+    beta_workspace = tmp_path / "runtime" / "projects" / "beta"
+    return ProjectRegistry(
+        {
+            "project-alpha": ProjectSpec(
+                project_id="project-alpha",
+                name="Project Alpha",
+                objective="Owns alpha files and tasks",
+                status=ProjectStatus.ACTIVE,
+                repository="AlphaEnginev1/alpha",
+                workspace=str(alpha_workspace),
+                current_state="Alpha workspace is registered",
+                updated_at="2026-10-16T00:00:00Z",
+            ),
+            "project-beta": ProjectSpec(
+                project_id="project-beta",
+                name="Project Beta",
+                objective="Owns beta files and tasks",
+                status=ProjectStatus.ACTIVE,
+                repository="AlphaEnginev1/beta",
+                workspace=str(beta_workspace),
+                current_state="Beta workspace is registered",
+                updated_at="2026-10-16T00:00:00Z",
+            ),
+        }
+    )
+
+
+class CapturingOrchestration:
+    def __init__(self):
+        self.model_calls = []
+        self.capability_calls = []
+
+    def run_task(self, **kwargs):
+        self.model_calls.append(kwargs)
+        return SimpleNamespace(
+            task_id=kwargs["task_id"],
+            role=kwargs["role"],
+            response=SimpleNamespace(content="project-scoped answer", model="fake/model"),
+        )
+
+    def run_capability_task(self, **kwargs):
+        self.capability_calls.append(kwargs)
+        return SimpleNamespace(
+            task_id=kwargs["task_id"],
+            role=kwargs["role"],
+            execution=SimpleNamespace(status="succeeded", output={"ok": True}),
+        )
+
+
+class FakePlanner:
+    def __init__(self, plan, project_registry):
+        self.plan_value = plan
+        self.project_registry = project_registry
+        self.calls = []
+
+    def plan(self, **kwargs):
+        self.calls.append(kwargs)
+        return self.plan_value
+
+
+class CapturingDirectorProvider:
+    provider_id = "test-provider"
+
+    def __init__(self):
+        self.calls = []
+
+    def generate(self, *, messages, model, role, tools=(), metadata=None):
+        self.calls.append(
+            {"messages": messages, "model": model, "role": role, "tools": tools, "metadata": metadata}
+        )
+        return DirectorModelResponse(
+            content='{"tasks":[{"task_id":"inspect","role":"operator","objective":"Inspect project"}]}',
+            model="fake/model",
+            provider="fake",
+            request_id="request-1",
+            execution_id="execution-1",
+        )
+
+
+def test_durable_mission_persists_and_inherits_canonical_project_scope(tmp_path):
+    registry = make_registry(tmp_path)
+    plan = DirectorPlan(
+        objective="Inspect Project Alpha",
+        tasks=(DelegatedTask("inspect", "operator", "Inspect registered files"),),
+        model="fake/model",
+    )
+    planner = FakePlanner(plan, registry)
+    orchestration = CapturingOrchestration()
+    runtime_root = tmp_path / "runtime"
+    task_engine = TaskEngine(
+        orchestration,
+        runtime_root,
+        project_registry=registry,
+    )
+    store = DurableTaskStore(tmp_path / "tasks.db")
+    service = DurableDirectorService(
+        planner=planner,
+        task_engine=task_engine,
+        store=store,
+    )
+
+    submission = service.submit_mission(
+        objective="Inspect Project Alpha",
+        mission_id="mission-project-alpha",
+        project_id="project-alpha",
+        correlation_id="corr-project-alpha",
+    )
+
+    assert submission.project_id == "project-alpha"
+    assert planner.calls[0]["project_id"] == "project-alpha"
+    assert "project-alpha" in planner.calls[0]["context"][0]["content"]
+    task = store.list_tasks("mission-project-alpha")[0].task
+    assert task.project_id == "project-alpha"
+
+    events = store.events("mission-project-alpha")
+    submitted = next(event for event in events if event.event_type == "mission_submitted")
+    enqueued = next(event for event in events if event.event_type == "enqueued")
+    assert submitted.project_id == "project-alpha"
+    assert submitted.payload["project_id"] == "project-alpha"
+    assert submitted.correlation_id == "corr-project-alpha"
+    assert enqueued.project_id == "project-alpha"
+    assert enqueued.agent_role == "operator"
+
+    # A newly planned phase with no explicit project field must inherit the
+    # authoritative mission scope from its durable submission receipt.
+    store.enqueue(
+        "mission-project-alpha",
+        (DelegatedTask("replanned", "operator", "Continue the project task"),),
+        phase=1,
+    )
+    all_tasks = store.list_tasks("mission-project-alpha")
+    assert {item.task.project_id for item in all_tasks} == {"project-alpha"}
+
+    workspace = task_engine._workspace_for_task(
+        task,
+        "mission-project-alpha:inspect:attempt:1",
+    )
+    expected_root = Path(registry.resolve("project-alpha").workspace).resolve()
+    assert workspace.is_relative_to(expected_root)
+    assert workspace.parts[-2] == "tasks"
+
+    task_engine.execute_one(
+        task,
+        execution_scope="mission-project-alpha:inspect:attempt:1",
+    )
+    assert orchestration.model_calls[0]["project_id"] == "project-alpha"
+
+    capability_task = DelegatedTask(
+        "list-project-files",
+        "operator",
+        "List registered project files",
+        capability="workbench:file:list",
+        args=(".",),
+        project_id="project-alpha",
+    )
+    task_engine.execute_one(
+        capability_task,
+        execution_scope="mission-project-alpha:list-project-files:attempt:1",
+    )
+    request = orchestration.capability_calls[0]["request"]
+    assert request.constraints["project_id"] == "project-alpha"
+    assert request.constraints["project_repository"] == "AlphaEnginev1/alpha"
+
+
+def test_project_scoped_task_fails_closed_without_registry_or_for_unknown_project(tmp_path):
+    task = DelegatedTask(
+        "inspect",
+        "operator",
+        "Inspect project files",
+        project_id="missing-project",
+    )
+    with pytest.raises(TaskEngineError, match="canonical ProjectRegistry"):
+        TaskEngine(CapturingOrchestration(), tmp_path / "runtime").validate((task,))
+
+    registry = make_registry(tmp_path)
+    with pytest.raises(TaskEngineError, match="invalid project scope"):
+        TaskEngine(
+            CapturingOrchestration(),
+            tmp_path / "runtime",
+            project_registry=registry,
+        ).validate((task,))
+
+
+def test_project_id_reaches_model_router_request_metadata():
+    class CapturingRouter(ModelRouter):
+        def __init__(self):
+            super().__init__([ModelSpec("fake/model", "fake", "https://example.invalid")])
+            self.requests = []
+
+        def generate(self, request, capability=None, preferred_models=None):
+            self.requests.append(request)
+            return InferenceResponse(
+                model="fake/model",
+                provider="fake",
+                content="completed",
+                request_id=request.request_id,
+                execution_id="execution-model-1",
+            )
+
+    router = CapturingRouter()
+    orchestration = OrchestrationEngine(router)
+    orchestration.run_task(
+        task_id="task-alpha",
+        role="engineer",
+        objective="Inspect alpha",
+        project_id="project-alpha",
+        use_workbench=False,
+    )
+    assert router.requests[0].metadata["project_id"] == "project-alpha"
+
+
+def test_director_planner_passes_project_scope_metadata_to_provider(tmp_path):
+    registry = make_registry(tmp_path)
+    provider = CapturingDirectorProvider()
+    router = ModelRouter([ModelSpec("fake/model", "fake", "https://example.invalid")])
+    planner = DirectorPlanner(
+        router,
+        project_registry=registry,
+        provider=provider,
+    )
+
+    plan = planner.plan(
+        objective="Inspect Project Alpha",
+        project_id="project-alpha",
+    )
+
+    assert plan.tasks[0].task_id == "inspect"
+    assert provider.calls[0]["metadata"] == {"project_id": "project-alpha"}
+
+
+def test_workbench_project_scope_cannot_escape_registered_workspace(tmp_path):
+    registry = make_registry(tmp_path)
+    alpha_root = Path(registry.resolve("project-alpha").workspace)
+    beta_root = Path(registry.resolve("project-beta").workspace)
+    alpha_root.mkdir(parents=True)
+    beta_root.mkdir(parents=True)
+    (alpha_root / "alpha.txt").write_text("alpha", encoding="utf-8")
+    (beta_root / "beta-secret.txt").write_text("beta", encoding="utf-8")
+
+    workbench = UniversalWorkbench(
+        repository_root=tmp_path / "repo",
+        runtime_root=tmp_path / "runtime",
+        gateway=None,
+        project_registry=registry,
+    )
+    request = WorkbenchRequest(
+        capability="workbench:file:list",
+        actor="operator",
+        mission_id="mission-alpha",
+        arguments=(".",),
+        options={"project_id": "project-alpha"},
+    )
+
+    result = workbench.execute(request)
+    assert result.status == "succeeded"
+    names = {item["name"] for item in result.output}
+    assert "alpha.txt" in names
+    assert "beta-secret.txt" not in names
+
+    with pytest.raises(WorkbenchError, match="outside the registered project workspace"):
+        workbench._safe_path(str(beta_root / "beta-secret.txt"), request=request)
+
+
+def test_conversation_scope_requires_one_uniquely_named_registered_project(tmp_path):
+    service = object.__new__(DirectorConversationService)
+    service.project_registry = make_registry(tmp_path)
+
+    assert service._project_ids_in_prompt("Please inspect Project Alpha") == {"project-alpha"}
+    assert service._project_id_from_prompt("Inspect Project Alpha") == "project-alpha"
+    assert service._project_ids_in_prompt("Compare Project Alpha with Project Beta") == {
+        "project-alpha",
+        "project-beta",
+    }
+    assert service._project_id_from_prompt("Compare Project Alpha with Project Beta") is None
+
+
+def test_specialist_workbench_tool_cannot_replace_runtime_project_scope():
+    class FakeWorkbench:
+        def __init__(self):
+            self.calls = []
+            self.session_store = object()
+
+        def execute(self, request):
+            self.calls.append(request)
+            return WorkbenchResult(
+                capability=request.capability,
+                operation="read",
+                status="succeeded",
+                output="safe",
+                provenance="fake-workbench",
+            )
+
+    class FakeRouter(ModelRouter):
+        def __init__(self):
+            super().__init__([ModelSpec("fake/model", "fake", "https://example.invalid")])
+            self.responses = [
+                '{"workbench_calls":[{"capability":"workbench:file:read","arguments":["README.md"],"options":{"project_id":"project-beta","work_id":"untrusted-work","idempotency_key":"untrusted-key"}}]}',
+                "Finished with authoritative Workbench evidence.",
+            ]
+
+        def generate(self, request, capability=None, preferred_models=None):
+            return InferenceResponse(
+                model="fake/model",
+                provider="fake",
+                content=self.responses.pop(0),
+                request_id=request.request_id,
+                execution_id="agent-execution",
+            )
+
+    from aurora.inference.models import InferenceRequest
+
+    workbench = FakeWorkbench()
+    loop = AgentWorkbenchToolLoop(workbench)
+    loop.run(
+        request=InferenceRequest(
+            messages=[{"role": "user", "content": "Read only the registered project files"}],
+            metadata={
+                "role": "engineer",
+                "task_id": "task-alpha",
+                "project_id": "project-alpha",
+            },
+        ),
+        actor="engineer",
+        mission_id="mission-alpha",
+        task_id="task-alpha",
+        reason="Inspect project files",
+        router=FakeRouter(),
+    )
+
+    call = workbench.calls[0]
+    assert call.options["project_id"] == "project-alpha"
+    assert call.options["work_id"] == "mission-alpha"
+    assert call.idempotency_key == "agent-task:mission-alpha:task-alpha:call:0"
