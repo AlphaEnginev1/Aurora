@@ -641,6 +641,6 @@ def test_durable_workbench_task_uses_same_idempotency_key_across_worker_attempts
     assert second.status is TaskStatus.SUCCEEDED
     keys = [item.constraints["idempotency_key"] for item in orchestration.requests]
     assert keys == [
-        "task:mission-1:write-1:workbench:file:write",
-        "task:mission-1:write-1:workbench:file:write",
+        "task:mission-1:write-1",
+        "task:mission-1:write-1",
     ]
