@@ -32,7 +32,7 @@ from aurora.workbench.github import GitHubConnector, GitHubConnectorError
 from aurora.workbench.models import WorkbenchCapability, WorkbenchRequest, WorkbenchResult
 from aurora.research.models import ResearchRequest
 from aurora.research.service import ResearchService
-from aurora.projects import ProjectRegistry
+from aurora.projects import ProjectRegistry, ProjectStatus
 
 
 class WorkbenchError(RuntimeError):
@@ -496,9 +496,14 @@ class UniversalWorkbench:
                 "project-scoped Workbench operations require the canonical ProjectRegistry"
             )
         try:
-            return self.project_registry.resolve(raw_project_id)
+            project = self.project_registry.resolve(raw_project_id)
         except Exception as exc:
             raise WorkbenchError(f"invalid project scope: {exc}") from exc
+        if project.status is not ProjectStatus.ACTIVE:
+            raise WorkbenchError(
+                f"project-scoped execution requires an active project, got {project.status.value}"
+            )
+        return project
 
     def _project_workspace_root(self, request: WorkbenchRequest) -> Path | None:
         """Resolve a task's registered project workspace."""
