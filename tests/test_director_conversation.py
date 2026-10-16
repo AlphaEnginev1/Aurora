@@ -553,6 +553,135 @@ def test_durable_mission_receipt_is_returned_when_summary_provider_fails(tmp_pat
     assert len(submitted) == 1
 
 
+def test_replaying_running_mission_turn_refreshes_status_without_reexecution(tmp_path):
+    service, _seen = _service(tmp_path)
+    session = service.create_session()
+    provider_calls = []
+    mission_calls = []
+    status = {"value": "running"}
+
+    class ConversationProvider:
+        provider_id = "fake"
+
+        def generate(
+            self,
+            *,
+            messages,
+            model,
+            role,
+            tools=(),
+            metadata=None,
+            capability="reasoning",
+            preferred_models=(),
+        ):
+            provider_calls.append(role)
+            return DirectorModelResponse(
+                content=(
+                    "The order has been accepted."
+                    if role == "director_conversation"
+                    else "Execution evidence is attached."
+                ),
+                model=model or "fake/director",
+                provider="fake",
+                request_id=f"provider-request-{len(provider_calls)}",
+                execution_id=f"provider-execution-{len(provider_calls)}",
+                tool_calls=(),
+            )
+
+    service.set_provider(ConversationProvider())
+
+    def durable_result(mission_id, objective, current_status):
+        submitted = SimpleNamespace(
+            event_id=1,
+            event_type="mission_submitted",
+            task_id=None,
+            project_id="project-a",
+            correlation_id="corr-running-turn",
+            payload={
+                "objective": objective,
+                "project_id": "project-a",
+                "correlation_id": "corr-running-turn",
+            },
+        )
+        events = [submitted]
+        if current_status == "succeeded":
+            events.append(SimpleNamespace(
+                event_id=2,
+                event_type="mission_succeeded",
+                task_id=None,
+                project_id="project-a",
+                correlation_id="corr-running-turn",
+                payload={"status": "succeeded", "project_id": "project-a"},
+            ))
+        return SimpleNamespace(
+            mission_id=mission_id,
+            objective=objective,
+            submission=SimpleNamespace(
+                mission_id=mission_id,
+                plan=SimpleNamespace(
+                    objective=objective,
+                    tasks=(),
+                    model="fake/director",
+                    provider="fake",
+                    execution_id="planning-execution",
+                ),
+            ),
+            status=SimpleNamespace(value=current_status),
+            tasks=(),
+            events=tuple(events),
+        )
+
+    def runner(**kwargs):
+        mission_calls.append(dict(kwargs))
+        return durable_result(
+            kwargs["mission_id"],
+            kwargs["objective"],
+            "running",
+        )
+
+    service.mission_runner = runner
+    service.mission_status_reader = lambda mission_id: durable_result(
+        mission_id,
+        "Audita la orden durable de Aurora",
+        status["value"],
+    )
+
+    request_id = "refresh-running-order-status-001"
+    first = service.send_message(
+        session_id=session.session_id,
+        user_input="Audita la orden durable de Aurora",
+        request_id=request_id,
+    )
+
+    assert first.state == "completed"
+    assert first.execution_status == "running"
+    assert '"status": "running"' in first.response_text
+    assert len(mission_calls) == 1
+    assert provider_calls == [
+        "director_conversation",
+        "director_conversation_result",
+    ]
+
+    status["value"] = "succeeded"
+    replay = service.send_message(
+        session_id=session.session_id,
+        user_input="Audita la orden durable de Aurora",
+        request_id=request_id,
+    )
+
+    assert replay.state == "completed"
+    assert replay.execution_status == "succeeded"
+    assert "Estado actualizado de la orden durable de Aurora." in replay.response_text
+    assert '"status": "succeeded"' in replay.response_text
+    assert replay.turn.turn_id == first.turn.turn_id
+    assert replay.correlation_id == first.correlation_id
+    assert len(mission_calls) == 1
+    assert provider_calls == [
+        "director_conversation",
+        "director_conversation_result",
+    ]
+
+
 def test_replay_recovers_a_durable_turn_left_without_an_assistant_response(tmp_path):
     service, _ = _service(tmp_path)
     session = service.create_session()
