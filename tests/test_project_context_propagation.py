@@ -14,7 +14,7 @@ from aurora.orchestration.director_conversation import DirectorConversationServi
 from aurora.orchestration.director_provider import DirectorModelResponse
 from aurora.orchestration.durable_director import DurableDirectorService
 from aurora.orchestration.engine import OrchestrationEngine
-from aurora.orchestration.task_engine import DelegatedTask, TaskEngine, TaskEngineError
+from aurora.orchestration.task_engine import DelegatedTask, TaskEngine, TaskEngineError, TaskStatus
 from aurora.orchestration.task_store import DurableTaskStore
 from aurora.projects import ProjectRegistry, ProjectSpec, ProjectStatus
 from aurora.workbench.models import WorkbenchRequest, WorkbenchResult
@@ -538,3 +538,71 @@ def test_project_scoped_artifact_intake_can_be_inspected_within_same_project(tmp
     ))
     assert inspected.status == "succeeded"
     assert inspected.output["filename"] == source.name
+
+
+
+def test_mission_evidence_returns_persisted_model_selection_and_execution_receipt():
+    task = DelegatedTask(
+        "inspect",
+        "engineer",
+        "Inspect the project",
+        project_id="project-alpha",
+    )
+    durable_result = {
+        "type": "model",
+        "model": "nvidia/test-model",
+        "provider": "nvidia_api",
+        "request_id": "request-123",
+        "execution_id": "execution-456",
+        "requested_model": "nvidia/preferred-model",
+        "selected_model": "nvidia/test-model",
+        "reported_model": "nvidia/test-model",
+        "content": "Inspection complete with verifiable evidence.",
+        "truncated": False,
+        "routing": {
+            "selected_model": "nvidia/test-model",
+            "score": 0.91,
+            "factors": {"latency": 0.2, "capability": 0.9},
+            "candidates": [{"model": "nvidia/test-model", "score": 0.91}],
+        },
+    }
+    submission = SimpleNamespace(
+        mission_id="mission-alpha",
+        project_id="project-alpha",
+        plan=SimpleNamespace(
+            objective="Inspect the project",
+            model="nvidia/planner-model",
+            provider="nvidia_api",
+            execution_id="planning-execution",
+        ),
+    )
+    mission = SimpleNamespace(
+        mission_id="mission-alpha",
+        project_id="project-alpha",
+        submission=submission,
+        status=TaskStatus.SUCCEEDED,
+        tasks=(SimpleNamespace(
+            task=task,
+            status=TaskStatus.SUCCEEDED,
+            error=None,
+            capability_result=None,
+            model_result=None,
+            durable_result=durable_result,
+        ),),
+        wait_timed_out=False,
+        events=(),
+    )
+
+    evidence = DirectorConversationService._mission_evidence(mission)
+
+    assert evidence["project_id"] == "project-alpha"
+    assert evidence["provider"] == "nvidia_api"
+    assert evidence["planning_execution_id"] == "planning-execution"
+    assert evidence["tasks"][0]["project_id"] == "project-alpha"
+    assert evidence["tasks"][0]["model"] == "nvidia/test-model"
+    assert evidence["tasks"][0]["provider"] == "nvidia_api"
+    assert evidence["tasks"][0]["request_id"] == "request-123"
+    assert evidence["tasks"][0]["execution_id"] == "execution-456"
+    assert evidence["tasks"][0]["selected_model"] == "nvidia/test-model"
+    assert evidence["tasks"][0]["routing"]["score"] == 0.91
+    assert evidence["tasks"][0]["result"] == "Inspection complete with verifiable evidence."
