@@ -15,7 +15,7 @@ from .director_provider import (
     InferenceDirectorProvider,
 )
 from aurora.organization import OrganizationConfigError, OrganizationRegistry
-from aurora.projects import ProjectRegistry
+from aurora.projects import ProjectRegistry, ProjectStatus
 from aurora.skills import SkillRegistry, SkillRegistryError
 from .task_engine import DelegatedTask, DelegatedTaskResult, TaskEngine
 
@@ -133,6 +133,29 @@ Rules:
         self.skill_registry = skill_registry
         self.project_registry = project_registry
 
+    def _project_catalog(self, project_id: str | None) -> str | None:
+        if self.project_registry is None:
+            return None
+        if project_id is None:
+            return self.project_registry.catalog()
+        try:
+            project = self.project_registry.resolve(project_id)
+        except Exception as exc:
+            raise DirectorPlanError(f"invalid project scope: {exc}") from exc
+        if project.status is not ProjectStatus.ACTIVE:
+            raise DirectorPlanError(
+                f"project-scoped planning requires an active project, got {project.status.value}"
+            )
+        # Never append the global project catalog to a project-bound plan or
+        # review. That would bypass ContextGate's per-project isolation.
+        return (
+            f"- {project.project_id}: {project.name}; "
+            f"status={project.status.value}; objective={project.objective}; "
+            f"repository={project.repository or 'not recorded'}; "
+            f"workspace={project.workspace or 'not recorded'}; "
+            f"state={project.current_state or 'state not recorded'}"
+        )
+
     def plan(
         self,
         *,
@@ -152,9 +175,10 @@ Rules:
         if self.skill_registry is not None:
             system += "\nRegistered specialist skill catalog:\n"
             system += self.skill_registry.catalog() + "\n"
-        if self.project_registry is not None:
-            system += "\nRegistered Aurora project catalog:\n"
-            system += self.project_registry.catalog() + "\n"
+        project_catalog = self._project_catalog(project_id)
+        if project_catalog is not None:
+            system += "\nRegistered Aurora project context:\n"
+            system += project_catalog + "\n"
         messages = [
             {"role": "system", "content": system},
             *(context or []),
