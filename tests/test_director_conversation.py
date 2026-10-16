@@ -28,7 +28,7 @@ from aurora.orchestration.director_decision_policy_active_store import DirectorD
 from aurora.orchestration.director_decision_policy_contract_store import DirectorDecisionPolicyContractStore
 from aurora.orchestration.director_decision_policy_proposal_store import DirectorDecisionPolicyProposalStore
 from aurora.organization import OrganizationRegistry
-from aurora.projects import ProjectRegistry
+from aurora.projects import ProjectRegistry, ProjectSpec, ProjectStatus
 from aurora.research.store import ResearchStore
 from aurora.skills import SkillRegistry
 from aurora.orchestration.task_store import DurableTaskStore
@@ -54,8 +54,9 @@ class FakeProvider:
         )
 
 
-def _service(tmp_path: Path):
+def _service(tmp_path: Path, project_registry: ProjectRegistry | None = None):
     task_db = tmp_path / "tasks.db"
+    projects = project_registry or ProjectRegistry({})
     task_store = DurableTaskStore(task_db)
     research_store = ResearchStore(tmp_path / "research.db")
     organization = OrganizationRegistry(
@@ -98,7 +99,7 @@ def _service(tmp_path: Path):
         available=True,
     )
     plane = AuroraContextPlane(
-        project_registry=ProjectRegistry({}),
+        project_registry=projects,
         organization=organization,
         skill_registry=SkillRegistry({}),
         models=(model, rogue_model),
@@ -158,6 +159,7 @@ def _service(tmp_path: Path):
             router=router,
             bootstrap=bootstrap,
             db_path=tmp_path / "conversation.db",
+            project_registry=projects,
         ),
         seen,
     )
@@ -280,3 +282,60 @@ def test_nvidia_style_provider_response_contract(tmp_path):
     assert response.provider == "nvidia_api"
     assert response.model == "nvidia/nemotron-3-ultra-550b-a55b"
     assert response.execution_id == "execution-nvidia"
+
+
+
+def test_project_bound_conversation_bootstraps_only_the_selected_project_context(tmp_path: Path):
+    projects = ProjectRegistry({
+        "project-alpha": ProjectSpec(
+            project_id="project-alpha",
+            name="Project Alpha",
+            objective="Alpha-only project objective",
+            status=ProjectStatus.ACTIVE,
+            repository="AlphaEnginev1/alpha",
+            workspace=str(tmp_path / "projects" / "alpha"),
+            current_state="Alpha secret current state",
+            updated_at="2026-10-16T00:00:00Z",
+        ),
+        "project-beta": ProjectSpec(
+            project_id="project-beta",
+            name="Project Beta",
+            objective="Beta-only private objective",
+            status=ProjectStatus.ACTIVE,
+            repository="AlphaEnginev1/beta",
+            workspace=str(tmp_path / "projects" / "beta"),
+            current_state="Beta secret current state",
+            updated_at="2026-10-16T00:00:00Z",
+        ),
+    })
+    service, seen = _service(tmp_path, project_registry=projects)
+    session = service.create_session()
+
+    response = service.send_message(
+        session_id=session.session_id,
+        user_input="Inspect the current project",
+        request_id="project-context-isolation-001",
+        project_id="project-alpha",
+    )
+
+    request = seen[-1][0]
+    rendered = str(request.messages)
+    assert response.turn.project_id == "project-alpha"
+    assert request.metadata["project_id"] == "project-alpha"
+    assert request.metadata["aurora_context_scope"] == "project"
+    assert "Alpha-only project objective" in rendered
+    assert "Alpha secret current state" in rendered
+    assert "Project Beta" not in rendered
+    assert "Beta-only private objective" not in rendered
+    assert "Beta secret current state" not in rendered
+
+    # General/global bootstrap still works on a new unscoped turn, but the
+    # project-specific history and context are not copied into that turn.
+    response_global = service.send_message(
+        session_id=session.session_id,
+        user_input="General question without a project",
+        request_id="global-context-isolation-002",
+    )
+    global_request = seen[-1][0]
+    assert response_global.turn.project_id is None
+    assert "Beta secret current state" in str(global_request.messages)
