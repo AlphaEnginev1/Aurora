@@ -2665,8 +2665,12 @@ class DirectorRuntime:
                 mission_id=mission_id,
                 source="director",
                 kind="follow_up_plan",
-                content=self._plan_text(validated),
-                metadata={"round": round_number, "task_count": len(validated)},
+                content=self._plan_text(phase_tasks),
+                metadata={
+                    "round": round_number,
+                    "task_count": len(phase_tasks),
+                    "project_id": project_id,
+                },
             )
         except MissionMemoryError:
             pass
@@ -3609,6 +3613,7 @@ class DirectorRuntime:
 
             receipts.append({
                 "mission_id": mission_id,
+                "project_id": stored.task.project_id,
                 "task_id": stored.task.task_id,
                 "role": stored.task.role,
                 "capability": stored.task.capability or "reasoning",
@@ -3681,7 +3686,8 @@ class DirectorRuntime:
     @staticmethod
     def _plan_text(tasks: tuple[DelegatedTask, ...]) -> str:
         return "\n".join(
-            f"- {task.task_id} [{task.role}] capability={task.capability or 'reasoning'} "
+            f"- {task.task_id} [{task.role}] project_id={task.project_id or 'none'} "
+            f"capability={task.capability or 'reasoning'} "
             f"skills={','.join(task.skills) or 'none'} "
             f"depends_on={','.join(task.depends_on) or 'none'}: {task.objective}"
             for task in tasks
