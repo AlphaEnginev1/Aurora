@@ -464,7 +464,7 @@ def test_replay_recovers_a_durable_turn_left_without_an_assistant_response(tmp_p
     session = service.create_session()
     request_id = "recover-interrupted-turn-001"
     digest = hashlib.sha256(
-        f"{session.session_id}\\x00{request_id}".encode("utf-8")
+        f"{session.session_id}\x00{request_id}".encode("utf-8")
     ).hexdigest()[:32]
     turn_id = f"turn-request-{digest}"
     correlation_id = f"corr-request-{digest}"
