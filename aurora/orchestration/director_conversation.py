@@ -474,7 +474,7 @@ Keep responses useful and concise unless the human asks for depth."""
                 )
             else:
                 provider_messages = [
-                    {"role": "system", "content": self.SYSTEM_PROMPT},
+                    {"role": "system", "content": self._system_prompt()},
                     *bootstrap_state.messages,
                     *[
                         {"role": item.role, "content": item.content}
@@ -685,7 +685,7 @@ Keep responses useful and concise unless the human asks for depth."""
                 normalized = self._normalize_project_reference(reference.strip())
                 if not normalized:
                     continue
-                pattern = r"(?<![\\w])" + re.escape(normalized) + r"(?![\\w])"
+                pattern = r"(?<![\w])" + re.escape(normalized) + r"(?![\w])"
                 if re.search(pattern, prompt):
                     matches.add(project.project_id)
                     break
@@ -813,7 +813,11 @@ Keep responses useful and concise unless the human asks for depth."""
                         "mission references multiple registered projects; explicitly scope one project before execution"
                     )
                 prompt_project_id = next(iter(prompt_projects), None)
-                if project_id is not None and prompt_project_id is not None and project_id != prompt_project_id:
+                if project_id is not None and prompt_project_id is None:
+                    raise DirectorConversationError(
+                        "the user must explicitly identify one registered project before scoped mission execution"
+                    )
+                if project_id is not None and project_id != prompt_project_id:
                     raise DirectorConversationError(
                         "run_mission project_id conflicts with the project explicitly named by the user"
                     )
@@ -873,6 +877,18 @@ Keep responses useful and concise unless the human asks for depth."""
                 requested_capability = capability.strip()
                 capability = self._canonical_workbench_capability(requested_capability)
                 try:
+                    prompt_projects = self._project_ids_in_prompt(user_input)
+                    if len(prompt_projects) > 1:
+                        raise DirectorConversationError(
+                            "direct Workbench request references multiple registered projects; scope one explicitly"
+                        )
+                    canonical_project_id = next(iter(prompt_projects), None)
+                    workbench_options = dict(options)
+                    # Project routing is runtime-owned. Ignore model-supplied IDs and
+                    # accept only the unique project explicitly named by the human.
+                    workbench_options.pop("project_id", None)
+                    if canonical_project_id is not None:
+                        workbench_options["project_id"] = canonical_project_id
                     direct_workbench_mission_id = (
                         f"conversation:{conversation_turn_id}:{call.call_id}"
                         if conversation_turn_id
@@ -886,7 +902,7 @@ Keep responses useful and concise unless the human asks for depth."""
                             reason="Director conversation direct Workbench evidence",
                             arguments=tuple(call_args),
                             options={
-                                **dict(options),
+                                **workbench_options,
                                 "work_id": direct_workbench_mission_id,
                             },
                             correlation_id=correlation_id,
