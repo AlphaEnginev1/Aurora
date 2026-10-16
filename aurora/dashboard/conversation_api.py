@@ -49,6 +49,7 @@ class DashboardConversationAPI:
         user_input: str,
         model: str | None = None,
         request_id: str | None = None,
+        project_id: str | None = None,
         principal: str = "dashboard",
     ) -> dict[str, Any]:
         self._authorize(
@@ -56,6 +57,7 @@ class DashboardConversationAPI:
             {
                 "operation": "conversation.send_turn",
                 "session_id": session_id,
+                "project_id": project_id,
             },
         )
         try:
@@ -64,6 +66,7 @@ class DashboardConversationAPI:
                 user_input=user_input,
                 model=model,
                 request_id=request_id,
+                project_id=project_id,
             )
         except DirectorConversationError as exc:
             raise DashboardConversationAPIError(str(exc)) from exc
@@ -73,6 +76,7 @@ class DashboardConversationAPI:
             "response_text": response.response_text,
             "state": response.state,
             "request_id": request_id,
+            "project_id": project_id,
             "correlation_id": response.correlation_id,
             "context_manifest_id": response.context_manifest_id,
             "model": response.model,
