@@ -174,6 +174,7 @@ def test_agent_workbench_uses_runtime_owned_stable_key_and_work_id_across_retrie
             actor="engineer",
             mission_id="mission-1",
             reason="write a controlled task output",
+            task_id="write-task",
             router=router,
         )
 
