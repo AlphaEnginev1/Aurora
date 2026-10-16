@@ -872,14 +872,20 @@ class UniversalWorkbench:
             or not all(isinstance(key, str) and isinstance(val, str) for key, val in environment.items())
         ):
             raise WorkbenchError("command environment must be a string map")
+        project = self._registered_project(request)
+        command_constraints = {
+            "mission_id": request.mission_id,
+            "work_id": str(request.options.get("work_id") or request.mission_id),
+        }
+        if project is not None:
+            command_constraints["project_id"] = project.project_id
+            if project.repository:
+                command_constraints["project_repository"] = project.repository
         request_obj = CapabilityRequest(
             name=name,
             actor=request.actor,
             reason=request.reason,
-            constraints={
-                "mission_id": request.mission_id,
-                "work_id": str(request.options.get("work_id") or request.mission_id),
-            },
+            constraints=command_constraints,
         )
         if self.capability_runtime.broker.resolve(request_obj) is None:
             raise WorkbenchError(f"command capability is not registered: {name}")
