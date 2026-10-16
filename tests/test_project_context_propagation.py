@@ -448,3 +448,57 @@ def test_project_scoped_command_cannot_choose_another_workspace(tmp_path):
     with pytest.raises(WorkbenchError, match="outside the registered project workspace"):
         workbench.execute(request)
     assert runtime.calls == []
+
+
+
+def test_project_scoped_command_passes_registered_identity_to_capability_runtime(tmp_path):
+    registry = make_registry(tmp_path)
+    alpha_root = Path(registry.resolve("project-alpha").workspace)
+    alpha_root.mkdir(parents=True)
+
+    class FakeBroker:
+        def resolve(self, request):
+            return object()
+
+    class CapturingCapabilityRuntime:
+        def __init__(self):
+            self.broker = FakeBroker()
+            self.calls = []
+
+        def execute(self, request, *, workspace, args=(), environment=None):
+            self.calls.append((request, Path(workspace), tuple(args), dict(environment or {})))
+            return SimpleNamespace(
+                returncode=0,
+                timed_out=False,
+                command=("fake-command",),
+                stdout="ok",
+                stderr="",
+            )
+
+    runtime = CapturingCapabilityRuntime()
+    workbench = UniversalWorkbench(
+        repository_root=tmp_path / "repo",
+        runtime_root=tmp_path / "runtime",
+        gateway=None,
+        project_registry=registry,
+        capability_runtime=runtime,
+    )
+    request = WorkbenchRequest(
+        capability="workbench:command",
+        actor="operator",
+        mission_id="mission-alpha",
+        arguments=(json.dumps({
+            "capability": "python.package:example",
+            "args": [],
+            "workspace": str(alpha_root),
+        }),),
+        options={"project_id": "project-alpha", "work_id": "mission-alpha"},
+    )
+
+    result = workbench.execute(request)
+
+    assert result.status == "succeeded"
+    executed_request, workspace, _, _ = runtime.calls[0]
+    assert workspace == alpha_root.resolve()
+    assert executed_request.constraints["project_id"] == "project-alpha"
+    assert executed_request.constraints["project_repository"] == "AlphaEnginev1/alpha"
