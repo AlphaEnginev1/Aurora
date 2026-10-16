@@ -73,6 +73,7 @@ class DashboardConversationAPI:
             "turn": asdict(response.turn),
             "response_text": response.response_text,
             "state": response.state,
+            "execution_status": response.execution_status,
             "request_id": request_id,
             "correlation_id": response.correlation_id,
             "context_manifest_id": response.context_manifest_id,
