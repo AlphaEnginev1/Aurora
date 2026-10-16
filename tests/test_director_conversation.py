@@ -459,6 +459,100 @@ def test_default_router_provider_submits_one_durable_mission_and_returns_evidenc
     assert len(submitted) == 1
 
 
+def test_durable_mission_receipt_is_returned_when_summary_provider_fails(tmp_path):
+    service, _seen = _service(tmp_path)
+    session = service.create_session()
+    generated_roles = []
+
+    class FailingSummaryProvider:
+        provider_id = "fake"
+
+        def generate(
+            self,
+            *,
+            messages,
+            model,
+            role,
+            tools=(),
+            metadata=None,
+            capability="reasoning",
+            preferred_models=(),
+        ):
+            generated_roles.append(role)
+            if role == "director_conversation_result":
+                raise RuntimeError("controlled summary-provider outage")
+            return DirectorModelResponse(
+                content="Aurora has accepted the request.",
+                model=model or "fake/director",
+                provider="fake",
+                request_id="request-initial",
+                execution_id="execution-initial",
+                tool_calls=(),
+            )
+
+    service.set_provider(FailingSummaryProvider())
+    submitted = []
+
+    def durable_runner(**kwargs):
+        submitted.append(dict(kwargs))
+        mission_id = kwargs["mission_id"]
+        correlation_id = kwargs["correlation_id"]
+        submission = SimpleNamespace(
+            mission_id=mission_id,
+            plan=SimpleNamespace(
+                objective=kwargs["objective"],
+                tasks=(),
+                model="fake/director",
+                provider="fake",
+                execution_id="planning-execution",
+            ),
+        )
+        event = SimpleNamespace(
+            event_id=1,
+            event_type="mission_submitted",
+            task_id=None,
+            project_id=kwargs.get("project_id"),
+            correlation_id=correlation_id,
+            payload={
+                "objective": kwargs["objective"],
+                "project_id": kwargs.get("project_id"),
+                "correlation_id": correlation_id,
+                "task_ids": [],
+            },
+        )
+        return SimpleNamespace(
+            mission_id=mission_id,
+            objective=kwargs["objective"],
+            submission=submission,
+            status=SimpleNamespace(value="running"),
+            tasks=(),
+            events=(event,),
+        )
+
+    service.mission_runner = durable_runner
+    request_id = "summary-provider-failure-after-acceptance"
+    response = service.send_message(
+        session_id=session.session_id,
+        user_input="Audita la cadena durable de Aurora",
+        request_id=request_id,
+    )
+
+    assert generated_roles == ["director_conversation", "director_conversation_result"]
+    assert len(submitted) == 1
+    assert response.state == "completed"
+    assert "EVIDENCIA_AUTORITATIVA_DE_EJECUCION (JSON):" in response.response_text
+    assert '"accepted": true' in response.response_text
+    assert submitted[0]["mission_id"] in response.response_text
+    assert not any(turn.state == "failed" for turn in service.list_turns(session.session_id, limit=10))
+    saved = service.send_message(
+        session_id=session.session_id,
+        user_input="Audita la cadena durable de Aurora",
+        request_id=request_id,
+    )
+    assert saved.turn.turn_id == response.turn.turn_id
+    assert len(submitted) == 1
+
+
 def test_replay_recovers_a_durable_turn_left_without_an_assistant_response(tmp_path):
     service, _ = _service(tmp_path)
     session = service.create_session()
