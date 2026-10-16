@@ -745,6 +745,65 @@ def test_conversation_mission_evidence_uses_final_director_status_after_recovery
     assert any(event.event_type == "mission_succeeded" for event in store.events(submission.mission_id))
 
 
+def test_director_rejects_replan_dependency_on_succeeded_task_without_receipt(
+    tmp_path: Path,
+):
+    runtime, store, planner, _engine = make_runtime(tmp_path)
+    original_review = planner.review
+
+    def review_with_prior_dependency(**kwargs):
+        review = original_review(**kwargs)
+        if review.decision == "continue":
+            return DirectorReview(
+                decision="continue",
+                rationale="Validate the result from the earlier phase.",
+                tasks=(
+                    DelegatedTask(
+                        "validate",
+                        "validator",
+                        "validate prior evidence",
+                        depends_on=("collect",),
+                    ),
+                ),
+                model=review.model,
+                considered_alternatives=review.considered_alternatives,
+            )
+        return review
+
+    planner.review = review_with_prior_dependency
+    original_complete = store.complete
+
+    def complete_without_collect_receipt(mission_id, task_id, **kwargs):
+        if task_id == "collect" and kwargs.get("status") == "succeeded":
+            kwargs["result"] = None
+        return original_complete(mission_id, task_id, **kwargs)
+
+    store.complete = complete_without_collect_receipt
+    submission = runtime.submit_mission(
+        objective="adapt this mission using prior evidence",
+        mission_id="mission-replan-missing-prior-receipt",
+        correlation_id="corr-replan-missing-prior-receipt",
+    )
+
+    result = runtime.run_until_terminal(submission)
+
+    assert result.status is TaskStatus.BLOCKED
+    assert store.get(submission.mission_id, "collect").status == "succeeded"
+    assert store.get(submission.mission_id, "collect").result is None
+    assert store.get(submission.mission_id, "r1_validate") is None
+    events = store.events(submission.mission_id)
+    rejection = next(
+        event for event in events
+        if event.event_type == "director_replan_rejected"
+    )
+    assert "without verified durable result evidence" in rejection.payload["reason"]
+    recorded_review = next(
+        event for event in events if event.event_type == "director_review"
+    )
+    assert recorded_review.payload["decision"] == "blocked"
+    assert any(event.event_type == "mission_blocked" for event in events)
+
+
 def test_runtime_retries_transient_replan_enqueue_failure_from_durable_receipt(
     tmp_path: Path,
 ):
