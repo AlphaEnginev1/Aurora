@@ -697,6 +697,11 @@ class TaskEngine:
                 scope_constraints["project_id"] = project.project_id
                 if project.repository:
                     scope_constraints["project_repository"] = project.repository
+            stable_action_key = (
+                f"task:{project.project_id}:{mission_identity}:{task.task_id}"
+                if project is not None
+                else f"task:{mission_identity}:{task.task_id}"
+            )
             request = CapabilityRequest(
                 name=task.capability,
                 actor=task.role,
@@ -707,7 +712,7 @@ class TaskEngine:
                     # Stable across the worker's attempt number; a retry must
                     # resume the same Workbench action rather than repeat an
                     # external side effect with a new identity.
-                    "idempotency_key": f"task:{mission_identity}:{task.task_id}",
+                    "idempotency_key": stable_action_key,
                     **scope_constraints,
                 },
             )
