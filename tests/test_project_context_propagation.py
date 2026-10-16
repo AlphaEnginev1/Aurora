@@ -473,6 +473,7 @@ def test_project_scoped_command_passes_registered_identity_to_capability_runtime
                 command=("fake-command",),
                 stdout="ok",
                 stderr="",
+                capability=SimpleNamespace(artifact_id=None),
             )
 
     runtime = CapturingCapabilityRuntime()
