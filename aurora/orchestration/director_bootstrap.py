@@ -237,17 +237,32 @@ def build_context_runtime_adapter(
     def runtime_context(project_id: str | None) -> dict[str, object]:
         missions = task_store.list_missions()
         if project_id is not None:
-            # Task rows are the canonical scope binding. A project-bound
-            # ContextGate must not infer membership from an untagged event or
-            # from another project's mission activity.
-            missions = tuple(
-                mission_id
-                for mission_id in missions
-                if any(
-                    stored.task.project_id == project_id
-                    for stored in task_store.list_tasks(mission_id)
-                )
-            )
+            # Prefer task rows as the canonical scope binding. For legacy rows
+            # created before the tasks.project_id migration, recover scope only
+            # from the durable mission_submitted receipt; never infer it from
+            # unrelated or untagged task activity.
+            scoped_missions: list[str] = []
+            for mission_id in missions:
+                stored_tasks = task_store.list_tasks(mission_id)
+                explicit_scopes = {
+                    stored.task.project_id
+                    for stored in stored_tasks
+                    if stored.task.project_id is not None
+                }
+                if explicit_scopes:
+                    if explicit_scopes == {project_id}:
+                        scoped_missions.append(mission_id)
+                    continue
+                for event in task_store.events(mission_id):
+                    if event.event_type != "mission_submitted":
+                        continue
+                    receipt_project_id = (
+                        event.project_id or event.payload.get("project_id")
+                    )
+                    if receipt_project_id == project_id:
+                        scoped_missions.append(mission_id)
+                    break
+            missions = tuple(scoped_missions)
         states: dict[str, int] = {
             "pending": 0,
             "running": 0,
