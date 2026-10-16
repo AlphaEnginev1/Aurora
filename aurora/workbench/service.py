@@ -943,6 +943,10 @@ class UniversalWorkbench:
         objective = str(value.get("objective") or request.reason).strip()
         required_sources = value.get("required_sources", [])
         constraints = value.get("constraints", [])
+        if not isinstance(required_sources, list) or not all(isinstance(item, str) for item in required_sources):
+            raise WorkbenchError("required_sources must be a string array")
+        if not isinstance(constraints, list) or not all(isinstance(item, str) for item in constraints):
+            raise WorkbenchError("constraints must be a string array")
         project = self._registered_project(request)
         if project is not None:
             # Keep discovery/retrieval anchored to the registered project while
