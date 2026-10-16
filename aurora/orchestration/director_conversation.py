@@ -615,12 +615,30 @@ Keep responses useful and concise unless the human asks for depth."""
 
     @staticmethod
     def _requests_mission_execution(user_input: str | None) -> bool:
+        """Classify explicit work orders independently from provider/tool compliance."""
         text = str(user_input or "").casefold()
         normalized = "".join(
             character
             for character in unicodedata.normalize("NFKD", text)
             if not unicodedata.combining(character)
+        ).strip()
+        if not normalized:
+            return False
+
+        # Questions asking for instructions are not themselves an order to act.
+        informational_prefixes = (
+            "como puedo ",
+            "como se ",
+            "que es ",
+            "explicame ",
+            "how do i ",
+            "how can i ",
+            "what is ",
+            "explain how ",
         )
+        if normalized.startswith(informational_prefixes):
+            return False
+
         mission_markers = (
             "mision",
             "mission",
@@ -643,10 +661,41 @@ Keep responses useful and concise unless the human asks for depth."""
             "realiza",
             "haz ",
         )
-        return (
+        if (
             any(marker in normalized for marker in mission_markers)
             and any(marker in normalized for marker in action_markers)
+        ):
+            return True
+
+        # Concrete engineering, investigation, validation, and repository-change
+        # requests must enter the durable mission path even when the user does
+        # not know Aurora's internal term "mission" and regardless of which
+        # model/provider is active.
+        explicit_work_verbs = (
+            "corrig", "arregl", "solucion", "implement", "modific", "crea ",
+            "constru", "anad", "actualiz", "escrib", "refactor", "desarroll",
+            "repar", "prueb", "test ", "audita", "investig", "analiz", "revisa",
+            "completa", "continua con", "sigue con",
+            "fix ", "repair", "implement", "modify", "create ", "build ",
+            "add ", "update ", "write ", "refactor", "develop", "test ",
+            "audit ", "investigate", "analyz", "review ", "continue with",
         )
+        has_explicit_work = any(marker in normalized for marker in explicit_work_verbs)
+
+        # Preserve explicit single-operation reads ("check this file directly")
+        # as Workbench calls, unless the same request also asks for a change.
+        direct_read = (
+            "directamente" in normalized or "directly" in normalized
+        ) and any(
+            marker in normalized
+            for marker in ("comprueb", "lee ", "abre ", "lista ", "consulta ", "read ", "check ", "open ", "list ")
+        )
+        if direct_read and not any(
+            marker in normalized
+            for marker in ("corrig", "arregl", "solucion", "modific", "implement", "write ", "fix ", "repair", "update ", "create ")
+        ):
+            return False
+        return has_explicit_work
 
     @classmethod
     def _canonical_workbench_capability(cls, requested: str) -> str:
