@@ -3264,24 +3264,32 @@ class DirectorRuntime:
                 initial_events=lifecycle_events,
             )
         except Exception as exc:
+            # The validated Director decision receipt is already durable. A
+            # failed enqueue is therefore an interrupted continuation, not a
+            # completed terminal decision: do not block the mission and make
+            # that receipt unrecoverable. The next runtime cycle enters
+            # _resume_interrupted_review_decision() and retries the exact saved
+            # task graph without calling the planner again.
             reason = _safe_catalog_error_text(exc)
-            self.event_bus.publish(
-                mission_id=mission_id,
-                event_type="director_replan_persistence_failed",
-                payload={
-                    "round": round_number,
-                    "reason": reason,
-                    "task_ids": task_ids,
-                    **({"project_id": project_id} if project_id is not None else {}),
-                },
-                project_id=project_id,
-                correlation_id=correlation_id,
-            )
-            self._publish_terminal(
-                mission_id,
-                status="blocked",
-                reason=f"Director follow-up plan could not be durably enqueued: {reason}",
-            )
+            events_now = self.store.events(mission_id)
+            if not any(
+                event.event_type == "director_review_recovery_deferred"
+                and event.payload.get("round") == round_number
+                for event in events_now
+            ):
+                self.event_bus.publish(
+                    mission_id=mission_id,
+                    event_type="director_review_recovery_deferred",
+                    payload={
+                        "round": round_number,
+                        "reason": reason,
+                        "task_ids": task_ids,
+                        "source": "normal_replan_enqueue",
+                        **({"project_id": project_id} if project_id is not None else {}),
+                    },
+                    project_id=project_id,
+                    correlation_id=correlation_id,
+                )
             return
         try:
             self.memory.append(
