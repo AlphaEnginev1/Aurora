@@ -7,7 +7,7 @@ Director-preplanned capability tasks.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Mapping, Sequence
 
 from aurora.inference.multimodal import MultimodalContentError, parse_content
@@ -105,6 +105,7 @@ If no Workbench action is needed, answer normally.
         ):
             messages.insert(0, {"role": "system", "content": self.INSTRUCTION})
         executed = 0
+        workbench_receipts: list[dict[str, Any]] = []
         while True:
             current_metadata = dict(request.metadata or {})
             current_metadata["workbench_tool_loop"] = True
@@ -130,6 +131,11 @@ If no Workbench action is needed, answer normally.
                 )
             calls = parse_workbench_calls(response.content)
             if not calls:
+                if workbench_receipts:
+                    return replace(
+                        response,
+                        workbench_receipts=tuple(workbench_receipts),
+                    )
                 return response
             if executed + len(calls) > self.max_calls:
                 raise AgentWorkbenchToolError("Workbench tool-call budget exceeded")
@@ -171,7 +177,9 @@ If no Workbench action is needed, answer normally.
                     )
                 )
                 executed += 1
-                results.append(_bounded_result(call, result, self.MAX_RESULT_CHARS))
+                receipt = _bounded_result(call, result, self.MAX_RESULT_CHARS)
+                workbench_receipts.append(receipt)
+                results.append(receipt)
             evidence_content: list[dict[str, Any]] = [
                 {
                     "modality": "text",
@@ -243,6 +251,8 @@ def _bounded_result(
         "output": result.output,
         "artifact_id": result.artifact_id,
         "provenance": result.provenance,
+        "receipt_id": result.receipt_id,
+        "correlation_id": result.correlation_id,
         "error": result.error,
     }
     encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
@@ -254,7 +264,10 @@ def _bounded_result(
         "status": result.status,
         "artifact_id": result.artifact_id,
         "provenance": result.provenance,
+        "receipt_id": result.receipt_id,
+        "correlation_id": result.correlation_id,
         "error": result.error,
+        "truncated": True,
         "output": "[truncated: Workbench result exceeded context safety limit]",
     }
 
