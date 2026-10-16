@@ -607,7 +607,7 @@ Keep responses useful and concise unless the human asks for depth."""
             character
             for character in unicodedata.normalize("NFKD", text)
             if not unicodedata.combining(character)
-        ).strip()
+        ).strip().lstrip("¿¡- ").strip()
         if not normalized:
             return False
 
@@ -631,13 +631,18 @@ Keep responses useful and concise unless the human asks for depth."""
             "realiza", "lanza", "inicia", "constru", "desarroll", "audita",
             "audit", "verifica", "comprueba", "prueba", "testea", "investiga",
             "investigate", "review", "revisa", "check", "verify", "fix", "repair",
-            "build", "refactor", "inspect", "analyz", "analyse", "run tests",
-            "run the tests", "deploy", "create", "write", "delegate", "execute",
-            "launch", "continue with", "finish", "complete", "resolve", "examine",
-            "inspecciona", "mision", "mission", "multiagente", "multi-agent",
-            "run_mission", "tarea delegada", "tareas delegadas",
+            "build", "refactor", "inspect", "analyz", "analyse", "analiz",
+            "compara", "run tests", "run the tests", "deploy", "create", "write",
+            "delegate", "execute", "launch", "continue with", "finish", "complete",
+            "resolve", "examine", "inspecciona", "mision", "mission", "multiagente",
+            "multi-agent", "run_mission", "tarea delegada", "tareas delegadas",
         )
-        return any(marker in normalized for marker in execution_markers)
+        tokens = normalized.split()
+        return any(
+            marker in normalized if " " in marker
+            else any(token.startswith(marker) for token in tokens)
+            for marker in execution_markers
+        )
 
     @classmethod
     def _canonical_workbench_capability(cls, requested: str) -> str:
