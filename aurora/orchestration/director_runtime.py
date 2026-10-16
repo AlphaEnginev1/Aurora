@@ -1626,7 +1626,9 @@ class DirectorRuntime:
             value = event.project_id or event.payload.get("project_id")
             if isinstance(value, str) and value.strip():
                 return value.strip()
-            return None
+            # Older or partially migrated receipts may omit the project ID.
+            # Fall back to the durable task rows rather than stopping here.
+            break
         return next(
             (
                 stored.task.project_id
