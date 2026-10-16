@@ -142,6 +142,11 @@ If no Workbench action is needed, answer normally.
                 call_options.pop("idempotency_key", None)
                 call_options.pop("work_id", None)
                 call_options["work_id"] = mission_id
+                canonical_project_id = (request.metadata or {}).get("project_id")
+                if canonical_project_id is not None:
+                    call_options["project_id"] = canonical_project_id
+                else:
+                    call_options.pop("project_id", None)
                 idempotency_key = (
                     f"agent-task:{mission_id}:{task_id}:call:{executed}"
                     if task_id and getattr(self.workbench, "session_store", None) is not None
