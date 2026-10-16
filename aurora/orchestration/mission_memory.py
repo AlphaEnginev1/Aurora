@@ -158,12 +158,6 @@ class MissionMemory:
             scope = MailboxScope(scope)
         except ValueError as exc:
             raise MissionMemoryError(f"invalid mailbox scope: {scope}") from exc
-        if scope is MailboxScope.PROJECT and not (project_id and project_id.strip()):
-            raise MissionMemoryError("project scope requires project_id")
-        if scope is MailboxScope.AGENT and not (agent_role and agent_role.strip()):
-            raise MissionMemoryError("agent scope requires agent_role")
-        if scope is MailboxScope.TASK and not (task_id and task_id.strip()):
-            raise MissionMemoryError("task scope requires task_id")
         identifiers = (
             mission_id,
             source,
@@ -178,6 +172,82 @@ class MissionMemory:
             raise MissionMemoryError("mission message contains a null byte")
         if event_id is not None and event_id < 1:
             raise MissionMemoryError("event_id must be positive")
+
+        # A mission mailbox entry inherits the mission's canonical project and
+        # correlation identifiers unless the caller supplies an event-specific
+        # correlation. Task-linked entries additionally inherit the durable task
+        # project and role. This keeps reconstructed and live projections aligned.
+        try:
+            with self.store._connect() as context_db:
+                task_context = None
+                if task_id is not None:
+                    task_context = context_db.execute(
+                        """
+                        SELECT project_id, role
+                        FROM tasks
+                        WHERE mission_id = ? AND task_id = ?
+                        """,
+                        (mission_id, task_id),
+                    ).fetchone()
+                submitted = context_db.execute(
+                    """
+                    SELECT project_id, correlation_id, payload_json
+                    FROM task_events
+                    WHERE mission_id = ? AND event_type = 'mission_submitted'
+                    ORDER BY event_id
+                    LIMIT 1
+                    """,
+                    (mission_id,),
+                ).fetchone()
+        except sqlite3.Error as exc:
+            raise MissionMemoryError(f"could not resolve mission mailbox context: {exc}") from exc
+
+        submitted_payload = {}
+        if submitted is not None:
+            try:
+                submitted_payload = json.loads(submitted["payload_json"])
+            except (TypeError, json.JSONDecodeError):
+                submitted_payload = {}
+        canonical_project = (
+            submitted["project_id"] if submitted is not None else None
+        )
+        if canonical_project is None and isinstance(submitted_payload, dict):
+            value = submitted_payload.get("project_id")
+            canonical_project = value if isinstance(value, str) and value.strip() else None
+        if (
+            canonical_project is not None
+            and project_id is not None
+            and project_id != canonical_project
+        ):
+            raise MissionMemoryError(
+                "mission mailbox project_id conflicts with the durable submission receipt"
+            )
+        if task_context is not None and task_context["project_id"] is not None:
+            task_project_id = str(task_context["project_id"])
+            if canonical_project is not None and task_project_id != canonical_project:
+                raise MissionMemoryError(
+                    "durable task project_id conflicts with the mission submission receipt"
+                )
+            if project_id is None:
+                project_id = task_project_id
+            if agent_role is None:
+                agent_role = str(task_context["role"])
+        if project_id is None:
+            project_id = canonical_project
+        if correlation_id is None and submitted is not None:
+            correlation_id = submitted["correlation_id"]
+            if correlation_id is None and isinstance(submitted_payload, dict):
+                value = submitted_payload.get("correlation_id")
+                correlation_id = (
+                    value if isinstance(value, str) and value.strip() else None
+                )
+
+        if scope is MailboxScope.PROJECT and not (project_id and project_id.strip()):
+            raise MissionMemoryError("project scope requires project_id")
+        if scope is MailboxScope.AGENT and not (agent_role and agent_role.strip()):
+            raise MissionMemoryError("agent scope requires agent_role")
+        if scope is MailboxScope.TASK and not (task_id and task_id.strip()):
+            raise MissionMemoryError("task scope requires task_id")
 
         now = datetime.now(timezone.utc).isoformat()
         payload = json.dumps(dict(metadata or {}), sort_keys=True)
