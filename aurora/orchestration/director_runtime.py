@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
@@ -3263,6 +3264,33 @@ class DirectorRuntime:
                 correlation_id=correlation_id,
                 initial_events=lifecycle_events,
             )
+        except sqlite3.Error as exc:
+            # The versioned director_review receipt already contains the exact
+            # validated graph. A transient SQLite interruption must not make the
+            # mission terminal: the next runtime cycle replays this receipt before
+            # any planner call and retries the same atomic task/event transaction.
+            reason = _safe_catalog_error_text(exc)
+            try:
+                self.event_bus.publish(
+                    mission_id=mission_id,
+                    event_type="director_review_recovery_deferred",
+                    payload={
+                        "round": round_number,
+                        "reason": reason,
+                        "task_ids": task_ids,
+                        "retryable": True,
+                        **({"project_id": project_id} if project_id is not None else {}),
+                    },
+                    project_id=project_id,
+                    correlation_id=correlation_id,
+                )
+            except Exception:
+                logging.getLogger(__name__).exception(
+                    "mission %s has a durable Director review receipt; "
+                    "SQLite replan persistence will be retried next cycle",
+                    mission_id,
+                )
+            return
         except Exception as exc:
             reason = _safe_catalog_error_text(exc)
             self.event_bus.publish(
