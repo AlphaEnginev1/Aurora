@@ -143,6 +143,13 @@
                 <p id="chat-status" class="chat-status" role="status" aria-live="polite">Conversation ready. Your messages go to Aurora Director.</p>
                 <p id="avatar-transcript" class="avatar-transcript-buffer" hidden aria-hidden="true"></p>
                 <div id="attachment-list" class="attachment-list" aria-live="polite" hidden></div>
+                <div class="chat-project-scope">
+                  <label for="director-project-scope">Project scope</label>
+                  <select id="director-project-scope" aria-label="Project scope">
+                    <option value="">General · no project selected</option>
+                  </select>
+                  <span id="director-project-scope-hint">Choose a registered project to scope delegated work.</span>
+                </div>
                 <div class="chat-composer">
                   <button id="attach-file" class="attach-button" type="button" aria-label="Attach files" title="Attach files">+</button>
                   <input id="aurora-file-input" type="file" multiple hidden aria-label="Choose files to attach">
