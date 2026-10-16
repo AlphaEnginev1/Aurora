@@ -1,6 +1,9 @@
 from pathlib import Path
 from types import SimpleNamespace
+import json
 
+from aurora.inference.models import InferenceResponse
+from aurora.inference.providers.registry import ProviderRegistry, ProviderSpec
 from aurora.orchestration.director_conversation import DirectorConversationService
 from aurora.orchestration.director_provider import DirectorModelResponse, DirectorToolCall
 from tests.test_director_conversation import _service as base_service
@@ -798,3 +801,84 @@ def test_duplicate_request_without_saved_response_is_not_executed_again(tmp_path
     assert "no la vuelve a ejecutar automáticamente" in response.response_text
     assert provider.calls == []
     assert [item.role for item in service.list_turns(session.session_id)] == ["user"]
+
+
+
+def test_default_inference_provider_routes_explicit_execution_through_durable_mission(tmp_path: Path):
+    service, seen = base_service(tmp_path)
+    executed = []
+
+    class ToolInferenceProvider:
+        provider_id = "fake"
+
+        def generate(self, request, *, selected_model, execution_id):
+            seen.append((request, selected_model, execution_id))
+            role = request.metadata.get("role")
+            if role == "director_conversation":
+                content = json.dumps({
+                    "tool_calls": [{
+                        "name": "run_mission",
+                        "arguments": {"objective": "Execute the durable audit"},
+                    }],
+                })
+            else:
+                content = "Aurora received the durable mission and returned its evidence."
+            return InferenceResponse(
+                model=selected_model,
+                provider="fake",
+                content=content,
+                request_id=request.request_id,
+                execution_id=execution_id,
+                selected_model=selected_model,
+                provider_model=selected_model,
+                reported_model=selected_model,
+            )
+
+    service.router.provider_registry = ProviderRegistry((
+        ProviderSpec(
+            "fake",
+            "Fake",
+            ("chat", "reasoning"),
+            True,
+            lambda spec: ToolInferenceProvider(),
+        ),
+    ))
+
+    def runner(*, objective, mission_id=None, correlation_id=None, project_id=None):
+        executed.append({
+            "objective": objective,
+            "mission_id": mission_id,
+            "correlation_id": correlation_id,
+            "project_id": project_id,
+        })
+        plan = SimpleNamespace(
+            objective=objective,
+            model="fake/director",
+            provider="fake",
+            execution_id="durable-planning-execution",
+        )
+        submission = SimpleNamespace(mission_id=mission_id, plan=plan)
+        return SimpleNamespace(
+            mission_id=mission_id,
+            submission=submission,
+            objective=objective,
+            status=SimpleNamespace(value="succeeded"),
+            tasks=(),
+        )
+
+    service.mission_runner = runner
+    session = service.create_session()
+    response = service.send_message(
+        session_id=session.session_id,
+        user_input="Ejecuta la auditoría del repositorio y delega el trabajo necesario.",
+    )
+
+    assert len(executed) == 1
+    assert executed[0]["objective"] == "Execute the durable audit"
+    assert executed[0]["mission_id"]
+    assert executed[0]["correlation_id"]
+    assert response.response_text.startswith("Aurora received the durable mission")
+    first_request = seen[0][0]
+    assert first_request.metadata["role"] == "director_conversation"
+    assert first_request.metadata["aurora_context_verified"] is True
+    assert any("run_mission" in message["content"] for message in first_request.messages if message["role"] == "system")
