@@ -40,6 +40,7 @@ class ConversationSession:
     state: str
     bootstrap_id: str
     context_manifest_id: str
+    project_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -183,8 +184,11 @@ Keep responses useful and concise unless the human asks for depth."""
         self.router.configure_context_gate(bootstrap.context_gate, enforce=True)
         self._initialize_schema()
 
-    def create_session(self, *, session_id: str | None = None) -> ConversationSession:
+    def create_session(
+        self, *, session_id: str | None = None, project_id: str | None = None
+    ) -> ConversationSession:
         state = self._initialize_bootstrap()
+        project_id = self._validate_project_id(project_id)
         session = session_id or f"conv-{uuid4().hex}"
         _require_identifier(session, "session_id")
         now = _now()
@@ -194,10 +198,10 @@ Keep responses useful and concise unless the human asks for depth."""
                     """
                     INSERT INTO conversation_sessions (
                         session_id, created_at, updated_at, state,
-                        bootstrap_id, context_manifest_id
-                    ) VALUES (?, ?, ?, 'active', ?, ?)
+                        bootstrap_id, context_manifest_id, project_id
+                    ) VALUES (?, ?, ?, 'active', ?, ?, ?)
                     """,
-                    (session, now, now, state.boot_id, state.context.manifest_id),
+                    (session, now, now, state.boot_id, state.context.manifest_id, project_id),
                 )
             except sqlite3.IntegrityError as exc:
                 raise DirectorConversationError(
@@ -210,6 +214,7 @@ Keep responses useful and concise unless the human asks for depth."""
             state="active",
             bootstrap_id=state.boot_id,
             context_manifest_id=state.context.manifest_id,
+            project_id=project_id,
         )
 
     def get_session(self, session_id: str) -> ConversationSession:
@@ -218,7 +223,7 @@ Keep responses useful and concise unless the human asks for depth."""
             row = db.execute(
                 """
                 SELECT session_id, created_at, updated_at, state,
-                       bootstrap_id, context_manifest_id
+                       bootstrap_id, context_manifest_id, project_id
                 FROM conversation_sessions
                 WHERE session_id = ?
                 """,
@@ -407,7 +412,14 @@ Keep responses useful and concise unless the human asks for depth."""
                         "this request_id already failed and will not be re-executed; "
                         "use a new request_id only to intentionally submit a new turn"
                     )
-                return self._in_progress_response(session, existing_user_turn)
+                # Recover an interrupted turn. The mission runner receives a stable
+                # mission ID derived from this durable turn, so a mission already
+                # accepted before a crash is replayed rather than enqueued twice.
+                recovering_turn = True
+            else:
+                recovering_turn = False
+        else:
+            recovering_turn = False
 
         if session.state != "active":
             raise DirectorConversationError(
@@ -419,16 +431,17 @@ Keep responses useful and concise unless the human asks for depth."""
         self._validate_requested_model(model, policy)
 
         next_sequence = self._next_sequence(session_id)
-        self._insert_turn(
-            turn_id=turn_id,
-            session_id=session_id,
-            sequence=next_sequence,
-            role="user",
-            content=prompt,
-            state="completed",
-            created_at=_now(),
-            correlation_id=correlation_id,
-        )
+        if not recovering_turn:
+            self._insert_turn(
+                turn_id=turn_id,
+                session_id=session_id,
+                sequence=next_sequence,
+                role="user",
+                content=prompt,
+                state="completed",
+                created_at=_now(),
+                correlation_id=correlation_id,
+            )
 
         history = list(self.list_turns(session_id, limit=self.max_history_turns))
         messages = [
@@ -448,6 +461,7 @@ Keep responses useful and concise unless the human asks for depth."""
                 "conversation_session_id": session_id,
                 "conversation_turn_id": turn_id,
                 "correlation_id": correlation_id,
+                **({"project_id": session.project_id} if session.project_id else {}),
                 "task_type": "conversation",
                 "allowed_models": self._preferred_models(policy),
             },
@@ -728,6 +742,15 @@ Keep responses useful and concise unless the human asks for depth."""
             item.kind is inspect.Parameter.VAR_KEYWORD
             for item in parameters.values()
         )
+        # Only pass optional context fields to callbacks that explicitly support
+        # them. This preserves older/test adapters while the canonical runtime
+        # receives project_id and correlation identity.
+        if not accepts_extra and parameters:
+            call_kwargs = {
+                key: value
+                for key, value in call_kwargs.items()
+                if key in parameters
+            }
         if mission_id and (accepts_extra or "mission_id" in parameters):
             call_kwargs["mission_id"] = mission_id
         if correlation_id and (accepts_extra or "correlation_id" in parameters):
@@ -774,6 +797,7 @@ Keep responses useful and concise unless the human asks for depth."""
                             if conversation_turn_id else None
                         ),
                         correlation_id=correlation_id,
+                        project_id=(metadata or {}).get("project_id"),
                     )
                     evidence = self._mission_evidence(mission)
                     evidence["routing_fallback"] = (
@@ -799,11 +823,9 @@ Keep responses useful and concise unless the human asks for depth."""
                     raise DirectorConversationError("run_mission is unavailable")
                 objective, explicit_tasks = self._normalize_mission_tool_arguments(arguments)
                 try:
-                    call_key = hashlib.sha256(
-                        str(call.call_id).encode("utf-8")
-                    ).hexdigest()[:16]
-                    # Distinct tool calls in one user turn are distinct commands;
-                    # retries/replays of the same call keep the same durable ID.
+                    # Stable across provider retries and process recovery, while
+                    # different objectives in the same turn remain distinct orders.
+                    call_key = hashlib.sha256(objective.encode("utf-8")).hexdigest()[:16]
                     mission_id = (
                         f"mission-conversation-{conversation_turn_id}-{call_key}"
                         if conversation_turn_id else None
@@ -813,6 +835,7 @@ Keep responses useful and concise unless the human asks for depth."""
                             objective=objective,
                             mission_id=mission_id,
                             correlation_id=correlation_id,
+                            project_id=(metadata or {}).get("project_id"),
                         )
                     else:
                         # All missions emitted by one conversation turn share a
@@ -827,6 +850,7 @@ Keep responses useful and concise unless the human asks for depth."""
                             planning_model=getattr(response, "model", None),
                             planning_provider=getattr(response, "provider", None),
                             planning_execution_id=getattr(response, "execution_id", None),
+                            project_id=(metadata or {}).get("project_id"),
                         )
                     results.append(self._mission_evidence(mission))
                 except Exception as exc:
@@ -1100,6 +1124,7 @@ Keep responses useful and concise unless the human asks for depth."""
                 correlation_id = correlation_id or durable_result.get("correlation_id")
             tasks.append({
                 "task_id": getattr(task, "task_id", None),
+                "project_id": getattr(task, "project_id", None),
                 "role": getattr(task, "role", None),
                 "status": str(value),
                 "error": getattr(item, "error", None),
@@ -1149,6 +1174,12 @@ Keep responses useful and concise unless the human asks for depth."""
         ]
         return {
             "mission_id": mission_id,
+            "project_id": next((
+                event.payload.get("project_id")
+                for event in events
+                if getattr(event, "event_type", None) == "mission_submitted"
+                and isinstance(getattr(event, "payload", None), Mapping)
+            ), None),
             "accepted": bool(mission_id and submission is not None),
             "status": status,
             "wait_timed_out": wait_timed_out,
@@ -1207,7 +1238,24 @@ Keep responses useful and concise unless the human asks for depth."""
             state="closed",
             bootstrap_id=session.bootstrap_id,
             context_manifest_id=session.context_manifest_id,
+            project_id=session.project_id,
         )
+
+    def _validate_project_id(self, project_id: str | None) -> str | None:
+        if project_id is None:
+            return None
+        if not isinstance(project_id, str) or not project_id.strip() or "\x00" in project_id:
+            raise DirectorConversationError("project_id must be a non-empty identifier")
+        gate = getattr(self.bootstrap, "context_gate", None)
+        plane = getattr(gate, "plane", None)
+        registry = getattr(plane, "project_registry", None)
+        if registry is None:
+            raise DirectorConversationError("project-scoped conversation requires the canonical project registry")
+        try:
+            registry.resolve(project_id.strip())
+        except Exception as exc:
+            raise DirectorConversationError(f"unknown project_id: {project_id}") from exc
+        return project_id.strip()
 
     def _initialize_bootstrap(self):
         try:
@@ -1230,10 +1278,14 @@ Keep responses useful and concise unless the human asks for depth."""
                     updated_at TEXT NOT NULL,
                     state TEXT NOT NULL CHECK (state IN ('active', 'closed')),
                     bootstrap_id TEXT NOT NULL,
-                    context_manifest_id TEXT NOT NULL
+                    context_manifest_id TEXT NOT NULL,
+                    project_id TEXT
                 )
                 """
             )
+            session_columns = {row["name"] for row in db.execute("PRAGMA table_info(conversation_sessions)").fetchall()}
+            if "project_id" not in session_columns:
+                db.execute("ALTER TABLE conversation_sessions ADD COLUMN project_id TEXT")
             db.execute(
                 """
                 CREATE TABLE IF NOT EXISTS conversation_turns (

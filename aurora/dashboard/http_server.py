@@ -281,12 +281,16 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 return
             if parsed.path == "/api/conversation/session":
                 session_id = payload.get("session_id")
+                project_id = payload.get("project_id")
                 if session_id is not None and not isinstance(session_id, str):
                     raise DashboardConversationAPIError("session_id must be a string")
+                if project_id is not None and not isinstance(project_id, str):
+                    raise DashboardConversationAPIError("project_id must be a string")
                 self._json(
                     201,
                     self.conversation_api.create_session(
                         session_id=session_id,
+                        project_id=project_id,
                         principal=self._principal(),
                     ),
                 )

@@ -1,4 +1,5 @@
 from pathlib import Path
+import hashlib
 import json
 from types import SimpleNamespace
 
@@ -456,3 +457,37 @@ def test_default_router_provider_submits_one_durable_mission_and_returns_evidenc
     assert replay.turn.turn_id == response.turn.turn_id
     assert replay.correlation_id == response.correlation_id
     assert len(submitted) == 1
+
+
+def test_replay_recovers_a_durable_turn_left_without_an_assistant_response(tmp_path):
+    service, _ = _service(tmp_path)
+    session = service.create_session()
+    request_id = "recover-interrupted-turn-001"
+    digest = hashlib.sha256(
+        f"{session.session_id}\x00{request_id}".encode("utf-8")
+    ).hexdigest()[:32]
+    turn_id = f"turn-request-{digest}"
+    correlation_id = f"corr-request-{digest}"
+    service._insert_turn(
+        turn_id=turn_id,
+        session_id=session.session_id,
+        sequence=1,
+        role="user",
+        content="Recupera esta orden interrumpida",
+        state="completed",
+        created_at="2026-10-16T00:00:00+00:00",
+        correlation_id=correlation_id,
+    )
+
+    response = service.send_message(
+        session_id=session.session_id,
+        user_input="Recupera esta orden interrumpida",
+        request_id=request_id,
+    )
+
+    assert response.state == "completed"
+    assert response.correlation_id == correlation_id
+    turns = service.list_turns(session.session_id, limit=10)
+    assert [turn.role for turn in turns] == ["user", "assistant"]
+    assert turns[0].turn_id == turn_id
+    assert turns[1].turn_id == f"{turn_id}-response"
