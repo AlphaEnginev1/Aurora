@@ -2298,7 +2298,22 @@ class DirectorRuntime:
 
         objective = self._objective_from_memory(mission_id)
         context = self.memory.context(mission_id, limit=50)
-        project_context = self._project_context_for_mission(mission_id)
+        try:
+            project_context = self._project_context_for_mission(mission_id)
+        except DirectorRuntimeError as exc:
+            self.event_bus.publish(
+                mission_id=mission_id,
+                event_type="director_project_context_rejected",
+                payload={"reason": str(exc), "project_id": self._mission_project_id(mission_id)},
+                project_id=self._mission_project_id(mission_id),
+                correlation_id=self._mission_correlation_id(mission_id),
+            )
+            self._publish_terminal(
+                mission_id,
+                status="blocked",
+                reason=f"Director cannot safely review/replan project-scoped mission: {exc}",
+            )
+            return
         if project_context is not None:
             context.append(
                 {
