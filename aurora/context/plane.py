@@ -15,7 +15,7 @@ from typing import Callable, Iterable, Mapping
 
 from aurora.inference.models import ModelSpec
 from aurora.organization import OrganizationRegistry
-from aurora.projects import ProjectRegistry, ProjectSpec
+from aurora.projects import ProjectRegistry, ProjectSpec, ProjectStatus
 from aurora.inference.registry import ModelRegistry
 from aurora.skills import SkillRegistry
 
@@ -103,6 +103,10 @@ class AuroraContextPlane:
                 selected_project = self.project_registry.resolve(normalized_project)
             except Exception as exc:
                 raise AuroraContextError(str(exc)) from exc
+            if selected_project.status is not ProjectStatus.ACTIVE:
+                raise AuroraContextError(
+                    f"project-scoped context requires an active project, got {selected_project.status.value}"
+                )
 
         if normalized_project is not None and selected_project is not None:
             # A project-bound request must not receive names, objectives, or
