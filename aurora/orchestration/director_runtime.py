@@ -482,7 +482,8 @@ class DirectorRuntime:
                 "removed_roles": list(state.reconfiguration.removed_roles) if state.reconfiguration else [],
             })
             self.memory.append(mission_id=mission_id, source="director", kind="skill_promotion",
-                content=json.dumps(team_payload, sort_keys=True), metadata={"candidate_id": approved.candidate_id})
+                content=json.dumps(team_payload, sort_keys=True), metadata={"candidate_id": approved.candidate_id},
+                project_id=self._mission_project_id(mission_id))
             return state
         self.event_bus.publish(mission_id=mission_id, event_type="team.reformation_skipped",
             payload={"candidate_id": approved.candidate_id, "reason": "no pending tasks or team coordinator"})
@@ -654,6 +655,7 @@ class DirectorRuntime:
                 kind="skill_evolution",
                 content=json.dumps(payload, sort_keys=True),
                 metadata={"candidate_id": approved.candidate_id},
+                project_id=self._mission_project_id(mission_id),
             )
             return state
 
@@ -1280,6 +1282,7 @@ class DirectorRuntime:
                             },
                             event_id=event.event_id,
                             task_id=event.task_id,
+                            project_id=event.project_id or self._mission_project_id(event.mission_id),
                             correlation_id=event.correlation_id,
                         )
                     except Exception:
@@ -1578,6 +1581,7 @@ class DirectorRuntime:
                     **({"error": projected_error} if projected_error else {}),
                 },
                 task_id=stored.task.task_id,
+                project_id=stored.task.project_id or self._mission_project_id(mission_id),
                 correlation_id=self._mission_correlation_id(mission_id),
             )
         except MissionMemoryError as exc:
@@ -1909,6 +1913,7 @@ class DirectorRuntime:
                     sort_keys=True,
                 ),
                 metadata={"round": round_number},
+                project_id=self._mission_project_id(mission_id),
             )
         except MissionMemoryError:
             pass
@@ -2357,6 +2362,7 @@ class DirectorRuntime:
                     "routing_evidence": routing_evidence,
                     "considered_alternatives": list(review.considered_alternatives),
                 },
+                project_id=self._mission_project_id(mission_id),
             )
         except MissionMemoryError:
             pass
@@ -2459,6 +2465,7 @@ class DirectorRuntime:
                 kind="follow_up_plan",
                 content=self._plan_text(validated),
                 metadata={"round": round_number, "task_count": len(validated)},
+                project_id=self._mission_project_id(mission_id),
             )
         except MissionMemoryError:
             pass
@@ -2611,6 +2618,7 @@ class DirectorRuntime:
                         "round": evaluation.round,
                         "evidence": list(evaluation.evidence),
                     },
+                    project_id=self._mission_project_id(mission_id),
                 )
             except MissionMemoryError:
                 pass
