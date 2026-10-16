@@ -807,6 +807,7 @@ def build_autonomy_runtime_bindings(*, director_service, router, workbench, rese
             evidence_ids=tuple(item.evidence_id for item in evidence),
             confidence=1.0,
             state=EvidenceState.VERIFIED,
+            project_id=claim.project_id,
         )
         try:
             research_service.store.record_finding(finding)
