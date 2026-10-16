@@ -1294,6 +1294,8 @@ def test_provider_failure_retries_same_conversation_tool_through_durable_mission
     assert first_reserve["role"] == "director_conversation"
     assert first_reserve["metadata"]["project_id"] == "project-alpha"
     assert "run_mission" in first_reserve["tools"]
+    result_reserve = next(call for call in reserve.calls if call["role"] == "director_conversation_result")
+    assert result_reserve["metadata"]["project_id"] == "project-alpha"
     assert len(executed) == 1
     assert executed[0]["project_id"] == "project-alpha"
     assert executed[0]["mission_id"]
