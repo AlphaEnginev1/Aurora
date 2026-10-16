@@ -1332,8 +1332,8 @@ async function testProvider(provider) {
     });
   }
 
-  function uploadFingerprint(file) {
-    const value = [file.name, file.size, file.lastModified].join("\\u0000");
+  function uploadFingerprint(file, projectId) {
+    const value = [projectId || "__global__", file.name, file.size, file.lastModified].join("\\u0000");
     let hash = 2166136261;
     for (let index = 0; index < value.length; index += 1) {
       hash ^= value.charCodeAt(index);
@@ -1342,8 +1342,8 @@ async function testProvider(provider) {
     return (hash >>> 0).toString(16) + "-" + value.length;
   }
 
-  function stableUploadRequest(file) {
-    const fingerprint = uploadFingerprint(file);
+  function stableUploadRequest(file, projectId) {
+    const fingerprint = uploadFingerprint(file, projectId);
     const storageKey = "aurora.pendingUploadRequest." + fingerprint;
     try {
       const saved = JSON.parse(window.sessionStorage.getItem(storageKey) || "null");
@@ -1380,23 +1380,30 @@ async function testProvider(provider) {
     const selected = Array.from(files || []);
     if (!selected.length) return;
     const button = $("attach-file");
+    const projectId = state.selectedProjectId;
     button.disabled = true;
-    setChatStatus("Uploading " + selected.length + " attachment(s) to Aurora…", false);
+    setChatStatus(
+      "Uploading " + selected.length + " attachment(s) to Aurora" +
+      (projectId ? " for project " + projectId : " in general mode") + "…",
+      false
+    );
     try {
       for (const file of selected) {
         if (!file.size) throw new Error(file.name + " is empty.");
         if (file.size > 25 * 1024 * 1024) {
           throw new Error(file.name + " exceeds the 25 MiB per-file limit.");
         }
-        const pendingRequest = stableUploadRequest(file);
+        const pendingRequest = stableUploadRequest(file, projectId);
+        const uploadHeaders = {
+          Accept: "application/json",
+          "Content-Type": file.type || "application/octet-stream",
+          "X-Aurora-Filename": encodeURIComponent(file.name),
+          "X-Aurora-Request-ID": pendingRequest.requestId
+        };
+        if (projectId) uploadHeaders["X-Aurora-Project-ID"] = projectId;
         const response = await fetch(state.apiBase + "/artifacts", {
           method: "POST",
-          headers: {
-            Accept: "application/json",
-            "Content-Type": file.type || "application/octet-stream",
-            "X-Aurora-Filename": encodeURIComponent(file.name),
-            "X-Aurora-Request-ID": pendingRequest.requestId
-          },
+          headers: uploadHeaders,
           body: await file.arrayBuffer()
         });
         // Keep the key on network/5xx failures because the upload or intake
@@ -1412,6 +1419,7 @@ async function testProvider(provider) {
           name: file.name,
           size: file.size,
           mission_id: data.mission_id || "",
+          project_id: data.project_id || null,
           artifact: data.artifact || null
         });
       }
@@ -1820,6 +1828,18 @@ async function testProvider(provider) {
     const raw = String(rawText == null ? "" : rawText).trim();
     const attachments = state.pendingAttachments.slice();
     if ((!raw && !attachments.length) || state.conversationInFlight) return;
+    const projectId = state.selectedProjectId;
+    const mismatchedAttachment = attachments.find(function (item) {
+      return (item.project_id || null) !== (projectId || null);
+    });
+    if (mismatchedAttachment) {
+      setChatStatus(
+        "Attachment " + mismatchedAttachment.name +
+        " was uploaded for a different project scope. Select its original project or remove and upload it again.",
+        true
+      );
+      return;
+    }
 
     let content = raw || "Revisa los archivos adjuntos recibidos por Aurora y resume qué has podido extraer. Si no puedes acceder al contenido de algún archivo, indícalo explícitamente.";
     if (attachments.length) {
@@ -1841,7 +1861,6 @@ async function testProvider(provider) {
 
     try {
       const sessionId = await ensureConversationSession();
-      const projectId = state.selectedProjectId;
       const requestId = getStableConversationRequestId(sessionId, content, projectId);
       const turnPayload = { user_input: content, request_id: requestId };
       if (projectId) turnPayload.project_id = projectId;
