@@ -75,6 +75,7 @@ class OrchestrationEngine:
         model_preferences: Sequence[str] | None = None,
         project_id: str | None = None,
         mission_id: str | None = None,
+        correlation_id: str | None = None,
         context: list[dict[str, Any]] | None = None,
         skill_ids: Sequence[str] | None = None,
         skill_tags: Sequence[str] | None = None,
@@ -88,6 +89,10 @@ class OrchestrationEngine:
             "task_id": task_id,
             "role": role,
         }
+        if mission_id:
+            request_metadata["mission_id"] = mission_id
+        if correlation_id:
+            request_metadata["correlation_id"] = correlation_id
         if project_id:
             request_metadata["project_id"] = project_id
         if skill_ids:
@@ -154,7 +159,14 @@ class OrchestrationEngine:
                     mission_id=request.constraints.get("mission_id", task_id),
                     reason=request.reason,
                     arguments=tuple(args),
-                    options=dict(request.constraints),
+                    options={
+                        key: value for key, value in request.constraints.items()
+                        if key != "correlation_id"
+                    },
+                    correlation_id=(
+                        str(request.constraints["correlation_id"])
+                        if request.constraints.get("correlation_id") else None
+                    ),
                     idempotency_key=(
                         str(request.constraints["idempotency_key"])
                         if request.constraints.get("idempotency_key")
