@@ -22,6 +22,7 @@ class ResearchRequest:
     required_sources: tuple[str, ...] = ()
     constraints: tuple[str, ...] = ()
     max_sources: int = 10
+    project_id: str | None = None
 
 @dataclass(frozen=True)
 class RedirectHop:
@@ -41,6 +42,7 @@ class SourceRecord:
     content_text: str = ""
     final_url: str | None = None
     redirect_chain: tuple[RedirectHop, ...] = ()
+    project_id: str | None = None
 
 @dataclass(frozen=True)
 class ClaimRecord:
@@ -54,6 +56,7 @@ class ClaimRecord:
     end_offset: int
     extraction_confidence: float
     state: EvidenceState = EvidenceState.PENDING
+    project_id: str | None = None
 
     def __post_init__(self) -> None:
         if self.start_offset < 0 or self.end_offset <= self.start_offset:
@@ -72,12 +75,19 @@ class EvidenceRecord:
     state: EvidenceState = EvidenceState.PENDING
     verification_notes: str = ""
     verified_at: str | None = None
+    project_id: str | None = None
 
     def verify(self, notes: str = "") -> "EvidenceRecord":
-        return EvidenceRecord(self.evidence_id,self.source_id,self.claim,EvidenceState.VERIFIED,notes,datetime.now(timezone.utc).isoformat())
+        return EvidenceRecord(
+            self.evidence_id, self.source_id, self.claim, EvidenceState.VERIFIED,
+            notes, datetime.now(timezone.utc).isoformat(), self.project_id,
+        )
 
     def reject(self, notes: str) -> "EvidenceRecord":
-        return EvidenceRecord(self.evidence_id,self.source_id,self.claim,EvidenceState.REJECTED,notes,datetime.now(timezone.utc).isoformat())
+        return EvidenceRecord(
+            self.evidence_id, self.source_id, self.claim, EvidenceState.REJECTED,
+            notes, datetime.now(timezone.utc).isoformat(), self.project_id,
+        )
 
 @dataclass(frozen=True)
 class ResearchFinding:
@@ -86,12 +96,19 @@ class ResearchFinding:
     evidence_ids: tuple[str, ...] = ()
     confidence: float = 0.0
     state: EvidenceState = EvidenceState.PENDING
+    project_id: str | None = None
 
     def verified(self, evidence: tuple[EvidenceRecord, ...]) -> bool:
         if not self.evidence_ids:
             return False
         by_id = {item.evidence_id: item for item in evidence}
-        return all(by_id.get(evidence_id) is not None and by_id[evidence_id].state is EvidenceState.VERIFIED for evidence_id in self.evidence_ids)
+        for evidence_id in self.evidence_ids:
+            item = by_id.get(evidence_id)
+            if item is None or item.state is not EvidenceState.VERIFIED:
+                return False
+            if item.project_id != self.project_id:
+                return False
+        return True
 
 @dataclass(frozen=True)
 class ResearchReport:
@@ -99,6 +116,7 @@ class ResearchReport:
     findings: tuple[ResearchFinding, ...]
     source_ids: tuple[str, ...]
     generated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    project_id: str | None = None
 
     @property
     def trusted_findings(self) -> tuple[ResearchFinding, ...]:
