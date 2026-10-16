@@ -765,6 +765,17 @@ def test_duplicate_request_without_saved_response_is_not_executed_again(tmp_path
     service, _ = base_service(tmp_path)
     provider = ToolProvider()
     service.set_provider(provider)
+    service.mission_runner = lambda **kwargs: SimpleNamespace(
+        mission_id=kwargs.get("mission_id", "mission-recovered"),
+        submission=SimpleNamespace(
+            mission_id=kwargs.get("mission_id", "mission-recovered"),
+            plan=SimpleNamespace(objective=kwargs["objective"], tasks=()),
+        ),
+        objective=kwargs["objective"],
+        status="running",
+        tasks=(),
+        events=(),
+    )
     session = service.create_session()
     request_id = "http-request-crash-recovery-001"
     digest = hashlib.sha256(
