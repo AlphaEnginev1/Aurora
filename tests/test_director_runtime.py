@@ -1057,6 +1057,23 @@ def test_replan_preserves_project_context_and_traceability(tmp_path: Path):
     assert all(item.correlation_id == "corr-project-replan" for item in events)
     assert all(item.payload.get("project_id") == "project-a" for item in events)
 
+    # Project mailbox indexing is a separate read path from mission-local
+    # Director context; verify that durable projections remain discoverable
+    # through it after the whole initial/replan/terminal cycle.
+    project_mailbox = [
+        item for item in runtime.memory.list_project("project-a", limit=100)
+        if item.mission_id == submission.mission_id
+    ]
+    assert project_mailbox
+    assert all(item.project_id == "project-a" for item in project_mailbox)
+    for kind in ("mission_objective", "mission_plan", "task_result", "review", "follow_up_plan"):
+        matching = [item for item in project_mailbox if item.kind == kind]
+        assert matching, f"missing project mailbox projection for {kind}"
+        assert all(
+            item.correlation_id == "corr-project-replan"
+            for item in matching
+        ), kind
+
 
 def test_invalid_director_replan_is_rejected_before_follow_up_enqueue(tmp_path: Path):
     runtime, store, planner, _engine = make_runtime(tmp_path)
