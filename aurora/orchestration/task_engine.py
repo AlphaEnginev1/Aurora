@@ -319,24 +319,47 @@ class TaskEngine:
             )
             return self._learn_from_result(result)
         capability_result = None if isinstance(result, TaskResult) else result
-        if capability_result is not None:
+        if capability_result is not None and not isinstance(capability_result, ResearchTaskResult):
             execution = getattr(capability_result, "execution", capability_result)
             reported_status = getattr(execution, "status", None)
-            if reported_status is not None:
-                status_value = getattr(reported_status, "value", reported_status)
-                if str(status_value).strip().lower() != TaskStatus.SUCCEEDED.value:
-                    error = getattr(execution, "error", None) or (
-                        f"capability execution reported non-success status: {status_value}"
+            status_value = getattr(reported_status, "value", reported_status)
+            failure_reasons: list[str] = []
+            if reported_status is not None and str(status_value).strip().lower() != TaskStatus.SUCCEEDED.value:
+                failure_reasons.append(
+                    f"capability execution reported non-success status: {status_value}"
+                )
+
+            # Brokered CapabilityExecutionResult exposes returncode/timed_out,
+            # not a Workbench-style status. A missing status must never turn a
+            # non-zero exit or timed-out process into a successful task.
+            if bool(getattr(execution, "timed_out", False)):
+                failure_reasons.append("capability execution timed out")
+            if hasattr(execution, "returncode"):
+                returncode = getattr(execution, "returncode", None)
+                if (
+                    not isinstance(returncode, int)
+                    or isinstance(returncode, bool)
+                    or returncode != 0
+                ):
+                    failure_reasons.append(
+                        f"capability execution returned non-zero or invalid returncode: {returncode!r}"
                     )
-                    failed_result = DelegatedTaskResult(
-                        task,
-                        TaskStatus.FAILED,
-                        capability_result=capability_result,
-                        error=str(error),
-                        trusted_research_artifact_ids=trusted_artifacts,
-                        research_trust_state=research_trust_state,
-                    )
-                    return self._learn_from_result(failed_result)
+            elif reported_status is None:
+                failure_reasons.append(
+                    "capability execution reported neither a status nor a returncode"
+                )
+
+            if failure_reasons:
+                error = getattr(execution, "error", None) or "; ".join(failure_reasons)
+                failed_result = DelegatedTaskResult(
+                    task,
+                    TaskStatus.FAILED,
+                    capability_result=capability_result,
+                    error=str(error),
+                    trusted_research_artifact_ids=trusted_artifacts,
+                    research_trust_state=research_trust_state,
+                )
+                return self._learn_from_result(failed_result)
         result = DelegatedTaskResult(
             task,
             TaskStatus.SUCCEEDED,
