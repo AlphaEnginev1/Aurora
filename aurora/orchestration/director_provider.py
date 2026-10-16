@@ -4,8 +4,9 @@ from __future__ import annotations
 import ast
 from dataclasses import dataclass
 import json
+import inspect
 import re
-from typing import Any, Protocol
+from typing import Any, Mapping, Protocol
 from uuid import uuid4
 
 from aurora.inference.models import InferenceRequest, InferenceResponse
@@ -54,8 +55,33 @@ class DirectorProvider(Protocol):
         model: str | None,
         role: str,
         tools: tuple[DirectorToolSpec, ...] = (),
+        metadata: Mapping[str, Any] | None = None,
+        capability: str = "reasoning",
+        preferred_models: tuple[str, ...] = (),
     ) -> DirectorModelResponse:
         ...
+
+
+def _router_generate_compatible(
+    router: ModelRouter,
+    request: InferenceRequest,
+    *,
+    capability: str,
+    preferred_models: tuple[str, ...],
+) -> InferenceResponse:
+    """Forward optional routing preferences only when supported by this router."""
+    kwargs: dict[str, Any] = {"capability": capability}
+    try:
+        parameters = inspect.signature(router.generate).parameters
+    except (TypeError, ValueError):
+        parameters = {}
+    accepts_extra = any(
+        item.kind is inspect.Parameter.VAR_KEYWORD
+        for item in parameters.values()
+    )
+    if "preferred_models" in parameters or accepts_extra:
+        kwargs["preferred_models"] = preferred_models or None
+    return router.generate(request, **kwargs)
 
 
 class InferenceDirectorProvider:
@@ -82,6 +108,9 @@ class InferenceDirectorProvider:
         model: str | None,
         role: str,
         tools: tuple[DirectorToolSpec, ...] = (),
+        metadata: Mapping[str, Any] | None = None,
+        capability: str = "reasoning",
+        preferred_models: tuple[str, ...] = (),
     ) -> DirectorModelResponse:
         prompt_messages = list(messages)
         if tools:
@@ -98,12 +127,18 @@ class InferenceDirectorProvider:
             model=model,
             temperature=0.0,
             max_tokens=3000,
-            metadata={"role": role, "director_tools": [tool.name for tool in tools]},
+            metadata={
+                **dict(metadata or {}),
+                "role": role,
+                "director_tools": [tool.name for tool in tools],
+            },
             request_id=uuid4().hex,
         )
-        response: InferenceResponse = self._router.generate(
+        response: InferenceResponse = _router_generate_compatible(
+            self._router,
             request,
-            capability="reasoning",
+            capability=capability,
+            preferred_models=preferred_models,
         )
         tool_calls = self._parse_tool_calls(response.content, tools)
         return DirectorModelResponse(

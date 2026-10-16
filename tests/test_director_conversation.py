@@ -1,5 +1,6 @@
 from pathlib import Path
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -280,3 +281,121 @@ def test_nvidia_style_provider_response_contract(tmp_path):
     assert response.provider == "nvidia_api"
     assert response.model == "nvidia/nemotron-3-ultra-550b-a55b"
     assert response.execution_id == "execution-nvidia"
+
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        "Audita toda la cadena de ejecucion y corrige los fallos",
+        "Revisa todos los enlaces de Aurora y arregla los que fallen",
+        "Implement the durable order path and run the tests",
+        "Please continue with the integration work",
+    ],
+)
+def test_work_intent_does_not_require_the_word_mission(prompt):
+    assert DirectorConversationService._requests_mission_execution(prompt) is True
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        "Que hace run_mission?",
+        "Lee el archivo README.md",
+        "List the files in the repository",
+        "How does ModelRouter select a model?",
+    ],
+)
+def test_information_questions_and_single_reads_do_not_start_a_mission(prompt):
+    assert DirectorConversationService._requests_mission_execution(prompt) is False
+
+
+@pytest.mark.parametrize("emit_tool_call", [True, False])
+def test_default_router_provider_submits_one_durable_mission_and_returns_evidence(tmp_path, emit_tool_call):
+    service, _ = _service(tmp_path)
+    session = service.create_session()
+    received_requests = []
+    submitted = []
+
+    class ToolCallingProvider:
+        provider_id = "fake"
+
+        def generate(self, request, *, selected_model, execution_id):
+            received_requests.append(request)
+            tool_names = request.metadata.get("director_tools", [])
+            if "run_mission" in tool_names and emit_tool_call:
+                content = json.dumps({
+                    "tool_calls": [{
+                        "name": "run_mission",
+                        "arguments": {"objective": "audit Aurora links"},
+                    }]
+                })
+            else:
+                content = "Aurora has processed the durable mission receipt."
+            return InferenceResponse(
+                model=selected_model,
+                provider="fake",
+                content=content,
+                request_id=request.request_id,
+                execution_id=execution_id,
+                selected_model=selected_model,
+                provider_model=selected_model,
+                reported_model=selected_model,
+            )
+
+    service.router.provider_registry = ProviderRegistry((
+        ProviderSpec(
+            "fake", "Fake", ("chat", "reasoning"), True,
+            lambda spec: ToolCallingProvider(),
+        ),
+    ))
+
+    def mission_runner(**kwargs):
+        submitted.append(dict(kwargs))
+        mission_id = kwargs["mission_id"]
+        plan = SimpleNamespace(
+            objective=kwargs["objective"],
+            model="fake/director",
+            provider="fake",
+            execution_id="planning-execution-123",
+        )
+        submission = SimpleNamespace(mission_id=mission_id, plan=plan)
+        return SimpleNamespace(
+            mission_id=mission_id,
+            submission=submission,
+            objective=kwargs["objective"],
+            status="succeeded",
+            tasks=(),
+            events=(),
+        )
+
+    service.mission_runner = mission_runner
+    response = service.send_message(
+        session_id=session.session_id,
+        user_input="Audita todos los enlaces de Aurora y corrige los que fallen",
+        request_id="durable-tool-routing-regression-001",
+    )
+
+    assert len(submitted) == 1
+    expected_objective = (
+        "audit Aurora links"
+        if emit_tool_call
+        else "Audita todos los enlaces de Aurora y corrige los que fallen"
+    )
+    assert submitted[0]["objective"] == expected_objective
+    assert submitted[0]["mission_id"].startswith("mission-conversation-turn-request-")
+    assert submitted[0]["correlation_id"] == response.correlation_id
+    assert response.state == "completed"
+    assert "EVIDENCIA_AUTORITATIVA_DE_EJECUCION (JSON):" in response.response_text
+    assert '"accepted": true' in response.response_text
+    assert '"mission_id": "' + submitted[0]["mission_id"] + '"' in response.response_text
+    assert received_requests[0].metadata["conversation_session_id"] == session.session_id
+    assert received_requests[0].metadata["aurora_context_verified"] is True
+
+    # A resend after losing the HTTP response replays the same turn/mission receipt.
+    replay = service.send_message(
+        session_id=session.session_id,
+        user_input="Audita todos los enlaces de Aurora y corrige los que fallen",
+        request_id="durable-tool-routing-regression-001",
+    )
+    assert replay.turn.turn_id == response.turn.turn_id
+    assert replay.correlation_id == response.correlation_id
+    assert len(submitted) == 1

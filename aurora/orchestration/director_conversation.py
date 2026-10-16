@@ -454,40 +454,40 @@ Keep responses useful and concise unless the human asks for depth."""
         )
 
         try:
-            if isinstance(self.provider, InferenceDirectorProvider):
-                response = self.router.generate(
-                    request,
+            provider_messages = [
+                {"role": "system", "content": self.SYSTEM_PROMPT},
+                *bootstrap_state.messages,
+                *[
+                    {"role": item.role, "content": item.content}
+                    for item in history
+                    if item.state == "completed" and item.role in {"user", "assistant"}
+                ],
+            ]
+            tools = self._conversation_tools(user_input=prompt)
+            response = self._generate_provider(
+                messages=provider_messages,
+                model=model,
+                role="director_conversation",
+                tools=tools,
+                metadata=request.metadata,
+                capability=str(policy["default_capability"]),
+                preferred_models=self._preferred_models(policy),
+            )
+            if getattr(response, "tool_calls", ()) or (
+                self.mission_runner is not None
+                and self._requests_mission_execution(prompt)
+            ):
+                response = self._execute_conversation_tools(
+                    response=response,
+                    model=model,
+                    provider_messages=provider_messages,
+                    user_input=prompt,
+                    conversation_turn_id=turn_id,
+                    correlation_id=correlation_id,
+                    metadata=request.metadata,
                     capability=str(policy["default_capability"]),
                     preferred_models=self._preferred_models(policy),
                 )
-            else:
-                provider_messages = [
-                    {"role": "system", "content": self.SYSTEM_PROMPT},
-                    *bootstrap_state.messages,
-                    *[
-                        {"role": item.role, "content": item.content}
-                        for item in history
-                        if item.state == "completed" and item.role in {"user", "assistant"}
-                    ],
-                ]
-                response = self.provider.generate(
-                    messages=provider_messages,
-                    model=model,
-                    role="director_conversation",
-                    tools=self._conversation_tools(user_input=prompt),
-                )
-                if getattr(response, "tool_calls", ()) or (
-                    self.mission_runner is not None
-                    and self._requests_mission_execution(prompt)
-                ):
-                    response = self._execute_conversation_tools(
-                        response=response,
-                        model=model,
-                        provider_messages=provider_messages,
-                        user_input=prompt,
-                        conversation_turn_id=turn_id,
-                        correlation_id=correlation_id,
-                    )
         except Exception as exc:
             self._insert_turn(
                 turn_id=f"{turn_id}-error",
@@ -601,37 +601,47 @@ Keep responses useful and concise unless the human asks for depth."""
 
     @staticmethod
     def _requests_mission_execution(user_input: str | None) -> bool:
+        """Distinguish execution requests from information questions and single reads."""
         text = str(user_input or "").casefold()
         normalized = "".join(
             character
             for character in unicodedata.normalize("NFKD", text)
             if not unicodedata.combining(character)
+        ).strip().lstrip("¿¡- ").strip()
+        if not normalized:
+            return False
+
+        # Informational questions should not create missions merely because they
+        # mention a tool, mission, or action word.
+        informational_prefixes = (
+            "que es ", "que hace ", "que significa ", "por que ", "porque ",
+            "como funciona ", "explica ", "describe ", "what is ", "what does ",
+            "how does ", "why does ", "explain ", "describe ", "how do i ",
+            "how can i ", "how to ", "como puedo ", "como se ",
         )
-        mission_markers = (
-            "mision",
-            "mission",
-            "multiagente",
-            "multi-agent",
-            "run_mission",
-            "tarea delegada",
-            "tareas delegadas",
+        if normalized.startswith(informational_prefixes):
+            return False
+
+        # Broad verbs cover project work and multi-step tasks even when the user
+        # does not use the word "mission/misión". Plain read/list/open requests are
+        # intentionally omitted so a single Workbench evidence read stays direct.
+        execution_markers = (
+            "implement", "corrig", "arregl", "repar", "modific", "actualiz",
+            "integra", "complet", "termina", "continua", "sigue", "ejecut",
+            "realiza", "lanza", "inicia", "constru", "desarroll", "audita",
+            "audit", "verifica", "comprueba", "prueba", "testea", "investiga",
+            "investigate", "review", "revisa", "check", "verify", "fix", "repair",
+            "build", "refactor", "inspect", "analyz", "analyse", "analiz",
+            "compara", "run tests", "run the tests", "deploy", "create", "write",
+            "delegate", "execute", "launch", "continue with", "finish", "complete",
+            "resolve", "examine", "inspecciona", "mision", "mission", "multiagente",
+            "multi-agent", "run_mission", "tarea delegada", "tareas delegadas",
         )
-        action_markers = (
-            "ejecut",
-            "planifica",
-            "planear",
-            "delega",
-            "delegate",
-            "execute",
-            "run",
-            "launch",
-            "start",
-            "realiza",
-            "haz ",
-        )
-        return (
-            any(marker in normalized for marker in mission_markers)
-            and any(marker in normalized for marker in action_markers)
+        tokens = normalized.split()
+        return any(
+            marker in normalized if " " in marker
+            else any(token.startswith(marker) for token in tokens)
+            for marker in execution_markers
         )
 
     @classmethod
@@ -643,6 +653,42 @@ Keep responses useful and concise unless the human asks for depth."""
         if candidate in cls._CANONICAL_WORKBENCH_CAPABILITIES:
             return candidate
         return capability
+
+    def _generate_provider(
+        self,
+        *,
+        messages: list[dict[str, Any]],
+        model: str | None,
+        role: str,
+        tools: tuple[DirectorToolSpec, ...],
+        metadata: Mapping[str, Any] | None = None,
+        capability: str = "reasoning",
+        preferred_models: tuple[str, ...] = (),
+    ) -> Any:
+        """Call any registered Director adapter with supported routing context."""
+        kwargs: dict[str, Any] = {
+            "messages": messages,
+            "model": model,
+            "role": role,
+            "tools": tools,
+        }
+        try:
+            parameters = inspect.signature(self.provider.generate).parameters
+        except (TypeError, ValueError):
+            parameters = {}
+        accepts_extra = any(
+            item.kind is inspect.Parameter.VAR_KEYWORD
+            for item in parameters.values()
+        )
+        optional = {
+            "metadata": metadata,
+            "capability": capability,
+            "preferred_models": preferred_models,
+        }
+        for name, value in optional.items():
+            if name in parameters or accepts_extra:
+                kwargs[name] = value
+        return self.provider.generate(**kwargs)
 
     def _conversation_tools(
         self, *, user_input: str | None = None
@@ -697,6 +743,9 @@ Keep responses useful and concise unless the human asks for depth."""
         user_input: str | None = None,
         conversation_turn_id: str | None = None,
         correlation_id: str | None = None,
+        metadata: Mapping[str, Any] | None = None,
+        capability: str = "reasoning",
+        preferred_models: tuple[str, ...] = (),
     ) -> Any:
         calls = tuple(getattr(response, "tool_calls", ()) or ())
         results: list[dict[str, Any]] = []
@@ -855,11 +904,14 @@ Keep responses useful and concise unless the human asks for depth."""
             *provider_messages,
             {"role": "user", "content": evidence_content},
         ]
-        final_response = self.provider.generate(
+        final_response = self._generate_provider(
             messages=follow_up,
             model=model,
             role="director_conversation_result",
             tools=(),
+            metadata=metadata,
+            capability=capability,
+            preferred_models=preferred_models,
         )
         # Keep the exact execution receipt in the persisted assistant turn. The
         # summarizing model may explain the result, but cannot omit the authoritative
