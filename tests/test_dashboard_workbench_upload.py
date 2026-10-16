@@ -265,6 +265,7 @@ def test_project_scoped_dashboard_upload_stays_inside_project_workspace_and_is_i
             "Content-Type": "text/plain",
             "X-Aurora-Filename": "notes.txt",
             "X-Aurora-Request-ID": request_id,
+            "X-Aurora-Mission-Id": "shared-upload-mission",
         }
         if project_id is not None:
             headers["X-Aurora-Project-ID"] = project_id
@@ -280,6 +281,9 @@ def test_project_scoped_dashboard_upload_stays_inside_project_workspace_and_is_i
 
         assert alpha["project_id"] == "project-alpha"
         assert beta["project_id"] == "project-beta"
+        assert alpha["mission_id"] != beta["mission_id"]
+        assert alpha["mission_id"].startswith("shared-upload-mission:project:")
+        assert beta["mission_id"].startswith("shared-upload-mission:project:")
         assert replay_alpha["mission_id"] == alpha["mission_id"]
         assert replay_alpha["artifact"]["artifact_id"] == alpha["artifact"]["artifact_id"]
         assert len(executed) == 2
