@@ -3542,6 +3542,19 @@ class DirectorRuntime:
                         f"Director follow-up task {task.task_id} depends on prior task "
                         f"{dependency_id} with non-succeeded status {prior.status}"
                     )
+                verified, receipt_problems = self._verified_result_payload(prior.result)
+                identity_problems = self._task_result_identity_problems(
+                    mission_id, prior
+                )
+                all_problems = (*receipt_problems, *identity_problems)
+                if not verified or all_problems:
+                    details = ", ".join(all_problems) or (
+                        "durable result receipt could not be verified"
+                    )
+                    raise DirectorRuntimeError(
+                        f"Director follow-up task {task.task_id} depends on prior task "
+                        f"{dependency_id} without verified durable result evidence: {details}"
+                    )
 
         internal_graph = tuple(
             replace(
