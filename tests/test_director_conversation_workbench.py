@@ -968,6 +968,15 @@ def test_execution_classifier_preserves_questions_and_explicit_single_reads():
     assert not DirectorConversationService._requests_mission_execution(
         "Comprueba directamente las notas del proyecto."
     )
+    assert DirectorConversationService._requests_mission_execution(
+        "Verifica que todas las conexiones de Aurora funcionan y corrige los errores."
+    )
+    assert DirectorConversationService._requests_mission_execution(
+        "Inspect the project end-to-end and validate the outputs."
+    )
+    assert not DirectorConversationService._requests_mission_execution(
+        "How do I verify that the router works?"
+    )
 
 
 
