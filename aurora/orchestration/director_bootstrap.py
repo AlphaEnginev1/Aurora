@@ -106,10 +106,23 @@ class DirectorBootstrap:
     policy_contract_store: DirectorDecisionPolicyContractStore
     decision_knowledge_store: DirectorDecisionKnowledgeStore
 
-    def initialize(self) -> DirectorBootstrapState:
+    def initialize(self, *, project_id: str | None = None) -> DirectorBootstrapState:
         policy = self._load_model_policy()
+        if project_id is not None:
+            project_id = project_id.strip()
+            if not project_id:
+                raise DirectorBootstrapError("project_id must be non-empty")
+            try:
+                project = self.context_gate.plane.project_registry.resolve(project_id)
+            except Exception as exc:
+                raise DirectorBootstrapError(f"invalid project scope: {exc}") from exc
+            if project.status.value != "active":
+                raise DirectorBootstrapError(
+                    f"project-scoped bootstrap requires an active project, got {project.status.value}"
+                )
         context = self.context_gate.prepare(
-            scope=ContextScope.DIRECTOR,
+            scope=ContextScope.PROJECT if project_id is not None else ContextScope.DIRECTOR,
+            project_id=project_id,
             require_mailbox=True,
             require_knowledge=True,
         )
