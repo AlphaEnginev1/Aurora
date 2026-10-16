@@ -2338,6 +2338,13 @@ class DirectorRuntime:
                     mission_id, round_number, review_event.event_id,
                     "mission_reopened does not match the durable follow-up graph",
                 )
+        if not phase_rows and (execution is not None or reopened is not None):
+            return self._review_recovery_rejected(
+                mission_id,
+                round_number,
+                review_event.event_id,
+                "lifecycle receipts claim follow-up execution but durable task rows are missing; refusing to replay potentially duplicated work",
+            )
 
         def event_spec(event_type: str, event_payload: dict[str, Any]) -> dict[str, Any]:
             return {
