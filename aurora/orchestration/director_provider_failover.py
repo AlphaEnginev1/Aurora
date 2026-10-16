@@ -7,6 +7,7 @@ mission ownership or task state.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import inspect
 from datetime import datetime, timezone
 import sqlite3
 from threading import RLock
@@ -73,6 +74,9 @@ class BoundInferenceDirectorProvider:
         model: str | None,
         role: str,
         tools: tuple[DirectorToolSpec, ...] = (),
+        metadata: Mapping[str, Any] | None = None,
+        capability: str = "reasoning",
+        preferred_models: tuple[str, ...] = (),
     ) -> DirectorModelResponse:
         prompt_messages = list(messages)
         if tools:
@@ -89,9 +93,17 @@ class BoundInferenceDirectorProvider:
             model=self._model if self._model is not None else model,
             temperature=0.0,
             max_tokens=3000,
-            metadata={"role": role, "director_tools": [tool.name for tool in tools]},
+            metadata={
+                **dict(metadata or {}),
+                "role": role,
+                "director_tools": [tool.name for tool in tools],
+            },
         )
-        response = self._router.generate(request, capability="reasoning")
+        response = self._router.generate(
+            request,
+            capability=capability,
+            preferred_models=preferred_models or None,
+        )
         tool_calls = InferenceDirectorProvider._parse_tool_calls(response.content, tools)
         return DirectorModelResponse(
             content=response.content if not tool_calls else "",
@@ -200,6 +212,43 @@ class DirectorProviderFailoverStore:
         return db
 
 
+def _generate_compatible_provider(
+    provider: DirectorProvider,
+    *,
+    messages: list[dict[str, Any]],
+    model: str | None,
+    role: str,
+    tools: tuple[DirectorToolSpec, ...],
+    metadata: Mapping[str, Any] | None,
+    capability: str,
+    preferred_models: tuple[str, ...],
+) -> DirectorModelResponse:
+    """Pass optional routing context only to adapters that support it."""
+    kwargs: dict[str, Any] = {
+        "messages": messages,
+        "model": model,
+        "role": role,
+        "tools": tools,
+    }
+    try:
+        parameters = inspect.signature(provider.generate).parameters
+    except (TypeError, ValueError):
+        parameters = {}
+    accepts_extra = any(
+        item.kind is inspect.Parameter.VAR_KEYWORD
+        for item in parameters.values()
+    )
+    optional = {
+        "metadata": metadata,
+        "capability": capability,
+        "preferred_models": preferred_models,
+    }
+    for name, value in optional.items():
+        if name in parameters or accepts_extra:
+            kwargs[name] = value
+    return provider.generate(**kwargs)
+
+
 class DirectorProviderFailoverController:
     """Execute Director calls with deterministic provider replacement.
 
@@ -271,15 +320,22 @@ class DirectorProviderFailoverController:
         model: str | None,
         role: str,
         tools: tuple[DirectorToolSpec, ...] = (),
+        metadata: Mapping[str, Any] | None = None,
+        capability: str = "reasoning",
+        preferred_models: tuple[str, ...] = (),
     ) -> DirectorModelResponse:
         with self._lock:
             active = self._active_provider
             try:
-                response = active.generate(
+                response = _generate_compatible_provider(
+                    active,
                     messages=messages,
                     model=model,
                     role=role,
                     tools=tools,
+                    metadata=metadata,
+                    capability=capability,
+                    preferred_models=preferred_models,
                 )
                 if self._health_store is not None:
                     self._health_store.record_success(
@@ -369,11 +425,15 @@ class DirectorProviderFailoverController:
                     )
                     try:
                         replacement = candidate.factory()
-                        response = replacement.generate(
+                        response = _generate_compatible_provider(
+                            replacement,
                             messages=messages,
                             model=candidate.model,
                             role=role,
                             tools=tools,
+                            metadata=metadata,
+                            capability=capability,
+                            preferred_models=preferred_models,
                         )
                         if self._health_store is not None:
                             self._health_store.record_success(
