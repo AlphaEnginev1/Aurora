@@ -77,3 +77,6 @@ class InferenceResponse:
     routing_score: float | None = None
     routing_factors: dict[str, float] = field(default_factory=dict)
     routing_candidates: tuple[tuple[str, float], ...] = ()
+    # Runtime-attached receipts for governed Workbench calls performed during
+    # agent reasoning. These are not provider-generated claims.
+    workbench_receipts: tuple[dict[str, Any], ...] = ()

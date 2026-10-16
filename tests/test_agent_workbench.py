@@ -89,6 +89,50 @@ def test_agent_reasoning_can_request_and_receive_workbench_evidence():
     assert any("WORKBENCH_RESULTS" in str(message["content"]) for message in router.requests[1].messages)
 
 
+def test_agent_response_retains_failed_workbench_receipt_even_if_final_text_claims_success():
+    class FailedWorkbench(FakeWorkbench):
+        def execute(self, request):
+            self.calls.append(request)
+            return WorkbenchResult(
+                capability=request.capability,
+                operation="file_write",
+                status="failed",
+                output=None,
+                artifact_id=None,
+                provenance="fake-workbench",
+                error="controlled write failure",
+                receipt_id="receipt-failed",
+                correlation_id="corr-failed",
+            )
+
+    from aurora.inference.models import InferenceRequest
+
+    workbench = FailedWorkbench()
+    router = FakeRouter()
+    router.responses = [
+        '{"workbench_calls":[{"capability":"workbench:file:write","arguments":["out.txt","done"]}]}',
+        "The file was written successfully.",
+    ]
+    response = AgentWorkbenchToolLoop(workbench).run(
+        request=InferenceRequest(
+            messages=[{"role": "user", "content": "Write the result file."}],
+            metadata={"role": "engineer", "task_id": "task-write"},
+        ),
+        actor="engineer",
+        mission_id="mission-write",
+        reason="Write the result file",
+        task_id="task-write",
+        router=router,
+    )
+
+    assert response.content == "The file was written successfully."
+    assert len(response.workbench_receipts) == 1
+    receipt = response.workbench_receipts[0]
+    assert receipt["status"] == "failed"
+    assert receipt["error"] == "controlled write failure"
+    assert receipt["receipt_id"] == "receipt-failed"
+
+
 def test_agent_workbench_budget_fails_closed():
     workbench = FakeWorkbench()
     router = FakeRouter()
