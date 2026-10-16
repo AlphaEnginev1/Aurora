@@ -47,6 +47,28 @@ class DirectorProviderCandidate:
         }
 
 
+def _router_generate_compatible(
+    router: ModelRouter,
+    request: InferenceRequest,
+    *,
+    capability: str,
+    preferred_models: tuple[str, ...],
+) -> Any:
+    """Forward optional routing preferences only when supported by this router."""
+    kwargs: dict[str, Any] = {"capability": capability}
+    try:
+        parameters = inspect.signature(router.generate).parameters
+    except (TypeError, ValueError):
+        parameters = {}
+    accepts_extra = any(
+        item.kind is inspect.Parameter.VAR_KEYWORD
+        for item in parameters.values()
+    )
+    if "preferred_models" in parameters or accepts_extra:
+        kwargs["preferred_models"] = preferred_models or None
+    return router.generate(request, **kwargs)
+
+
 class BoundInferenceDirectorProvider:
     """Expose a stable failover identity over Aurora's inference fabric."""
 
@@ -99,10 +121,11 @@ class BoundInferenceDirectorProvider:
                 "director_tools": [tool.name for tool in tools],
             },
         )
-        response = self._router.generate(
+        response = _router_generate_compatible(
+            self._router,
             request,
             capability=capability,
-            preferred_models=preferred_models or None,
+            preferred_models=preferred_models,
         )
         tool_calls = InferenceDirectorProvider._parse_tool_calls(response.content, tools)
         return DirectorModelResponse(
