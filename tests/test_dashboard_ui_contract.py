@@ -158,6 +158,8 @@ def test_home_chat_attachments_and_live_roadmap_office_contract():
     assert 'project_id: data.project_id || null' in js
     assert "was uploaded for a different project scope" in js
     assert 'function uploadFingerprint(file, projectId)' in js
+    assert 'evidence.push("artifact_id=" + artifact.artifact_id)' in js
+    assert 'evidence.push("stored_path=" + artifact.path)' in js
 
 
 
