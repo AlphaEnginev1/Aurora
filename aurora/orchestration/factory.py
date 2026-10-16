@@ -644,6 +644,7 @@ def build_director_service(*, inference_policy_path: str | Path, autonomy_policy
         audit_path=audit_path,
         resolution=resolution,
         capability_runtime=capability_runtime,
+        project_registry=project_registry,
     )
     orchestration=OrchestrationEngine(
         router,
@@ -673,6 +674,7 @@ def build_director_service(*, inference_policy_path: str | Path, autonomy_policy
         model_performance=model_performance,
         research_service=research_service,
         research_learning_gate=research_learning_gate,
+        project_registry=project_registry,
     )
     director_provider = _build_director_provider(settings_store, router=router)
 
@@ -833,6 +835,7 @@ def build_director_runtime(*, inference_policy_path: str | Path, autonomy_policy
         db_path=runtime_root/"conversations.db",
         provider=service.planner.provider,
         workbench=service.task_engine.orchestration._workbench,
+        project_registry=service.planner.project_registry,
     )
 
     observability=ProductionObservability(runtime_root/"observability.jsonl")
@@ -901,6 +904,7 @@ def build_director_runtime(*, inference_policy_path: str | Path, autonomy_policy
         objective: str,
         mission_id: str | None = None,
         correlation_id: str | None = None,
+        project_id: str | None = None,
         tasks=None,
         planning_model: str | None = None,
         planning_provider: str | None = None,
@@ -911,6 +915,8 @@ def build_director_runtime(*, inference_policy_path: str | Path, autonomy_policy
             submission_kwargs["mission_id"] = mission_id
         if correlation_id:
             submission_kwargs["correlation_id"] = correlation_id
+        if project_id is not None:
+            submission_kwargs["project_id"] = project_id
         if tasks is not None:
             submission_kwargs.update({
                 "tasks": tasks,
