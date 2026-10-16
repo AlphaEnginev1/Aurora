@@ -280,24 +280,41 @@ def build_context_mailbox_adapter(task_store, *, limit: int = 40) -> Any:
 
 
 def build_context_knowledge_adapter(research_store, *, limit: int = 50) -> Any:
-    """Expose the research knowledge/evidence index without injecting full documents."""
+    """Expose knowledge for the requested project without cross-project leakage."""
 
     if limit < 1:
         raise DirectorBootstrapError("knowledge limit must be at least 1")
 
-    def knowledge_context(_project_id: str | None) -> tuple[dict[str, object], ...]:
+    def knowledge_context(project_id: str | None) -> tuple[dict[str, object], ...]:
         try:
             with research_store._connect() as db:
-                rows = db.execute(
-                    """
-                    SELECT artifact_id, finding_id, claim, evidence_ids,
-                           source_ids, state, created_at
-                    FROM knowledge_artifacts
-                    ORDER BY created_at DESC, artifact_id
-                    LIMIT ?
-                    """,
-                    (limit,),
-                ).fetchall()
+                if project_id is None:
+                    # Global Director context may consult the full Aurora index.
+                    rows = db.execute(
+                        """
+                        SELECT artifact_id, finding_id, claim, evidence_ids,
+                               source_ids, state, created_at, project_id
+                        FROM knowledge_artifacts
+                        ORDER BY created_at DESC, artifact_id
+                        LIMIT ?
+                        """,
+                        (limit,),
+                    ).fetchall()
+                else:
+                    # Project-bound model calls may only see artifacts that carry
+                    # the exact canonical project tag. Legacy NULL records are
+                    # not assumed to belong to any project.
+                    rows = db.execute(
+                        """
+                        SELECT artifact_id, finding_id, claim, evidence_ids,
+                               source_ids, state, created_at, project_id
+                        FROM knowledge_artifacts
+                        WHERE project_id = ?
+                        ORDER BY created_at DESC, artifact_id
+                        LIMIT ?
+                        """,
+                        (project_id, limit),
+                    ).fetchall()
         except Exception as exc:
             raise DirectorBootstrapError(
                 f"unable to load knowledge/evidence index: {exc}"
@@ -311,12 +328,12 @@ def build_context_knowledge_adapter(research_store, *, limit: int = 50) -> Any:
                 "source_count": len(json.loads(row["source_ids"] or "[]")),
                 "state": str(row["state"]),
                 "created_at": str(row["created_at"]),
+                "project_id": row["project_id"],
             }
             for row in rows
-        ) or ({"state": "empty", "artifact_count": 0},)
+        ) or ({"state": "empty", "artifact_count": 0, "project_id": project_id},)
 
     return knowledge_context
-
 
 __all__ = [
     "DirectorBootstrap",
