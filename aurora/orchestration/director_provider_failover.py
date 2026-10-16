@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import inspect
 import sqlite3
 from threading import RLock
 from typing import Any, Callable, Mapping
@@ -269,6 +270,31 @@ class DirectorProviderFailoverController:
     ) -> None:
         self._context_provider = context_provider
 
+    @staticmethod
+    def _generate_with_scope(
+        provider: DirectorProvider,
+        *,
+        messages: list[dict[str, Any]],
+        model: str | None,
+        role: str,
+        tools: tuple[DirectorToolSpec, ...],
+        metadata: Mapping[str, Any] | None,
+    ) -> DirectorModelResponse:
+        kwargs: dict[str, Any] = {
+            "messages": messages,
+            "model": model,
+            "role": role,
+            "tools": tools,
+        }
+        if metadata is not None:
+            parameters = inspect.signature(provider.generate).parameters
+            if "metadata" in parameters or any(
+                item.kind is inspect.Parameter.VAR_KEYWORD
+                for item in parameters.values()
+            ):
+                kwargs["metadata"] = metadata
+        return provider.generate(**kwargs)
+
     def generate(
         self,
         *,
@@ -276,15 +302,18 @@ class DirectorProviderFailoverController:
         model: str | None,
         role: str,
         tools: tuple[DirectorToolSpec, ...] = (),
+        metadata: Mapping[str, Any] | None = None,
     ) -> DirectorModelResponse:
         with self._lock:
             active = self._active_provider
             try:
-                response = active.generate(
+                response = self._generate_with_scope(
+                    active,
                     messages=messages,
                     model=model,
                     role=role,
                     tools=tools,
+                    metadata=metadata,
                 )
                 if self._health_store is not None:
                     self._health_store.record_success(
@@ -374,11 +403,13 @@ class DirectorProviderFailoverController:
                     )
                     try:
                         replacement = candidate.factory()
-                        response = replacement.generate(
+                        response = self._generate_with_scope(
+                            replacement,
                             messages=messages,
                             model=candidate.model,
                             role=role,
                             tools=tools,
+                            metadata=metadata,
                         )
                         if self._health_store is not None:
                             self._health_store.record_success(
