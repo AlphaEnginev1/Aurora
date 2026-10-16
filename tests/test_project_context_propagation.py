@@ -979,3 +979,48 @@ def test_inactive_project_is_rejected_at_mission_task_and_workbench_boundaries(t
             mission_id="mission-paused",
             project_id="project-paused",
         )
+
+
+
+def test_task_engine_and_workbench_share_canonical_relative_project_workspace(tmp_path):
+    registry = ProjectRegistry({
+        "project-alpha": ProjectSpec(
+            project_id="project-alpha",
+            name="Project Alpha",
+            objective="Shared workspace anchor",
+            status=ProjectStatus.ACTIVE,
+            repository="AlphaEnginev1/alpha",
+            workspace="projects/alpha",
+            current_state="Project workspace exists",
+            updated_at="2026-10-16T00:00:00Z",
+        )
+    })
+    canonical_workspace = tmp_path / "runtime" / "workspace"
+    task_engine = TaskEngine(
+        CapturingOrchestration(),
+        canonical_workspace,
+        project_registry=registry,
+    )
+    workbench = UniversalWorkbench(
+        repository_root=tmp_path / "repo",
+        runtime_root=tmp_path / "runtime",
+        workspace_root=canonical_workspace,
+        gateway=None,
+        project_registry=registry,
+    )
+    task = DelegatedTask(
+        "inspect",
+        "operator",
+        "Inspect Alpha files",
+        project_id="project-alpha",
+    )
+    task_root = task_engine._project_workspace_root(task.project_id)
+    wb_root = workbench._project_workspace_root(WorkbenchRequest(
+        capability="workbench:file:list",
+        actor="operator",
+        mission_id="mission-alpha",
+        arguments=(".",),
+        options={"project_id": "project-alpha"},
+    ))
+    assert task_root == wb_root
+    assert task_root == (canonical_workspace / "projects" / "alpha").resolve()
