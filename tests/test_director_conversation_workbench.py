@@ -1076,6 +1076,7 @@ def test_dashboard_selected_project_flows_into_durable_mission_without_name_in_p
             updated_at="2026-10-16T00:00:00Z",
         ),
     })
+    service.bootstrap.context_gate.plane.project_registry = service.project_registry
     provider = ToolProvider()
     service.set_provider(provider)
     executed = []
@@ -1155,6 +1156,7 @@ def test_conversation_rejects_unregistered_or_conflicting_selected_project(tmp_p
             updated_at="2026-10-16T00:00:00Z",
         ),
     })
+    service.bootstrap.context_gate.plane.project_registry = service.project_registry
     session = service.create_session()
 
     import pytest
@@ -1190,6 +1192,7 @@ def test_provider_failure_retries_same_conversation_tool_through_durable_mission
             updated_at="2026-10-16T00:00:00Z",
         ),
     })
+    service.bootstrap.context_gate.plane.project_registry = service.project_registry
     executed = []
 
     class FailoverableProviderError(RuntimeError):
@@ -1328,6 +1331,7 @@ def test_conversation_history_isolated_by_project_inside_one_session(tmp_path: P
         ),
     })
     service.project_registry = projects
+    service.bootstrap.context_gate.plane.project_registry = projects
 
     class CapturingProvider:
         provider_id = "fake"
