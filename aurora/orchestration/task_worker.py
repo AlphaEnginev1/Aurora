@@ -419,7 +419,7 @@ class TaskWorker:
         if result.model_result is not None:
             content = result.model_result.response.content
             response = result.model_result.response
-            return {
+            payload = {
                 "type": "model",
                 "model": response.model,
                 "provider": response.provider,
@@ -440,6 +440,24 @@ class TaskWorker:
                     ],
                 },
             }
+            workbench_receipts = tuple(
+                getattr(response, "workbench_receipts", ()) or ()
+            )
+            if workbench_receipts:
+                serialized_receipts = json.dumps(
+                    workbench_receipts,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    default=str,
+                )
+                if len(serialized_receipts) <= limit:
+                    payload["workbench_receipts"] = list(workbench_receipts)
+                else:
+                    payload["workbench_receipts"] = {
+                        "truncated": True,
+                        "preview": serialized_receipts[:limit],
+                    }
+            return payload
         capability = result.capability_result
         if isinstance(capability, ResearchTaskResult):
             return {
