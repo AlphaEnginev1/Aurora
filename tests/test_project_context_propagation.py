@@ -1190,3 +1190,37 @@ def test_project_scoped_runtime_context_excludes_other_missions(tmp_path):
     assert beta["project_id"] == "project-beta"
     assert beta["mission_count"] == 1
     assert global_context["mission_count"] == 3
+
+
+
+def test_project_runtime_context_recovers_scope_from_legacy_submission_receipt(tmp_path):
+    store = DurableTaskStore(tmp_path / "legacy-project-runtime.db")
+    store.enqueue(
+        "mission-alpha-legacy",
+        (DelegatedTask("inspect", "engineer", "Inspect project Alpha", project_id="project-alpha"),),
+        project_id="project-alpha",
+        initial_events=(
+            {
+                "event_type": "mission_submitted",
+                "project_id": "project-alpha",
+                "payload": {
+                    "objective": "Inspect Project Alpha",
+                    "project_id": "project-alpha",
+                },
+            },
+        ),
+    )
+    # Simulate a pre-migration task row whose project_id column exists but is
+    # NULL, while the durable mission submission receipt still records scope.
+    with store._connect() as db:
+        db.execute(
+            "UPDATE tasks SET project_id = NULL WHERE mission_id = ? AND task_id = ?",
+            ("mission-alpha-legacy", "inspect"),
+        )
+
+    adapter = build_context_runtime_adapter(store)
+    alpha = adapter("project-alpha")
+    beta = adapter("project-beta")
+
+    assert alpha["mission_count"] == 1
+    assert beta["mission_count"] == 0
