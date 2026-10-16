@@ -200,9 +200,11 @@ class DurableDirectorService:
                 validated = team_state.tasks
                 initial_events.append({
                     "event_type": "team.formed",
+                    "project_id": project_id,
                     "correlation_id": correlation_id,
                     "payload": {
                         "objective": plan.objective,
+                        "project_id": project_id,
                         "roles": [member.role for member in team_state.team.members],
                         "required_skills": list(team_state.team.required_skills),
                         "covered_skills": list(team_state.team.covered_skills),
