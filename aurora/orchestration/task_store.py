@@ -1175,7 +1175,7 @@ class DurableTaskStore:
                     project_id = submitted["project_id"]
                     if project_id is None and isinstance(submitted_payload, dict):
                         candidate = submitted_payload.get("project_id")
-                        project_id = candidate if isinstance(candidate, str) else None
+                        project_id = candidate if isinstance(candidate, str) and candidate.strip() else None
                 if correlation_id is None:
                     correlation_id = submitted["correlation_id"]
                     if correlation_id is None and isinstance(submitted_payload, dict):
@@ -1184,6 +1184,28 @@ class DurableTaskStore:
                             candidate if isinstance(candidate, str) and candidate.strip()
                             else None
                         )
+
+        # The submission event itself has no prior receipt to consult, so its
+        # payload is a valid bootstrap source for the envelope fields.
+        if event_type == "mission_submitted" and isinstance(payload, dict):
+            if project_id is None:
+                candidate = payload.get("project_id")
+                project_id = candidate if isinstance(candidate, str) and candidate.strip() else None
+            if correlation_id is None:
+                candidate = payload.get("correlation_id")
+                correlation_id = (
+                    candidate if isinstance(candidate, str) and candidate.strip()
+                    else None
+                )
+
+        if task_id is not None and project_id is not None:
+            payload = dict(payload)
+            payload_project = payload.get("project_id")
+            if payload_project is not None and payload_project != project_id:
+                raise TaskStoreError(
+                    f"task event project_id conflicts with durable task context: {mission_id}/{task_id}"
+                )
+            payload.setdefault("project_id", project_id)
 
         cursor = db.execute(
             """
