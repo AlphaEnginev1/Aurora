@@ -50,7 +50,7 @@ Inject a one-time storage error after a valid `continue` decision receipt has co
 
 ### RD-09 — Project and correlation identity across inference and Workbench execution
 
-Run a project-bound task and a project-bound conversation whose model-generated Workbench options deliberately name a different project and correlation ID. Runtime-owned scope must override those options. The inference request, Workbench request, task result receipt, mission correlation, and terminal review must remain bound to the canonical identity. Mutating a versioned durable result receipt to name another correlation or project must cause the Director's completion evidence gate to reject success.
+Run a project-bound task and a project-bound conversation whose model-generated Workbench options deliberately name a different project and correlation ID. Runtime-owned scope must override those options. The inference request, Workbench request, task result receipt, mission correlation, and terminal review must remain bound to the canonical identity. Mutating a versioned durable result receipt to name another correlation or project must cause the Director's completion evidence gate to reject success. Also return a failed Workbench result and have the model's final prose claim the operation succeeded; the persisted model result must retain the failed structured action receipt, and the completion gate must reject it as insufficient evidence.
 
 ## Closure evidence
 
