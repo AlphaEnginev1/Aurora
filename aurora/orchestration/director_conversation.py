@@ -770,12 +770,6 @@ Keep responses useful and concise unless the human asks for depth."""
                 objective = str(user_input or "").strip()
                 prompt_projects = self._project_ids_in_prompt(user_input)
                 if len(prompt_projects) > 1:
-                    results.append({
-                        "status": "blocked",
-                        "objective": objective,
-                        "error": "mission references multiple registered projects; explicitly scope one project before execution",
-                        "routing_fallback": "ambiguous_project_scope",
-                    })
                     mission_project_id = None
                 else:
                     mission_project_id = next(iter(prompt_projects), None)
