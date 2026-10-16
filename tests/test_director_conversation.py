@@ -23,7 +23,7 @@ from aurora.orchestration.director_conversation import (
     DirectorConversationError,
     DirectorConversationService,
 )
-from aurora.orchestration.director_provider import DirectorModelResponse
+from aurora.orchestration.director_provider import DirectorModelResponse, DirectorToolCall
 from aurora.orchestration.director import DirectorPlan
 from aurora.orchestration.durable_director import DurableDirectorService
 from aurora.orchestration.task_engine import DelegatedTask, TaskEngine
