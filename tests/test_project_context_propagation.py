@@ -635,3 +635,45 @@ def test_project_scoped_github_read_accepts_only_registered_repo_api_paths(tmp_p
     )
     with pytest.raises(WorkbenchError, match="outside the registered project repository"):
         workbench._enforce_project_repository_scope(invalid)
+
+
+
+def test_mission_evidence_trusts_terminal_director_success_after_replanning():
+    old_task = DelegatedTask("first-pass", "engineer", "First pass")
+    replanned_task = DelegatedTask("r1_recovery", "engineer", "Recover failed first pass")
+    submission = SimpleNamespace(
+        mission_id="mission-replanned",
+        project_id=None,
+        plan=SimpleNamespace(
+            objective="Complete the order",
+            model="nvidia/planner",
+            provider="nvidia_api",
+            execution_id="planning-1",
+        ),
+    )
+    mission = SimpleNamespace(
+        mission_id="mission-replanned",
+        submission=submission,
+        status=TaskStatus.SUCCEEDED,
+        tasks=(
+            SimpleNamespace(
+                task=old_task,
+                status=TaskStatus.FAILED,
+                error="transient failure in the original phase",
+                durable_result={"type": "model", "content": "failed attempt"},
+            ),
+            SimpleNamespace(
+                task=replanned_task,
+                status=TaskStatus.SUCCEEDED,
+                error=None,
+                durable_result={"type": "model", "model": "nvidia/reserve", "content": "replanned result"},
+            ),
+        ),
+        wait_timed_out=False,
+        events=(),
+    )
+
+    evidence = DirectorConversationService._mission_evidence(mission)
+
+    assert [item["status"] for item in evidence["tasks"]] == ["failed", "succeeded"]
+    assert evidence["status"] == "succeeded"
