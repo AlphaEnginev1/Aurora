@@ -3458,8 +3458,14 @@ class DirectorRuntime:
 
     @staticmethod
     def _result_text(task_id: str, status: str, result: dict, error: str | None) -> str:
+        serialized = json.dumps(
+            result,
+            ensure_ascii=False,
+            sort_keys=True,
+            default=str,
+        )
         return (
-            f"Task {task_id} status={status}; result={result}; "
+            f"Task {task_id} status={status}; result={serialized}; "
             f"error={error or 'none'}"
         )
 
