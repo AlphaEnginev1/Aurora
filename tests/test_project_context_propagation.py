@@ -14,7 +14,7 @@ from aurora.orchestration.director import DirectorPlan, DirectorPlanner
 from aurora.orchestration.director_conversation import DirectorConversationService
 from aurora.orchestration.director_provider import DirectorModelResponse
 from aurora.orchestration.durable_director import DurableDirectorService
-from aurora.orchestration.director_runtime import DirectorRuntime
+from aurora.orchestration.director_runtime import DirectorRuntime, DirectorRuntimeError
 from aurora.orchestration.mission_memory import MissionMemory
 from aurora.orchestration.engine import OrchestrationEngine
 from aurora.orchestration.task_engine import DelegatedTask, TaskEngine, TaskEngineError, TaskStatus
@@ -858,3 +858,46 @@ def test_runtime_recovery_reprojects_legacy_mailbox_rows_with_canonical_project_
     assert submitted.project_id == "project-alpha"
     assert completed.project_id == "project-alpha"
     assert completed.correlation_id == "corr-project-alpha"
+
+
+
+def test_director_replanning_preserves_registered_project_and_rejects_scope_change(tmp_path):
+    store = DurableTaskStore(tmp_path / "tasks.db")
+    store.enqueue(
+        "mission-project-alpha",
+        (DelegatedTask("inspect", "operator", "Inspect Alpha", project_id="project-alpha"),),
+        project_id="project-alpha",
+        initial_events=(
+            {
+                "event_type": "mission_submitted",
+                "project_id": "project-alpha",
+                "payload": {"objective": "Inspect Project Alpha", "project_id": "project-alpha"},
+            },
+        ),
+    )
+    runtime = object.__new__(DirectorRuntime)
+    runtime.store = store
+
+    planned = runtime._phase_tasks(
+        "mission-project-alpha",
+        1,
+        (
+            DelegatedTask("verify", "verifier", "Verify the project result"),
+        ),
+    )
+    assert planned[0].task_id == "r1_verify"
+    assert planned[0].project_id == "project-alpha"
+
+    with pytest.raises(DirectorRuntimeError, match="change project scope"):
+        runtime._phase_tasks(
+            "mission-project-alpha",
+            2,
+            (
+                DelegatedTask(
+                    "cross-project",
+                    "engineer",
+                    "Change another project's file",
+                    project_id="project-beta",
+                ),
+            ),
+        )
