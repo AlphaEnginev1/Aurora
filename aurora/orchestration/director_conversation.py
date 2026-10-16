@@ -1238,7 +1238,7 @@ Keep responses useful and concise unless the human asks for depth."""
         if not isinstance(project_id, str) or not project_id.strip() or "\x00" in project_id:
             raise DirectorConversationError("project_id must be a non-empty identifier")
         gate = getattr(self.bootstrap, "context_gate", None)
-        plane = getattr(gate, "context_plane", None)
+        plane = getattr(gate, "plane", None)
         registry = getattr(plane, "project_registry", None)
         if registry is None:
             raise DirectorConversationError("project-scoped conversation requires the canonical project registry")
