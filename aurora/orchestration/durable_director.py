@@ -147,23 +147,6 @@ class DurableDirectorService:
                 )
                 return MissionSubmission(mission_id=mission_id.strip(), plan=restored_plan)
 
-        if tasks is None:
-            plan = self.planner.plan(
-                objective=objective,
-                context=context,
-                model=model,
-            )
-        else:
-            # A provider may submit an explicit, declarative task graph. It is
-            # still untrusted input: TaskEngine validation and policy/team checks
-            # below are mandatory before anything is persisted or executed.
-            plan = DirectorPlan(
-                objective=objective.strip(),
-                tasks=tuple(tasks),
-                model=planning_model or "unknown",
-                provider=planning_provider,
-                execution_id=planning_execution_id,
-            )
         if project_id:
             project_registry = getattr(self.planner, "project_registry", None)
             if project_registry is None:
@@ -186,6 +169,24 @@ class DurableDirectorService:
                         "current_state": project.current_state,
                     }
                 }, ensure_ascii=False, sort_keys=True)})
+
+        if tasks is None:
+            plan = self.planner.plan(
+                objective=objective,
+                context=context,
+                model=model,
+            )
+        else:
+            # A provider may submit an explicit, declarative task graph. It is
+            # still untrusted input: TaskEngine validation and policy/team checks
+            # below are mandatory before anything is persisted or executed.
+            plan = DirectorPlan(
+                objective=objective.strip(),
+                tasks=tuple(tasks),
+                model=planning_model or "unknown",
+                provider=planning_provider,
+                execution_id=planning_execution_id,
+            )
         try:
             mission = mission_id.strip() if mission_id and mission_id.strip() else f"mission-{uuid4().hex}"
             initial_events: list[dict[str, object]] = []
