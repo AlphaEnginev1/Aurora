@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
+import json
 
 import pytest
 
@@ -355,3 +356,95 @@ def test_specialist_workbench_tool_cannot_replace_runtime_project_scope():
     assert call.options["project_id"] == "project-alpha"
     assert call.options["work_id"] == "mission-alpha"
     assert call.idempotency_key == "agent-task:mission-alpha:task-alpha:call:0"
+
+
+
+def test_project_scoped_document_extract_cannot_read_another_project(tmp_path):
+    registry = make_registry(tmp_path)
+    alpha_root = Path(registry.resolve("project-alpha").workspace)
+    beta_root = Path(registry.resolve("project-beta").workspace)
+    alpha_root.mkdir(parents=True)
+    beta_root.mkdir(parents=True)
+    (beta_root / "private.txt").write_text("must not be read", encoding="utf-8")
+
+    workbench = UniversalWorkbench(
+        repository_root=tmp_path / "repo",
+        runtime_root=tmp_path / "runtime",
+        gateway=None,
+        project_registry=registry,
+    )
+    request = WorkbenchRequest(
+        capability="workbench:document:extract",
+        actor="operator",
+        mission_id="mission-alpha",
+        arguments=(str(beta_root / "private.txt"),),
+        options={"project_id": "project-alpha"},
+    )
+
+    with pytest.raises(WorkbenchError, match="outside the registered project workspace"):
+        workbench.execute(request)
+
+
+def test_project_scoped_github_operation_cannot_target_another_repository(tmp_path):
+    registry = make_registry(tmp_path)
+    workbench = UniversalWorkbench(
+        repository_root=tmp_path / "repo",
+        runtime_root=tmp_path / "runtime",
+        gateway=None,
+        project_registry=registry,
+    )
+    request = WorkbenchRequest(
+        capability="workbench:github:file:write",
+        actor="operator",
+        mission_id="mission-alpha",
+        arguments=(json.dumps({
+            "owner": "AlphaEnginev1",
+            "repo": "beta",
+            "path": "README.md",
+            "content": "not authorized",
+            "message": "attempt cross-project write",
+            "branch": "main",
+        }),),
+        options={"project_id": "project-alpha"},
+    )
+
+    with pytest.raises(WorkbenchError, match="outside the registered project repository"):
+        workbench.execute(request)
+
+
+def test_project_scoped_command_cannot_choose_another_workspace(tmp_path):
+    registry = make_registry(tmp_path)
+    alpha_root = Path(registry.resolve("project-alpha").workspace)
+    beta_root = Path(registry.resolve("project-beta").workspace)
+
+    class CapturingCapabilityRuntime:
+        def __init__(self):
+            self.calls = []
+
+        def execute(self, request, *, workspace, args=()):
+            self.calls.append((request, Path(workspace), tuple(args)))
+            return SimpleNamespace(returncode=0, stdout="ok", stderr="")
+
+    runtime = CapturingCapabilityRuntime()
+    workbench = UniversalWorkbench(
+        repository_root=tmp_path / "repo",
+        runtime_root=tmp_path / "runtime",
+        gateway=None,
+        project_registry=registry,
+        capability_runtime=runtime,
+    )
+    request = WorkbenchRequest(
+        capability="workbench:command",
+        actor="operator",
+        mission_id="mission-alpha",
+        arguments=(json.dumps({
+            "capability": "python.package:example",
+            "args": [],
+            "workspace": str(beta_root),
+        }),),
+        options={"project_id": "project-alpha"},
+    )
+
+    with pytest.raises(WorkbenchError, match="outside the registered project workspace"):
+        workbench.execute(request)
+    assert runtime.calls == []
