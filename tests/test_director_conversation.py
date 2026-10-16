@@ -682,6 +682,65 @@ def test_replaying_running_mission_turn_refreshes_status_without_reexecution(tmp
     ]
 
 
+def test_mission_execution_requires_stable_request_id_before_persisting_order(
+    tmp_path: Path,
+):
+    service, _seen = _service(tmp_path)
+    session = service.create_session()
+    calls = []
+    service.mission_runner = lambda **kwargs: calls.append(kwargs)
+
+    with pytest.raises(DirectorConversationError, match="request_id is required"):
+        service.send_message(
+            session_id=session.session_id,
+            user_input="Audita la cadena durable de Aurora",
+        )
+
+    assert calls == []
+    assert service.list_turns(session.session_id, limit=10) == ()
+
+
+def test_provider_requested_mission_without_request_id_fails_before_runner_invocation(
+    tmp_path: Path,
+):
+    service, _seen = _service(tmp_path)
+    session = service.create_session()
+    executed = []
+
+    class RequestsMissionProvider:
+        provider_id = "fake"
+
+        def generate(
+            self, *, messages, model, role, tools=(), metadata=None,
+            capability="reasoning", preferred_models=(),
+        ):
+            return DirectorModelResponse(
+                content="",
+                model=model or "fake/director",
+                provider="fake",
+                request_id="provider-request",
+                execution_id="provider-execution",
+                tool_calls=(
+                    DirectorToolCall(
+                        call_id="call-1",
+                        name="run_mission",
+                        arguments={"objective": "investigate"},
+                    ),
+                ) if role == "director_conversation" else (),
+            )
+
+    service.set_provider(RequestsMissionProvider())
+    service.mission_runner = lambda **kwargs: executed.append(kwargs)
+
+    with pytest.raises(DirectorConversationError, match="request_id is required"):
+        service.send_message(
+            session_id=session.session_id,
+            user_input="Hola Aurora",
+        )
+
+    assert executed == []
+
+
 def test_replay_recovers_a_durable_turn_left_without_an_assistant_response(tmp_path):
     service, _ = _service(tmp_path)
     session = service.create_session()
