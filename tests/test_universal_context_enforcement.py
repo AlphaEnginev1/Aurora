@@ -11,12 +11,12 @@ from aurora.orchestration.director_bootstrap import (
     build_context_runtime_adapter,
 )
 from aurora.orchestration.task_store import DurableTaskStore
-from aurora.projects import ProjectRegistry
+from aurora.projects import ProjectRegistry, ProjectSpec, ProjectStatus
 from aurora.skills import SkillRegistry
 from aurora.research.store import ResearchStore
 
 
-def _router_fixture(tmp_path):
+def _router_fixture(tmp_path, project_registry=None):
     organization = OrganizationRegistry(
         agents={
             "researcher": AgentSpec(
@@ -42,7 +42,7 @@ def _router_fixture(tmp_path):
     task_store = DurableTaskStore(tmp_path / "tasks.db")
     research_store = ResearchStore(tmp_path / "research.db")
     plane = AuroraContextPlane(
-        project_registry=ProjectRegistry({}),
+        project_registry=project_registry or ProjectRegistry({}),
         organization=organization,
         skill_registry=SkillRegistry({}),
         models=(
@@ -206,3 +206,58 @@ def test_router_uses_project_scope_when_project_identity_is_present(tmp_path):
     )
     with pytest.raises(ModelRoutingError, match="unknown Aurora project"):
         router.generate(request, capability="reasoning")
+
+
+
+def test_director_conversation_with_project_id_uses_project_context_not_global(tmp_path):
+    workspace = tmp_path / "workspace" / "alpha"
+    project = ProjectSpec(
+        project_id="project-alpha",
+        name="Project Alpha",
+        objective="Alpha-only project context",
+        status=ProjectStatus.ACTIVE,
+        repository="AlphaEnginev1/alpha",
+        workspace=str(workspace),
+        current_state="Project Alpha has a verified current state",
+        updated_at="2026-10-16T00:00:00Z",
+    )
+    router = _router_fixture(
+        tmp_path,
+        project_registry=ProjectRegistry({"project-alpha": project}),
+    )
+    observed = []
+
+    class CaptureProvider:
+        provider_id = "test"
+
+        def generate(self, request, *, selected_model, execution_id):
+            observed.append(request)
+            return InferenceResponse(
+                model=selected_model,
+                provider="test",
+                content="scoped",
+                request_id=request.request_id,
+                execution_id=execution_id,
+            )
+
+    router.provider_registry = ProviderRegistry((
+        ProviderSpec("test", "Test", ("reasoning",), True, lambda _spec: CaptureProvider()),
+    ))
+    request = InferenceRequest(
+        messages=[{"role": "user", "content": "Inspect Alpha"}],
+        metadata={
+            "role": "director_conversation",
+            "project_id": "project-alpha",
+            "task_type": "conversation",
+        },
+    )
+
+    router.generate(request, capability="reasoning")
+
+    routed = observed[0]
+    assert routed.metadata["aurora_context_verified"] is True
+    assert routed.metadata["aurora_context_scope"] == "project"
+    assert routed.metadata["project_id"] == "project-alpha"
+    rendered = str(routed.messages)
+    assert "Alpha-only project context" in rendered
+    assert "Project Alpha has a verified current state" in rendered
