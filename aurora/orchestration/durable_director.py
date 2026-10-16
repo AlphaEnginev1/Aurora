@@ -13,6 +13,7 @@ from .event_bus import DurableEventBus
 from .task_engine import DelegatedTask, TaskEngine
 from .task_store import DurableTaskStore
 from .team_runtime import TeamCoordinator, TeamCoordinatorError
+from aurora.projects import ProjectStatus
 
 
 class DurableDirectorError(RuntimeError):
@@ -112,6 +113,10 @@ class DurableDirectorService:
                 selected_project = registry.resolve(project_id)
             except Exception as exc:
                 raise DurableDirectorError(f"invalid project scope: {exc}") from exc
+            if selected_project.status is not ProjectStatus.ACTIVE:
+                raise DurableDirectorError(
+                    f"project-scoped execution requires an active project, got {selected_project.status.value}"
+                )
         if correlation_id is not None and (
             not correlation_id.strip() or "\x00" in correlation_id
         ):
