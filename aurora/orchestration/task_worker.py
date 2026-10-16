@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 import inspect
 import json
 from threading import Event, Thread
@@ -444,19 +445,49 @@ class TaskWorker:
                 getattr(response, "workbench_receipts", ()) or ()
             )
             if workbench_receipts:
-                serialized_receipts = json.dumps(
-                    workbench_receipts,
+                durable_receipts: list[dict[str, Any]] = []
+                for receipt in workbench_receipts:
+                    if not isinstance(receipt, dict):
+                        durable_receipts.append({
+                            "status": "invalid",
+                            "error": "Workbench receipt is not a mapping",
+                            "truncated": True,
+                        })
+                        continue
+                    normalized = {
+                        field: receipt.get(field)
+                        for field in (
+                            "capability", "operation", "status", "artifact_id",
+                            "provenance", "receipt_id", "correlation_id", "error",
+                            "truncated",
+                        )
+                        if receipt.get(field) is not None
+                    }
+                    output = receipt.get("output")
+                    if output is not None:
+                        rendered = json.dumps(
+                            output,
+                            ensure_ascii=False,
+                            sort_keys=True,
+                            default=str,
+                        )
+                        normalized["output"] = {
+                            "sha256": hashlib.sha256(
+                                rendered.encode("utf-8")
+                            ).hexdigest(),
+                            "preview": rendered[:400],
+                            "preview_truncated": len(rendered) > 400,
+                        }
+                    durable_receipts.append(normalized)
+                # Store JSON-native normalized rows, not provider/tool objects.
+                # Hashes retain integrity evidence while bounded previews prevent
+                # a multi-call task from overflowing its durable result receipt.
+                payload["workbench_receipts"] = json.loads(json.dumps(
+                    durable_receipts,
                     ensure_ascii=False,
                     sort_keys=True,
                     default=str,
-                )
-                if len(serialized_receipts) <= limit:
-                    payload["workbench_receipts"] = list(workbench_receipts)
-                else:
-                    payload["workbench_receipts"] = {
-                        "truncated": True,
-                        "preview": serialized_receipts[:limit],
-                    }
+                ))
             return payload
         capability = result.capability_result
         if isinstance(capability, ResearchTaskResult):
