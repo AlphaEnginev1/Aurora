@@ -90,6 +90,8 @@ class OrchestrationEngine:
         }
         if project_id:
             request_metadata["project_id"] = project_id
+        if mission_id:
+            request_metadata["mission_id"] = mission_id
         if skill_ids:
             request_metadata["skill_ids"] = list(skill_ids)
         if skill_tags:
