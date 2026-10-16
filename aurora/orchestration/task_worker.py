@@ -386,6 +386,7 @@ class TaskWorker:
     def _durable_result_payload(self, result: DelegatedTaskResult) -> dict:
         """Add immutable mission/task identity around the typed execution result."""
         payload = self._result_payload(result)
+        payload["identity_version"] = 1
         payload["mission_id"] = self.mission_id
         payload["project_id"] = result.task.project_id
         payload["correlation_id"] = self.correlation_id
