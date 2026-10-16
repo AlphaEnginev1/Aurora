@@ -28,6 +28,7 @@ from aurora.research.store import ResearchStore
 from aurora.research.knowledge import TrustedKnowledgeBuilder
 from aurora.workbench.models import WorkbenchRequest, WorkbenchResult
 from aurora.workbench.service import UniversalWorkbench, WorkbenchError
+from aurora.workbench.session import WorkSessionStore
 
 
 def make_registry(tmp_path: Path) -> ProjectRegistry:
