@@ -1287,18 +1287,24 @@ Keep responses useful and concise unless the human asks for depth."""
         blocked = any(item["status"] == "blocked" for item in tasks)
         mission_status = getattr(mission, "status", None)
         mission_status = getattr(mission_status, "value", mission_status)
+        terminal_mission_status = (
+            str(mission_status)
+            if mission_status in {"succeeded", "failed", "blocked"}
+            else None
+        )
         if wait_timed_out:
             # The request's wait timer expired, not the accepted mission. Until
             # DirectorRuntime finalizes the durable order, the conversation must
             # not override this receipt with one task's intermediate failed state.
             status = "running"
+        elif terminal_mission_status is not None:
+            # The final Director decision is authoritative: an earlier phase may
+            # have failed but been superseded by a successful replanned phase.
+            status = terminal_mission_status
         elif failed:
             status = "failed"
         elif blocked:
             status = "blocked"
-        elif mission_status:
-            # Report the durable terminal decision, including a final review block.
-            status = str(mission_status)
         elif tasks and all(item["status"] == "succeeded" for item in tasks):
             status = "succeeded"
         else:
