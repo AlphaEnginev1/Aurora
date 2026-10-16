@@ -137,8 +137,8 @@ def test_conversation_run_mission_returns_conservative_receipt_when_status_reads
 
     assert receipt.submission.mission_id == submission.mission_id
     assert receipt.status is TaskStatus.RUNNING
-    assert receipt.wait_timed_out is True
-    assert receipt.wait_timeout_seconds == 45.0
+    assert receipt.wait_timed_out is False
+    assert receipt.wait_timeout_seconds is None
     assert receipt.tasks == ()
     assert submitted == [{"objective": "Preserve accepted order"}]
 
