@@ -993,6 +993,7 @@ class UniversalWorkbench:
             required_sources=tuple(required_sources),
             constraints=tuple(constraints),
             max_sources=max_sources,
+            project_id=project.project_id if project is not None else None,
         )
 
     def _research_discover(self, request: WorkbenchRequest) -> WorkbenchResult:
