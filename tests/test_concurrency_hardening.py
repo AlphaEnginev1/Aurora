@@ -59,7 +59,18 @@ class _CapabilityRecorder:
 
     def run_capability_task(self, *, task_id, role, request, workspace, args):
         self.workspaces.append(Path(workspace))
-        return object()
+        # Match the brokered CapabilityExecutionResult contract: no Workbench
+        # status field, but an explicit zero exit code and timeout signal.
+        return type(
+            "CapabilityExecution",
+            (),
+            {
+                "returncode": 0,
+                "stdout": "capability completed",
+                "stderr": "",
+                "timed_out": False,
+            },
+        )()
 
 
 def test_task_engine_assigns_distinct_attempt_workspaces(tmp_path):

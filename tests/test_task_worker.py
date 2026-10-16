@@ -28,7 +28,20 @@ class FakeOrchestration:
         if self.failures:
             self.failures -= 1
             raise RuntimeError("transient failure")
-        return object()
+        return TaskResult(
+            task_id=kwargs["task_id"],
+            role=kwargs["role"],
+            response=InferenceResponse(
+                model="fake/model",
+                provider="fake",
+                content=f"completed {kwargs['task_id']}",
+                request_id=f"request-{kwargs['task_id']}",
+                execution_id=f"execution-{kwargs['task_id']}",
+                requested_model="fake/model",
+                selected_model="fake/model",
+                reported_model="fake/model",
+            ),
+        )
 
     def run_capability_task(self, **kwargs):
         raise AssertionError("capability path is not expected in this test")
@@ -203,6 +216,91 @@ def test_worker_persists_routing_evidence_for_director_review(tmp_path: Path):
         ],
     }
 
+
+
+def test_task_engine_rejects_capability_nonzero_exit_and_timeout(tmp_path: Path):
+    engine = TaskEngine(FakeOrchestration(), tmp_path / "workspace")
+    task = DelegatedTask(
+        "capability-execution",
+        "agent",
+        "run the registered capability",
+        capability="registered:capability",
+    )
+    executions = (
+        (
+            SimpleNamespace(
+                returncode=17,
+                stdout="partial output retained",
+                stderr="command failed",
+                timed_out=False,
+            ),
+            "returncode",
+        ),
+        (
+            SimpleNamespace(
+                returncode=0,
+                stdout="partial output retained",
+                stderr="",
+                timed_out=True,
+            ),
+            "timed out",
+        ),
+        (
+            SimpleNamespace(
+                status="succeeded",
+                returncode=8,
+                stdout="partial output retained",
+                stderr="late process failure",
+                timed_out=False,
+            ),
+            "returncode",
+        ),
+    )
+
+    for execution, expected_reason in executions:
+        engine._execute_task = lambda _task, **_kwargs: SimpleNamespace(execution=execution)
+        result = engine.execute_one(task)
+        assert result.status is TaskStatus.FAILED
+        assert result.capability_result.execution is execution
+        assert expected_reason in (result.error or "")
+
+
+def test_worker_preserves_capability_failure_receipt_at_attempt_limit(tmp_path: Path):
+    store, worker, _ = make_worker(tmp_path, max_attempts=1)
+    task = DelegatedTask(
+        "capability-failed",
+        "agent",
+        "run a capability and preserve its receipt",
+        capability="registered:capability",
+    )
+    store.enqueue("mission-1", [task])
+    execution = SimpleNamespace(
+        returncode=17,
+        stdout="partial stdout that explains the failure",
+        stderr="controlled failure detail",
+        timed_out=True,
+    )
+    worker.task_engine.execute_one = lambda _task, **_kwargs: DelegatedTaskResult(
+        task=task,
+        status=TaskStatus.FAILED,
+        capability_result=SimpleNamespace(execution=execution),
+        error="controlled capability failure",
+    )
+
+    cycle = worker.run_once()
+
+    assert cycle.action == "failed"
+    assert cycle.result_payload["type"] == "capability"
+    assert cycle.result_payload["attempt"] == 1
+    assert cycle.result_payload["returncode"] == 17
+    assert cycle.result_payload["timed_out"] is True
+    assert cycle.result_payload["stdout"] == execution.stdout
+    assert cycle.result_payload["stderr"] == execution.stderr
+    assert cycle.result_payload["error"] == "controlled capability failure"
+    stored = store.get("mission-1", task.task_id)
+    assert stored is not None
+    assert stored.status == "failed"
+    assert stored.result == cycle.result_payload
 
 
 class _CountingEvaluator:

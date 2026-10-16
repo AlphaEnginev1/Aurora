@@ -3309,18 +3309,20 @@ class DirectorRuntime:
             ):
                 problems.append("Workbench receipt has no output, receipt, artifact, or provenance")
         elif result_type == "capability":
-            if result.get("output") is not None:
-                pass
-            else:
-                returncode = result.get("returncode")
-                if not (
-                    isinstance(returncode, int)
-                    and not isinstance(returncode, bool)
-                    and returncode == 0
-                ):
-                    problems.append(
-                        "capability receipt has neither output nor a verified zero return code"
-                    )
+            # A payload/output does not override process failure. Brokered
+            # capability receipts must carry an explicit zero exit code and
+            # must not report a timeout, even when partial output exists.
+            if result.get("timed_out") is True:
+                problems.append("capability execution timed out")
+            returncode = result.get("returncode")
+            if not (
+                isinstance(returncode, int)
+                and not isinstance(returncode, bool)
+                and returncode == 0
+            ):
+                problems.append(
+                    f"capability receipt returncode is {returncode!r}, not verified zero"
+                )
         else:
             problems.append(f"unrecognized or missing result type: {result_type!r}")
 
@@ -3372,7 +3374,8 @@ class DirectorRuntime:
                 for field in (
                     "model", "provider", "request_id", "execution_id",
                     "selected_model", "receipt_id", "artifact_id", "provenance",
-                    "operation", "status", "returncode", "trust_state",
+                    "operation", "status", "returncode", "timed_out", "trust_state",
+                    "correlation_id", "error",
                 ):
                     value = result.get(field)
                     if value is not None:
