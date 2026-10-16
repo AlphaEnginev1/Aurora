@@ -195,8 +195,6 @@ class DurableTaskStore:
         if len(set(ids)) != len(ids):
             raise TaskStoreError("task ids must be unique")
         known = set(ids)
-        if any(dep not in known for task in tasks for dep in task.depends_on):
-            raise TaskStoreError("task plan contains an unknown dependency")
 
         normalized_events: list[dict[str, object]] = []
         for event in initial_events:
@@ -226,6 +224,30 @@ class DurableTaskStore:
         with self._connect() as db:
             try:
                 db.execute("BEGIN IMMEDIATE")
+                existing_dependency_rows = db.execute(
+                    "SELECT task_id, phase, status FROM tasks WHERE mission_id = ?",
+                    (mission_id,),
+                ).fetchall()
+                existing_dependencies = {
+                    row["task_id"]: row for row in existing_dependency_rows
+                }
+                for task in tasks:
+                    for dependency_id in task.depends_on:
+                        if dependency_id in known:
+                            continue
+                        dependency = existing_dependencies.get(dependency_id)
+                        if dependency is None:
+                            raise TaskStoreError(
+                                f"task plan contains an unknown dependency: {dependency_id}"
+                            )
+                        if int(dependency["phase"]) >= phase:
+                            raise TaskStoreError(
+                                f"cross-phase dependency {dependency_id} must belong to an earlier phase"
+                            )
+                        if dependency["status"] != "succeeded":
+                            raise TaskStoreError(
+                                f"cross-phase dependency {dependency_id} must have succeeded"
+                            )
                 for task in tasks:
                     db.execute(
                         """
