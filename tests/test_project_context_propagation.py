@@ -606,3 +606,32 @@ def test_mission_evidence_returns_persisted_model_selection_and_execution_receip
     assert evidence["tasks"][0]["selected_model"] == "nvidia/test-model"
     assert evidence["tasks"][0]["routing"]["score"] == 0.91
     assert evidence["tasks"][0]["result"] == "Inspection complete with verifiable evidence."
+
+
+
+def test_project_scoped_github_read_accepts_only_registered_repo_api_paths(tmp_path):
+    registry = make_registry(tmp_path)
+    workbench = UniversalWorkbench(
+        repository_root=tmp_path / "repo",
+        runtime_root=tmp_path / "runtime",
+        gateway=None,
+        project_registry=registry,
+    )
+    valid = WorkbenchRequest(
+        capability="workbench:github:get",
+        actor="operator",
+        mission_id="mission-alpha",
+        arguments=("/repos/AlphaEnginev1/alpha/issues",),
+        options={"project_id": "project-alpha"},
+    )
+    workbench._enforce_project_repository_scope(valid)
+
+    invalid = WorkbenchRequest(
+        capability="workbench:github:get",
+        actor="operator",
+        mission_id="mission-alpha",
+        arguments=("/repos/AlphaEnginev1/beta/issues",),
+        options={"project_id": "project-alpha"},
+    )
+    with pytest.raises(WorkbenchError, match="outside the registered project repository"):
+        workbench._enforce_project_repository_scope(invalid)
