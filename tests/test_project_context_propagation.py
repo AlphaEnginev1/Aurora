@@ -905,3 +905,77 @@ def test_director_replanning_preserves_registered_project_and_rejects_scope_chan
                 ),
             ),
         )
+
+
+
+def test_inactive_project_is_rejected_at_mission_task_and_workbench_boundaries(tmp_path):
+    inactive_status = next(
+        (status for status in ProjectStatus if status is not ProjectStatus.ACTIVE),
+        None,
+    )
+    if inactive_status is None:
+        pytest.skip("ProjectStatus has no inactive state to exercise")
+
+    project = ProjectSpec(
+        project_id="project-paused",
+        name="Paused Project",
+        objective="A project that must not accept execution",
+        status=inactive_status,
+        repository="AlphaEnginev1/paused",
+        workspace=str(tmp_path / "projects" / "paused"),
+        current_state="Not active",
+        updated_at="2026-10-16T00:00:00Z",
+    )
+    registry = ProjectRegistry({"project-paused": project})
+    task = DelegatedTask(
+        "write",
+        "engineer",
+        "Change a project file",
+        capability="workbench:file:write",
+        args=("README.md", "not allowed"),
+        project_id="project-paused",
+    )
+
+    with pytest.raises(TaskEngineError, match="requires an active project"):
+        TaskEngine(
+            CapturingOrchestration(),
+            tmp_path / "runtime",
+            project_registry=registry,
+        ).validate((task,))
+
+    workbench = UniversalWorkbench(
+        repository_root=tmp_path / "repo",
+        runtime_root=tmp_path / "runtime",
+        gateway=None,
+        project_registry=registry,
+    )
+    with pytest.raises(WorkbenchError, match="requires an active project"):
+        workbench.execute(WorkbenchRequest(
+            capability="workbench:file:list",
+            actor="operator",
+            mission_id="mission-paused",
+            arguments=(".",),
+            options={"project_id": "project-paused"},
+        ))
+
+    plan = DirectorPlan(
+        objective="Do not execute a paused project",
+        tasks=(task,),
+        model="fake/model",
+    )
+    planner = FakePlanner(plan, registry)
+    store = DurableTaskStore(tmp_path / "paused.db")
+    with pytest.raises(Exception, match="requires an active project"):
+        DurableDirectorService(
+            planner=planner,
+            task_engine=TaskEngine(
+                CapturingOrchestration(),
+                tmp_path / "runtime",
+                project_registry=registry,
+            ),
+            store=store,
+        ).submit_mission(
+            objective="Do not execute a paused project",
+            mission_id="mission-paused",
+            project_id="project-paused",
+        )
