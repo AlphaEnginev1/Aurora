@@ -4,6 +4,8 @@ import pytest
 
 from aurora.orchestration.director import DirectorPlan
 from aurora.orchestration.durable_director import DurableDirectorError, DurableDirectorService
+from aurora.inference.models import InferenceResponse
+from aurora.orchestration.engine import TaskResult
 from aurora.orchestration.task_engine import DelegatedTask, TaskEngine
 from aurora.orchestration.task_store import DurableTaskStore
 from aurora.projects.registry import ProjectRegistry, ProjectSpec, ProjectStatus
@@ -109,3 +111,40 @@ def test_mission_idempotency_cannot_switch_project(tmp_path: Path):
             project_id="project-b",
         )
     assert len(store.list_tasks("mission-project-bound")) == 1
+
+
+def test_project_id_reaches_model_inference_metadata(tmp_path: Path):
+    class RecordingOrchestration(_Orchestration):
+        def __init__(self):
+            self.kwargs = None
+
+        def run_task(self, **kwargs):
+            self.kwargs = kwargs
+            response = InferenceResponse(
+                model="test/model",
+                provider="test",
+                content="project-scoped result",
+                request_id="request-project",
+                execution_id="execution-project",
+                selected_model="test/model",
+                provider_model="test/model",
+                reported_model="test/model",
+            )
+            return TaskResult(task_id=kwargs["task_id"], role=kwargs["role"], response=response)
+
+    orchestration = RecordingOrchestration()
+    engine = TaskEngine(orchestration, tmp_path / "workspace")
+    result = engine.execute_one(
+        DelegatedTask(
+            "task-project",
+            "researcher",
+            "Inspect project A",
+            project_id="project-a",
+        )
+    )
+    assert result.status.value == "succeeded"
+    assert orchestration.kwargs["project_id"] == "project-a"
+    assert any(
+        "project_id: project-a" in item["content"]
+        for item in orchestration.kwargs["context"]
+    )
