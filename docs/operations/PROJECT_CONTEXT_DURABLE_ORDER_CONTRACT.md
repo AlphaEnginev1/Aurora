@@ -9,6 +9,7 @@ This contract covers the boundary between Director conversation, durable mission
 3. Mission submission resolves the canonical project record before planning, adds the authoritative project metadata to planning context, and binds the durable mission ID to that project.
 4. Every task stores `project_id` in SQLite. Worker inference metadata carries the canonical `mission_id`, `project_id` and `correlation_id`; governed capability and Workbench requests retain the same scope. Model-generated Workbench options must not override a project-bound task or conversation. Mission and task events expose the project ID for audit.
 5. Versioned result receipts include `identity_version`, `mission_id`, `project_id` and `correlation_id`. The Director checks that identity against the canonical submission/task record as well as applying the existing typed-evidence gate; missing or mismatched identity evidence must not produce mission success. Legacy receipts remain readable without pretending they contain the new fields.
+6. If an agent invokes Workbench while reasoning, the final model result also carries the structured action receipts from those calls. The Director validates those receipts; a failed, erroneous or truncated Workbench action cannot be hidden by a later natural-language model response claiming success.
 
 
 ## Director replanning invariants
