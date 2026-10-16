@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import inspect
 from dataclasses import dataclass, replace
 from typing import Any
 
@@ -138,6 +139,7 @@ Rules:
         objective: str,
         context: list[dict[str, Any]] | None = None,
         model: str | None = None,
+        project_id: str | None = None,
     ) -> DirectorPlan:
         objective = objective.strip()
         if not objective:
@@ -158,12 +160,21 @@ Rules:
             *(context or []),
             {"role": "user", "content": objective},
         ]
-        response = self.provider.generate(
-            messages=messages,
-            model=model,
-            role="director_planner",
-            tools=(self._DELEGATE_TOOL,),
-        )
+        provider_kwargs: dict[str, Any] = {
+            "messages": messages,
+            "model": model,
+            "role": "director_planner",
+            "tools": (self._DELEGATE_TOOL,),
+        }
+        if project_id is not None:
+            parameters = inspect.signature(self.provider.generate).parameters
+            accepts_metadata = "metadata" in parameters or any(
+                item.kind is inspect.Parameter.VAR_KEYWORD
+                for item in parameters.values()
+            )
+            if accepts_metadata:
+                provider_kwargs["metadata"] = {"project_id": project_id}
+        response = self.provider.generate(**provider_kwargs)
         tasks = (
             self._parse_tool_calls(response.tool_calls)
             if response.tool_calls
@@ -194,6 +205,7 @@ Rules:
         objective: str,
         context: list[dict[str, Any]] | None = None,
         model: str | None = None,
+        project_id: str | None = None,
     ) -> DirectorReview:
         objective = objective.strip()
         if not objective:
@@ -213,12 +225,21 @@ Rules:
             *(context or []),
             {"role": "user", "content": objective},
         ]
-        response = self.provider.generate(
-            messages=messages,
-            model=model,
-            role="director_reviewer",
-            tools=(self._DELEGATE_TOOL,),
-        )
+        provider_kwargs: dict[str, Any] = {
+            "messages": messages,
+            "model": model,
+            "role": "director_reviewer",
+            "tools": (self._DELEGATE_TOOL,),
+        }
+        if project_id is not None:
+            parameters = inspect.signature(self.provider.generate).parameters
+            accepts_metadata = "metadata" in parameters or any(
+                item.kind is inspect.Parameter.VAR_KEYWORD
+                for item in parameters.values()
+            )
+            if accepts_metadata:
+                provider_kwargs["metadata"] = {"project_id": project_id}
+        response = self.provider.generate(**provider_kwargs)
         if response.tool_calls:
             decision, rationale, tasks, considered_alternatives = self._parse_review_tool_calls(response.tool_calls)
         else:
