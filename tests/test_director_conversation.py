@@ -23,7 +23,7 @@ from aurora.orchestration.director_conversation import (
     DirectorConversationError,
     DirectorConversationService,
 )
-from aurora.orchestration.director_provider import DirectorModelResponse
+from aurora.orchestration.director_provider import DirectorModelResponse, DirectorToolCall
 from aurora.orchestration.director import DirectorPlan
 from aurora.orchestration.durable_director import DurableDirectorService
 from aurora.orchestration.task_engine import DelegatedTask, TaskEngine
@@ -457,6 +457,288 @@ def test_default_router_provider_submits_one_durable_mission_and_returns_evidenc
     assert replay.turn.turn_id == response.turn.turn_id
     assert replay.correlation_id == response.correlation_id
     assert len(submitted) == 1
+
+
+def test_durable_mission_receipt_is_returned_when_summary_provider_fails(tmp_path):
+    service, _seen = _service(tmp_path)
+    session = service.create_session()
+    generated_roles = []
+
+    class FailingSummaryProvider:
+        provider_id = "fake"
+
+        def generate(
+            self,
+            *,
+            messages,
+            model,
+            role,
+            tools=(),
+            metadata=None,
+            capability="reasoning",
+            preferred_models=(),
+        ):
+            generated_roles.append(role)
+            if role == "director_conversation_result":
+                raise RuntimeError("controlled summary-provider outage")
+            return DirectorModelResponse(
+                content="Aurora has accepted the request.",
+                model=model or "fake/director",
+                provider="fake",
+                request_id="request-initial",
+                execution_id="execution-initial",
+                tool_calls=(),
+            )
+
+    service.set_provider(FailingSummaryProvider())
+    submitted = []
+
+    def durable_runner(**kwargs):
+        submitted.append(dict(kwargs))
+        mission_id = kwargs["mission_id"]
+        correlation_id = kwargs["correlation_id"]
+        submission = SimpleNamespace(
+            mission_id=mission_id,
+            plan=SimpleNamespace(
+                objective=kwargs["objective"],
+                tasks=(),
+                model="fake/director",
+                provider="fake",
+                execution_id="planning-execution",
+            ),
+        )
+        event = SimpleNamespace(
+            event_id=1,
+            event_type="mission_submitted",
+            task_id=None,
+            project_id=kwargs.get("project_id"),
+            correlation_id=correlation_id,
+            payload={
+                "objective": kwargs["objective"],
+                "project_id": kwargs.get("project_id"),
+                "correlation_id": correlation_id,
+                "task_ids": [],
+            },
+        )
+        return SimpleNamespace(
+            mission_id=mission_id,
+            objective=kwargs["objective"],
+            submission=submission,
+            status=SimpleNamespace(value="running"),
+            tasks=(),
+            events=(event,),
+        )
+
+    service.mission_runner = durable_runner
+    request_id = "summary-provider-failure-after-acceptance"
+    response = service.send_message(
+        session_id=session.session_id,
+        user_input="Audita la cadena durable de Aurora",
+        request_id=request_id,
+    )
+
+    assert generated_roles == ["director_conversation", "director_conversation_result"]
+    assert len(submitted) == 1
+    assert response.state == "completed"
+    assert "EVIDENCIA_AUTORITATIVA_DE_EJECUCION (JSON):" in response.response_text
+    assert '"accepted": true' in response.response_text
+    assert submitted[0]["mission_id"] in response.response_text
+    assert not any(turn.state == "failed" for turn in service.list_turns(session.session_id, limit=10))
+    saved = service.send_message(
+        session_id=session.session_id,
+        user_input="Audita la cadena durable de Aurora",
+        request_id=request_id,
+    )
+    assert saved.turn.turn_id == response.turn.turn_id
+    assert len(submitted) == 1
+
+
+def test_replaying_running_mission_turn_refreshes_status_without_reexecution(tmp_path):
+    service, _seen = _service(tmp_path)
+    session = service.create_session()
+    provider_calls = []
+    mission_calls = []
+    status = {"value": "running"}
+
+    class ConversationProvider:
+        provider_id = "fake"
+
+        def generate(
+            self,
+            *,
+            messages,
+            model,
+            role,
+            tools=(),
+            metadata=None,
+            capability="reasoning",
+            preferred_models=(),
+        ):
+            provider_calls.append(role)
+            return DirectorModelResponse(
+                content=(
+                    "The order has been accepted."
+                    if role == "director_conversation"
+                    else "Execution evidence is attached."
+                ),
+                model=model or "fake/director",
+                provider="fake",
+                request_id=f"provider-request-{len(provider_calls)}",
+                execution_id=f"provider-execution-{len(provider_calls)}",
+                tool_calls=(),
+            )
+
+    service.set_provider(ConversationProvider())
+
+    def durable_result(mission_id, objective, current_status):
+        submitted = SimpleNamespace(
+            event_id=1,
+            event_type="mission_submitted",
+            task_id=None,
+            project_id="project-a",
+            correlation_id="corr-running-turn",
+            payload={
+                "objective": objective,
+                "project_id": "project-a",
+                "correlation_id": "corr-running-turn",
+            },
+        )
+        events = [submitted]
+        if current_status == "succeeded":
+            events.append(SimpleNamespace(
+                event_id=2,
+                event_type="mission_succeeded",
+                task_id=None,
+                project_id="project-a",
+                correlation_id="corr-running-turn",
+                payload={"status": "succeeded", "project_id": "project-a"},
+            ))
+        return SimpleNamespace(
+            mission_id=mission_id,
+            objective=objective,
+            submission=SimpleNamespace(
+                mission_id=mission_id,
+                plan=SimpleNamespace(
+                    objective=objective,
+                    tasks=(),
+                    model="fake/director",
+                    provider="fake",
+                    execution_id="planning-execution",
+                ),
+            ),
+            status=SimpleNamespace(value=current_status),
+            tasks=(),
+            events=tuple(events),
+        )
+
+    def runner(**kwargs):
+        mission_calls.append(dict(kwargs))
+        return durable_result(
+            kwargs["mission_id"],
+            kwargs["objective"],
+            "running",
+        )
+
+    service.mission_runner = runner
+    service.mission_status_reader = lambda mission_id: durable_result(
+        mission_id,
+        "Audita la orden durable de Aurora",
+        status["value"],
+    )
+
+    request_id = "refresh-running-order-status-001"
+    first = service.send_message(
+        session_id=session.session_id,
+        user_input="Audita la orden durable de Aurora",
+        request_id=request_id,
+    )
+
+    assert first.state == "completed"
+    assert first.execution_status == "running"
+    assert '"status": "running"' in first.response_text
+    assert len(mission_calls) == 1
+    assert provider_calls == [
+        "director_conversation",
+        "director_conversation_result",
+    ]
+
+    status["value"] = "succeeded"
+    replay = service.send_message(
+        session_id=session.session_id,
+        user_input="Audita la orden durable de Aurora",
+        request_id=request_id,
+    )
+
+    assert replay.state == "completed"
+    assert replay.execution_status == "succeeded"
+    assert "Estado actualizado de la orden durable de Aurora." in replay.response_text
+    assert '"status": "succeeded"' in replay.response_text
+    assert replay.turn.turn_id == first.turn.turn_id
+    assert replay.correlation_id == first.correlation_id
+    assert len(mission_calls) == 1
+    assert provider_calls == [
+        "director_conversation",
+        "director_conversation_result",
+    ]
+
+
+def test_mission_execution_requires_stable_request_id_before_persisting_order(
+    tmp_path: Path,
+):
+    service, _seen = _service(tmp_path)
+    session = service.create_session()
+    calls = []
+    service.mission_runner = lambda **kwargs: calls.append(kwargs)
+
+    with pytest.raises(DirectorConversationError, match="request_id is required"):
+        service.send_message(
+            session_id=session.session_id,
+            user_input="Audita la cadena durable de Aurora",
+        )
+
+    assert calls == []
+    assert service.list_turns(session.session_id, limit=10) == ()
+
+
+def test_provider_requested_mission_without_request_id_fails_before_runner_invocation(
+    tmp_path: Path,
+):
+    service, _seen = _service(tmp_path)
+    session = service.create_session()
+    executed = []
+
+    class RequestsMissionProvider:
+        provider_id = "fake"
+
+        def generate(
+            self, *, messages, model, role, tools=(), metadata=None,
+            capability="reasoning", preferred_models=(),
+        ):
+            return DirectorModelResponse(
+                content="",
+                model=model or "fake/director",
+                provider="fake",
+                request_id="provider-request",
+                execution_id="provider-execution",
+                tool_calls=(
+                    DirectorToolCall(
+                        call_id="call-1",
+                        name="run_mission",
+                        arguments={"objective": "investigate"},
+                    ),
+                ) if role == "director_conversation" else (),
+            )
+
+    service.set_provider(RequestsMissionProvider())
+    service.mission_runner = lambda **kwargs: executed.append(kwargs)
+
+    with pytest.raises(DirectorConversationError, match="request_id is required"):
+        service.send_message(
+            session_id=session.session_id,
+            user_input="Hola Aurora",
+        )
+
+    assert executed == []
 
 
 def test_replay_recovers_a_durable_turn_left_without_an_assistant_response(tmp_path):

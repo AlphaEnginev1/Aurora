@@ -225,7 +225,7 @@ class DurableTaskStore:
             try:
                 db.execute("BEGIN IMMEDIATE")
                 existing_dependency_rows = db.execute(
-                    "SELECT task_id, phase, status FROM tasks WHERE mission_id = ?",
+                    "SELECT task_id, phase, status, result_json FROM tasks WHERE mission_id = ?",
                     (mission_id,),
                 ).fetchall()
                 existing_dependencies = {
@@ -247,6 +247,21 @@ class DurableTaskStore:
                         if dependency["status"] != "succeeded":
                             raise TaskStoreError(
                                 f"cross-phase dependency {dependency_id} must have succeeded"
+                            )
+                        raw_result = dependency["result_json"]
+                        if not isinstance(raw_result, str) or not raw_result.strip():
+                            raise TaskStoreError(
+                                f"cross-phase dependency {dependency_id} has no durable result receipt"
+                            )
+                        try:
+                            parsed_result = json.loads(raw_result)
+                        except (TypeError, json.JSONDecodeError) as exc:
+                            raise TaskStoreError(
+                                f"cross-phase dependency {dependency_id} has an invalid durable result receipt"
+                            ) from exc
+                        if not isinstance(parsed_result, dict) or not parsed_result:
+                            raise TaskStoreError(
+                                f"cross-phase dependency {dependency_id} has no structured durable result receipt"
                             )
                 for task in tasks:
                     db.execute(

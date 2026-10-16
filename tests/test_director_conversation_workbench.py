@@ -61,6 +61,7 @@ def test_conversation_can_execute_governed_mission(tmp_path: Path):
     response = service.send_message(
         session_id=session.session_id,
         user_input="Audita el proyecto y haz el trabajo necesario.",
+        request_id="workbench-governed-mission-001",
     )
 
     assert executed == ["Inspect the project"]
@@ -414,6 +415,7 @@ def test_conversation_executes_native_explicit_readonly_tasks_and_returns_durabl
     response = service.send_message(
         session_id=session.session_id,
         user_input="Ejecuta la misión gobernada de validación de solo lectura.",
+        request_id="workbench-explicit-readonly-mission-001",
     )
 
     assert captured["objective"] == "Validación Durable de Aurora"
@@ -582,6 +584,7 @@ def test_explicit_mission_request_cannot_be_replaced_by_direct_workbench_call(tm
     response = service.send_message(
         session_id=session.session_id,
         user_input=user_input,
+        request_id="workbench-misrouted-mission-001",
     )
 
     assert executed == [user_input]
@@ -658,6 +661,7 @@ def test_multiple_mission_calls_in_one_turn_keep_distinct_order_ids_and_shared_c
     response = service.send_message(
         session_id=session.session_id,
         user_input="Plan and execute two missions for Alpha and Beta.",
+        request_id="workbench-multi-mission-001",
     )
 
     assert response.state == "completed"

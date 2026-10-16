@@ -939,6 +939,7 @@ def build_director_runtime(*, inference_policy_path: str | Path, autonomy_policy
             return exc.result
 
     conversation_service.mission_runner = run_durable_conversation_mission
+    conversation_service.mission_status_reader = runtime.durable_mission_snapshot
     runtime.autonomy_controllers = build_autonomy_runtime_bindings(
         director_service=service,
         router=service.planner.router,

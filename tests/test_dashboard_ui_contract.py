@@ -72,6 +72,11 @@ def test_dashboard_ui_assets_are_present():
     assert "setView" in js
     assert "renderHealth" in js
     assert "Incident Detail" in js
+    # Conversation completion and durable mission completion are distinct.
+    # A timed-out but accepted mission must keep the stable request ID so replay
+    # can refresh its receipt without creating a duplicate order.
+    assert 'data.execution_status === "running"' in js
+    assert "executionStillRunning" in js
 
 
 def test_dashboard_ui_uses_gateway_endpoints_only():

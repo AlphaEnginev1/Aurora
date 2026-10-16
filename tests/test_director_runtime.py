@@ -745,6 +745,65 @@ def test_conversation_mission_evidence_uses_final_director_status_after_recovery
     assert any(event.event_type == "mission_succeeded" for event in store.events(submission.mission_id))
 
 
+def test_director_rejects_replan_dependency_on_succeeded_task_without_receipt(
+    tmp_path: Path,
+):
+    runtime, store, planner, _engine = make_runtime(tmp_path)
+    original_review = planner.review
+
+    def review_with_prior_dependency(**kwargs):
+        review = original_review(**kwargs)
+        if review.decision == "continue":
+            return DirectorReview(
+                decision="continue",
+                rationale="Validate the result from the earlier phase.",
+                tasks=(
+                    DelegatedTask(
+                        "validate",
+                        "validator",
+                        "validate prior evidence",
+                        depends_on=("collect",),
+                    ),
+                ),
+                model=review.model,
+                considered_alternatives=review.considered_alternatives,
+            )
+        return review
+
+    planner.review = review_with_prior_dependency
+    original_complete = store.complete
+
+    def complete_without_collect_receipt(mission_id, task_id, **kwargs):
+        if task_id == "collect" and kwargs.get("status") == "succeeded":
+            kwargs["result"] = None
+        return original_complete(mission_id, task_id, **kwargs)
+
+    store.complete = complete_without_collect_receipt
+    submission = runtime.submit_mission(
+        objective="adapt this mission using prior evidence",
+        mission_id="mission-replan-missing-prior-receipt",
+        correlation_id="corr-replan-missing-prior-receipt",
+    )
+
+    result = runtime.run_until_terminal(submission)
+
+    assert result.status is TaskStatus.BLOCKED
+    assert store.get(submission.mission_id, "collect").status == "succeeded"
+    assert store.get(submission.mission_id, "collect").result is None
+    assert store.get(submission.mission_id, "r1_validate") is None
+    events = store.events(submission.mission_id)
+    rejection = next(
+        event for event in events
+        if event.event_type == "director_replan_rejected"
+    )
+    assert "without verified durable result evidence" in rejection.payload["reason"]
+    recorded_review = next(
+        event for event in events if event.event_type == "director_review"
+    )
+    assert recorded_review.payload["decision"] == "blocked"
+    assert any(event.event_type == "mission_blocked" for event in events)
+
+
 def test_runtime_retries_transient_replan_enqueue_failure_from_durable_receipt(
     tmp_path: Path,
 ):
@@ -816,6 +875,158 @@ def test_runtime_retries_transient_replan_enqueue_failure_from_durable_receipt(
         item.task.task_id == "r1_validate"
         for item in result.tasks
     ) == 1
+
+
+def test_durable_mission_snapshot_reads_current_state_without_running_workers(
+    tmp_path: Path,
+):
+    runtime, store, planner, engine = make_runtime(tmp_path)
+    submission = runtime.submit_mission(
+        objective="inspect current durable status",
+        mission_id="mission-durable-status-snapshot",
+        correlation_id="corr-durable-status-snapshot",
+    )
+
+    running = runtime.durable_mission_snapshot(submission.mission_id)
+    assert running is not None
+    assert running.status is TaskStatus.RUNNING
+    assert running.submission.mission_id == submission.mission_id
+    assert [item.task.task_id for item in running.tasks] == ["collect", "review"]
+    assert engine.orchestration.calls == []
+
+    terminal = runtime.run_until_terminal(submission)
+    assert terminal.status is TaskStatus.SUCCEEDED
+    refreshed = runtime.durable_mission_snapshot(submission.mission_id)
+    assert refreshed is not None
+    assert refreshed.status is TaskStatus.SUCCEEDED
+    assert refreshed.submission.mission_id == submission.mission_id
+    assert len(engine.orchestration.calls) == 2
+    assert planner.calls and len(planner.calls) == 1
+
+
+def test_project_scoped_order_runs_end_to_end_through_replan_receipt_and_restart(
+    tmp_path: Path,
+):
+    registry = ProjectRegistry({
+        "project-a": ProjectSpec(
+            project_id="project-a",
+            name="Project A",
+            objective="Keep this mission bound to one project",
+            status=ProjectStatus.ACTIVE,
+            repository="org/project-a",
+            workspace="/workspace/project-a",
+            architecture_ref="docs/architecture.md",
+            current_state="authoritative project state",
+        )
+    })
+    runtime1, store, planner1, engine1 = make_runtime(
+        tmp_path, max_continue_reviews=1, project_registry=registry
+    )
+    original_review = planner1.review
+
+    def review_using_prior_phase_evidence(**kwargs):
+        decision = original_review(**kwargs)
+        if decision.decision == "continue":
+            return DirectorReview(
+                decision="continue",
+                rationale="Use the verified result from phase zero for one final validation.",
+                tasks=(
+                    DelegatedTask(
+                        "validate",
+                        "validator",
+                        "validate the collected project evidence",
+                        depends_on=("collect",),
+                    ),
+                ),
+                model=decision.model,
+                considered_alternatives=decision.considered_alternatives,
+            )
+        return decision
+
+    planner1.review = review_using_prior_phase_evidence
+    submission = runtime1.submit_mission(
+        objective="adapt this project mission through verified phase evidence",
+        mission_id="mission-five-point-flow-project-recovery",
+        correlation_id="corr-five-point-flow-project-recovery",
+        project_id="project-a",
+    )
+
+    initial = store.events(submission.mission_id)
+    assert sum(event.event_type == "mission_submitted" for event in initial) == 1
+    assert all(item.task.project_id == "project-a" for item in store.list_tasks(submission.mission_id))
+    assert all(
+        item.task.project_id == "project-a"
+        for item in runtime1.durable_mission_snapshot(submission.mission_id).tasks
+    )
+
+    original_append = runtime1.memory.append
+
+    def crash_after_review_receipt(*args, **kwargs):
+        if kwargs.get("kind") == "review":
+            raise SystemExit("simulated restart after durable phase decision")
+        return original_append(*args, **kwargs)
+
+    runtime1.memory.append = crash_after_review_receipt
+    with pytest.raises(SystemExit, match="simulated restart"):
+        runtime1.run_until_terminal(submission)
+
+    crashed_events = store.events(submission.mission_id)
+    first_receipt = next(
+        event for event in crashed_events if event.event_type == "director_review"
+    )
+    assert first_receipt.payload["decision"] == "continue"
+    assert first_receipt.payload["decision_receipt_version"] == 1
+    assert first_receipt.project_id == "project-a"
+    assert first_receipt.correlation_id == "corr-five-point-flow-project-recovery"
+    assert [item["depends_on"] for item in first_receipt.payload["follow_up_tasks"]] == [
+        ["collect"]
+    ]
+    assert not any(item.phase == 1 for item in store.list_tasks(submission.mission_id))
+
+    runtime2, store2, planner2, engine2 = make_runtime(
+        tmp_path, max_continue_reviews=0, project_registry=registry
+    )
+    completed = runtime2.run_until_terminal(submission)
+
+    assert completed.status is TaskStatus.SUCCEEDED
+    assert [item.task.task_id for item in completed.tasks] == [
+        "collect", "review", "r1_validate"
+    ]
+    assert all(item.task.project_id == "project-a" for item in completed.tasks)
+    assert all(item.status is TaskStatus.SUCCEEDED for item in completed.tasks)
+    assert all(
+        isinstance(item.durable_result, dict)
+        and item.durable_result.get("identity_version") == 1
+        and item.durable_result.get("mission_id") == submission.mission_id
+        and item.durable_result.get("project_id") == "project-a"
+        and item.durable_result.get("correlation_id") == "corr-five-point-flow-project-recovery"
+        and DirectorRuntime._verified_result_payload(item.durable_result)[0]
+        for item in completed.tasks
+    )
+
+    events = store2.events(submission.mission_id)
+    assert sum(event.event_type == "mission_submitted" for event in events) == 1
+    assert sum(
+        event.event_type == "director_review" and event.payload.get("round") == 1
+        for event in events
+    ) == 1
+    assert sum(
+        event.event_type == "director_review_recovered" and event.payload.get("round") == 1
+        for event in events
+    ) == 1
+    assert sum(
+        event.event_type == "mission_reopened" and event.payload.get("round") == 1
+        for event in events
+    ) == 1
+    assert sum(event.event_type == "mission_succeeded" for event in events) == 1
+    assert all(event.project_id == "project-a" for event in events)
+    assert all(
+        event.correlation_id == "corr-five-point-flow-project-recovery"
+        for event in events
+    )
+    assert [call["task_id"] for call in engine2.orchestration.calls] == ["r1_validate"]
+    assert len(engine1.orchestration.calls) == 2
+    assert planner2.review_calls == 1
 
 
 def test_runtime_replays_durable_continue_review_after_restart_without_replanning(tmp_path: Path):

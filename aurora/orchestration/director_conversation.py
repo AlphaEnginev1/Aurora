@@ -70,6 +70,7 @@ class DirectorConversationResponse:
     provider: str
     execution_id: str
     presentation_hints: Mapping[str, Any]
+    execution_status: str | None = None
 
 
 class DirectorConversationService:
@@ -179,6 +180,9 @@ Keep responses useful and concise unless the human asks for depth."""
         self.provider: DirectorProvider = provider or InferenceDirectorProvider(router)
         self.mission_runner = mission_runner
         self.workbench = workbench
+        # Optional durable status reader used to refresh an accepted mission when
+        # the browser resends the same stable request_id after a wait timeout.
+        self.mission_status_reader: Callable[[str], Any] | None = None
         self._session_locks_guard = RLock()
         self._session_locks: dict[str, RLock] = {}
         self.router.configure_context_gate(bootstrap.context_gate, enforce=True)
@@ -306,7 +310,127 @@ Keep responses useful and concise unless the human asks for depth."""
                 "voice_requested": False,
                 "idempotent_replay": True,
             },
+            execution_status=DirectorConversationService._execution_status_from_content(
+                turn.content
+            ),
         )
+
+    _EXECUTION_EVIDENCE_MARKER = "EVIDENCIA_AUTORITATIVA_DE_EJECUCION (JSON):"
+
+    @classmethod
+    def _execution_evidence_payload(
+        cls, content: str
+    ) -> tuple[int, list[dict[str, Any]]] | None:
+        marker_index = content.rfind(cls._EXECUTION_EVIDENCE_MARKER)
+        if marker_index < 0:
+            return None
+        encoded = content[marker_index + len(cls._EXECUTION_EVIDENCE_MARKER):].strip()
+        try:
+            payload = json.loads(encoded)
+        except (TypeError, json.JSONDecodeError):
+            return None
+        if not isinstance(payload, list):
+            return None
+        return marker_index, [
+            dict(item) for item in payload if isinstance(item, Mapping)
+        ]
+
+    @classmethod
+    def _execution_status_from_content(cls, content: str) -> str | None:
+        parsed = cls._execution_evidence_payload(content)
+        if parsed is None:
+            return None
+        _marker_index, results = parsed
+        missions = [
+            item for item in results
+            if item.get("accepted") is True
+            and isinstance(item.get("mission_id"), str)
+        ]
+        if not missions:
+            return None
+        statuses = [
+            "running" if item.get("wait_timed_out") is True
+            else str(item.get("status") or "unknown").strip().lower()
+            for item in missions
+        ]
+        if "running" in statuses:
+            return "running"
+        if "failed" in statuses:
+            return "failed"
+        if "blocked" in statuses:
+            return "blocked"
+        if all(status in {"succeeded", "complete", "completed"} for status in statuses):
+            return "succeeded"
+        return statuses[0] if len(set(statuses)) == 1 else "unknown"
+
+    def _refresh_saved_mission_response(
+        self,
+        session: ConversationSession,
+        turn: ConversationTurn,
+    ) -> DirectorConversationResponse:
+        """Refresh a cached running mission receipt without re-running its turn."""
+        saved = self._response_from_saved_turn(session, turn)
+        if saved.execution_status != "running" or self.mission_status_reader is None:
+            return saved
+        parsed = self._execution_evidence_payload(turn.content)
+        if parsed is None:
+            return saved
+        _marker_index, evidence = parsed
+        changed = False
+        for index, item in enumerate(evidence):
+            if (
+                item.get("accepted") is not True
+                or item.get("status") != "running"
+                or not isinstance(item.get("mission_id"), str)
+                or not item["mission_id"].strip()
+            ):
+                continue
+            try:
+                current = self.mission_status_reader(item["mission_id"])
+            except Exception:
+                # An unavailable status read is not a reason to replay execution.
+                continue
+            if current is None:
+                continue
+            refreshed = self._mission_evidence(current)
+            if refreshed != item:
+                evidence[index] = refreshed
+                changed = True
+        if not changed:
+            return saved
+
+        # Prefer deterministic status text over an old model summary when the
+        # same request_id is replayed. The structured receipt remains authoritative.
+        content = (
+            "Estado actualizado de la orden durable de Aurora.\n\n"
+            + self._EXECUTION_EVIDENCE_MARKER
+            + "\n"
+            + json.dumps(evidence, ensure_ascii=False, sort_keys=True)
+        )
+        self._update_saved_turn_content(
+            turn.session_id, turn.turn_id, content
+        )
+        updated = self._get_turn_by_id(turn.session_id, turn.turn_id)
+        return (
+            self._response_from_saved_turn(session, updated)
+            if updated is not None else saved
+        )
+
+    def _update_saved_turn_content(
+        self,
+        session_id: str,
+        turn_id: str,
+        content: str,
+    ) -> None:
+        with self._connect() as db:
+            db.execute(
+                """
+                UPDATE conversation_turns
+                SET content = ?
+                WHERE session_id = ? AND turn_id = ? AND state = 'completed'
+                """,
+                (content, session_id, turn_id),
+            )
 
     @staticmethod
     def _in_progress_response(
@@ -345,6 +469,7 @@ Keep responses useful and concise unless the human asks for depth."""
                 "voice_requested": False,
                 "idempotent_replay": True,
             },
+            execution_status="running",
         )
 
     def send_message(
@@ -376,6 +501,15 @@ Keep responses useful and concise unless the human asks for depth."""
         prompt = user_input.strip()
         if not prompt:
             raise DirectorConversationError("user_input is empty")
+        if (
+            request_id is None
+            and self.mission_runner is not None
+            and self._requests_mission_execution(prompt)
+        ):
+            raise DirectorConversationError(
+                "request_id is required for durable mission execution so retries "
+                "can replay the accepted order without creating a duplicate"
+            )
         if request_id is not None:
             if not isinstance(request_id, str):
                 raise DirectorConversationError("request_id must be a string or null")
@@ -403,7 +537,9 @@ Keep responses useful and concise unless the human asks for depth."""
                     session_id, f"{turn_id}-response"
                 )
                 if existing_response is not None and existing_response.state == "completed":
-                    return self._response_from_saved_turn(session, existing_response)
+                    return self._refresh_saved_mission_response(
+                        session, existing_response
+                    )
                 existing_error = self._get_turn_by_id(
                     session_id, f"{turn_id}-error"
                 )
@@ -487,6 +623,17 @@ Keep responses useful and concise unless the human asks for depth."""
                 capability=str(policy["default_capability"]),
                 preferred_models=self._preferred_models(policy),
             )
+            if (
+                request_id is None
+                and self.mission_runner is not None
+                and any(
+                    getattr(call, "name", None) == self._RUN_MISSION_TOOL.name
+                    for call in (getattr(response, "tool_calls", ()) or ())
+                )
+            ):
+                raise DirectorConversationError(
+                    "request_id is required before executing a provider-requested mission"
+                )
             if getattr(response, "tool_calls", ()) or (
                 self.mission_runner is not None
                 and self._requests_mission_execution(prompt)
@@ -579,6 +726,7 @@ Keep responses useful and concise unless the human asks for depth."""
                 "text_available": True,
                 "voice_requested": False,
             },
+            execution_status=self._execution_status_from_content(response.content),
         )
 
 
@@ -938,15 +1086,34 @@ Keep responses useful and concise unless the human asks for depth."""
             *provider_messages,
             {"role": "user", "content": evidence_content},
         ]
-        final_response = self._generate_provider(
-            messages=follow_up,
-            model=model,
-            role="director_conversation_result",
-            tools=(),
-            metadata=metadata,
-            capability=capability,
-            preferred_models=preferred_models,
-        )
+        try:
+            final_response = self._generate_provider(
+                messages=follow_up,
+                model=model,
+                role="director_conversation_result",
+                tools=(),
+                metadata=metadata,
+                capability=capability,
+                preferred_models=preferred_models,
+            )
+        except Exception as exc:
+            # Governed execution has already produced durable receipts. A second
+            # provider outage must not turn an accepted order into a failed
+            # conversation turn or hide the mission ID from the caller.
+            # Preserve the initial provider metadata only as provenance; the JSON
+            # execution evidence appended below remains the source of truth.
+            final_response = DirectorModelResponse(
+                content=(
+                    "La ejecución ya produjo recibos de Aurora, pero no se pudo "
+                    "generar el resumen conversacional. Consulta la evidencia "
+                    "autoritativa adjunta para conocer el estado real de la orden."
+                ),
+                model="aurora/durable-receipt-fallback",
+                provider="aurora_runtime",
+                request_id=f"receipt-fallback-request-{conversation_turn_id or uuid4().hex}",
+                execution_id=f"receipt-fallback-execution-{conversation_turn_id or uuid4().hex}",
+                tool_calls=(),
+            )
         # Keep the exact execution receipt in the persisted assistant turn. The
         # summarizing model may explain the result, but cannot omit the authoritative
         # mission ID, task outcomes, errors, planning provenance, or event evidence.

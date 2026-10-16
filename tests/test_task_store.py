@@ -260,6 +260,44 @@ def test_later_phase_can_depend_on_succeeded_prior_phase_task(tmp_path: Path):
     assert second.task.depends_on == ("collect",)
 
 
+def test_later_phase_rejects_succeeded_prior_task_without_result_receipt(
+    tmp_path: Path,
+):
+    store = DurableTaskStore(tmp_path / "cross-phase-missing-result.db")
+    store.enqueue(
+        "mission-cross-phase-missing-result",
+        [DelegatedTask("collect", "researcher", "collect evidence")],
+        phase=0,
+    )
+    first = store.claim_next("mission-cross-phase-missing-result", "worker-a")
+    assert first is not None
+    store.complete(
+        "mission-cross-phase-missing-result",
+        "collect",
+        status="succeeded",
+        worker_id="worker-a",
+        claim_token=first.claim_token,
+    )
+
+    with pytest.raises(TaskStoreError, match="no durable result receipt"):
+        store.enqueue(
+            "mission-cross-phase-missing-result",
+            [
+                DelegatedTask(
+                    "r1_validate",
+                    "validator",
+                    "validate prior evidence",
+                    depends_on=("collect",),
+                )
+            ],
+            phase=1,
+        )
+
+    assert [item.task.task_id for item in store.list_tasks(
+        "mission-cross-phase-missing-result"
+    )] == ["collect"]
+
+
 def test_later_phase_rejects_non_succeeded_prior_dependency(tmp_path: Path):
     store = DurableTaskStore(tmp_path / "cross-phase-failed.db")
     store.enqueue(
