@@ -629,11 +629,18 @@ Keep responses useful and concise unless the human asks for depth."""
         informational_prefixes = (
             "como puedo ",
             "como se ",
+            "como compruebo ",
+            "como verifico ",
+            "como inspecciono ",
             "que es ",
             "explicame ",
             "how do i ",
             "how can i ",
+            "how do i check ",
+            "how do i verify ",
+            "how to ",
             "what is ",
+            "what should i do ",
             "explain how ",
         )
         if normalized.startswith(informational_prefixes):
@@ -675,10 +682,15 @@ Keep responses useful and concise unless the human asks for depth."""
             "corrig", "arregl", "solucion", "implement", "modific", "crea ",
             "constru", "anad", "actualiz", "escrib", "refactor", "desarroll",
             "repar", "prueb", "test ", "audita", "investig", "analiz", "revisa",
-            "completa", "continua con", "sigue con",
+            "comprueb", "verific", "valid", "demuestr", "inspeccion", "examin",
+            "diagnostic", "depur", "evalua", "confirma", "continua", "sigue con",
+            "completa", "deploy", "configur", "instala", "migrat", "prueba",
             "fix ", "repair", "implement", "modify", "create ", "build ",
             "add ", "update ", "write ", "refactor", "develop", "test ",
-            "audit ", "investigate", "analyz", "review ", "continue with",
+            "audit ", "investigate", "analyz", "review ", "verify", "validat",
+            "demonstrat", "inspect", "examine", "diagnos", "debug", "troubleshoot",
+            "ensure", "check ", "confirm", "prove", "assess", "deploy", "configure",
+            "install", "migrate", "continue with",
         )
         has_explicit_work = any(marker in normalized for marker in explicit_work_verbs)
 
@@ -688,7 +700,11 @@ Keep responses useful and concise unless the human asks for depth."""
             "directamente" in normalized or "directly" in normalized
         ) and any(
             marker in normalized
-            for marker in ("comprueb", "lee ", "abre ", "lista ", "consulta ", "read ", "check ", "open ", "list ")
+            for marker in (
+                "comprueb", "verific", "inspeccion", "lee ", "abre ", "lista ",
+                "consulta ", "read ", "check ", "verify ", "inspect ", "examine ",
+                "open ", "list ", "confirm ",
+            )
         )
         if direct_read and not any(
             marker in normalized
