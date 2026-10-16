@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import ast
 from dataclasses import dataclass
+import inspect
 import json
 import re
 from typing import Any, Mapping, Protocol
@@ -111,11 +112,20 @@ class InferenceDirectorProvider:
         preferred = request_metadata.get("preferred_models") or ()
         if not isinstance(preferred, (list, tuple)) or not all(isinstance(item, str) for item in preferred):
             preferred = ()
-        response: InferenceResponse = self._router.generate(
-            request,
-            capability=routing_capability,
-            preferred_models=tuple(preferred),
+        try:
+            router_parameters = inspect.signature(self._router.generate).parameters
+        except (TypeError, ValueError):
+            router_parameters = {}
+        accepts_extra = any(
+            item.kind is inspect.Parameter.VAR_KEYWORD
+            for item in router_parameters.values()
         )
+        routing_kwargs: dict[str, Any] = {}
+        if "capability" in router_parameters or accepts_extra or not router_parameters:
+            routing_kwargs["capability"] = routing_capability
+        if preferred and ("preferred_models" in router_parameters or accepts_extra):
+            routing_kwargs["preferred_models"] = tuple(preferred)
+        response: InferenceResponse = self._router.generate(request, **routing_kwargs)
         tool_calls = self._parse_tool_calls(response.content, tools)
         return DirectorModelResponse(
             content=response.content if not tool_calls else "",
