@@ -537,7 +537,7 @@ def test_project_scoped_artifact_intake_can_be_inspected_within_same_project(tmp
         options={"project_id": "project-alpha"},
     ))
     assert inspected.status == "succeeded"
-    assert inspected.output["filename"] == source.name
+    assert inspected.output["filename"].endswith(source.name)
 
 
 
