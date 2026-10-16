@@ -1224,6 +1224,7 @@ Keep responses useful and concise unless the human asks for depth."""
             state="closed",
             bootstrap_id=session.bootstrap_id,
             context_manifest_id=session.context_manifest_id,
+            project_id=session.project_id,
         )
 
     def _validate_project_id(self, project_id: str | None) -> str | None:
