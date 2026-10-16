@@ -816,18 +816,19 @@ Keep responses useful and concise unless the human asks for depth."""
 
         if len(calls) > 4:
             raise DirectorConversationError("Director requested too many conversation tools")
-        for call in calls:
+        for call_index, call in enumerate(calls):
             arguments = call.arguments if isinstance(call.arguments, dict) else {}
             if call.name == self._RUN_MISSION_TOOL.name:
                 if self.mission_runner is None:
                     raise DirectorConversationError("run_mission is unavailable")
                 objective, explicit_tasks = self._normalize_mission_tool_arguments(arguments)
                 try:
-                    # Stable across provider retries and process recovery, while
-                    # different objectives in the same turn remain distinct orders.
-                    call_key = hashlib.sha256(objective.encode("utf-8")).hexdigest()[:16]
+                    # A durable turn slot is stable even if a provider retry
+                    # regenerates different tool-call IDs or arguments. Different
+                    # mission calls in one turn keep distinct slots; changed content
+                    # at an already-used slot fails closed at DurableDirectorService.
                     mission_id = (
-                        f"mission-conversation-{conversation_turn_id}-{call_key}"
+                        f"mission-conversation-{conversation_turn_id}-{call_index}"
                         if conversation_turn_id else None
                     )
                     if explicit_tasks is None:
