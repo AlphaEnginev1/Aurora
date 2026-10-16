@@ -960,10 +960,10 @@ Keep responses useful and concise unless the human asks for depth."""
                     "generar el resumen conversacional. Consulta la evidencia "
                     "autoritativa adjunta para conocer el estado real de la orden."
                 ),
-                model=str(getattr(response, "model", "unknown")),
-                provider=str(getattr(response, "provider", "unknown")),
-                request_id=str(getattr(response, "request_id", "unknown")),
-                execution_id=str(getattr(response, "execution_id", "unknown")),
+                model="aurora/durable-receipt-fallback",
+                provider="aurora_runtime",
+                request_id=f"receipt-fallback-{conversation_turn_id or uuid4().hex}",
+                execution_id=f"receipt-fallback-{conversation_turn_id or uuid4().hex}",
                 tool_calls=(),
             )
         # Keep the exact execution receipt in the persisted assistant turn. The
