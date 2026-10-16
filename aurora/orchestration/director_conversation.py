@@ -1163,9 +1163,13 @@ Keep responses useful and concise unless the human asks for depth."""
             execution = getattr(capability_result, "execution", capability_result)
             output = getattr(execution, "output", None)
             model_result = getattr(item, "model_result", None)
+            model_response = (
+                getattr(model_result, "response", None)
+                if model_result is not None
+                else None
+            )
             durable_result = getattr(item, "durable_result", None)
-            if output is None and model_result is not None:
-                model_response = getattr(model_result, "response", None)
+            if output is None and model_response is not None:
                 output = getattr(model_response, "content", None)
 
             # DurableRuntime reconstructs completed tasks from SQLite; typed
@@ -1202,6 +1206,37 @@ Keep responses useful and concise unless the human asks for depth."""
                 receipt_id = receipt_id or durable_result.get("receipt_id")
                 provenance = provenance or durable_result.get("provenance")
                 correlation_id = correlation_id or durable_result.get("correlation_id")
+            execution_model = getattr(model_response, "model", None)
+            execution_provider = getattr(model_response, "provider", None)
+            request_id = getattr(model_response, "request_id", None)
+            execution_id = getattr(model_response, "execution_id", None)
+            requested_model = getattr(model_response, "requested_model", None)
+            selected_model = getattr(model_response, "selected_model", None)
+            reported_model = getattr(model_response, "reported_model", None)
+            routing = None
+            result_type = None
+            result_truncated = None
+            if isinstance(durable_result, Mapping):
+                execution_model = execution_model or durable_result.get("model")
+                execution_provider = execution_provider or durable_result.get("provider")
+                request_id = request_id or durable_result.get("request_id")
+                execution_id = execution_id or durable_result.get("execution_id")
+                requested_model = requested_model or durable_result.get("requested_model")
+                selected_model = selected_model or durable_result.get("selected_model")
+                reported_model = reported_model or durable_result.get("reported_model")
+                routing = durable_result.get("routing")
+                result_type = durable_result.get("type")
+                result_truncated = durable_result.get("truncated")
+            if routing is None and model_response is not None:
+                routing = {
+                    "selected_model": selected_model or execution_model,
+                    "score": getattr(model_response, "routing_score", None),
+                    "factors": getattr(model_response, "routing_factors", {}),
+                    "candidates": [
+                        {"model": candidate, "score": score}
+                        for candidate, score in getattr(model_response, "routing_candidates", ())
+                    ],
+                }
             tasks.append({
                 "task_id": getattr(task, "task_id", None),
                 "role": getattr(task, "role", None),
@@ -1209,6 +1244,16 @@ Keep responses useful and concise unless the human asks for depth."""
                 "status": str(value),
                 "error": getattr(item, "error", None),
                 "capability": getattr(task, "capability", None),
+                "result_type": result_type,
+                "model": execution_model,
+                "provider": execution_provider,
+                "request_id": request_id,
+                "execution_id": execution_id,
+                "requested_model": requested_model,
+                "selected_model": selected_model,
+                "reported_model": reported_model,
+                "routing": DirectorConversationService._bound_evidence_value(routing, max_chars=2500),
+                "result_truncated": result_truncated,
                 "depends_on": list(getattr(task, "depends_on", ()) or ()),
                 "result": DirectorConversationService._bound_evidence_value(output),
                 "artifact_id": artifact_id,
