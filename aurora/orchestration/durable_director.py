@@ -213,6 +213,7 @@ class DurableDirectorService:
                 validated = tuple(replace(task, project_id=project_id) for task in validated)
             initial_events.append({
                 "event_type": "mission_submitted",
+                "project_id": project_id,
                 "correlation_id": correlation_id,
                 "payload": {
                     "objective": plan.objective,
