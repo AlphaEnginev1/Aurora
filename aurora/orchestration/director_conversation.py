@@ -448,58 +448,60 @@ Keep responses useful and concise unless the human asks for depth."""
             ],
         ]
 
+        preferred_models = self._preferred_models(policy)
         request_metadata = {
             "role": "director_conversation",
             "conversation_session_id": session_id,
             "conversation_turn_id": turn_id,
             "correlation_id": correlation_id,
             "task_type": "conversation",
-            "allowed_models": self._preferred_models(policy),
+            "allowed_models": preferred_models,
+            "preferred_models": preferred_models,
+            "routing_capability": str(policy["default_capability"]),
         }
         project_scope = self._project_id_from_prompt(prompt)
         if project_scope is not None:
             request_metadata["project_id"] = project_scope
-        request = InferenceRequest(
-            messages=messages,
-            model=model,
-            metadata=request_metadata,
-        )
+        provider_messages = [
+            {"role": "system", "content": self._system_prompt()},
+            *bootstrap_state.messages,
+            *[
+                {"role": item.role, "content": item.content}
+                for item in history
+                if item.state == "completed" and item.role in {"user", "assistant"}
+            ],
+        ]
 
         try:
-            if isinstance(self.provider, InferenceDirectorProvider):
-                response = self.router.generate(
-                    request,
-                    capability=str(policy["default_capability"]),
-                    preferred_models=self._preferred_models(policy),
-                )
-            else:
-                provider_messages = [
-                    {"role": "system", "content": self._system_prompt()},
-                    *bootstrap_state.messages,
-                    *[
-                        {"role": item.role, "content": item.content}
-                        for item in history
-                        if item.state == "completed" and item.role in {"user", "assistant"}
-                    ],
-                ]
-                response = self.provider.generate(
-                    messages=provider_messages,
+            provider_kwargs: dict[str, Any] = {
+                "messages": provider_messages,
+                "model": model,
+                "role": "director_conversation",
+                "tools": self._conversation_tools(user_input=prompt),
+            }
+            try:
+                provider_parameters = inspect.signature(self.provider.generate).parameters
+            except (TypeError, ValueError):
+                provider_parameters = {}
+            accepts_extra = any(
+                item.kind is inspect.Parameter.VAR_KEYWORD
+                for item in provider_parameters.values()
+            )
+            if "metadata" in provider_parameters or accepts_extra:
+                provider_kwargs["metadata"] = request_metadata
+            response = self.provider.generate(**provider_kwargs)
+            if getattr(response, "tool_calls", ()) or (
+                self.mission_runner is not None
+                and self._requests_mission_execution(prompt)
+            ):
+                response = self._execute_conversation_tools(
+                    response=response,
                     model=model,
-                    role="director_conversation",
-                    tools=self._conversation_tools(user_input=prompt),
+                    provider_messages=provider_messages,
+                    user_input=prompt,
+                    conversation_turn_id=turn_id,
+                    correlation_id=correlation_id,
                 )
-                if getattr(response, "tool_calls", ()) or (
-                    self.mission_runner is not None
-                    and self._requests_mission_execution(prompt)
-                ):
-                    response = self._execute_conversation_tools(
-                        response=response,
-                        model=model,
-                        provider_messages=provider_messages,
-                        user_input=prompt,
-                        conversation_turn_id=turn_id,
-                        correlation_id=correlation_id,
-                    )
         except Exception as exc:
             self._insert_turn(
                 turn_id=f"{turn_id}-error",
