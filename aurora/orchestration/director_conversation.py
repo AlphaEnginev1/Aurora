@@ -910,13 +910,7 @@ Keep responses useful and concise unless the human asks for depth."""
                     )
                 project_id = project_id or prompt_project_id
                 try:
-                    normalized_objective = " ".join(
-                        character
-                        for character in unicodedata.normalize(
-                            "NFKD", objective.casefold()
-                        )
-                        if not unicodedata.combining(character)
-                    )
+                    normalized_objective = self._normalize_project_reference(objective)
                     normalized_objective = " ".join(normalized_objective.split())
                     mission_signature = json.dumps(
                         {
