@@ -151,11 +151,13 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 return
             if path.startswith("/api/conversation/") and path.endswith("/turns"):
                 session_id = unquote(path[len("/api/conversation/"):-len("/turns")].strip("/"))
+                project_id = parse_qs(parsed.query).get("project_id", [None])[0]
                 self._require_token()
                 self._json(
                     200,
                     self.conversation_api.get_turns(
                         session_id=session_id,
+                        project_id=project_id,
                         principal=self._principal(),
                     ),
                 )
