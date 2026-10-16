@@ -2656,10 +2656,18 @@ class DirectorRuntime:
                 }
             )
 
+        project_id = self._mission_project_id(mission_id)
+        correlation_id = self._mission_correlation_id(mission_id)
         self.event_bus.publish(
             mission_id=mission_id,
             event_type="director_review_started",
-            payload={"round": round_number, "worker_id": self.worker_id},
+            payload={
+                "round": round_number,
+                "worker_id": self.worker_id,
+                "project_id": project_id,
+            },
+            project_id=project_id,
+            correlation_id=correlation_id,
         )
         self._provider_failover_context = {
             "mission_id": mission_id,
@@ -2674,7 +2682,13 @@ class DirectorRuntime:
             self.event_bus.publish(
                 mission_id=mission_id,
                 event_type="director_review_failed",
-                payload={"round": round_number, "error": str(exc)},
+                payload={
+                    "round": round_number,
+                    "error": str(exc),
+                    "project_id": project_id,
+                },
+                project_id=project_id,
+                correlation_id=correlation_id,
             )
             if round_number >= self.max_review_rounds:
                 self._publish_terminal(
