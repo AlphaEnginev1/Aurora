@@ -677,3 +677,75 @@ def test_mission_evidence_trusts_terminal_director_success_after_replanning():
 
     assert [item["status"] for item in evidence["tasks"]] == ["failed", "succeeded"]
     assert evidence["status"] == "succeeded"
+
+
+
+def test_project_scoped_research_task_carries_registered_context_and_constraints(tmp_path):
+    registry = make_registry(tmp_path)
+
+    class CapturingResearchService:
+        def __init__(self):
+            self.requests = []
+
+        def discover(self, request):
+            self.requests.append(("discover", request))
+            return ("https://example.test/alpha",)
+
+        def retrieve_and_extract(self, request):
+            self.requests.append(("retrieve", request))
+            return (), ()
+
+    research = CapturingResearchService()
+    engine = TaskEngine(
+        CapturingOrchestration(),
+        tmp_path / "runtime",
+        project_registry=registry,
+        research_service=research,
+    )
+    task = DelegatedTask(
+        "research-alpha",
+        "researcher",
+        "Research the registered project's integration constraints",
+        capability="research",
+        project_id="project-alpha",
+    )
+    engine.execute_one(task, execution_scope="mission-alpha:research-alpha:attempt:1")
+
+    discovery_request = next(request for kind, request in research.requests if kind == "discover")
+    retrieval_request = next(request for kind, request in research.requests if kind == "retrieve")
+    for request in (discovery_request, retrieval_request):
+        assert "project-alpha" in request.objective
+        assert "AlphaEnginev1/alpha" in request.objective
+        assert "project_id=project-alpha" in request.constraints
+        assert "project_repository=AlphaEnginev1/alpha" in request.constraints
+
+
+def test_project_scoped_workbench_research_overrides_model_project_constraints(tmp_path):
+    registry = make_registry(tmp_path)
+    workbench = UniversalWorkbench(
+        repository_root=tmp_path / "repo",
+        runtime_root=tmp_path / "runtime",
+        gateway=None,
+        project_registry=registry,
+    )
+    request = WorkbenchRequest(
+        capability="workbench:research:discover",
+        actor="researcher",
+        mission_id="mission-alpha",
+        arguments=(json.dumps({
+            "objective": "Find integration guidance",
+            "constraints": ["project_id=project-beta", "project_repository=AlphaEnginev1/beta", "fresh_only=true"],
+            "max_sources": 5,
+        }),),
+        options={"project_id": "project-alpha"},
+    )
+
+    normalized = workbench._research_request(request)
+
+    assert "project-alpha" in normalized.objective
+    assert "AlphaEnginev1/alpha" in normalized.objective
+    assert "project_id=project-alpha" in normalized.constraints
+    assert "project_repository=AlphaEnginev1/alpha" in normalized.constraints
+    assert "project_id=project-beta" not in normalized.constraints
+    assert "project_repository=AlphaEnginev1/beta" not in normalized.constraints
+    assert "fresh_only=true" in normalized.constraints
