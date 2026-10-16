@@ -1108,12 +1108,27 @@ Keep responses useful and concise unless the human asks for depth."""
             *provider_messages,
             {"role": "user", "content": evidence_content},
         ]
-        final_response = self.provider.generate(
-            messages=follow_up,
-            model=model,
-            role="director_conversation_result",
-            tools=(),
+        final_kwargs: dict[str, Any] = {
+            "messages": follow_up,
+            "model": model,
+            "role": "director_conversation_result",
+            "tools": (),
+        }
+        try:
+            final_parameters = inspect.signature(self.provider.generate).parameters
+        except (TypeError, ValueError):
+            final_parameters = {}
+        final_accepts_extra = any(
+            item.kind is inspect.Parameter.VAR_KEYWORD
+            for item in final_parameters.values()
         )
+        if "metadata" in final_parameters or final_accepts_extra:
+            final_kwargs["metadata"] = {
+                "role": "director_conversation_result",
+                "task_type": "conversation_result",
+                **({"project_id": project_scope_id} if project_scope_id is not None else {}),
+            }
+        final_response = self.provider.generate(**final_kwargs)
         # Keep the exact execution receipt in the persisted assistant turn. The
         # summarizing model may explain the result, but cannot omit the authoritative
         # mission ID, task outcomes, errors, planning provenance, or event evidence.
