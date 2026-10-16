@@ -2258,11 +2258,29 @@ class DirectorRuntime:
             "mission_id": mission_id,
             "role": "director_reviewer",
         }
-        try:
-            review = self.director.planner.review(
-                objective=objective,
-                context=context,
+        mission_project_id = None
+        for mission_event in self.store.events(mission_id):
+            if mission_event.event_type == "mission_submitted":
+                candidate_project_id = (
+                    mission_event.project_id or mission_event.payload.get("project_id")
+                )
+                if isinstance(candidate_project_id, str) and candidate_project_id.strip():
+                    mission_project_id = candidate_project_id.strip()
+                break
+        if mission_project_id is None:
+            mission_project_id = next(
+                (
+                    stored.task.project_id
+                    for stored in self.store.list_tasks(mission_id)
+                    if stored.task.project_id
+                ),
+                None,
             )
+        review_kwargs = {"objective": objective, "context": context}
+        if mission_project_id is not None:
+            review_kwargs["project_id"] = mission_project_id
+        try:
+            review = self.director.planner.review(**review_kwargs)
         except (DirectorPlanError, RuntimeError, ValueError) as exc:
             self.event_bus.publish(
                 mission_id=mission_id,
