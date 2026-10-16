@@ -2218,10 +2218,10 @@ class DirectorRuntime:
                             project_id=project_id,
                             correlation_id=correlation_id,
                         )
-            if execution is not None and execution.payload.get("decision") not in {
-                final_decision,
-                decision,
-            }:
+            if (
+                execution is not None
+                and execution.payload.get("decision") != final_decision
+            ):
                 return self._review_recovery_rejected(
                     mission_id,
                     round_number,
