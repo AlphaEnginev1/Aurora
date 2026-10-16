@@ -536,6 +536,10 @@ class UniversalWorkbench:
                 parts = parts[1:]
         else:
             parts = [part for part in raw.split("/") if part]
+            # The GitHub connector can pass repo-scoped REST paths, not only
+            # owner/repo slugs. Strip the REST prefix before extracting owner.
+            if parts and parts[0].casefold() == "repos":
+                parts = parts[1:]
         if len(parts) < 2:
             return None
         owner, repository = parts[0], parts[1]
