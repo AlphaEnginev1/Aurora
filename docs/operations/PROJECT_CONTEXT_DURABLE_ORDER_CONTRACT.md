@@ -19,7 +19,7 @@ This contract covers the boundary between Director conversation, durable mission
 4. Review, replan rejection, follow-up execution, mission reopening and terminal events carry the durable project and correlation identities. Follow-up task rows and the `team.reconfigured`, `director_decision_executed` and `mission_reopened` lifecycle receipts are committed together in the task-store transaction.
 5. Automated regression coverage must prove a project-bound mission retains the same project through at least one complete replan and final result, both automatic-role conversion paths retain the project, and an invalid follow-up DAG is rejected before any follow-up row is inserted.
 
-This section covers normal-path replanning and validation. Recovery when a process stops after recording a review decision but before committing its follow-up task graph belongs to the separate Director-restart recovery increment; this contract does not claim that interruption case is closed.
+This section also covers restart recovery of durable review decisions. A recorded continue decision carries the exact validated, phase-qualified follow-up task graph and team reconfiguration receipt. After restart, Aurora replays that receipt without asking the model for a replacement decision; task rows and lifecycle receipts are committed atomically. Partial legacy writes are reconciled by comparing stored rows with the receipt and adding only missing lifecycle events. A mismatched or incomplete receipt fails closed instead of guessing or enqueuing a new plan.
 
 ## Recovery contract
 

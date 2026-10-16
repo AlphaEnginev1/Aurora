@@ -38,6 +38,12 @@ A new runtime/event consumer must resume from the durable event cursor after res
 
 Existing acquisition recovery/reconciliation must remain covered by its established tests. Block 6 does not reimplement transaction recovery.
 
+### RD-07 — Director decision receipt replay
+
+Simulate process termination after the durable `director_review` receipt is committed but before task enqueue or terminal publication. On restart, Aurora must replay the exact stored decision and phase-qualified graph without calling the planner for a replacement decision. A continuation must enqueue one copy of each follow-up task and commit `director_decision_executed`, `mission_reopened`, and the recovery receipt atomically with those rows. A terminal decision must create its missing execution/terminal markers once. Malformed receipts or mismatched task rows must block fail-closed.
+
+Also simulate termination after `director_review_started` but before `director_review` is written. The restarted Director must reuse that round number instead of consuming a review round that never produced a decision.
+
 ## Closure evidence
 
 Block 6 is VERIFIED on the canonical `main` line.
@@ -45,6 +51,8 @@ Block 6 is VERIFIED on the canonical `main` line.
 - CI 1396: Recovery Drills branch — `test` PASS, `e2e-network` PASS.
 - CI 1398: canonical `main` after merge — `test` PASS, `e2e-network` PASS.
 - RD-01..RD-05 are green.
+- RD-07 is green in PR #278 CI run 38918770649: 832 unit tests passed; 57 E2E passed and 4 skipped.
+- RD-07 verifies replay of a saved continuation, replay of a terminal decision, and reuse of an uncompleted review round after restart.
 - Existing acquisition transaction reconciliation remains covered by its established recovery tests.
 - No new recovery subsystem was introduced; the drills verify the already-integrated durable recovery mechanisms.
 - Recovery remains idempotent and claim-token safe, and restart evidence is preserved in the durable task/event state.
