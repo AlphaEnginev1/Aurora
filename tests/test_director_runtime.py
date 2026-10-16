@@ -635,8 +635,27 @@ def test_runtime_replays_durable_continue_review_after_restart_without_replannin
     assert sum(event.event_type == "mission_succeeded" for event in events) == 1
 
 
-def test_runtime_replays_terminal_review_after_restart_without_replanning(tmp_path: Path):
-    runtime, store, _planner, _engine = make_runtime(tmp_path)
+@pytest.mark.parametrize(
+    ("review_decision", "expected_status", "expected_terminal_event"),
+    [
+        ("complete", TaskStatus.SUCCEEDED, "mission_succeeded"),
+        ("blocked", TaskStatus.BLOCKED, "mission_blocked"),
+    ],
+)
+def test_runtime_replays_terminal_review_after_restart_without_replanning(
+    tmp_path: Path,
+    review_decision: str,
+    expected_status: TaskStatus,
+    expected_terminal_event: str,
+):
+    runtime, store, planner, _engine = make_runtime(tmp_path)
+    if review_decision == "blocked":
+        planner.review = lambda **_kwargs: DirectorReview(
+            decision="blocked",
+            rationale="The Director blocked this mission.",
+            tasks=(),
+            model="fake/model",
+        )
     submission = runtime.submit_mission(
         objective="finish after restart",
         mission_id="mission-replay-terminal-review",
@@ -655,6 +674,8 @@ def test_runtime_replays_terminal_review_after_restart_without_replanning(tmp_pa
 
     before_restart = store.events(submission.mission_id)
     assert sum(event.event_type == "director_review" for event in before_restart) == 1
+    receipt = next(event for event in before_restart if event.event_type == "director_review")
+    assert receipt.payload["decision"] == review_decision
     assert not any(
         event.event_type == "director_decision_executed"
         for event in before_restart
@@ -667,12 +688,12 @@ def test_runtime_replays_terminal_review_after_restart_without_replanning(tmp_pa
     runtime2, store2, planner2, _engine2 = make_runtime(tmp_path)
     result = runtime2.run_until_terminal(submission)
 
-    assert result.status is TaskStatus.SUCCEEDED
+    assert result.status is expected_status
     assert planner2.review_calls == 0
     events = store2.events(submission.mission_id)
     assert sum(event.event_type == "director_review" for event in events) == 1
     assert sum(event.event_type == "director_decision_executed" for event in events) == 1
-    assert sum(event.event_type == "mission_succeeded" for event in events) == 1
+    assert sum(event.event_type == expected_terminal_event for event in events) == 1
 
 
 def test_runtime_reuses_review_round_when_process_stops_before_decision_receipt(tmp_path: Path):
