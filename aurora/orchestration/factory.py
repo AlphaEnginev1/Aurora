@@ -638,6 +638,7 @@ def build_director_service(*, inference_policy_path: str | Path, autonomy_policy
     workbench=UniversalWorkbench(
         repository_root=Path(__file__).resolve().parents[2],
         runtime_root=root,
+        workspace_root=root,
         gateway=gateway,
         policy=policy,
         session_store=WorkSessionStore(root / "work-sessions.db"),
