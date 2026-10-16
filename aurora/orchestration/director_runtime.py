@@ -1965,12 +1965,324 @@ class DirectorRuntime:
             },
         )
 
+    def _review_receipt_tasks(
+        self,
+        mission_id: str,
+        round_number: int,
+        raw_tasks: object,
+    ) -> tuple[DelegatedTask, ...]:
+        """Parse the exact phase-qualified task graph persisted with a review decision."""
+        if not isinstance(raw_tasks, list) or not raw_tasks:
+            raise DirectorRuntimeError("durable continue decision has no follow-up task graph")
+        canonical_project_id = self._mission_project_id(mission_id)
+        tasks: list[DelegatedTask] = []
+        for item in raw_tasks:
+            if not isinstance(item, Mapping):
+                raise DirectorRuntimeError("durable follow-up task receipt is not an object")
+            task_id = item.get("task_id")
+            role = item.get("role")
+            objective = item.get("objective")
+            capability = item.get("capability")
+            args = item.get("args", [])
+            depends_on = item.get("depends_on", [])
+            skills = item.get("skills", [])
+            project_id = item.get("project_id")
+            if (
+                not isinstance(task_id, str)
+                or not task_id.startswith(f"r{round_number}_")
+                or not isinstance(role, str)
+                or not role.strip()
+                or not isinstance(objective, str)
+                or not objective.strip()
+                or (capability is not None and not isinstance(capability, str))
+                or not isinstance(args, list)
+                or not all(isinstance(value, str) for value in args)
+                or not isinstance(depends_on, list)
+                or not all(isinstance(value, str) for value in depends_on)
+                or not isinstance(skills, list)
+                or not all(isinstance(value, str) for value in skills)
+                or (project_id is not None and not isinstance(project_id, str))
+            ):
+                raise DirectorRuntimeError("durable follow-up task receipt has invalid fields")
+            if project_id != canonical_project_id:
+                raise DirectorRuntimeError(
+                    f"durable follow-up task {task_id} changed canonical project_id "
+                    f"from {canonical_project_id!r} to {project_id!r}"
+                )
+            tasks.append(
+                DelegatedTask(
+                    task_id=task_id,
+                    role=role,
+                    objective=objective,
+                    capability=capability,
+                    args=tuple(args),
+                    depends_on=tuple(depends_on),
+                    skills=tuple(skills),
+                    project_id=project_id,
+                )
+            )
+        if len({task.task_id for task in tasks}) != len(tasks):
+            raise DirectorRuntimeError("durable follow-up task receipt has duplicate task ids")
+        return tuple(tasks)
+
+    def _follow_up_lifecycle_events(
+        self,
+        mission_id: str,
+        round_number: int,
+        tasks: tuple[DelegatedTask, ...],
+        rationale: str,
+        *,
+        team_reconfiguration: Mapping[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        project_id = self._mission_project_id(mission_id)
+        correlation_id = self._mission_correlation_id(mission_id)
+        events: list[dict[str, Any]] = []
+        if team_reconfiguration is not None:
+            events.append(
+                {
+                    "event_type": "team.reconfigured",
+                    "project_id": project_id,
+                    "correlation_id": correlation_id,
+                    "payload": dict(team_reconfiguration),
+                }
+            )
+        task_ids = [task.task_id for task in tasks]
+        events.extend(
+            [
+                {
+                    "event_type": "director_decision_executed",
+                    "project_id": project_id,
+                    "correlation_id": correlation_id,
+                    "payload": {
+                        "round": round_number,
+                        "decision": "continue",
+                        "execution": "follow_up_tasks_enqueued",
+                        "task_ids": task_ids,
+                        "project_id": project_id,
+                    },
+                },
+                {
+                    "event_type": "mission_reopened",
+                    "project_id": project_id,
+                    "correlation_id": correlation_id,
+                    "payload": {
+                        "round": round_number,
+                        "task_ids": task_ids,
+                        "rationale": rationale,
+                        "project_id": project_id,
+                    },
+                },
+            ]
+        )
+        return events
+
+    def _reject_interrupted_review(
+        self,
+        mission_id: str,
+        round_number: int,
+        reason: str,
+    ) -> bool:
+        """Record unrecoverable contradictions and stop rather than replan a second time."""
+        events = self.store.events(mission_id)
+        if not any(
+            event.event_type == "director_review_recovery_rejected"
+            and event.payload.get("round") == round_number
+            for event in events
+        ):
+            self.event_bus.publish(
+                mission_id=mission_id,
+                event_type="director_review_recovery_rejected",
+                payload={
+                    "round": round_number,
+                    "reason": reason,
+                    "project_id": self._mission_project_id(mission_id),
+                },
+                project_id=self._mission_project_id(mission_id),
+                correlation_id=self._mission_correlation_id(mission_id),
+            )
+        self._publish_terminal(
+            mission_id,
+            status="blocked",
+            reason="Interrupted Director decision could not be recovered safely: " + reason,
+        )
+        return True
+
+    def _resume_interrupted_review_decision(self, mission_id: str) -> bool:
+        """Replay a committed review receipt before allowing a fresh planning call."""
+        events = self.store.events(mission_id)
+        review_events = [event for event in events if event.event_type == "director_review"]
+        if not review_events:
+            return False
+        review_event = review_events[-1]
+        payload = review_event.payload
+        round_number = payload.get("round")
+        decision = payload.get("decision")
+        if (
+            not isinstance(round_number, int)
+            or isinstance(round_number, bool)
+            or round_number < 1
+        ):
+            return self._reject_interrupted_review(
+                mission_id, 1, "durable review receipt has no valid round number"
+            )
+
+        execution_events = [
+            event
+            for event in events
+            if event.event_type == "director_decision_executed"
+            and event.payload.get("round") == round_number
+        ]
+        execution = execution_events[-1] if execution_events else None
+        project_id = self._mission_project_id(mission_id)
+        correlation_id = self._mission_correlation_id(mission_id)
+        rationale = payload.get("rationale")
+        rationale = (
+            rationale
+            if isinstance(rationale, str) and rationale.strip()
+            else "Recovered durable Director decision"
+        )
+
+        if decision in {"complete", "blocked"}:
+            if execution is None:
+                self.event_bus.publish(
+                    mission_id=mission_id,
+                    event_type="director_decision_executed",
+                    payload={
+                        "round": round_number,
+                        "decision": decision,
+                        "execution": "mission_terminal",
+                        "project_id": project_id,
+                        "recovered_from_review_event_id": review_event.event_id,
+                    },
+                    project_id=project_id,
+                    correlation_id=correlation_id,
+                )
+            self._publish_terminal(
+                mission_id,
+                status="succeeded" if decision == "complete" else "blocked",
+                reason=rationale,
+            )
+            return True
+
+        if decision != "continue":
+            return self._reject_interrupted_review(
+                mission_id, round_number, f"unsupported durable review decision: {decision!r}"
+            )
+
+        phase_rows = [
+            item for item in self.store.list_tasks(mission_id)
+            if item.phase == round_number
+        ]
+        raw_tasks = payload.get("follow_up_tasks")
+        try:
+            if isinstance(raw_tasks, list) and raw_tasks:
+                follow_up_tasks = self._review_receipt_tasks(
+                    mission_id, round_number, raw_tasks
+                )
+            elif phase_rows:
+                # Compatibility path for rows written by the pre-receipt implementation.
+                follow_up_tasks = tuple(item.task for item in phase_rows)
+                canonical_project_id = self._mission_project_id(mission_id)
+                if any(task.project_id != canonical_project_id for task in follow_up_tasks):
+                    raise DirectorRuntimeError(
+                        "existing follow-up task rows contradict the canonical project binding"
+                    )
+            else:
+                raise DirectorRuntimeError(
+                    "interrupted continue decision has neither a durable task graph nor phase rows"
+                )
+            self.director.task_engine.validate(follow_up_tasks)
+        except Exception as exc:
+            return self._reject_interrupted_review(mission_id, round_number, str(exc))
+
+        expected = {task.task_id: task for task in follow_up_tasks}
+        actual = {item.task.task_id: item.task for item in phase_rows}
+        if phase_rows and actual != expected:
+            return self._reject_interrupted_review(
+                mission_id,
+                round_number,
+                "persisted follow-up rows differ from the approved durable review graph",
+            )
+
+        if execution is not None:
+            expected_ids = execution.payload.get("task_ids")
+            if not isinstance(expected_ids, list) or set(expected_ids) != set(expected):
+                return self._reject_interrupted_review(
+                    mission_id, round_number, "decision marker task ids contradict the durable graph"
+                )
+            if not phase_rows:
+                return self._reject_interrupted_review(
+                    mission_id, round_number, "decision marker exists but follow-up task rows are missing"
+                )
+            if not any(
+                event.event_type == "mission_reopened"
+                and event.payload.get("round") == round_number
+                for event in events
+            ):
+                self.event_bus.publish(
+                    mission_id=mission_id,
+                    event_type="mission_reopened",
+                    payload={
+                        "round": round_number,
+                        "task_ids": sorted(expected),
+                        "rationale": rationale,
+                        "project_id": project_id,
+                        "recovered": True,
+                    },
+                    project_id=project_id,
+                    correlation_id=correlation_id,
+                )
+            return False
+
+        lifecycle = self._follow_up_lifecycle_events(
+            mission_id,
+            round_number,
+            follow_up_tasks,
+            rationale,
+            team_reconfiguration=(
+                payload.get("team_reconfiguration")
+                if isinstance(payload.get("team_reconfiguration"), Mapping)
+                else None
+            ),
+        )
+        if not phase_rows:
+            # Task rows, decision execution and mission reopening are one SQLite commit.
+            self.store.enqueue(
+                mission_id,
+                follow_up_tasks,
+                phase=round_number,
+                correlation_id=correlation_id,
+                initial_events=lifecycle,
+            )
+            return True
+
+        # Repair pre-transaction implementations idempotently only when the existing
+        # rows exactly equal the approved graph.
+        current_events = self.store.events(mission_id)
+        for event_spec in lifecycle:
+            kind = event_spec["event_type"]
+            already_recorded = any(
+                event.event_type == kind and event.payload.get("round") == round_number
+                for event in current_events
+            )
+            if not already_recorded:
+                self.event_bus.publish(
+                    mission_id=mission_id,
+                    event_type=str(kind),
+                    payload=dict(event_spec["payload"]),
+                    project_id=event_spec.get("project_id"),
+                    correlation_id=event_spec.get("correlation_id"),
+                )
+        return True
+
     def _review_or_finalize(self, mission_id: str) -> None:
         if not self._recovery_fail_closed(mission_id):
             return
         if self._is_finalized(mission_id):
             return
         if not self._require_director_ownership(mission_id):
+            return
+        if self._resume_interrupted_review_decision(mission_id):
             return
 
         self._evaluate_pending_director_decisions(mission_id)
@@ -2389,6 +2701,40 @@ class DirectorRuntime:
                     model=review.model,
                     considered_alternatives=review.considered_alternatives,
                 )
+        project_id = self._mission_project_id(mission_id)
+        phase_tasks: tuple[DelegatedTask, ...] | None = None
+        team_reconfiguration: dict[str, Any] | None = None
+        if review.decision == "continue":
+            try:
+                phase_tasks = self._phase_tasks(mission_id, round_number, review.tasks)
+                coordinator = getattr(self.director, "team_coordinator", None)
+                if coordinator is not None:
+                    team_state = coordinator.prepare(
+                        mission_id=mission_id,
+                        objective=objective,
+                        tasks=phase_tasks,
+                    )
+                    phase_tasks = team_state.tasks
+                    team_reconfiguration = {
+                        "round": round_number,
+                        "roles": [member.role for member in team_state.team.members],
+                        "required_skills": list(team_state.team.required_skills),
+                        "covered_skills": list(team_state.team.covered_skills),
+                        "project_id": project_id,
+                    }
+                else:
+                    phase_tasks = self.director.task_engine.validate(phase_tasks)
+            except Exception as exc:
+                review = type(review)(
+                    decision="blocked",
+                    rationale=f"Director follow-up plan rejected: {exc}",
+                    tasks=(),
+                    model=review.model,
+                    considered_alternatives=review.considered_alternatives,
+                )
+                phase_tasks = None
+                team_reconfiguration = None
+
         review_event = self.event_bus.publish(
             mission_id=mission_id,
             event_type="director_review",
@@ -2399,7 +2745,25 @@ class DirectorRuntime:
                 "model": review.model,
                 "routing_evidence": routing_evidence,
                 "considered_alternatives": list(review.considered_alternatives),
+                "project_id": project_id,
+                "decision_receipt_version": 1,
+                "follow_up_tasks": [
+                    {
+                        "task_id": task.task_id,
+                        "role": task.role,
+                        "objective": task.objective,
+                        "capability": task.capability,
+                        "args": list(task.args),
+                        "depends_on": list(task.depends_on),
+                        "skills": list(task.skills),
+                        "project_id": task.project_id,
+                    }
+                    for task in (phase_tasks or ())
+                ],
+                "team_reconfiguration": team_reconfiguration,
             },
+            project_id=project_id,
+            correlation_id=self._mission_correlation_id(mission_id),
         )
         self._observe_policy_shadow_canary(
             mission_id=mission_id,
@@ -2419,12 +2783,14 @@ class DirectorRuntime:
                     "model": review.model,
                     "routing_evidence": routing_evidence,
                     "considered_alternatives": list(review.considered_alternatives),
+                    "project_id": project_id,
+                    "review_event_id": review_event.event_id,
                 },
             )
         except MissionMemoryError:
             pass
 
-        if review.decision == "complete":
+        if review.decision in {"complete", "blocked"}:
             if not self._require_director_ownership(mission_id):
                 return
             self.event_bus.publish(
@@ -2434,94 +2800,52 @@ class DirectorRuntime:
                     "round": round_number,
                     "decision": review.decision,
                     "execution": "mission_terminal",
+                    "project_id": project_id,
                 },
+                project_id=project_id,
+                correlation_id=self._mission_correlation_id(mission_id),
             )
             self._publish_terminal(
                 mission_id,
-                status="succeeded",
-                reason=review.rationale,
-            )
-            self._evaluate_pending_director_decisions(mission_id)
-            return
-        if review.decision == "blocked":
-            if not self._require_director_ownership(mission_id):
-                return
-            self.event_bus.publish(
-                mission_id=mission_id,
-                event_type="director_decision_executed",
-                payload={
-                    "round": round_number,
-                    "decision": review.decision,
-                    "execution": "mission_terminal",
-                },
-            )
-            self._publish_terminal(
-                mission_id,
-                status="blocked",
+                status="succeeded" if review.decision == "complete" else "blocked",
                 reason=review.rationale,
             )
             self._evaluate_pending_director_decisions(mission_id)
             return
 
-        tasks = self._phase_tasks(mission_id, round_number, review.tasks)
+        if phase_tasks is None:
+            raise DirectorRuntimeError(
+                "Director continuation reached execution without a validated durable task graph"
+            )
         if not self._require_director_ownership(mission_id):
             return
-        try:
-            coordinator = getattr(self.director, "team_coordinator", None)
-            if coordinator is not None:
-                team_state = coordinator.prepare(
-                    mission_id=mission_id,
-                    objective=objective,
-                    tasks=tasks,
-                )
-                validated = team_state.tasks
-                self.event_bus.publish(
-                    mission_id=mission_id,
-                    event_type="team.reconfigured",
-                    payload={
-                        "round": round_number,
-                        "roles": [member.role for member in team_state.team.members],
-                        "required_skills": list(team_state.team.required_skills),
-                        "covered_skills": list(team_state.team.covered_skills),
-                    },
-                )
-            else:
-                validated = self.director.task_engine.validate(tasks)
-            self.store.enqueue(mission_id, validated, phase=round_number)
-        except (TaskStoreError, ValueError) as exc:
-            self._publish_terminal(
+        # A persisted review receipt holds the exact approved graph; this atomic
+        # transaction commits its tasks and lifecycle markers together.
+        self.store.enqueue(
+            mission_id,
+            phase_tasks,
+            phase=round_number,
+            correlation_id=self._mission_correlation_id(mission_id),
+            initial_events=self._follow_up_lifecycle_events(
                 mission_id,
-                status="blocked",
-                reason=f"Director follow-up plan rejected: {exc}",
-            )
-            return
-
-        self.event_bus.publish(
-            mission_id=mission_id,
-            event_type="director_decision_executed",
-            payload={
-                "round": round_number,
-                "decision": review.decision,
-                "execution": "follow_up_tasks_enqueued",
-                "task_ids": [task.task_id for task in validated],
-            },
-        )
-        self.event_bus.publish(
-            mission_id=mission_id,
-            event_type="mission_reopened",
-            payload={
-                "round": round_number,
-                "task_ids": [task.task_id for task in validated],
-                "rationale": review.rationale,
-            },
+                round_number,
+                phase_tasks,
+                review.rationale,
+                team_reconfiguration=team_reconfiguration,
+            ),
         )
         try:
             self.memory.append(
                 mission_id=mission_id,
                 source="director",
                 kind="follow_up_plan",
-                content=self._plan_text(validated),
-                metadata={"round": round_number, "task_count": len(validated)},
+                content=self._plan_text(phase_tasks),
+                metadata={
+                    "round": round_number,
+                    "task_count": len(phase_tasks),
+                    "project_id": project_id,
+                    "review_event_id": review_event.event_id,
+                },
             )
         except MissionMemoryError:
             pass
