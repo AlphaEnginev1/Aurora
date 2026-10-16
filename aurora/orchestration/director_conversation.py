@@ -461,7 +461,7 @@ Keep responses useful and concise unless the human asks for depth."""
                 "conversation_session_id": session_id,
                 "conversation_turn_id": turn_id,
                 "correlation_id": correlation_id,
-                "project_id": session.project_id,
+                **({"project_id": session.project_id} if session.project_id else {}),
                 "task_type": "conversation",
                 "allowed_models": self._preferred_models(policy),
             },
@@ -814,13 +814,11 @@ Keep responses useful and concise unless the human asks for depth."""
                     raise DirectorConversationError("run_mission is unavailable")
                 objective, explicit_tasks = self._normalize_mission_tool_arguments(arguments)
                 try:
-                    call_key = hashlib.sha256(
-                        str(call.call_id).encode("utf-8")
-                    ).hexdigest()[:16]
-                    # Distinct tool calls in one user turn are distinct commands;
-                    # retries/replays of the same call keep the same durable ID.
+                    # Stable across provider retries and process recovery, while
+                    # different objectives in the same turn remain distinct orders.
+                    call_key = hashlib.sha256(objective.encode("utf-8")).hexdigest()[:16]
                     mission_id = (
-                        f"mission-conversation-{conversation_turn_id}"
+                        f"mission-conversation-{conversation_turn_id}-{call_key}"
                         if conversation_turn_id else None
                     )
                     if explicit_tasks is None:
