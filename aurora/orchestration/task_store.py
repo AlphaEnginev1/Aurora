@@ -83,6 +83,7 @@ class DurableTaskStore:
                     lease_until TEXT,
                     result_json TEXT,
                     phase INTEGER NOT NULL DEFAULT 0,
+                    project_id TEXT,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     PRIMARY KEY (mission_id, task_id)
@@ -149,6 +150,8 @@ class DurableTaskStore:
                 db.execute("ALTER TABLE tasks ADD COLUMN result_json TEXT")
             if "phase" not in columns:
                 db.execute("ALTER TABLE tasks ADD COLUMN phase INTEGER NOT NULL DEFAULT 0")
+            if "project_id" not in columns:
+                db.execute("ALTER TABLE tasks ADD COLUMN project_id TEXT")
             if "skills_json" not in columns:
                 db.execute("ALTER TABLE tasks ADD COLUMN skills_json TEXT NOT NULL DEFAULT '[]'")
             db.execute(
@@ -229,8 +232,8 @@ class DurableTaskStore:
                         INSERT INTO tasks (
                             mission_id, task_id, role, objective, capability,
                             args_json, deps_json, skills_json, status, attempts,
-                            last_error, claimed_by, lease_until, result_json, phase, created_at, updated_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, NULL, NULL, NULL, NULL, ?, ?, ?)
+                            last_error, claimed_by, lease_until, result_json, phase, project_id, created_at, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, NULL, NULL, NULL, NULL, ?, ?, ?, ?)
                         """,
                         (
                             mission_id,
@@ -242,6 +245,7 @@ class DurableTaskStore:
                             json.dumps(list(task.depends_on)),
                             json.dumps(list(task.skills)),
                             phase,
+                            task.project_id,
                             now,
                             now,
                         ),
@@ -255,7 +259,9 @@ class DurableTaskStore:
                             "role": task.role,
                             "capability": task.capability,
                             "skills": list(task.skills),
+                            "project_id": task.project_id,
                         },
+                        project_id=task.project_id,
                         correlation_id=correlation_id,
                     )
                 # Preserve the existing event chronology (task enqueued events
@@ -1062,6 +1068,7 @@ class DurableTaskStore:
             args=tuple(json.loads(row["args_json"])),
             depends_on=tuple(json.loads(row["deps_json"])),
             skills=tuple(json.loads(row["skills_json"])),
+            project_id=row["project_id"] if "project_id" in row.keys() else None,
         )
         raw_result = row["result_json"]
         return StoredTask(
