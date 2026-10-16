@@ -1085,6 +1085,7 @@ Keep responses useful and concise unless the human asks for depth."""
         plan = getattr(submission, "plan", None) or getattr(mission, "plan", None)
         mission_id = getattr(mission, "mission_id", None) or getattr(submission, "mission_id", None)
         objective = getattr(mission, "objective", None) or getattr(plan, "objective", None) or ""
+        project_id = getattr(mission, "project_id", None) or getattr(submission, "project_id", None)
         tasks: list[dict[str, Any]] = []
         for item in tuple(getattr(mission, "tasks", ()) or ()):
             task = getattr(item, "task", None)
@@ -1136,6 +1137,7 @@ Keep responses useful and concise unless the human asks for depth."""
             tasks.append({
                 "task_id": getattr(task, "task_id", None),
                 "role": getattr(task, "role", None),
+                "project_id": getattr(task, "project_id", None),
                 "status": str(value),
                 "error": getattr(item, "error", None),
                 "capability": getattr(task, "capability", None),
@@ -1146,6 +1148,9 @@ Keep responses useful and concise unless the human asks for depth."""
                 "provenance": provenance,
                 "correlation_id": correlation_id,
             })
+
+        if project_id is None:
+            project_id = next((item.get("project_id") for item in tasks if item.get("project_id")), None)
 
         wait_timed_out = bool(getattr(mission, "wait_timed_out", False))
         wait_timeout_seconds = getattr(mission, "wait_timeout_seconds", None)
@@ -1184,6 +1189,7 @@ Keep responses useful and concise unless the human asks for depth."""
         ]
         return {
             "mission_id": mission_id,
+            "project_id": project_id,
             "accepted": bool(mission_id and submission is not None),
             "status": status,
             "wait_timed_out": wait_timed_out,
