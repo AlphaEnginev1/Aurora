@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
@@ -75,6 +75,7 @@ class DurableTaskStore:
                     args_json TEXT NOT NULL,
                     deps_json TEXT NOT NULL,
                     skills_json TEXT NOT NULL DEFAULT '[]',
+                    project_id TEXT,
                     status TEXT NOT NULL CHECK (status IN ('pending','running','succeeded','failed','blocked')),
                     attempts INTEGER NOT NULL DEFAULT 0,
                     last_error TEXT,
@@ -151,6 +152,8 @@ class DurableTaskStore:
                 db.execute("ALTER TABLE tasks ADD COLUMN phase INTEGER NOT NULL DEFAULT 0")
             if "skills_json" not in columns:
                 db.execute("ALTER TABLE tasks ADD COLUMN skills_json TEXT NOT NULL DEFAULT '[]'")
+            if "project_id" not in columns:
+                db.execute("ALTER TABLE tasks ADD COLUMN project_id TEXT")
             db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_tasks_lease ON tasks (status, lease_until)"
             )
@@ -176,6 +179,7 @@ class DurableTaskStore:
         phase: int = 0,
         initial_events: Sequence[Mapping[str, object]] = (),
         correlation_id: str | None = None,
+        project_id: str | None = None,
     ) -> None:
         if not mission_id.strip():
             raise TaskStoreError("mission_id is empty")
@@ -184,6 +188,43 @@ class DurableTaskStore:
         ):
             raise TaskStoreError("correlation_id must be non-empty and contain no null byte")
         tasks = tuple(tasks)
+        if project_id is not None and (
+            not isinstance(project_id, str) or not project_id.strip() or "\x00" in project_id
+        ):
+            raise TaskStoreError("project_id must be a non-empty identifier")
+        if project_id is None:
+            # Follow-up phases inherit the original durable mission scope even
+            # when a replanner emits fresh task objects without an explicit ID.
+            with self._connect() as lookup_db:
+                receipt = lookup_db.execute(
+                    """
+                    SELECT project_id, payload_json
+                    FROM task_events
+                    WHERE mission_id = ? AND event_type = 'mission_submitted'
+                    ORDER BY event_id LIMIT 1
+                    """,
+                    (mission_id,),
+                ).fetchone()
+            if receipt is not None:
+                project_id = receipt["project_id"]
+                if project_id is None:
+                    try:
+                        receipt_payload = json.loads(receipt["payload_json"])
+                        candidate = receipt_payload.get("project_id") if isinstance(receipt_payload, dict) else None
+                        if isinstance(candidate, str) and candidate.strip():
+                            project_id = candidate.strip()
+                    except (TypeError, json.JSONDecodeError):
+                        project_id = None
+        embedded_project_ids = {task.project_id for task in tasks if task.project_id is not None}
+        if len(embedded_project_ids) > 1:
+            raise TaskStoreError("task plan mixes multiple project scopes")
+        embedded_project_id = next(iter(embedded_project_ids), None)
+        if project_id is None:
+            project_id = embedded_project_id
+        elif embedded_project_id is not None and embedded_project_id != project_id:
+            raise TaskStoreError("task project_id conflicts with the durable mission scope")
+        if project_id is not None:
+            tasks = tuple(replace(task, project_id=project_id) for task in tasks)
         if not tasks:
             raise TaskStoreError("cannot enqueue an empty task plan")
         if phase < 0:
@@ -214,7 +255,7 @@ class DurableTaskStore:
                 "event_type": event_type,
                 "payload": dict(payload),
                 "task_id": task_id,
-                "project_id": event.get("project_id"),
+                "project_id": event.get("project_id") or project_id,
                 "agent_role": event.get("agent_role"),
                 "correlation_id": event.get("correlation_id") or correlation_id,
             })
@@ -228,9 +269,9 @@ class DurableTaskStore:
                         """
                         INSERT INTO tasks (
                             mission_id, task_id, role, objective, capability,
-                            args_json, deps_json, skills_json, status, attempts,
+                            args_json, deps_json, skills_json, project_id, status, attempts,
                             last_error, claimed_by, lease_until, result_json, phase, created_at, updated_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, NULL, NULL, NULL, NULL, ?, ?, ?)
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, NULL, NULL, NULL, NULL, ?, ?, ?)
                         """,
                         (
                             mission_id,
@@ -241,6 +282,7 @@ class DurableTaskStore:
                             json.dumps(list(task.args)),
                             json.dumps(list(task.depends_on)),
                             json.dumps(list(task.skills)),
+                            task.project_id,
                             phase,
                             now,
                             now,
@@ -256,6 +298,8 @@ class DurableTaskStore:
                             "capability": task.capability,
                             "skills": list(task.skills),
                         },
+                        project_id=task.project_id,
+                        agent_role=task.role,
                         correlation_id=correlation_id,
                     )
                 # Preserve the existing event chronology (task enqueued events
@@ -1062,6 +1106,7 @@ class DurableTaskStore:
             args=tuple(json.loads(row["args_json"])),
             depends_on=tuple(json.loads(row["deps_json"])),
             skills=tuple(json.loads(row["skills_json"])),
+            project_id=row["project_id"],
         )
         raw_result = row["result_json"]
         return StoredTask(
@@ -1104,6 +1149,35 @@ class DurableTaskStore:
         agent_role: str | None = None,
         correlation_id: str | None = None,
     ) -> int:
+        if task_id is not None:
+            task_scope = db.execute(
+                "SELECT project_id, role FROM tasks WHERE mission_id = ? AND task_id = ?",
+                (mission_id, task_id),
+            ).fetchone()
+            if task_scope is not None:
+                project_id = project_id or task_scope["project_id"]
+                agent_role = agent_role or task_scope["role"]
+        if project_id is None or correlation_id is None:
+            mission_receipt = db.execute(
+                """
+                SELECT project_id, correlation_id, payload_json
+                FROM task_events
+                WHERE mission_id = ? AND event_type = 'mission_submitted'
+                ORDER BY event_id LIMIT 1
+                """,
+                (mission_id,),
+            ).fetchone()
+            if mission_receipt is not None:
+                project_id = project_id or mission_receipt["project_id"]
+                correlation_id = correlation_id or mission_receipt["correlation_id"]
+                if project_id is None or correlation_id is None:
+                    try:
+                        receipt_payload = json.loads(mission_receipt["payload_json"])
+                    except (TypeError, json.JSONDecodeError):
+                        receipt_payload = {}
+                    if isinstance(receipt_payload, dict):
+                        project_id = project_id or receipt_payload.get("project_id")
+                        correlation_id = correlation_id or receipt_payload.get("correlation_id")
         cursor = db.execute(
             """
             INSERT INTO task_events (
