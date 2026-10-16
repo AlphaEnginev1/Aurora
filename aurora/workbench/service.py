@@ -360,6 +360,7 @@ class UniversalWorkbench:
                 raise WorkbenchError("Workbench action claim returned no durable token")
 
         try:
+            self._enforce_project_repository_scope(request)
             if capability == "workbench:command":
                 result = self._command_execute(request)
             elif capability == "workbench:research:discover":
@@ -396,20 +397,7 @@ class UniversalWorkbench:
                     output=self.preflight(),
                     provenance="aurora-workbench:preflight",
                 )
-            self._enforce_project_repository_scope(request)
-            if capability == "workbench:command":
-                project_root = self._project_workspace_root(request)
-                if project_root is not None:
-                    # Workspace must be anchored in the registered project, even
-                    # when the command payload was proposed by a model.
-                    request = replace(
-                        request,
-                        options={
-                            **dict(request.options),
-                            "project_workspace_root": str(project_root),
-                        },
-                    )
-            if capability == "workbench:file:list":
+            elif capability == "workbench:file:list":
                 result = self._file_list(request)
             elif capability == "workbench:file:read":
                 result = self._file_read(request)
