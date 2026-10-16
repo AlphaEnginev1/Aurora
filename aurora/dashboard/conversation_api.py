@@ -34,11 +34,12 @@ class DashboardConversationAPI:
         self,
         *,
         session_id: str | None = None,
+        project_id: str | None = None,
         principal: str = "dashboard",
     ) -> dict[str, Any]:
-        self._authorize(principal, {"operation": "conversation.create_session"})
+        self._authorize(principal, {"operation": "conversation.create_session", "project_id": project_id})
         try:
-            return asdict(self.service.create_session(session_id=session_id))
+            return asdict(self.service.create_session(session_id=session_id, project_id=project_id))
         except DirectorConversationError as exc:
             raise DashboardConversationAPIError(str(exc)) from exc
 
