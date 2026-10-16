@@ -13,6 +13,7 @@
     conversationSessionId: null,
     conversationInFlight: false,
     pendingConversationRequest: null,
+    selectedProjectId: null,
     activeView: "home",
     settings: null,
     github: null,
@@ -142,6 +143,7 @@
       : "unknown";
 
     const projects = safeArray(data.projects);
+    renderProjectScope(projects);
     const agents = safeArray(data.organization && data.organization.agents);
     const runtime = safeObject(data.runtime);
     const counts = safeObject(runtime.task_status_counts);
@@ -295,6 +297,47 @@
       openInspector("Project Inspector", project.name || project.project_id, fetchProject(project.project_id));
     });
     return item;
+  }
+
+  function renderProjectScope(projects) {
+    const select = $("director-project-scope");
+    if (!select) return;
+    const registered = safeArray(projects).filter(function (project) {
+      return project && typeof project.project_id === "string" && project.project_id.trim();
+    });
+    const signature = registered.map(function (project) { return project.project_id; }).join("|");
+    let stored = "";
+    try { stored = window.sessionStorage.getItem("aurora.selectedProjectId") || ""; }
+    catch (_) {}
+    const currentValue = state.selectedProjectId || select.value || stored;
+    if (select.dataset.projectSignature !== signature) {
+      select.innerHTML = "";
+      const general = document.createElement("option");
+      general.value = "";
+      general.textContent = "General · no project selected";
+      select.appendChild(general);
+      registered.forEach(function (project) {
+        const option = document.createElement("option");
+        option.value = project.project_id;
+        option.textContent = (project.name || project.project_id) + " · " + project.project_id;
+        select.appendChild(option);
+      });
+      select.dataset.projectSignature = signature;
+    }
+    const exists = registered.some(function (project) { return project.project_id === currentValue; });
+    state.selectedProjectId = exists ? currentValue : null;
+    select.value = state.selectedProjectId || "";
+    const hint = $("director-project-scope-hint");
+    if (hint) {
+      hint.textContent = state.selectedProjectId
+        ? "Delegated tasks and tools are restricted to the selected registered project."
+        : registered.length
+          ? "General mode has no project scope. Choose one above before project-specific work."
+          : "No projects are registered. Register a project before project-scoped execution.";
+    }
+    if (!exists && currentValue) {
+      try { window.sessionStorage.removeItem("aurora.selectedProjectId"); } catch (_) {}
+    }
   }
 
   function renderProjects(projects, target, compact) {
@@ -1703,10 +1746,12 @@ async function testProvider(provider) {
     return item;
   }
 
-  function conversationRequestFingerprint(sessionId, content) {
+  function conversationRequestFingerprint(sessionId, content, projectId) {
     // A non-reversible, non-security fingerprint lets a pending retry survive
-    // reload without storing the prompt itself in sessionStorage.
-    const source = sessionId + "\\u0000" + content;
+    // reload without storing the prompt itself in sessionStorage. Scope is part
+    // of the identity so retry receipts cannot be reused across projects.
+    const source = sessionId + "\\u0000" + content +
+      (projectId ? "\\u0000project:" + projectId : "");
     let hash = 2166136261;
     for (let index = 0; index < source.length; index += 1) {
       hash ^= source.charCodeAt(index);
@@ -1715,8 +1760,8 @@ async function testProvider(provider) {
     return (hash >>> 0).toString(16) + "-" + source.length;
   }
 
-  function getStableConversationRequestId(sessionId, content) {
-    const fingerprint = conversationRequestFingerprint(sessionId, content);
+  function getStableConversationRequestId(sessionId, content, projectId) {
+    const fingerprint = conversationRequestFingerprint(sessionId, content, projectId);
     // Keep independent pending request IDs per turn. A still-running order
     // must not be overwritten when the user sends a different message.
     const storageKey = "aurora.pendingConversationRequest." + sessionId + "." + fingerprint;
@@ -1787,13 +1832,16 @@ async function testProvider(provider) {
 
     try {
       const sessionId = await ensureConversationSession();
-      const requestId = getStableConversationRequestId(sessionId, content);
+      const projectId = state.selectedProjectId;
+      const requestId = getStableConversationRequestId(sessionId, content, projectId);
+      const turnPayload = { user_input: content, request_id: requestId };
+      if (projectId) turnPayload.project_id = projectId;
       const response = await fetch(
         state.conversationApiBase + "/" + encodeURIComponent(sessionId) + "/turn",
         {
           method: "POST",
           headers: { Accept: "application/json", "Content-Type": "application/json" },
-          body: JSON.stringify({ user_input: content, request_id: requestId })
+          body: JSON.stringify(turnPayload)
         }
       );
       if (!response.ok) {
@@ -1849,6 +1897,23 @@ async function testProvider(provider) {
     }
   }
   function setupConversation() {
+    $("director-project-scope").addEventListener("change", function (event) {
+      const value = String(event.currentTarget.value || "").trim();
+      state.selectedProjectId = value || null;
+      try {
+        if (state.selectedProjectId) {
+          window.sessionStorage.setItem("aurora.selectedProjectId", state.selectedProjectId);
+        } else {
+          window.sessionStorage.removeItem("aurora.selectedProjectId");
+        }
+      } catch (_) {}
+      setChatStatus(
+        state.selectedProjectId
+          ? "Project scope selected: " + state.selectedProjectId
+          : "General mode selected; no project scope is attached.",
+        false
+      );
+    });
     $("attach-file").addEventListener("click", function () {
       $("aurora-file-input").click();
     });
