@@ -2202,6 +2202,24 @@ class DirectorRuntime:
                     project_id=project_id,
                     correlation_id=correlation_id,
                 )
+            if not any(
+                event.event_type == "director_review_recovered"
+                and event.payload.get("round") == round_number
+                for event in self.store.events(mission_id)
+            ):
+                self.event_bus.publish(
+                    mission_id=mission_id,
+                    event_type="director_review_recovered",
+                    payload={
+                        "round": round_number,
+                        "decision": final_decision,
+                        "review_event_id": review_event.event_id,
+                        "terminal_recovered": True,
+                        **({"project_id": project_id} if project_id is not None else {}),
+                    },
+                    project_id=project_id,
+                    correlation_id=correlation_id,
+                )
             if not self._is_finalized(mission_id):
                 self._publish_terminal(
                     mission_id,
@@ -2357,10 +2375,19 @@ class DirectorRuntime:
                     **({"project_id": project_id} if project_id is not None else {}),
                 },
             ))
+        team_event = self._review_recovery_event_exists(
+            events, "team.reconfigured", round_number
+        )
+        requires_recovery = (
+            not phase_rows
+            or execution is None
+            or reopened is None
+            or (team_reconfiguration is not None and team_event is None)
+        )
         recovery_event = self._review_recovery_event_exists(
             events, "director_review_recovered", round_number
         )
-        if recovery_event is None:
+        if requires_recovery and recovery_event is None:
             missing_specs.append(event_spec(
                 "director_review_recovered",
                 {
