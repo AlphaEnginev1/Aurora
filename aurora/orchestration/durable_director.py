@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import hashlib
 import json
 from typing import Sequence
@@ -29,6 +29,7 @@ def _task_graph_payload(tasks: Sequence[DelegatedTask]) -> list[dict[str, object
             "args": list(task.args),
             "depends_on": list(task.depends_on),
             "skills": list(task.skills),
+            "project_id": task.project_id,
         }
         for task in tasks
     ]
@@ -80,6 +81,7 @@ class DurableDirectorService:
         planning_provider: str | None = None,
         planning_execution_id: str | None = None,
         correlation_id: str | None = None,
+        project_id: str | None = None,
     ) -> MissionSubmission:
         normalized_objective = objective.strip()
         if not normalized_objective:
@@ -88,6 +90,11 @@ class DurableDirectorService:
             not correlation_id.strip() or "\x00" in correlation_id
         ):
             raise DurableDirectorError("correlation_id must be non-empty and contain no null byte")
+        if project_id is not None and (
+            not isinstance(project_id, str) or not project_id.strip() or "\x00" in project_id
+        ):
+            raise DurableDirectorError("project_id must be a non-empty identifier or null")
+        project_id = project_id.strip() if project_id else None
 
         # A caller-supplied mission_id is the idempotency key. If the request was
         # already committed, return its durable receipt instead of invoking the
@@ -113,6 +120,8 @@ class DurableDirectorService:
                     raise DurableDirectorError(
                         "mission_id is already bound to a different objective"
                     )
+                if submitted.get("project_id") != project_id:
+                    raise DurableDirectorError("mission_id is already bound to a different project_id")
                 if tasks is not None and submitted.get("requested_tasks_fingerprint") != requested_fingerprint:
                     raise DurableDirectorError(
                         "mission_id is already bound to a different explicit task graph"
@@ -155,6 +164,28 @@ class DurableDirectorService:
                 provider=planning_provider,
                 execution_id=planning_execution_id,
             )
+        if project_id:
+            project_registry = getattr(self.planner, "project_registry", None)
+            if project_registry is None:
+                raise DurableDirectorError("project-scoped mission requires the canonical project registry")
+            try:
+                project = project_registry.resolve(project_id)
+            except Exception as exc:
+                raise DurableDirectorError(f"unknown project_id: {project_id}") from exc
+            if tasks is None:
+                context = list(context or [])
+                context.append({"role": "system", "content": json.dumps({
+                    "authoritative_project": {
+                        "project_id": project.project_id,
+                        "name": project.name,
+                        "objective": project.objective,
+                        "status": project.status.value if hasattr(project.status, "value") else str(project.status),
+                        "repository": project.repository,
+                        "workspace": project.workspace,
+                        "architecture_ref": project.architecture_ref,
+                        "current_state": project.current_state,
+                    }
+                }, ensure_ascii=False, sort_keys=True)})
         try:
             mission = mission_id.strip() if mission_id and mission_id.strip() else f"mission-{uuid4().hex}"
             initial_events: list[dict[str, object]] = []
@@ -178,6 +209,8 @@ class DurableDirectorService:
                 })
             else:
                 validated = self.task_engine.validate(plan.tasks)
+            if project_id:
+                validated = tuple(replace(task, project_id=project_id) for task in validated)
             initial_events.append({
                 "event_type": "mission_submitted",
                 "correlation_id": correlation_id,
@@ -187,6 +220,7 @@ class DurableDirectorService:
                     "provider": plan.provider,
                     "planning_execution_id": plan.execution_id,
                     "correlation_id": correlation_id,
+                    "project_id": project_id,
                     "task_ids": [task.task_id for task in validated],
                     "requested_tasks_fingerprint": requested_fingerprint,
                     "task_graph": _task_graph_payload(validated),
