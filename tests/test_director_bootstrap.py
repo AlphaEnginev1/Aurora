@@ -193,3 +193,41 @@ def test_bootstrap_policy_never_exposes_secret_values(tmp_path):
     rendered = json.dumps(state.director_model_policy)
     assert "NVIDIA_API_KEY" not in rendered
     assert "TEST_KEY" in rendered
+
+
+
+def test_knowledge_adapter_never_injects_another_projects_artifacts(tmp_path):
+    from aurora.research.knowledge import KnowledgeArtifact
+    from aurora.research.models import EvidenceState
+    from aurora.research.store import ResearchStore
+
+    store = ResearchStore(tmp_path / "research.db")
+
+    def artifact(artifact_id, project_id):
+        return KnowledgeArtifact(
+            artifact_id=artifact_id,
+            finding_id=f"finding-{artifact_id}",
+            claim=f"Claim for {project_id or 'global'}",
+            evidence_ids=(f"ev-{artifact_id}",),
+            source_ids=(f"src-{artifact_id}",),
+            source_content_sha256=((f"src-{artifact_id}", f"sha-{artifact_id}"),),
+            state=EvidenceState.VERIFIED,
+            project_id=project_id,
+        )
+
+    store.record_knowledge_artifact(artifact("alpha-only", "project-alpha"))
+    store.record_knowledge_artifact(artifact("beta-only", "project-beta"))
+    store.record_knowledge_artifact(artifact("global-only", None))
+
+    adapter = build_context_knowledge_adapter(store)
+    alpha = adapter("project-alpha")
+    beta = adapter("project-beta")
+    global_context = adapter(None)
+
+    assert [item["artifact_id"] for item in alpha] == ["alpha-only"]
+    assert [item["artifact_id"] for item in beta] == ["beta-only"]
+    assert {item["artifact_id"] for item in global_context} == {
+        "alpha-only", "beta-only", "global-only"
+    }
+    assert "project-beta" not in str(alpha)
+    assert "project-alpha" not in str(beta)
