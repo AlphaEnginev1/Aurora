@@ -45,6 +45,12 @@ Director response
 
 Conversation requests use JSON and return the durable session/turn identity together with response text, model/provider identity, execution identity, context manifest and presentation hints.
 
+## Idempotency and durable execution status
+
+Turns that can create a durable mission must include a stable `request_id`. Keep the same ID after a lost HTTP response, wait timeout, network interruption or browser retry. Aurora binds the ID to the exact input and rejects reusing it with different input. Missing IDs are rejected before mission acceptance, including when a provider unexpectedly requests `run_mission`.
+
+The top-level `state` describes the saved conversation turn. The separate `execution_status` describes its durable mission receipt. The conversation turn may be complete while the mission is still running. The browser must retain the stable request ID in that case; replaying the same ID refreshes the durable receipt from the runtime journal without rerunning the order.
+
 ## Browser behavior
 
 The Operations Center now:
