@@ -1,6 +1,6 @@
 """Construct Aurora orchestration and autonomous Director services."""
 from __future__ import annotations
-import json, logging, os
+import json, logging, math, os
 from pathlib import Path
 from aurora.failure_tracker import report_failure
 from aurora.autonomy.acquisition import AcquisitionManager
@@ -923,9 +923,19 @@ def build_director_runtime(*, inference_policy_path: str | Path, autonomy_policy
                 "planning_execution_id": planning_execution_id,
             })
         submission = runtime.submit_mission(**submission_kwargs)
-        timeout_seconds = float(
-            os.getenv("AURORA_CONVERSATION_MISSION_TIMEOUT_SECONDS", "300")
-        )
+        try:
+            timeout_seconds = float(
+                os.getenv("AURORA_CONVERSATION_MISSION_TIMEOUT_SECONDS", "300")
+            )
+            if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
+                raise ValueError("mission wait timeout must be a finite positive number")
+        except (TypeError, ValueError):
+            # Timeout configuration is not mission submission state. Invalid
+            # configuration must not turn a committed order into a failed turn.
+            logging.getLogger(__name__).warning(
+                "invalid AURORA_CONVERSATION_MISSION_TIMEOUT_SECONDS; using 300 seconds"
+            )
+            timeout_seconds = 300.0
         # The daemon's run_forever loop owns worker cycles. The HTTP conversation
         # handler must wait for its durable result, not start a second run_once loop.
         # If the caller's wait expires, the order is still accepted and durable;

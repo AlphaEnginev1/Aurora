@@ -24,6 +24,55 @@ def test_runtime_factory_exposes_autonomous_mission_manager(tmp_path: Path, monk
     assert runtime.workbench is not None
 
 
+def test_conversation_run_mission_uses_safe_timeout_for_invalid_configuration(
+    tmp_path: Path, monkeypatch
+):
+    from aurora.orchestration.factory import build_director_runtime
+
+    monkeypatch.setenv("AURORA_DIRECTOR_PROVIDER", "router")
+    monkeypatch.setenv("AURORA_MODEL_DISCOVERY_REFRESH_ENABLED", "0")
+    monkeypatch.setenv("AURORA_WORKBENCH_ROOTS", str(tmp_path))
+    monkeypatch.setenv("AURORA_CONVERSATION_MISSION_TIMEOUT_SECONDS", "not-a-number")
+    runtime = build_director_runtime(
+        inference_policy_path="config/inference-policy.json",
+        autonomy_policy_path="config/autonomy-policy.json",
+        registry_path="config/tool-registry.json",
+        network_policy_path="config/network-policy.json",
+        workspace_root=tmp_path,
+        egress_proxy_host="127.0.0.1",
+        egress_proxy_port=3128,
+        organization_path="config/organization.json",
+        skills_path="config/skills.json",
+        projects_path="config/projects.json",
+    )
+
+    submission = SimpleNamespace(mission_id="mission-invalid-timeout", plan=SimpleNamespace(
+        objective="Run with safe timeout", tasks=()
+    ))
+    terminal = SimpleNamespace(
+        mission_id=submission.mission_id,
+        submission=submission,
+        status=SimpleNamespace(value="succeeded"),
+        tasks=(),
+        events=(),
+    )
+    calls = []
+    monkeypatch.setattr(runtime, "submit_mission", lambda **kwargs: submission)
+
+    def wait(actual_submission, *, timeout_seconds):
+        calls.append((actual_submission, timeout_seconds))
+        return terminal
+
+    monkeypatch.setattr(runtime, "wait_until_terminal", wait)
+    result = runtime.conversation_service.mission_runner(
+        objective="Run with safe timeout"
+    )
+
+    assert result is terminal
+    assert len(calls) == 1
+    assert calls[0] == (submission, 300.0)
+
+
 def test_conversation_run_mission_preserves_accepted_receipt_after_status_runtime_error(
     tmp_path: Path, monkeypatch
 ):
