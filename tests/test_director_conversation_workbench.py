@@ -146,12 +146,91 @@ def test_conversation_can_use_shared_workbench_directly(tmp_path: Path):
     assert all(request.mission_id.startswith("conversation:") for request in workbench.requests)
     first_turn_id = response.turn.turn_id.removesuffix("-response")
     second_turn_id = second_response.turn.turn_id.removesuffix("-response")
-    assert workbench.requests[0].mission_id == f"conversation:{first_turn_id}:call-wb-1"
-    assert workbench.requests[1].mission_id == f"conversation:{second_turn_id}:call-wb-1"
+    assert workbench.requests[0].mission_id == f"conversation:{first_turn_id}:0"
+    assert workbench.requests[1].mission_id == f"conversation:{second_turn_id}:0"
     assert workbench.requests[0].mission_id != workbench.requests[1].mission_id
     assert ("director_conversation", ("workbench",)) in provider.calls
     assert provider.calls.count(("director_conversation", ("workbench",))) == 2
     assert provider.calls.count(("director_conversation_result", ())) == 2
+
+
+def test_direct_workbench_retry_uses_stable_turn_slot_not_provider_call_id(
+    tmp_path: Path,
+):
+    service, _ = base_service(tmp_path)
+    provider = ToolProvider()
+    service.set_provider(provider)
+
+    class FakeWorkbench:
+        def __init__(self):
+            self.requests = []
+            self.session_store = object()
+
+        def execute(self, request):
+            self.requests.append(request)
+            return SimpleNamespace(
+                status="succeeded",
+                capability=request.capability,
+                operation="file_write",
+                output="written",
+                artifact_id="artifact-stable",
+                provenance="workbench:file:write",
+                receipt_id="receipt-stable",
+                correlation_id=request.correlation_id,
+                error=None,
+            )
+
+    workbench = FakeWorkbench()
+    service.workbench = workbench
+    service._generate_provider = lambda **kwargs: DirectorModelResponse(
+        content="summarized result",
+        model="nvidia/test-model",
+        provider="nvidia_api",
+        request_id="summary",
+        execution_id="summary-exec",
+    )
+
+    turn_id = "turn-stable-workbench"
+    corr = "corr-stable-workbench"
+
+    def invoke(call_id):
+        response = DirectorModelResponse(
+            content="",
+            model="nvidia/test-model",
+            provider="nvidia_api",
+            request_id="workbench-request",
+            execution_id="workbench-exec",
+            tool_calls=(
+                DirectorToolCall(
+                    call_id=call_id,
+                    name="workbench",
+                    arguments={
+                        "capability": "file:write",
+                        "arguments": ["notes.txt", "stable content"],
+                    },
+                ),
+            ),
+        )
+        return service._execute_conversation_tools(
+            response=response,
+            model="nvidia/test-model",
+            provider_messages=[{"role": "system", "content": service.SYSTEM_PROMPT}],
+            user_input="Escribe las notas",
+            conversation_turn_id=turn_id,
+            correlation_id=corr,
+            metadata={},
+        )
+
+    invoke("provider-call-first")
+    invoke("provider-call-regenerated")
+
+    assert len(workbench.requests) == 2
+    first, second = workbench.requests
+    assert first.mission_id == second.mission_id == f"conversation:{turn_id}:0"
+    assert first.options["work_id"] == second.options["work_id"] == first.mission_id
+    assert first.idempotency_key == second.idempotency_key == (
+        f"direct-workbench:{first.mission_id}"
+    )
 
 
 def test_mission_evidence_includes_durable_identity_and_planning_metadata():
@@ -364,6 +443,27 @@ def test_explicit_mission_rejects_workbench_writes_before_runner_invocation(tmp_
         assert "read-only Workbench operations" in str(exc)
     else:
         raise AssertionError("explicit task graph must reject write capabilities")
+
+
+def test_mission_evidence_uses_top_level_project_id_for_legacy_submission_event():
+    event = SimpleNamespace(
+        event_type="mission_submitted",
+        payload={"objective": "project scoped mission"},
+        project_id="project-legacy",
+    )
+    mission = SimpleNamespace(
+        submission=SimpleNamespace(
+            mission_id="mission-legacy-project",
+            plan=SimpleNamespace(objective="project scoped mission"),
+        ),
+        status=SimpleNamespace(value="succeeded"),
+        tasks=(),
+        events=(event,),
+    )
+
+    evidence = DirectorConversationService._mission_evidence(mission)
+
+    assert evidence["project_id"] == "project-legacy"
 
 
 def test_mission_evidence_preserves_failed_or_blocked_durable_terminal_state():
