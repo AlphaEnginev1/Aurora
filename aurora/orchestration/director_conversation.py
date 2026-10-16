@@ -962,8 +962,8 @@ Keep responses useful and concise unless the human asks for depth."""
                 ),
                 model="aurora/durable-receipt-fallback",
                 provider="aurora_runtime",
-                request_id=f"receipt-fallback-{conversation_turn_id or uuid4().hex}",
-                execution_id=f"receipt-fallback-{conversation_turn_id or uuid4().hex}",
+                request_id=f"receipt-fallback-request-{conversation_turn_id or uuid4().hex}",
+                execution_id=f"receipt-fallback-execution-{conversation_turn_id or uuid4().hex}",
                 tool_calls=(),
             )
         # Keep the exact execution receipt in the persisted assistant turn. The
