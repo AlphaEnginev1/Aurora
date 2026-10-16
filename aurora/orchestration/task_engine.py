@@ -653,6 +653,7 @@ class TaskEngine:
                 required_sources=tuple(source_args),
                 constraints=research_constraints,
                 max_sources=max(1, len(source_args)) if source_args else 10,
+                project_id=project.project_id if project is not None else None,
             )
             if source_args:
                 sources, claims = self.research_service.retrieve_and_extract(request)
