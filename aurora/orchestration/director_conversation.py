@@ -776,7 +776,9 @@ Keep responses useful and concise unless the human asks for depth."""
         if not prompt:
             return set()
         matches: set[str] = set()
-        for project in self.project_registry.active():
+        for project in self.project_registry.projects.values():
+            if project.status is not ProjectStatus.ACTIVE:
+                continue
             for reference in (project.project_id, project.name):
                 normalized = self._normalize_project_reference(reference.strip())
                 if not normalized:
