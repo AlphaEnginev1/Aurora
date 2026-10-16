@@ -142,7 +142,7 @@ class DurableDirectorService:
                     )
                 submitted = submitted_event.payload
                 stored_project_id = submitted.get("project_id") or submitted_event.project_id
-                if project_id is not None and stored_project_id != project_id:
+                if stored_project_id != project_id:
                     raise DurableDirectorError(
                         "mission_id is already bound to a different or missing project_id"
                     )
@@ -201,7 +201,14 @@ class DurableDirectorService:
                         + json.dumps(scope_record, ensure_ascii=False, sort_keys=True)
                     ),
                 })
-            plan = self.planner.plan(objective=objective, context=planning_context, model=model)
+            planning_kwargs = {
+                "objective": objective,
+                "context": planning_context,
+                "model": model,
+            }
+            if project_id is not None:
+                planning_kwargs["project_id"] = project_id
+            plan = self.planner.plan(**planning_kwargs)
         else:
             # A provider may submit an explicit, declarative task graph. It is
             # still untrusted input: TaskEngine validation and policy/team checks
