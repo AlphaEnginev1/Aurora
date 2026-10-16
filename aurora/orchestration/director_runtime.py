@@ -1070,18 +1070,27 @@ class DirectorRuntime:
             if submitted is None:
                 return False
             payload = submitted.payload
+            project_candidate = submitted.project_id or payload.get("project_id")
+            mission_project_id = (
+                project_candidate.strip()
+                if isinstance(project_candidate, str) and project_candidate.strip()
+                else self._mission_project_id(mission_id)
+            )
             objective = payload.get("objective")
             if not isinstance(objective, str) or not objective.strip():
                 raise DirectorRuntimeError(
                     f"mission {mission_id} has an invalid durable submission objective"
                 )
 
-            if self.memory.first_of_kind(mission_id, "mission_objective") is None:
+            if self.memory.first_of_kind(
+                mission_id, "mission_objective", project_id=mission_project_id
+            ) is None:
                 self.memory.append(
                     mission_id=mission_id,
                     source="director",
                     kind="mission_objective",
                     content=objective,
+                    project_id=mission_project_id,
                     metadata={
                         "model": payload.get("model"),
                         "provider": payload.get("provider"),
@@ -1095,7 +1104,9 @@ class DirectorRuntime:
                 )
 
             stored_tasks = self.store.list_tasks(mission_id)
-            if self.memory.first_of_kind(mission_id, "mission_plan") is None:
+            if self.memory.first_of_kind(
+                mission_id, "mission_plan", project_id=mission_project_id
+            ) is None:
                 if not stored_tasks:
                     raise DirectorRuntimeError(
                         f"mission {mission_id} has a submission receipt but no durable tasks"
@@ -1106,6 +1117,7 @@ class DirectorRuntime:
                     source="director",
                     kind="mission_plan",
                     content=self._plan_text(tasks),
+                    project_id=mission_project_id,
                     metadata={
                         "task_count": len(tasks),
                         "submission_event_id": submitted.event_id,
@@ -1119,7 +1131,9 @@ class DirectorRuntime:
             # Task completion lives in DurableTaskStore. Rebuild any missing
             # mailbox projection from it so a transient write failure cannot
             # permanently deprive later Director reviews or agents of the result.
-            projected_task_ids = self.memory.task_result_task_ids(mission_id)
+            projected_task_ids = self.memory.task_result_task_ids(
+                mission_id, project_id=mission_project_id
+            )
             for stored in stored_tasks:
                 if stored.task.task_id in projected_task_ids:
                     continue
@@ -1145,6 +1159,7 @@ class DirectorRuntime:
                         "action": "reconciled",
                     },
                     task_id=stored.task.task_id,
+                    project_id=stored.task.project_id or mission_project_id,
                     correlation_id=(
                         submitted.correlation_id
                         or payload.get("correlation_id")
