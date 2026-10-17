@@ -1148,3 +1148,86 @@ def test_malformed_later_mission_call_does_not_hide_earlier_accepted_order(
     assert results[0]["status"] == "running"
     assert results[1]["accepted"] is False
     assert results[1]["status"] == "failed"
+
+
+def test_workbench_output_is_json_safe_and_bounded_in_conversation_receipt(tmp_path: Path):
+    service, _ = base_service(tmp_path)
+    outputs = [Path("evidence.txt"), "x" * 5000]
+
+    class WorkbenchResultProvider:
+        provider_id = "nvidia_api"
+
+        def generate(self, *, messages, model, role, tools=()):
+            if role == "director_conversation":
+                return DirectorModelResponse(
+                    content="",
+                    model=model or "nvidia/test-model",
+                    provider="nvidia_api",
+                    request_id=f"initial-{len(messages)}",
+                    execution_id=f"initial-exec-{len(messages)}",
+                    tool_calls=(
+                        DirectorToolCall(
+                            call_id="workbench-output",
+                            name="workbench",
+                            arguments={
+                                "capability": "file:read",
+                                "arguments": ["notes.txt"],
+                            },
+                        ),
+                    ),
+                )
+            return DirectorModelResponse(
+                content="Summary",
+                model=model or "nvidia/test-model",
+                provider="nvidia_api",
+                request_id="summary",
+                execution_id="summary-exec",
+            )
+
+    class FakeWorkbench:
+        def execute(self, request):
+            output = outputs.pop(0)
+            return SimpleNamespace(
+                status="succeeded",
+                capability=request.capability,
+                operation="file_read",
+                output=output,
+                artifact_id="artifact-output-safe",
+                provenance="workbench:file:read",
+                receipt_id="receipt-output-safe",
+                correlation_id=request.correlation_id,
+                error=None,
+            )
+
+    service.workbench = FakeWorkbench()
+    service.set_provider(WorkbenchResultProvider())
+    session = service.create_session()
+
+    first = service.send_message(
+        session_id=session.session_id,
+        user_input="Please read the notes",
+        request_id="workbench-output-safe-001",
+    )
+    first_evidence = DirectorConversationService._execution_evidence_payload(
+        first.response_text
+    )
+    assert first.state == "completed"
+    assert first_evidence is not None
+    _marker_index, first_results = first_evidence
+    assert first_results[0]["output"] == "evidence.txt"
+    assert first_results[0]["output_truncated"] is False
+
+    second = service.send_message(
+        session_id=session.session_id,
+        user_input="Please read the notes once more",
+        request_id="workbench-output-safe-002",
+    )
+    second_evidence = DirectorConversationService._execution_evidence_payload(
+        second.response_text
+    )
+    assert second.state == "completed"
+    assert second_evidence is not None
+    _marker_index, second_results = second_evidence
+    assert second_results[0]["output_truncated"] is True
+    assert second_results[0]["output"]["truncated"] is True
+    assert len(second_results[0]["output"]["preview"]) <= 4000
