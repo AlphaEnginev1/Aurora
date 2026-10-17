@@ -15,6 +15,7 @@ from aurora.autonomy.capability_resolution import CapabilityResolutionRuntime
 from aurora.autonomy.capability_runtime import CapabilityRuntime, CapabilityExecutionError
 from aurora.autonomy.models import CapabilityRequest
 from aurora.autonomy.policy import Policy
+from aurora.projects.registry import ProjectConfigError, ProjectRegistry
 from aurora.workbench.artifacts import ArtifactError, ArtifactInspector
 from aurora.workbench.local_computer import LocalComputerError, LocalComputerGateway
 from aurora.workbench.mcp import MCPBridgeError, MCPClientBridge, MCPRegistry
@@ -480,22 +481,63 @@ class UniversalWorkbench:
             raise WorkbenchError(result.error or "Workbench operation failed")
         return result
 
-    def _safe_path(self, raw: str, *, must_exist: bool = False) -> Path:
+    def _within_configured_roots(self, candidate: Path) -> bool:
+        return any(candidate == root or root in candidate.parents for root in self.roots)
+
+    def _project_workspace_root(self, project_id: str) -> Path:
+        project_key = project_id.strip() if isinstance(project_id, str) else ""
+        if not project_key:
+            raise WorkbenchError("project-scoped Workbench operation requires a project_id")
+        try:
+            registry = ProjectRegistry.from_file(self.project_intake.projects_path)
+            project = registry.resolve(project_key)
+        except ProjectConfigError as exc:
+            raise WorkbenchError(
+                f"project-scoped Workbench operation cannot resolve canonical project {project_key!r}"
+            ) from exc
+        if not project.workspace:
+            raise WorkbenchError(
+                f"project {project_key!r} has no configured workspace; refusing unscoped file access"
+            )
+        workspace = Path(project.workspace).expanduser()
+        if not workspace.is_absolute():
+            workspace = self.repository_root / workspace
+        workspace = workspace.resolve()
+        if not self._within_configured_roots(workspace):
+            raise WorkbenchError(
+                f"project workspace for {project_key!r} is outside configured Workbench roots"
+            )
+        return workspace
+
+    def _safe_path(
+        self,
+        raw: str,
+        *,
+        must_exist: bool = False,
+        project_id: str | None = None,
+    ) -> Path:
         value = raw.strip()
         if not value:
             raise WorkbenchError("path is required")
-        candidate = Path(value)
+        project_root = self._project_workspace_root(project_id) if project_id is not None else None
+        candidate = Path(value).expanduser()
         if not candidate.is_absolute():
-            candidate = self.repository_root / candidate
+            candidate = (project_root or self.repository_root) / candidate
         candidate = candidate.resolve()
-        if not any(candidate == root or root in candidate.parents for root in self.roots):
+        if not self._within_configured_roots(candidate):
             raise WorkbenchError("path is outside configured Workbench roots")
+        if project_root is not None and not (
+            candidate == project_root or project_root in candidate.parents
+        ):
+            raise WorkbenchError(
+                f"path is outside project-scoped workspace for project {project_id!r}"
+            )
         if must_exist and not candidate.exists():
             raise WorkbenchError(f"path does not exist: {candidate}")
         return candidate
 
     def _file_list(self, request: WorkbenchRequest) -> WorkbenchResult:
-        root = self._safe_path(request.arguments[0] if request.arguments else ".")
+        root = self._safe_path(request.arguments[0] if request.arguments else ".", project_id=request.options.get("project_id"))
         if not root.is_dir():
             raise WorkbenchError(f"path is not a directory: {root}")
         entries = []
@@ -513,7 +555,7 @@ class UniversalWorkbench:
     def _file_read(self, request: WorkbenchRequest) -> WorkbenchResult:
         if not request.arguments:
             raise WorkbenchError("workbench:file:read requires a path")
-        path = self._safe_path(request.arguments[0], must_exist=True)
+        path = self._safe_path(request.arguments[0], must_exist=True, project_id=request.options.get("project_id"))
         if not path.is_file():
             raise WorkbenchError(f"path is not a file: {path}")
         max_bytes = int(request.options.get("max_bytes", 1_048_576))
@@ -537,7 +579,7 @@ class UniversalWorkbench:
     def _file_write(self, request: WorkbenchRequest) -> WorkbenchResult:
         if len(request.arguments) < 2:
             raise WorkbenchError("workbench:file:write requires path and content")
-        path = self._safe_path(request.arguments[0])
+        path = self._safe_path(request.arguments[0], project_id=request.options.get("project_id"))
         content = request.arguments[1]
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
@@ -736,7 +778,27 @@ class UniversalWorkbench:
             )
         args = value.get("args", [])
         environment = value.get("environment")
-        workspace = str(value.get("workspace") or self.repository_root)
+        project_id = request.options.get("project_id")
+        if project_id is not None:
+            project_root = self._project_workspace_root(project_id)
+            workspace_value = value.get("workspace") or str(project_root)
+            if not isinstance(workspace_value, str) or not workspace_value.strip():
+                raise WorkbenchError("project-scoped command workspace must be a non-empty string")
+            workspace_path = Path(workspace_value).expanduser()
+            if not workspace_path.is_absolute():
+                workspace_path = project_root / workspace_path
+            workspace_path = workspace_path.resolve()
+            if not self._within_configured_roots(workspace_path):
+                raise WorkbenchError("command workspace is outside configured Workbench roots")
+            if workspace_path != project_root and project_root not in workspace_path.parents:
+                raise WorkbenchError(
+                    f"command workspace is outside project-scoped workspace for project {project_id!r}"
+                )
+            if not workspace_path.is_dir():
+                raise WorkbenchError("project-scoped command workspace is not a directory")
+            workspace = str(workspace_path)
+        else:
+            workspace = str(value.get("workspace") or self.repository_root)
         if not isinstance(args, list) or not all(isinstance(item, str) for item in args):
             raise WorkbenchError("command args must be a string array")
         if environment is not None and (
