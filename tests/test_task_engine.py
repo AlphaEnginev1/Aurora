@@ -331,6 +331,88 @@ def test_research_request_id_includes_mission_identity_for_durable_tasks(tmp_pat
     ]
 
 
+def test_research_request_id_preserves_colon_delimited_worker_mission_identity(
+    tmp_path: Path,
+):
+    requests = []
+
+    class RecordingResearchService:
+        def retrieve_and_extract(self, request):
+            requests.append(request)
+            return (), ()
+
+    task_engine = TaskEngine(
+        FakeRouter([ModelSpec("fake/model", "fake", "https://example.invalid")]),
+        tmp_path / "workspace",
+        research_service=RecordingResearchService(),
+    )
+    task = DelegatedTask(
+        "research:shared",
+        "researcher",
+        "investigate this mission's target",
+        capability="research",
+    )
+
+    # Production TaskWorker supplies execution_scope but not a separate mission_id.
+    # Both IDs contain colons, so the old split(':', 1) logic collapsed the mission
+    # prefix and produced a colliding research request_id.
+    first = task_engine.execute_one(
+        task,
+        execution_scope="tenant:mission-a:research:shared:attempt:1",
+    )
+    second = task_engine.execute_one(
+        task,
+        execution_scope="tenant:mission-b:research:shared:attempt:1",
+    )
+
+    assert first.status is TaskStatus.SUCCEEDED
+    assert second.status is TaskStatus.SUCCEEDED
+    assert [item.request_id for item in requests] == [
+        "research-tenant:mission-a-research:shared",
+        "research-tenant:mission-b-research:shared",
+    ]
+
+
+def test_workbench_idempotency_key_preserves_colon_delimited_worker_mission_identity(
+    tmp_path: Path,
+):
+    class CaptureWorkbenchOrchestration:
+        def __init__(self):
+            self.requests = []
+
+        def run_capability_task(self, **kwargs):
+            self.requests.append(kwargs["request"])
+            return SimpleNamespace(
+                execution=SimpleNamespace(status="succeeded", output={"completed": True})
+            )
+
+        def run_task(self, **kwargs):
+            raise AssertionError("Workbench capability must use the governed capability path")
+
+    orchestration = CaptureWorkbenchOrchestration()
+    task_engine = TaskEngine(orchestration, tmp_path / "workspace")
+    task = DelegatedTask(
+        "write:shared",
+        "engineer",
+        "write a deterministic output",
+        capability="workbench:file:write",
+        args=("out.txt", "value"),
+    )
+
+    result = task_engine.execute_one(
+        task,
+        execution_scope="tenant:mission-a:write:shared:attempt:2",
+    )
+
+    assert result.status is TaskStatus.SUCCEEDED
+    request = orchestration.requests[0]
+    assert request.constraints["mission_id"] == "tenant:mission-a"
+    assert request.constraints["work_id"] == "tenant:mission-a"
+    assert request.constraints["idempotency_key"] == (
+        "task:tenant:mission-a:write:shared"
+    )
+
+
 def test_untrusted_research_reference_fails_closed_before_model_execution(tmp_path):
     from aurora.inference.model_performance import ModelPerformanceStore
     from aurora.organization import AgentSpec, DepartmentSpec, OrganizationRegistry
