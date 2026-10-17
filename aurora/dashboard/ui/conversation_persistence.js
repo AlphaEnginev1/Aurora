@@ -120,8 +120,11 @@
   function writeSelectedProject(projectId) {
     const value = normalizeProjectId(projectId) || "";
     const localWritten = writeItem(storage("localStorage"), PROJECT_KEY, value);
-    const sessionWritten = writeItem(storage("sessionStorage"), PROJECT_KEY, value);
-    return localWritten || sessionWritten;
+    // Mirror the preference in session storage, but only report persistent
+    // success when localStorage actually accepted it. Otherwise a stale
+    // cross-reload project choice could silently override the new selection.
+    writeItem(storage("sessionStorage"), PROJECT_KEY, value);
+    return localWritten;
   }
 
   function requestFingerprint(sessionId, content) {
