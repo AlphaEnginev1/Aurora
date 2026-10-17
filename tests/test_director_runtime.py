@@ -1917,3 +1917,27 @@ def test_conversation_wait_timeout_preserves_accepted_durable_mission_receipt(tm
     assert result.status is TaskStatus.SUCCEEDED
     assert len(store.list_tasks(submission.mission_id)) == 2
     assert len(planner.calls) == 1
+
+
+
+def test_run_until_terminal_reports_actual_cycle_count(tmp_path: Path):
+    from types import SimpleNamespace
+
+    runtime, _store, _planner, _engine = make_runtime(tmp_path)
+    submission = runtime.submit_mission(objective="count actual Director cycles")
+    calls = {"count": 0}
+
+    def run_cycle():
+        calls["count"] += 1
+        return SimpleNamespace(events=())
+
+    runtime.run_once = run_cycle
+    runtime._is_finalized = lambda _mission_id: calls["count"] >= 3
+    runtime._final_status = lambda _mission_id: TaskStatus.SUCCEEDED
+    runtime._results_snapshot = lambda _mission_id: ()
+    runtime._mission_events = lambda _mission_id: ()
+
+    result = runtime.run_until_terminal(submission, max_cycles=10)
+
+    assert calls["count"] == 3
+    assert result.cycles_run == 3
