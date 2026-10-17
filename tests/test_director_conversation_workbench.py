@@ -983,3 +983,168 @@ def test_duplicate_request_without_saved_response_is_not_executed_again(tmp_path
     assert [item.role for item in turns] == ["user", "assistant"]
     assert turns[0].turn_id == turn_id
     assert turns[1].turn_id == f"{turn_id}-response"
+
+
+def test_later_invalid_tool_call_preserves_prior_workbench_receipt(tmp_path: Path):
+    service, _ = base_service(tmp_path)
+
+    class MultiToolProvider:
+        provider_id = "nvidia_api"
+
+        def generate(self, *, messages, model, role, tools=()):
+            if role == "director_conversation":
+                return DirectorModelResponse(
+                    content="",
+                    model=model or "nvidia/test-model",
+                    provider="nvidia_api",
+                    request_id="initial-multi-tool",
+                    execution_id="initial-multi-tool-execution",
+                    tool_calls=(
+                        DirectorToolCall(
+                            call_id="valid-first",
+                            name="workbench",
+                            arguments={
+                                "capability": "file:read",
+                                "arguments": ["notes.txt"],
+                            },
+                        ),
+                        DirectorToolCall(
+                            call_id="invalid-second",
+                            name="unknown_tool",
+                            arguments={"anything": "ignored"},
+                        ),
+                    ),
+                )
+            assert role == "director_conversation_result"
+            return DirectorModelResponse(
+                content="El primer resultado se conserva y la segunda llamada no es válida.",
+                model=model or "nvidia/test-model",
+                provider="nvidia_api",
+                request_id="summary-multi-tool",
+                execution_id="summary-multi-tool-execution",
+            )
+
+    class FakeWorkbench:
+        def __init__(self):
+            self.requests = []
+
+        def execute(self, request):
+            self.requests.append(request)
+            return SimpleNamespace(
+                status="succeeded",
+                capability=request.capability,
+                operation="file_read",
+                output="durable file evidence",
+                artifact_id="artifact-partial-tool",
+                provenance="workbench:file:read",
+                receipt_id="receipt-partial-tool",
+                correlation_id=request.correlation_id,
+                error=None,
+            )
+
+    workbench = FakeWorkbench()
+    service.workbench = workbench
+    service.set_provider(MultiToolProvider())
+    session = service.create_session()
+
+    response = service.send_message(
+        session_id=session.session_id,
+        user_input="Please read the notes",
+        request_id="partial-tools-preserve-receipt-001",
+    )
+
+    assert response.state == "completed"
+    assert response.execution_status is None
+    assert len(workbench.requests) == 1
+    evidence = DirectorConversationService._execution_evidence_payload(
+        response.response_text
+    )
+    assert evidence is not None
+    _marker_index, results = evidence
+    assert len(results) == 2
+    assert results[0]["status"] == "succeeded"
+    assert results[0]["receipt_id"] == "receipt-partial-tool"
+    assert results[1]["status"] == "failed"
+    assert results[1]["accepted"] is False
+    assert "unregistered conversation tool" in results[1]["error"]
+
+    turns = service.list_turns(session.session_id, limit=10)
+    assert [turn.role for turn in turns] == ["user", "assistant"]
+    assert turns[-1].state == "completed"
+    assert not any(turn.state == "failed" for turn in turns)
+
+
+def test_malformed_later_mission_call_does_not_hide_earlier_accepted_order(
+    tmp_path: Path,
+):
+    service, _ = base_service(tmp_path)
+    submitted = []
+
+    def runner(**kwargs):
+        submitted.append(kwargs)
+        plan = SimpleNamespace(
+            objective=kwargs["objective"],
+            tasks=(),
+            model="nvidia/test-model",
+            provider="nvidia_api",
+            execution_id="planning-execution",
+        )
+        receipt = SimpleNamespace(
+            mission_id=kwargs["mission_id"],
+            submission=SimpleNamespace(mission_id=kwargs["mission_id"], plan=plan),
+            plan=plan,
+            objective=kwargs["objective"],
+            status=SimpleNamespace(value="running"),
+            tasks=(),
+            events=(),
+        )
+        return receipt
+
+    service.mission_runner = runner
+    service._generate_provider = lambda **_kwargs: DirectorModelResponse(
+        content="Summary with authoritative execution evidence.",
+        model="nvidia/test-model",
+        provider="nvidia_api",
+        request_id="mission-summary",
+        execution_id="mission-summary-execution",
+    )
+
+    response = service._execute_conversation_tools(
+        response=DirectorModelResponse(
+            content="",
+            model="nvidia/test-model",
+            provider="nvidia_api",
+            request_id="mission-tool-calls",
+            execution_id="mission-tool-calls-execution",
+            tool_calls=(
+                DirectorToolCall(
+                    call_id="valid-first",
+                    name="run_mission",
+                    arguments={"objective": "Execute the first order"},
+                ),
+                DirectorToolCall(
+                    call_id="invalid-second",
+                    name="run_mission",
+                    arguments={"description": " "},
+                ),
+            ),
+        ),
+        model="nvidia/test-model",
+        provider_messages=[{"role": "system", "content": service.SYSTEM_PROMPT}],
+        user_input="Audita y ejecuta las órdenes",
+        conversation_turn_id="turn-mission-partial",
+        correlation_id="corr-mission-partial",
+        metadata={"project_id": "project-a"},
+    )
+
+    assert len(submitted) == 1
+    assert submitted[0]["mission_id"] == "mission-conversation-turn-mission-partial-0"
+    evidence = DirectorConversationService._execution_evidence_payload(response.content)
+    assert evidence is not None
+    _marker_index, results = evidence
+    assert len(results) == 2
+    assert results[0]["accepted"] is True
+    assert results[0]["mission_id"] == submitted[0]["mission_id"]
+    assert results[0]["status"] == "running"
+    assert results[1]["accepted"] is False
+    assert results[1]["status"] == "failed"
