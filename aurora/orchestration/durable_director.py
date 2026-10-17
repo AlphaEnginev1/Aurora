@@ -210,6 +210,16 @@ class DurableDirectorService:
                 provider=planning_provider,
                 execution_id=planning_execution_id,
             )
+
+        # A mission's project binding is authoritative. Do not silently rewrite
+        # contradictory task-level targets: a caller must receive a rejection
+        # rather than an order that executes under a different project scope.
+        if project_id is not None:
+            for task in plan.tasks:
+                if task.project_id is not None and task.project_id != project_id:
+                    raise DurableDirectorError(
+                        f"task {task.task_id!r} project_id conflicts with authoritative mission project"
+                    )
         try:
             mission = mission_id.strip() if mission_id and mission_id.strip() else f"mission-{uuid4().hex}"
             initial_events: list[dict[str, object]] = []

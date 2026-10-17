@@ -184,6 +184,39 @@ def test_project_scoped_mission_rejects_unknown_project(tmp_path: Path):
         service.submit_mission(objective="Bad project", project_id="not-registered")
 
 
+def test_initial_task_graph_rejects_conflicting_project_id_before_persisting(tmp_path: Path):
+    planner = _Planner()
+    store = DurableTaskStore(tmp_path / "missions.db")
+    service = DurableDirectorService(
+        planner=planner,
+        task_engine=TaskEngine(_Orchestration(), tmp_path / "workspace"),
+        store=store,
+    )
+
+    with pytest.raises(
+        DurableDirectorError,
+        match="conflicts with authoritative mission project",
+    ):
+        service.submit_mission(
+            objective="Audit Project A",
+            mission_id="mission-project-conflict",
+            correlation_id="corr-project-conflict",
+            project_id="project-a",
+            tasks=(
+                DelegatedTask(
+                    "task-b",
+                    "researcher",
+                    "Inspect Project B",
+                    project_id="project-b",
+                ),
+            ),
+        )
+
+    assert planner.calls == []
+    assert store.list_tasks("mission-project-conflict") == ()
+    assert store.events("mission-project-conflict") == ()
+
+
 def test_mission_idempotency_cannot_switch_project(tmp_path: Path):
     planner = _Planner()
     store = DurableTaskStore(tmp_path / "missions.db")
