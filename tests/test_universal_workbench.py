@@ -1,9 +1,12 @@
 from pathlib import Path
+import json
+
+import pytest
 
 from aurora.autonomy.internet import InternetGateway, InternetPolicy
 from aurora.autonomy.policy import Policy
 from aurora.organization import OrganizationRegistry
-from aurora.workbench import UniversalWorkbench, WorkbenchRequest
+from aurora.workbench import UniversalWorkbench, WorkbenchError, WorkbenchRequest
 from aurora.workbench.session import WorkSessionStore
 
 
@@ -331,3 +334,77 @@ def test_workbench_does_not_repeat_side_effect_with_indeterminate_prior_outcome(
     state = sessions.get_action(request.idempotency_key)
     assert state is not None
     assert state["state"] == "indeterminate"
+
+
+
+def test_project_scoped_workbench_paths_cannot_target_another_project(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    runtime = tmp_path / "runtime"
+    runtime.mkdir()
+    project_a = tmp_path / "project-a"
+    project_a.mkdir()
+    project_b = tmp_path / "project-b"
+    project_b.mkdir()
+    sessions = WorkSessionStore(runtime / "sessions.db")
+    wb = UniversalWorkbench(
+        repository_root=repo,
+        runtime_root=runtime,
+        gateway=FakeGateway(),
+        policy=Policy(frozenset({"workbench:*"}), frozenset()),
+        session_store=sessions,
+        configured_roots=(project_a, project_b),
+    )
+    wb.project_intake.register(
+        project_id="project-a",
+        name="Project A",
+        objective="Keep Project A file access isolated",
+        workspace=str(project_a),
+    )
+    wb.project_intake.register(
+        project_id="project-b",
+        name="Project B",
+        objective="Separate Project B from Project A",
+        workspace=str(project_b),
+    )
+
+    with pytest.raises(WorkbenchError, match="outside project-scoped workspace"):
+        wb.execute(
+            WorkbenchRequest(
+                "workbench:file:write",
+                "director",
+                "mission-project-a",
+                arguments=(str(project_b / "must-not-write.txt"), "wrong project"),
+                options={"project_id": "project-a"},
+            )
+        )
+    assert not (project_b / "must-not-write.txt").exists()
+
+    written = wb.execute(
+        WorkbenchRequest(
+            "workbench:file:write",
+            "director",
+            "mission-project-a",
+            arguments=("safe.txt", "correct project"),
+            options={"project_id": "project-a"},
+        )
+    )
+    assert written.status == "succeeded"
+    assert (project_a / "safe.txt").read_text(encoding="utf-8") == "correct project"
+
+    # A project-scoped command must use the same workspace boundary, even if
+    # its JSON payload tries to nominate a different working directory.
+    wb.capability_runtime = object()
+    command = WorkbenchRequest(
+        "workbench:command",
+        "director",
+        "mission-project-a-command",
+        arguments=(json.dumps({
+            "capability": "test.capability",
+            "args": [],
+            "workspace": str(project_b),
+        }),),
+        options={"project_id": "project-a"},
+    )
+    with pytest.raises(WorkbenchError, match="outside project-scoped workspace"):
+        wb._command_execute(command)
