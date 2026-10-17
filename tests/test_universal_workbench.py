@@ -368,6 +368,30 @@ def test_project_scoped_workbench_paths_cannot_target_another_project(tmp_path: 
         workspace=str(project_b),
     )
 
+    inspect_other = wb.execute(
+        WorkbenchRequest(
+            "workbench:project:inspect",
+            "director",
+            "mission-project-a-inspect",
+            arguments=(str(project_b),),
+            options={"project_id": "project-a"},
+        )
+    )
+    assert inspect_other.status == "failed"
+    assert "outside project-scoped workspace" in (inspect_other.error or "")
+
+    inspect_own = wb.execute(
+        WorkbenchRequest(
+            "workbench:project:inspect",
+            "director",
+            "mission-project-a-inspect-own",
+            arguments=(str(project_a),),
+            options={"project_id": "project-a"},
+        )
+    )
+    assert inspect_own.status == "succeeded"
+    assert inspect_own.output["path"] == str(project_a)
+
     with pytest.raises(WorkbenchError, match="outside project-scoped workspace"):
         wb.execute(
             WorkbenchRequest(
