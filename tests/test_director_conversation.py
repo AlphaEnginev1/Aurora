@@ -317,6 +317,9 @@ def test_work_intent_does_not_require_the_word_mission(prompt):
         "How does ModelRouter select a model?",
         "¿Cómo puedo crear un proyecto?",
         "Can you explain how to add a file?",
+        "Could you explain how to create a project?",
+        "Please explain how to configure Aurora.",
+        "Can you tell me how to upload a report?",
         "Abre el archivo config.json",
     ],
 )
