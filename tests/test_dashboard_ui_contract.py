@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 import shutil
 import subprocess
 
@@ -202,3 +203,22 @@ def test_dashboard_navigation_and_home_overview_swap_sides():
     assert '@media (max-width: 980px)' in css
     assert 'grid-column: auto;\n    grid-row: auto;' in css
 
+
+
+def test_conversation_session_initializer_cannot_be_shadowed_by_legacy_code():
+    js = (UI_DIR / "app.js").read_text(encoding="utf-8")
+
+    # Duplicate function declarations are legal JavaScript and node --check
+    # accepts them; the last declaration silently wins and can drop project_id.
+    declarations = re.findall(
+        r"^\\s*async function ensureConversationSession\\s*\\(",
+        js,
+        flags=re.MULTILINE,
+    )
+    assert len(declarations) == 1, "conversation session initializer must have exactly one definition"
+    initializer_start = js.index("async function ensureConversationSession()")
+    initializer_end = js.index("function setupChatProjectScope()", initializer_start)
+    initializer = js[initializer_start:initializer_end]
+    assert "const projectId = state.selectedProjectId || null;" in initializer
+    assert "conversationPersistence.readSession(projectId)" in initializer
+    assert "return createConversationSession(projectId);" in initializer
