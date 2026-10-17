@@ -80,12 +80,15 @@ def test_discovery_loop_accepts_verified_result_with_durable_artifact():
 
 def test_mission_manager_delegates_to_existing_runtime():
     class Submission: mission_id="m-1"
-    class Result: status="succeeded"
+    class Result:
+        status = "succeeded"
+        cycles_run = 2
     class Runtime:
         def submit_mission(self,*,objective,context=None): return Submission()
         def run_until_terminal(self,submission,*,max_cycles): assert max_cycles==4; return Result()
     result=AutonomousMissionManager(Runtime(),max_cycles=4).run("mission")
     assert result.mission_id=="m-1" and result.status=="succeeded"
+    assert result.cycles == 2
 
 def test_rsi_runs_full_cycle():
     phases=[]
