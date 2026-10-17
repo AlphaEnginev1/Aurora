@@ -299,9 +299,6 @@ def test_research_request_id_includes_mission_identity_for_durable_tasks(tmp_pat
     requests = []
 
     class RecordingResearchService:
-        def discover(self, request):
-            return ()
-
         def retrieve_and_extract(self, request):
             requests.append(request)
             return (), ()
