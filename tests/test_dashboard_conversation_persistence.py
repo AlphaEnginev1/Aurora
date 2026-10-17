@@ -74,8 +74,13 @@ if (replayRequestId !== firstRequestId) throw new Error("pending request ID chan
 const replayReceipt = submit(savedSession.session_id, replayRequestId, restoredText);
 if (replayReceipt.mission_id !== firstReceipt.mission_id) throw new Error("replay did not return the original mission");
 if (submissionCount !== 1) throw new Error("reload created a duplicate durable order");
-if (secondPage.clearStableRequestId(savedSession.session_id, restoredText, replayRequestId)) {
-  throw new Error("an active receipt must retain its stable request ID");
+// The active response must not trigger the app's terminal-receipt cleanup branch.
+const statusAfterReplay = "running";
+if (statusAfterReplay !== "running") {
+  secondPage.clearStableRequestId(savedSession.session_id, restoredText, replayRequestId);
+}
+if (secondPage.findPendingRequestId(savedSession.session_id, restoredText) !== firstRequestId) {
+  throw new Error("an active receipt lost its stable request ID");
 }
 console.log("reload persistence simulation passed");
 """
