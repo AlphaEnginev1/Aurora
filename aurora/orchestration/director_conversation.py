@@ -1258,16 +1258,42 @@ Keep responses useful and concise unless the human asks for depth."""
 
     @staticmethod
     def _workbench_evidence(result: Any) -> dict[str, Any]:
+        # Workbench outputs are adapter-owned and are not guaranteed to be
+        # JSON-native (for example Path/bytes/custom result objects). A successful
+        # operation must still produce a persistable execution receipt instead
+        # of failing the whole conversation while encoding a later tool result.
+        output = DirectorConversationService._bound_evidence_value(
+            result.output, max_chars=4000
+        )
         return {
-            "status": result.status,
-            "capability": result.capability,
-            "operation": result.operation,
-            "output": result.output,
-            "artifact_id": result.artifact_id,
-            "provenance": result.provenance,
-            "receipt_id": result.receipt_id,
-            "correlation_id": result.correlation_id,
-            "error": result.error,
+            "status": DirectorConversationService._bound_evidence_value(
+                result.status, max_chars=200
+            ),
+            "capability": DirectorConversationService._bound_evidence_value(
+                result.capability, max_chars=200
+            ),
+            "operation": DirectorConversationService._bound_evidence_value(
+                result.operation, max_chars=200
+            ),
+            "output": output,
+            "output_truncated": bool(
+                isinstance(output, Mapping) and output.get("truncated") is True
+            ),
+            "artifact_id": DirectorConversationService._bound_evidence_value(
+                result.artifact_id, max_chars=500
+            ),
+            "provenance": DirectorConversationService._bound_evidence_value(
+                result.provenance, max_chars=1000
+            ),
+            "receipt_id": DirectorConversationService._bound_evidence_value(
+                result.receipt_id, max_chars=500
+            ),
+            "correlation_id": DirectorConversationService._bound_evidence_value(
+                result.correlation_id, max_chars=500
+            ),
+            "error": DirectorConversationService._bound_evidence_value(
+                result.error, max_chars=1000
+            ),
         }
 
     @staticmethod
