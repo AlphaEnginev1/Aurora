@@ -321,6 +321,11 @@ def test_work_intent_does_not_require_the_word_mission(prompt):
         "Please explain how to configure Aurora.",
         "Can you tell me how to upload a report?",
         "Abre el archivo config.json",
+        "The subject needs additional information about general project configuration.",
+        "Give me an overview of public endpoint installation and model generation.",
+        "The public interface has a subject and general configuration notes.",
+        "The report was uploaded and saved after installation.",
+        "The project is generating general information.",
     ],
 )
 def test_information_questions_and_single_reads_do_not_start_a_mission(prompt):
