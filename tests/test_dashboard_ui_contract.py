@@ -222,3 +222,22 @@ def test_conversation_session_initializer_cannot_be_shadowed_by_legacy_code():
     assert "const projectId = state.selectedProjectId || null;" in initializer
     assert "conversationPersistence.readSession(projectId)" in initializer
     assert "return createConversationSession(projectId);" in initializer
+
+
+
+def test_conversation_request_id_is_cleared_on_4xx_before_error_propagates():
+    js = (UI_DIR / "app.js").read_text(encoding="utf-8")
+    send_start = js.index("async function sendConversationMessage")
+    error_start = js.index("if (!response.ok)", send_start)
+    error_end = js.index("const data = await response.json()", error_start)
+    error_branch = js[error_start:error_end]
+
+    clear = "clearStableConversationRequest(sessionId, content, requestId);"
+    assert "response.status >= 400 && response.status < 500" in error_branch
+    assert clear in error_branch
+    assert error_branch.index(clear) < error_branch.index("throw new Error(message);")
+
+    # Ambiguous server errors and an accepted/running order must retain the key.
+    assert "response.status >= 400 && response.status < 500" not in error_branch.split("if (response.status")[0]
+    assert "executionStillRunning" in js
+    assert "data.execution_status === \"running\"" in js

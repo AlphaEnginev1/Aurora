@@ -1922,6 +1922,12 @@ async function testProvider(provider) {
           const errorBody = await response.json();
           if (errorBody && errorBody.error) message = errorBody.error;
         } catch (_) {}
+        // A 4xx is a definitive client rejection: release this request ID so
+        // the user can intentionally retry after correcting the cause. Keep it
+        // for 5xx, which may arrive after Aurora has durably accepted the order.
+        if (response.status >= 400 && response.status < 500) {
+          clearStableConversationRequest(sessionId, content, requestId);
+        }
         throw new Error(message);
       }
       const data = await response.json();
