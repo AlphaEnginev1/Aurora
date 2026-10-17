@@ -209,7 +209,7 @@ def test_direct_workbench_retry_uses_stable_turn_slot_not_provider_call_id(
                         "capability": "file:write",
                         "arguments": ["notes.txt", "stable content"],
                         "options": {
-                            "project_id": "project-b",
+                            "project_id": "project-a",
                             "correlation_id": "model-chosen",
                         },
                     },
