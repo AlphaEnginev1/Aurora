@@ -970,11 +970,30 @@ Keep responses useful and concise unless the human asks for depth."""
         for call_index, call in enumerate(calls):
             arguments = call.arguments if isinstance(call.arguments, dict) else {}
             if call.name == self._RUN_MISSION_TOOL.name:
-                if self.mission_runner is None:
-                    raise DirectorConversationError("run_mission is unavailable")
-                objective, explicit_tasks = self._normalize_mission_tool_arguments(arguments)
                 mission = None
+                objective_hint = (
+                    arguments.get("objective")
+                    or arguments.get("description")
+                    or arguments.get("name")
+                    or arguments.get("title")
+                )
+                objective = (
+                    objective_hint.strip()
+                    if isinstance(objective_hint, str) and objective_hint.strip()
+                    else "Invalid run_mission request"
+                )
+                if self.mission_runner is None:
+                    results.append({
+                        "tool": "run_mission",
+                        "call_index": call_index,
+                        "accepted": False,
+                        "status": "failed",
+                        "objective": objective,
+                        "error": "run_mission is unavailable",
+                    })
+                    continue
                 try:
+                    objective, explicit_tasks = self._normalize_mission_tool_arguments(arguments)
                     # A durable turn slot is stable even if a provider retry
                     # regenerates different tool-call IDs or arguments. Different
                     # mission calls in one turn keep distinct slots; changed content
@@ -1007,25 +1026,46 @@ Keep responses useful and concise unless the human asks for depth."""
                         )
                     results.append(self._mission_evidence(mission))
                 except Exception as exc:
-                    results.append(self._degraded_mission_evidence(
+                    evidence = self._degraded_mission_evidence(
                         mission,
                         objective=objective,
                         project_id=(metadata or {}).get("project_id"),
                         error=exc,
-                    ))
+                    )
+                    evidence.setdefault("accepted", False)
+                    evidence["tool"] = "run_mission"
+                    evidence["call_index"] = call_index
+                    results.append(evidence)
                 continue
             if call.name == self._WORKBENCH_TOOL.name:
                 if self.workbench is None:
-                    raise DirectorConversationError("workbench is unavailable")
+                    results.append({
+                        "tool": "workbench",
+                        "call_index": call_index,
+                        "accepted": False,
+                        "status": "failed",
+                        "error": "workbench is unavailable",
+                    })
+                    continue
                 capability = arguments.get("capability")
                 call_args = arguments.get("arguments", [])
                 options = arguments.get("options", {})
+                validation_error = None
                 if not isinstance(capability, str) or not capability.strip():
-                    raise DirectorConversationError("workbench requires a non-empty capability")
-                if not isinstance(call_args, list) or not all(isinstance(item, str) for item in call_args):
-                    raise DirectorConversationError("workbench arguments must be a string array")
-                if not isinstance(options, dict):
-                    raise DirectorConversationError("workbench options must be an object")
+                    validation_error = "workbench requires a non-empty capability"
+                elif not isinstance(call_args, list) or not all(isinstance(item, str) for item in call_args):
+                    validation_error = "workbench arguments must be a string array"
+                elif not isinstance(options, dict):
+                    validation_error = "workbench options must be an object"
+                if validation_error is not None:
+                    results.append({
+                        "tool": "workbench",
+                        "call_index": call_index,
+                        "accepted": False,
+                        "status": "failed",
+                        "error": validation_error,
+                    })
+                    continue
                 requested_capability = capability.strip()
                 capability = self._canonical_workbench_capability(requested_capability)
                 try:
@@ -1074,9 +1114,15 @@ Keep responses useful and concise unless the human asks for depth."""
                         failure["requested_capability"] = requested_capability
                     results.append(failure)
                 continue
-            raise DirectorConversationError(
-                f"Director requested unregistered conversation tool: {call.name}"
-            )
+            # A malformed/unregistered later tool call must not discard durable
+            # results from earlier calls in this same provider response.
+            results.append({
+                "tool": str(call.name or "unknown"),
+                "call_index": call_index,
+                "accepted": False,
+                "status": "failed",
+                "error": f"Director requested unregistered conversation tool: {call.name}",
+            })
         evidence = json.dumps(results, ensure_ascii=False, sort_keys=True)
         evidence_content: list[dict[str, Any]] = [{
             "modality": "text",
