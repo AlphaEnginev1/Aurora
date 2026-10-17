@@ -633,7 +633,7 @@ class UniversalWorkbench:
     def _artifact_inspect(self, request: WorkbenchRequest) -> WorkbenchResult:
         if not request.arguments:
             raise WorkbenchError("workbench:artifact:inspect requires a source path")
-        path = self._safe_path(request.arguments[0], must_exist=True)
+        path = self._safe_path(request.arguments[0], must_exist=True, project_id=request.options.get("project_id"))
         descriptor = self.artifacts.inspect(path)
         return WorkbenchResult(
             request.capability,
@@ -654,7 +654,7 @@ class UniversalWorkbench:
     def _document_extract(self, request: WorkbenchRequest) -> WorkbenchResult:
         if not request.arguments:
             raise WorkbenchError("workbench:document:extract requires a source path")
-        path = self._safe_path(request.arguments[0], must_exist=True)
+        path = self._safe_path(request.arguments[0], must_exist=True, project_id=request.options.get("project_id"))
         max_chars = int(request.options.get("max_chars", 2_000_000))
         content = self.artifacts.extract_text(path, max_chars=max_chars)
         descriptor = self.artifacts.inspect(path)
@@ -674,7 +674,7 @@ class UniversalWorkbench:
     def _artifact_intake(self, request: WorkbenchRequest) -> WorkbenchResult:
         if not request.arguments:
             raise WorkbenchError("workbench:artifact:intake requires a source path")
-        source = self._safe_path(request.arguments[0], must_exist=True)
+        source = self._safe_path(request.arguments[0], must_exist=True, project_id=request.options.get("project_id"))
         if not source.is_file():
             raise WorkbenchError(f"artifact source is not a file: {source}")
         target_root = self.runtime_root / "artifacts"
