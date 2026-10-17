@@ -713,8 +713,58 @@ class UniversalWorkbench:
             raise WorkbenchError("GitHub operation is missing required fields: " + ", ".join(missing))
         return value
 
+    @staticmethod
+    def _canonical_github_repository(value: str) -> str | None:
+        raw = value.strip()
+        if not raw:
+            return None
+        if raw.lower().startswith("git@github.com:"):
+            raw = raw.split(":", 1)[1]
+        elif "://" in raw:
+            parsed = urlparse(raw)
+            if (parsed.hostname or "").lower() != "github.com":
+                return None
+            raw = parsed.path
+        raw = raw.strip().strip("/").removesuffix(".git").strip("/")
+        parts = raw.split("/")
+        if len(parts) != 2 or not all(part.strip() for part in parts):
+            return None
+        return f"{parts[0]}/{parts[1]}".casefold()
+
+    def _validate_project_github_repository(
+        self,
+        request: WorkbenchRequest,
+        *,
+        owner: str,
+        repo: str,
+    ) -> None:
+        project_id = request.options.get("project_id")
+        if not isinstance(project_id, str) or not project_id.strip():
+            return
+        try:
+            registry = ProjectRegistry.from_file(self.project_intake.projects_path)
+            project = registry.resolve(project_id)
+        except ProjectConfigError as exc:
+            raise WorkbenchError(
+                f"cannot resolve canonical project {project_id!r} for GitHub operation"
+            ) from exc
+        canonical_repo = self._canonical_github_repository(project.repository or "")
+        requested_repo = self._canonical_github_repository(f"{owner}/{repo}")
+        if canonical_repo is None:
+            raise WorkbenchError(
+                f"project {project_id!r} has no canonical GitHub repository; refusing project-scoped GitHub operation"
+            )
+        if requested_repo is None or requested_repo != canonical_repo:
+            raise WorkbenchError(
+                f"GitHub target {owner}/{repo} conflicts with canonical repository "
+                f"{project.repository!r} for project {project_id!r}"
+            )
+
     def _github_branch(self, request: WorkbenchRequest) -> WorkbenchResult:
         value = self._github_json_arg(request, ("owner", "repo", "branch", "sha"))
+        self._validate_project_github_repository(
+            request, owner=str(value["owner"]), repo=str(value["repo"])
+        )
         result = self.github.create_branch(
             str(value["owner"]), str(value["repo"]), str(value["branch"]), str(value["sha"])
         )
@@ -722,6 +772,9 @@ class UniversalWorkbench:
 
     def _github_file_write(self, request: WorkbenchRequest) -> WorkbenchResult:
         value = self._github_json_arg(request, ("owner", "repo", "path", "content", "message", "branch"))
+        self._validate_project_github_repository(
+            request, owner=str(value["owner"]), repo=str(value["repo"])
+        )
         result = self.github.upsert_file(
             str(value["owner"]), str(value["repo"]), str(value["path"]),
             str(value["content"]), str(value["message"]), str(value["branch"]),
@@ -731,6 +784,9 @@ class UniversalWorkbench:
 
     def _github_pr(self, request: WorkbenchRequest) -> WorkbenchResult:
         value = self._github_json_arg(request, ("owner", "repo", "title", "head", "base"))
+        self._validate_project_github_repository(
+            request, owner=str(value["owner"]), repo=str(value["repo"])
+        )
         result = self.github.create_pull_request(
             str(value["owner"]), str(value["repo"]), str(value["title"]),
             str(value["head"]), str(value["base"]), str(value.get("body") or ""),
@@ -740,6 +796,9 @@ class UniversalWorkbench:
 
     def _github_merge(self, request: WorkbenchRequest) -> WorkbenchResult:
         value = self._github_json_arg(request, ("owner", "repo", "number"))
+        self._validate_project_github_repository(
+            request, owner=str(value["owner"]), repo=str(value["repo"])
+        )
         result = self.github.merge_pull_request(
             str(value["owner"]), str(value["repo"]), int(value["number"]),
             method=str(value.get("method") or "merge"),
@@ -750,6 +809,9 @@ class UniversalWorkbench:
 
     def _github_workflow_runs(self, request: WorkbenchRequest) -> WorkbenchResult:
         value = self._github_json_arg(request, ("owner", "repo"))
+        self._validate_project_github_repository(
+            request, owner=str(value["owner"]), repo=str(value["repo"])
+        )
         result = self.github.workflow_runs(
             str(value["owner"]), str(value["repo"]),
             branch=str(value["branch"]) if value.get("branch") else None,
@@ -1095,7 +1157,16 @@ class UniversalWorkbench:
             if len(parts) < 2:
                 raise WorkbenchError("repo:owner/name requires an owner and repository")
             suffix = "/" + parts[2] if len(parts) == 3 else ""
+            self._validate_project_github_repository(
+                request, owner=parts[0], repo=parts[1]
+            )
             target = self.github.repo_path(parts[0], parts[1], suffix)
+        else:
+            parts = target.strip("/").split("/")
+            if len(parts) >= 3 and parts[0] == "repos":
+                self._validate_project_github_repository(
+                    request, owner=parts[1], repo=parts[2]
+                )
         data = self.github.get(target)
         return WorkbenchResult(
             request.capability,
