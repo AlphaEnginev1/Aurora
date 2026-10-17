@@ -570,11 +570,15 @@ class TaskEngine:
         mission_id: str | None = None,
         correlation_id: str | None = None,
     ):
-        mission_identity = mission_id or (
-            execution_scope.split(":", 1)[0]
-            if execution_scope and ":" in execution_scope
-            else execution_scope or task.task_id
-        )
+        if mission_id:
+            mission_identity = mission_id
+            has_durable_mission_identity = True
+        else:
+            mission_identity, has_durable_mission_identity = (
+                self._mission_identity_from_execution_scope(
+                    task, execution_scope
+                )
+            )
         skill_assignment = None
         if self.skill_registry is not None and self.organization is not None:
             agent = self.organization.resolve_agent(task.role)
@@ -618,7 +622,7 @@ class TaskEngine:
                 raise TaskEngineError("research task requires a configured research service")
             request_id = (
                 f"research-{mission_identity}-{task.task_id}"
-                if mission_id is not None
+                if has_durable_mission_identity
                 else f"research-{task.task_id}"
             )
             request = ResearchRequest(
@@ -757,6 +761,31 @@ class TaskEngine:
             project_id=task.project_id,
             correlation_id=correlation_id,
         )
+
+    @staticmethod
+    def _mission_identity_from_execution_scope(
+        task: DelegatedTask,
+        execution_scope: str | None,
+    ) -> tuple[str, bool]:
+        """Extract the mission prefix from the worker's complete execution scope.
+
+        Mission and task IDs may themselves contain colons. Only the exact
+        task-ID/attempt suffix is a structural delimiter; splitting at the first
+        colon can collapse distinct missions onto one Workbench idempotency key
+        or research request ID.
+        """
+        if execution_scope is None:
+            return task.task_id, False
+        if not execution_scope.strip():
+            raise TaskEngineError("execution_scope cannot be empty")
+        marker = f":{task.task_id}:attempt:"
+        if marker in execution_scope:
+            mission_prefix, attempt = execution_scope.rsplit(marker, 1)
+            if mission_prefix and attempt.isdigit():
+                return mission_prefix, True
+        # A caller-supplied non-worker scope is opaque. Preserve the full value
+        # rather than guessing that text before its first colon is the mission ID.
+        return execution_scope, False
 
     def _workspace_for_task(self, task: DelegatedTask, execution_scope: str | None) -> Path:
         """Return an isolated deterministic workspace for one execution attempt."""

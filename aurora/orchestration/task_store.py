@@ -1148,14 +1148,12 @@ class DurableTaskStore:
         agent_role: str | None = None,
         correlation_id: str | None = None,
     ) -> int:
-        # Internal task-state transitions bypass DurableEventBus.publish. Resolve
-        # missing envelope fields here so worker claims, lease changes, retries,
-        # completions and dependency blocks remain queryable by canonical mission
-        # and task identity just like Director-published events.
+        # A mission's project binding is immutable. Check it for every event
+        # (including mission-level events with no task_id), rather than only
+        # filling a missing envelope field. An explicitly contradictory scope
+        # must not create an event that appears to belong to another project.
         task_context = None
-        if task_id is not None and (
-            project_id is None or agent_role is None
-        ):
+        if task_id is not None:
             task_context = db.execute(
                 """
                 SELECT project_id, role
@@ -1164,13 +1162,12 @@ class DurableTaskStore:
                 """,
                 (mission_id, task_id),
             ).fetchone()
-            if task_context is not None:
-                if project_id is None:
-                    project_id = task_context["project_id"]
-                if agent_role is None:
-                    agent_role = task_context["role"]
+            if task_context is not None and agent_role is None:
+                agent_role = task_context["role"]
 
-        if project_id is None or correlation_id is None:
+        submitted = None
+        submitted_payload: dict = {}
+        if event_type != "mission_submitted":
             submitted = db.execute(
                 """
                 SELECT project_id, correlation_id, payload_json
@@ -1183,44 +1180,67 @@ class DurableTaskStore:
             ).fetchone()
             if submitted is not None:
                 try:
-                    submitted_payload = json.loads(submitted["payload_json"])
+                    decoded = json.loads(submitted["payload_json"])
+                    if isinstance(decoded, dict):
+                        submitted_payload = decoded
                 except (TypeError, json.JSONDecodeError):
                     submitted_payload = {}
-                if project_id is None:
-                    project_id = submitted["project_id"]
-                    if project_id is None and isinstance(submitted_payload, dict):
-                        candidate = submitted_payload.get("project_id")
-                        project_id = candidate if isinstance(candidate, str) and candidate.strip() else None
-                if correlation_id is None:
-                    correlation_id = submitted["correlation_id"]
-                    if correlation_id is None and isinstance(submitted_payload, dict):
-                        candidate = submitted_payload.get("correlation_id")
-                        correlation_id = (
-                            candidate if isinstance(candidate, str) and candidate.strip()
-                            else None
-                        )
 
-        # The submission event itself has no prior receipt to consult, so its
-        # payload is a valid bootstrap source for the envelope fields.
-        if event_type == "mission_submitted" and isinstance(payload, dict):
-            if project_id is None:
-                candidate = payload.get("project_id")
-                project_id = candidate if isinstance(candidate, str) and candidate.strip() else None
+        payload = dict(payload)
+        payload_project = payload.get("project_id")
+        if payload_project is not None and (
+            not isinstance(payload_project, str) or not payload_project.strip()
+        ):
+            raise TaskStoreError("event payload project_id must be a non-empty string or null")
+
+        submitted_project = (
+            submitted["project_id"] if submitted is not None else None
+        )
+        if submitted_project is None:
+            value = submitted_payload.get("project_id")
+            submitted_project = (
+                value if isinstance(value, str) and value.strip() else None
+            )
+        if event_type == "mission_submitted":
+            submitted_project = (
+                payload_project if payload_project is not None else project_id
+            )
+
+        task_project = (
+            task_context["project_id"]
+            if task_context is not None else None
+        )
+        known_project_ids = {
+            value
+            for value in (
+                project_id,
+                task_project,
+                submitted_project,
+                payload_project,
+            )
+            if value is not None
+        }
+        if len(known_project_ids) > 1:
+            raise TaskStoreError(
+                f"event project_id conflicts with durable mission/task context: {mission_id}"
+            )
+        if project_id is None:
+            project_id = task_project or submitted_project or payload_project
+        if project_id is not None:
+            payload["project_id"] = project_id
+
+        if correlation_id is None:
+            if submitted is not None:
+                correlation_id = submitted["correlation_id"]
             if correlation_id is None:
-                candidate = payload.get("correlation_id")
+                value = submitted_payload.get("correlation_id")
                 correlation_id = (
-                    candidate if isinstance(candidate, str) and candidate.strip()
-                    else None
+                    value if isinstance(value, str) and value.strip() else None
                 )
-
-        if task_id is not None and project_id is not None:
-            payload = dict(payload)
-            payload_project = payload.get("project_id")
-            if payload_project is not None and payload_project != project_id:
-                raise TaskStoreError(
-                    f"task event project_id conflicts with durable task context: {mission_id}/{task_id}"
-                )
-            payload.setdefault("project_id", project_id)
+            if event_type == "mission_submitted":
+                value = payload.get("correlation_id")
+                if isinstance(value, str) and value.strip():
+                    correlation_id = value
 
         cursor = db.execute(
             """
