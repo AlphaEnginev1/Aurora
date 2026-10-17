@@ -798,15 +798,61 @@ Keep responses useful and concise unless the human asks for depth."""
             "investigate", "review", "revisa", "check", "verify", "fix", "repair",
             "build", "refactor", "inspect", "analyz", "analyse", "analiz",
             "compara", "run tests", "run the tests", "deploy", "create", "write",
-            # Common imperative forms for Spanish and English execution requests.
-            # Questions such as "how can I create..." remain informational because
-            # informational_prefixes are checked before this marker list.
-            "haz", "crea", "anad", "agreg", "gener", "escrib", "sub", "guard",
-            "configur", "prepar", "envi", "elimin", "borr", "fusion", "public",
-            "instal", "conect", "habilit", "desactiv", "resuelv", "sincroniz",
-            "compart", "mov", "copi", "cambi", "add", "upload", "save",
-            "configure", "prepare", "send", "merge", "publish", "install",
-            "delete", "remove", "sync",
+            "delegate", "execute", "launch", "continue with", "finish", "complete",
+            "resolve", "examine", "inspecciona", "mision", "mission", "multiagente",
+            "multi-agent", "run_mission", "tarea delegada", "tareas delegadas",
+        )
+        # Newly supported imperatives use concrete verb forms rather than short
+        # prefixes. Prefixes like "sub" and "gener" also match ordinary nouns
+        # ("subject", "generation") and must not manufacture a durable mission.
+        execution_action_forms = frozenset({
+            # Spanish commands / infinitives / common subjunctive and gerund forms.
+            "haz", "hacer", "haga", "hagas", "hagan",
+            "crea", "crear", "cree", "crees", "creen", "creando",
+            "anade", "anadir", "anada", "anadas", "anadan", "anadiendo",
+            "agrega", "agregar", "agregue", "agregues", "agreguen", "agregando",
+            "genera", "generar", "genere", "generes", "generen", "generando",
+            "escribe", "escribir", "escriba", "escribas", "escriban", "escribiendo",
+            "sube", "subir", "suba", "subas", "suban", "subiendo", "subelo",
+            "guarda", "guardar", "guarde", "guardes", "guarden", "guardando",
+            "configura", "configurar", "configure", "configures", "configuren", "configurando",
+            "prepara", "preparar", "prepare", "prepares", "preparen", "preparando",
+            "envia", "enviar", "envie", "envies", "envien", "enviando",
+            "elimina", "eliminar", "elimine", "elimines", "eliminen", "eliminando",
+            "borra", "borrar", "borre", "borres", "borren", "borrando",
+            "fusiona", "fusionar", "fusione", "fusiones", "fusionen", "fusionando",
+            "publica", "publicar", "publique", "publiques", "publiquen", "publicando",
+            "instala", "instalar", "instale", "instales", "instalen", "instalando",
+            "conecta", "conectar", "conecte", "conectes", "conecten", "conectando",
+            "habilita", "habilitar", "habilite", "habilites", "habiliten", "habilitando",
+            "desactiva", "desactivar", "desactive", "desactives", "desactiven", "desactivando",
+            "resuelve", "resolver", "resuelva", "resuelvas", "resuelvan", "resolviendo",
+            "sincroniza", "sincronizar", "sincronice", "sincronices", "sincronicen", "sincronizando",
+            "comparte", "compartir", "comparta", "compartas", "compartan", "compartiendo",
+            "mueve", "mover", "mueva", "muevas", "muevan", "moviendo",
+            "copia", "copiar", "copie", "copies", "copien", "copiando",
+            "cambia", "cambiar", "cambie", "cambies", "cambien", "cambiando",
+            # English commands / common inflections. Exact forms avoid nouns such
+            # as "additional", "installation", and "configuration".
+            "add", "adds", "added", "adding",
+            "upload", "uploads", "uploaded", "uploading",
+            "save", "saves", "saved", "saving",
+            "configure", "configures", "configured", "configuring",
+            "prepare", "prepares", "prepared", "preparing",
+            "send", "sends", "sent", "sending",
+            "merge", "merges", "merged", "merging",
+            "publish", "publishes", "published", "publishing",
+            "install", "installs", "installed", "installing",
+            "delete", "deletes", "deleted", "deleting",
+            "remove", "removes", "removed", "removing",
+            "sync", "syncs", "synced", "syncing",
+        })
+        tokens = normalized.split()
+        return any(
+            marker in normalized if " " in marker
+            else any(token.startswith(marker) for token in tokens)
+            for marker in execution_markers
+        ) or any(token in execution_action_forms for token in tokens)
             "delegate", "execute", "launch", "continue with", "finish", "complete",
             "resolve", "examine", "inspecciona", "mision", "mission", "multiagente",
             "multi-agent", "run_mission", "tarea delegada", "tareas delegadas",
