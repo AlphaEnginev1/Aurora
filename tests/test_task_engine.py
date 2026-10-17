@@ -340,6 +340,9 @@ def test_research_request_id_preserves_colon_delimited_worker_mission_identity(
     requests = []
 
     class RecordingResearchService:
+        def discover(self, request):
+            return ()
+
         def retrieve_and_extract(self, request):
             requests.append(request)
             return (), ()
