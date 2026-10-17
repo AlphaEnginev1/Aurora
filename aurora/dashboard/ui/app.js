@@ -11,8 +11,10 @@
     portraitUrl: window.AURORA_AVATAR_PORTRAIT_URL || "./aurora-central-avatar.jpg",
     conversationApiBase: window.AURORA_CONVERSATION_API_BASE || "/api/conversation",
     conversationSessionId: null,
+    conversationSessionPromise: null,
+    conversationProjectId: null,
+    selectedProjectId: null,
     conversationInFlight: false,
-    pendingConversationRequest: null,
     activeView: "home",
     settings: null,
     github: null,
@@ -31,6 +33,8 @@
     roadmapDeliveryCount: 0,
     roadmapDeliveryItems: []
   };
+  const conversationPersistence = window.AuroraConversationPersistence;
+  state.selectedProjectId = conversationPersistence.readSelectedProject();
 
   const $ = (id) => document.getElementById(id);
 
@@ -142,6 +146,7 @@
       : "unknown";
 
     const projects = safeArray(data.projects);
+    renderChatProjectSelector(projects);
     const agents = safeArray(data.organization && data.organization.agents);
     const runtime = safeObject(data.runtime);
     const counts = safeObject(runtime.task_status_counts);
@@ -319,6 +324,144 @@
         target.appendChild(item);
       } else {
         target.appendChild(projectButton(project));
+      }
+    });
+  }
+
+  function renderChatProjectSelector(projects) {
+    const select = $("chat-project-select");
+    if (!select) return;
+    const selected = state.selectedProjectId || "";
+    const options = [document.createElement("option")];
+    options[0].value = "";
+    options[0].textContent = "General conversation · no project";
+    safeArray(projects).forEach(function (project) {
+      if (!project || typeof project.project_id !== "string" || !project.project_id.trim()) return;
+      const option = document.createElement("option");
+      option.value = project.project_id;
+      option.textContent = String(project.name || project.project_id) + " · " + project.project_id;
+      options.push(option);
+    });
+    if (selected && !options.some(function (option) { return option.value === selected; })) {
+      const missing = document.createElement("option");
+      missing.value = selected;
+      missing.textContent = "Unavailable project · " + selected;
+      options.push(missing);
+    }
+    select.replaceChildren.apply(select, options);
+    select.value = selected;
+  }
+
+  async function createConversationSession(projectId) {
+    const response = await fetch(state.conversationApiBase + "/session", {
+      method: "POST",
+      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      body: JSON.stringify(projectId ? { project_id: projectId } : {})
+    });
+    if (!response.ok) throw new Error("conversation session " + response.status);
+    const data = await response.json();
+    if (!data || typeof data.session_id !== "string" || !data.session_id) {
+      throw new Error("invalid conversation session contract");
+    }
+    const returnedProjectId = typeof data.project_id === "string" && data.project_id.trim()
+      ? data.project_id.trim()
+      : null;
+    if (returnedProjectId !== (projectId || null)) {
+      throw new Error("Aurora did not confirm the canonical project scope for this conversation session");
+    }
+    if (!conversationPersistence.writeSession({
+      session_id: data.session_id,
+      project_id: returnedProjectId
+    })) {
+      throw new Error("Browser storage is unavailable; refusing to start a conversation that cannot safely resume after reload");
+    }
+    state.conversationSessionId = data.session_id;
+    state.conversationProjectId = returnedProjectId;
+    return data.session_id;
+  }
+
+  async function ensureConversationSession() {
+    if (state.conversationSessionId) return state.conversationSessionId;
+    if (state.conversationSessionPromise) return state.conversationSessionPromise;
+
+    state.conversationSessionPromise = (async function () {
+      const projectId = state.selectedProjectId || null;
+      const saved = conversationPersistence.readSession(projectId);
+      if (saved) {
+        const response = await fetch(
+          state.conversationApiBase + "/" + encodeURIComponent(saved.session_id) + "/turns",
+          { headers: { Accept: "application/json" } }
+        );
+        if (!response.ok) {
+          throw new Error(
+            "Saved Aurora conversation " + saved.session_id +
+            " could not be resumed (HTTP " + response.status +
+            "). No replacement session was created, to avoid losing or duplicating an accepted order."
+          );
+        }
+        const data = await response.json();
+        const serverSession = data && data.session;
+        const serverProjectId = serverSession && typeof serverSession.project_id === "string" &&
+          serverSession.project_id.trim() ? serverSession.project_id.trim() : null;
+        if (!serverSession || serverSession.session_id !== saved.session_id ||
+            serverProjectId !== projectId || saved.project_id !== projectId) {
+          throw new Error(
+            "Saved Aurora conversation identity does not match the server's session/project record; refusing to create a replacement."
+          );
+        }
+        state.conversationSessionId = saved.session_id;
+        state.conversationProjectId = projectId;
+        return saved.session_id;
+      }
+      return createConversationSession(projectId);
+    })();
+
+    try {
+      return await state.conversationSessionPromise;
+    } finally {
+      state.conversationSessionPromise = null;
+    }
+  }
+
+  function setupChatProjectScope() {
+    const select = $("chat-project-select");
+    if (!select) return;
+    select.value = state.selectedProjectId || "";
+    select.addEventListener("change", async function () {
+      const previousProjectId = state.selectedProjectId || null;
+      const nextProjectId = select.value || null;
+      if (nextProjectId === previousProjectId) return;
+      if (state.conversationInFlight || state.conversationSessionPromise) {
+        select.value = previousProjectId || "";
+        setChatStatus("Wait for the current conversation request to finish before changing project scope.", true);
+        return;
+      }
+      if (!conversationPersistence.writeSelectedProject(nextProjectId)) {
+        select.value = previousProjectId || "";
+        setChatStatus("Browser storage is unavailable; project selection was not changed.", true);
+        return;
+      }
+      state.selectedProjectId = nextProjectId;
+      state.conversationSessionId = null;
+      state.conversationProjectId = null;
+      try {
+        await ensureConversationSession();
+        await loadConversationHistory();
+        const replayed = await resumePendingConversationRequests();
+        if (replayed) await loadConversationHistory();
+        setChatStatus(
+          nextProjectId
+            ? "Conversation is scoped to project " + nextProjectId + ". Previous project conversations remain available when reselected."
+            : "Conversation is using the general, unscoped context.",
+          false
+        );
+      } catch (error) {
+        state.selectedProjectId = previousProjectId;
+        select.value = previousProjectId || "";
+        conversationPersistence.writeSelectedProject(previousProjectId);
+        state.conversationSessionId = null;
+        state.conversationProjectId = null;
+        setChatStatus("Could not switch conversation scope safely: " + error.message, true);
       }
     });
   }
@@ -1659,6 +1802,52 @@ async function testProvider(provider) {
       if (drawerBody) drawerBody.innerHTML = '<div class="empty-state">Conversation history unavailable: ' + esc(error.message) + "</div>";
     }
   }
+  async function resumePendingConversationRequests() {
+    const sessionId = await ensureConversationSession();
+    const historyResponse = await fetch(
+      state.conversationApiBase + "/" + encodeURIComponent(sessionId) + "/turns",
+      { headers: { Accept: "application/json" } }
+    );
+    if (!historyResponse.ok) return false;
+    const history = await historyResponse.json();
+    const turns = safeArray(history && history.turns);
+    const pending = turns.filter(function (turn) {
+      return turn && turn.role === "user" && typeof turn.content === "string" &&
+        conversationPersistence.findPendingRequestId(sessionId, turn.content);
+    });
+    if (!pending.length) return false;
+
+    let attempted = false;
+    for (const turn of pending) {
+      const requestId = conversationPersistence.findPendingRequestId(sessionId, turn.content);
+      if (!requestId) continue;
+      try {
+        const response = await fetch(
+          state.conversationApiBase + "/" + encodeURIComponent(sessionId) + "/turn",
+          {
+            method: "POST",
+            headers: { Accept: "application/json", "Content-Type": "application/json" },
+            body: JSON.stringify({ user_input: turn.content, request_id: requestId })
+          }
+        );
+        attempted = true;
+        if (response.ok) {
+          const data = await response.json();
+          if (data.state !== "in_progress" && data.execution_status !== "running") {
+            conversationPersistence.clearStableRequestId(sessionId, turn.content, requestId);
+          }
+        } else if (response.status >= 400 && response.status < 500) {
+          conversationPersistence.clearStableRequestId(sessionId, turn.content, requestId);
+        }
+        // Keep the request key after a running receipt or server error. A later
+        // reload can replay the exact same request_id and recover its durable receipt.
+      } catch (_) {
+        // An interrupted recovery attempt must not discard the stable request ID.
+      }
+    }
+    return attempted;
+  }
+
   function openHistory() {
     $("chat-history").classList.add("open");
     $("chat-history").setAttribute("aria-hidden", "false");
@@ -1703,63 +1892,8 @@ async function testProvider(provider) {
     return item;
   }
 
-  function conversationRequestFingerprint(sessionId, content) {
-    // A non-reversible, non-security fingerprint lets a pending retry survive
-    // reload without storing the prompt itself in sessionStorage.
-    const source = sessionId + "\\u0000" + content;
-    let hash = 2166136261;
-    for (let index = 0; index < source.length; index += 1) {
-      hash ^= source.charCodeAt(index);
-      hash = Math.imul(hash, 16777619);
-    }
-    return (hash >>> 0).toString(16) + "-" + source.length;
-  }
-
-  function getStableConversationRequestId(sessionId, content) {
-    const fingerprint = conversationRequestFingerprint(sessionId, content);
-    // Keep independent pending request IDs per turn. A still-running order
-    // must not be overwritten when the user sends a different message.
-    const storageKey = "aurora.pendingConversationRequest." + sessionId + "." + fingerprint;
-    try {
-      const saved = JSON.parse(window.sessionStorage.getItem(storageKey) || "null");
-      if (saved && saved.fingerprint === fingerprint && typeof saved.request_id === "string") {
-        state.pendingConversationRequest = {
-          storageKey: storageKey,
-          fingerprint: fingerprint,
-          requestId: saved.request_id
-        };
-        return saved.request_id;
-      }
-    } catch (_) {}
-    const requestId = "request-" + (
-      window.crypto && typeof window.crypto.randomUUID === "function"
-        ? window.crypto.randomUUID()
-        : Date.now().toString(36) + "-" + Math.random().toString(36).slice(2)
-    );
-    state.pendingConversationRequest = {
-      storageKey: storageKey,
-      fingerprint: fingerprint,
-      requestId: requestId
-    };
-    try {
-      window.sessionStorage.setItem(storageKey, JSON.stringify({
-        fingerprint: fingerprint,
-        request_id: requestId
-      }));
-    } catch (_) {}
-    return requestId;
-  }
-
-  function clearStableConversationRequest(requestId) {
-    const pending = state.pendingConversationRequest;
-    if (!pending || pending.requestId !== requestId) return;
-    try {
-      const saved = JSON.parse(window.sessionStorage.getItem(pending.storageKey) || "null");
-      if (saved && saved.request_id === requestId) {
-        window.sessionStorage.removeItem(pending.storageKey);
-      }
-    } catch (_) {}
-    state.pendingConversationRequest = null;
+  function clearStableConversationRequest(sessionId, content, requestId) {
+    return conversationPersistence.clearStableRequestId(sessionId, content, requestId);
   }
 
   async function sendConversationMessage(rawText) {
@@ -1787,7 +1921,7 @@ async function testProvider(provider) {
 
     try {
       const sessionId = await ensureConversationSession();
-      const requestId = getStableConversationRequestId(sessionId, content);
+      const requestId = conversationPersistence.getOrCreateRequestId(sessionId, content);
       const response = await fetch(
         state.conversationApiBase + "/" + encodeURIComponent(sessionId) + "/turn",
         {
@@ -1812,7 +1946,7 @@ async function testProvider(provider) {
       const executionStillRunning = data.execution_status === "running";
       if ((response.ok && data.state !== "in_progress" && !executionStillRunning) ||
           (response.status >= 400 && response.status < 500)) {
-        clearStableConversationRequest(requestId);
+        clearStableConversationRequest(sessionId, content, requestId);
       }
       $("director-message").value = "";
       $("director-message").style.height = "auto";
@@ -1850,6 +1984,7 @@ async function testProvider(provider) {
     }
   }
   function setupConversation() {
+    setupChatProjectScope();
     $("attach-file").addEventListener("click", function () {
       $("aurora-file-input").click();
     });
@@ -1977,8 +2112,10 @@ async function testProvider(provider) {
   setupAvatarVoice();
   setupSettings();
 
-  ensureConversationSession().then(function () {
-    return loadConversationHistory();
+  ensureConversationSession().then(async function () {
+    await loadConversationHistory();
+    const resumed = await resumePendingConversationRequests();
+    if (resumed) await loadConversationHistory();
   }).catch(function (error) {
     setChatStatus("Conversation service unavailable: " + error.message, true);
     if (state.avatarVoice) state.avatarVoice.setDisconnected();

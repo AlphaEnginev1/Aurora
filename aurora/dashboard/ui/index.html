@@ -131,6 +131,14 @@
                 </div>
               </header>
 
+              <div class="chat-project-scope">
+                <label for="chat-project-select">PROJECT CONTEXT</label>
+                <select id="chat-project-select" aria-label="Project context">
+                  <option value="">General conversation · no project</option>
+                </select>
+                <span>New messages use this scope; each project's conversation can be resumed independently.</span>
+              </div>
+
               <div id="chat-messages" class="chat-messages" role="log" aria-live="polite" aria-label="Chat messages">
                 <div class="chat-welcome" id="chat-welcome">
                   <div class="chat-welcome-symbol" aria-hidden="true">✳</div>
@@ -522,6 +530,7 @@
 
   <script src="./avatar_voice.js" defer></script>
   <script src="./provider_credentials.js" defer></script>
+  <script src="./conversation_persistence.js" defer></script>
   <script src="./app.js" defer></script>
 </body>
 </html>

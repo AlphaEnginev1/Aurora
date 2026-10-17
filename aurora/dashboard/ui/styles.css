@@ -1141,6 +1141,52 @@ body {
   padding: 10px clamp(12px, 2.5vw, 36px) 13px;
   background: #000;
 }
+
+.chat-project-scope {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 7px 12px;
+  width: min(100%, 860px);
+  margin: 0 auto;
+  padding: 10px clamp(12px, 2.5vw, 36px) 0;
+  background: #000;
+}
+.chat-project-scope label {
+  color: #777;
+  font-size: 9px;
+  letter-spacing: .12em;
+}
+.chat-project-scope select {
+  min-width: 0;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid #333;
+  border-radius: 9px;
+  outline: none;
+  background: #101010;
+  color: #ddd;
+  font: inherit;
+  font-size: 11px;
+}
+.chat-project-scope select:focus {
+  border-color: #666;
+}
+.chat-project-scope span {
+  grid-column: 2;
+  color: #666;
+  font-size: 9px;
+  line-height: 1.4;
+}
+@media (max-width: 520px) {
+  .chat-project-scope {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+  }
+  .chat-project-scope span {
+    grid-column: 1;
+  }
+}
 .chat-status {
   width: min(100%, 830px);
   margin: 0 auto 8px;

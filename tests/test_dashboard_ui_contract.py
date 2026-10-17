@@ -11,7 +11,10 @@ def test_dashboard_ui_assets_are_present():
     js = (UI_DIR / "app.js").read_text(encoding="utf-8")
 
     assert 'href="./styles.css"' in html
+    assert '<script src="./conversation_persistence.js" defer></script>' in html
     assert '<script src="./app.js" defer></script>' in html
+    assert 'id="chat-project-select"' in html
+    assert 'class="chat-project-scope"' in html
     assert 'id="director-portrait"' in html
     assert 'data-nav-target="home"' in html
     assert 'data-nav-target="projects"' in html
@@ -77,6 +80,10 @@ def test_dashboard_ui_assets_are_present():
     # can refresh its receipt without creating a duplicate order.
     assert 'data.execution_status === "running"' in js
     assert "executionStillRunning" in js
+    assert "function resumePendingConversationRequests()" in js
+    assert "conversationPersistence.readSession(projectId)" in js
+    assert "conversationPersistence.getOrCreateRequestId(sessionId, content)" in js
+    assert "conversationPersistence.writeSession" in js
 
 
 def test_dashboard_ui_uses_gateway_endpoints_only():
@@ -166,7 +173,7 @@ def test_dashboard_javascript_syntax_when_node_is_available():
     node = shutil.which("node")
     if node is None:
         return
-    for script in ("app.js", "provider_credentials.js"):
+    for script in ("app.js", "provider_credentials.js", "conversation_persistence.js"):
         result = subprocess.run(
             [node, "--check", str(UI_DIR / script)],
             check=False,
