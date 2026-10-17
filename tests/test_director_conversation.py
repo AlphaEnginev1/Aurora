@@ -293,6 +293,15 @@ def test_nvidia_style_provider_response_contract(tmp_path):
         "Revisa todos los enlaces de Aurora y arregla los que fallen",
         "Implement the durable order path and run the tests",
         "Please continue with the integration work",
+        "Haz el cambio solicitado en el repositorio",
+        "Crea un informe con los resultados",
+        "Añade pruebas de regresión a este módulo",
+        "Genera la documentación pendiente",
+        "Configura el proyecto para ejecutar las pruebas",
+        "Escribe el archivo de configuración y súbelo a la rama",
+        "Add a regression test to the module",
+        "Upload the report after creating it",
+        "Configure the project and run the tests",
     ],
 )
 def test_work_intent_does_not_require_the_word_mission(prompt):
@@ -306,6 +315,12 @@ def test_work_intent_does_not_require_the_word_mission(prompt):
         "Lee el archivo README.md",
         "List the files in the repository",
         "How does ModelRouter select a model?",
+        "¿Cómo puedo crear un proyecto?",
+        "Can you explain how to add a file?",
+        "Could you explain how to create a project?",
+        "Please explain how to configure Aurora.",
+        "Can you tell me how to upload a report?",
+        "Abre el archivo config.json",
     ],
 )
 def test_information_questions_and_single_reads_do_not_start_a_mission(prompt):

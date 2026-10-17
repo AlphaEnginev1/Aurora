@@ -780,6 +780,9 @@ Keep responses useful and concise unless the human asks for depth."""
             "como funciona ", "explica ", "describe ", "what is ", "what does ",
             "how does ", "why does ", "explain ", "describe ", "how do i ",
             "how can i ", "how to ", "como puedo ", "como se ",
+            "can you explain ", "could you explain ", "would you explain ",
+            "can you tell me ", "could you tell me ", "can you describe ",
+            "could you describe ", "please explain ", "please describe ",
         )
         if normalized.startswith(informational_prefixes):
             return False
@@ -795,6 +798,15 @@ Keep responses useful and concise unless the human asks for depth."""
             "investigate", "review", "revisa", "check", "verify", "fix", "repair",
             "build", "refactor", "inspect", "analyz", "analyse", "analiz",
             "compara", "run tests", "run the tests", "deploy", "create", "write",
+            # Common imperative forms for Spanish and English execution requests.
+            # Questions such as "how can I create..." remain informational because
+            # informational_prefixes are checked before this marker list.
+            "haz", "crea", "anad", "agreg", "gener", "escrib", "sub", "guard",
+            "configur", "prepar", "envi", "elimin", "borr", "fusion", "public",
+            "instal", "conect", "habilit", "desactiv", "resuelv", "sincroniz",
+            "compart", "mov", "copi", "cambi", "add", "upload", "save",
+            "configure", "prepare", "send", "merge", "publish", "install",
+            "delete", "remove", "sync",
             "delegate", "execute", "launch", "continue with", "finish", "complete",
             "resolve", "examine", "inspecciona", "mision", "mission", "multiagente",
             "multi-agent", "run_mission", "tarea delegada", "tareas delegadas",
