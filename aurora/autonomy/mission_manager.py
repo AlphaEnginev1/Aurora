@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, Mapping
+from typing import Any, Callable
 
 
 class MissionManagerError(RuntimeError):
@@ -43,7 +43,7 @@ class AutonomousMissionManager:
         return MissionRun(
             mission_id=str(submission.mission_id),
             status=str(result.status),
-            cycles=self.max_cycles,
+            cycles=result.cycles_run,
             result=result,
         )
 
