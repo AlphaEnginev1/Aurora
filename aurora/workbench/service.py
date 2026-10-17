@@ -1107,8 +1107,13 @@ class UniversalWorkbench:
     def _project_inspect(self, request: WorkbenchRequest) -> WorkbenchResult:
         if not request.arguments:
             raise WorkbenchError("workbench:project:inspect requires a local path")
-        report = self.project_intake.inspect_local(
+        path = self._safe_path(
             request.arguments[0],
+            must_exist=True,
+            project_id=request.options.get("project_id"),
+        )
+        report = self.project_intake.inspect_local(
+            path,
             project_id=str(request.options.get("project_id") or "unregistered"),
         )
         return WorkbenchResult(request.capability, "project_inspect", "succeeded", output=report.__dict__, provenance=report.path)
