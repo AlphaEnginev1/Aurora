@@ -211,7 +211,7 @@ def test_conversation_session_initializer_cannot_be_shadowed_by_legacy_code():
     # Duplicate function declarations are legal JavaScript and node --check
     # accepts them; the last declaration silently wins and can drop project_id.
     declarations = re.findall(
-        r"^\\s*async function ensureConversationSession\\s*\\(",
+        r"^\s*async function ensureConversationSession\s*\(",
         js,
         flags=re.MULTILINE,
     )
