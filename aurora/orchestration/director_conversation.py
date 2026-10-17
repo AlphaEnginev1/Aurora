@@ -853,16 +853,6 @@ Keep responses useful and concise unless the human asks for depth."""
             else any(token.startswith(marker) for token in tokens)
             for marker in execution_markers
         ) or any(token in execution_action_forms for token in tokens)
-            "delegate", "execute", "launch", "continue with", "finish", "complete",
-            "resolve", "examine", "inspecciona", "mision", "mission", "multiagente",
-            "multi-agent", "run_mission", "tarea delegada", "tareas delegadas",
-        )
-        tokens = normalized.split()
-        return any(
-            marker in normalized if " " in marker
-            else any(token.startswith(marker) for token in tokens)
-            for marker in execution_markers
-        )
 
     @classmethod
     def _canonical_workbench_capability(cls, requested: str) -> str:
