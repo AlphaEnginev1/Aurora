@@ -215,7 +215,7 @@ def test_agent_workbench_uses_runtime_owned_stable_key_and_work_id_across_retrie
             + supplied_work_id
             + '","idempotency_key":"'
             + supplied_key
-            + '","project_id":"project-b","correlation_id":"model-chosen"}}]}',
+            + '","project_id":"project-a","correlation_id":"model-chosen"}}]}',
             "The write request was processed.",
         ]
         loop.run(
@@ -237,3 +237,43 @@ def test_agent_workbench_uses_runtime_owned_stable_key_and_work_id_across_retrie
     assert first.correlation_id == second.correlation_id == "corr-authoritative"
     assert "idempotency_key" not in first.options
     assert first.idempotency_key not in {"model-key-one", "model-key-two"}
+
+
+
+def test_agent_workbench_rejects_conflicting_project_before_execution():
+    workbench = FakeWorkbench()
+    workbench.session_store = object()
+    router = FakeRouter()
+    router.responses = [
+        '{"workbench_calls":[{"capability":"workbench:file:write","arguments":["out.txt","wrong project"],"options":{"project_id":"project-b"}}]}',
+        "The project conflict was rejected.",
+    ]
+    from aurora.inference.models import InferenceRequest
+
+    request = InferenceRequest(
+        messages=[{"role": "user", "content": "Write a file in the selected project."}],
+        metadata={
+            "role": "engineer",
+            "task_id": "task-project-scope",
+            "project_id": "project-a",
+            "correlation_id": "corr-project-a",
+        },
+    )
+    response = AgentWorkbenchToolLoop(workbench).run(
+        request=request,
+        actor="engineer",
+        mission_id="mission-project-a",
+        reason="write a project-scoped file",
+        task_id="task-project-scope",
+        router=router,
+    )
+
+    assert workbench.calls == []
+    assert len(response.workbench_receipts) == 1
+    receipt = response.workbench_receipts[0]
+    assert receipt["status"] == "failed"
+    assert receipt["operation"] == "project_scope_validation"
+    assert receipt["requested_project_id"] == "project-b"
+    assert receipt["project_id"] == "project-a"
+    assert "conflicts with the authoritative task project" in receipt["error"]
+    assert "WORKBENCH_RESULTS" in str(router.requests[1].messages[-1]["content"])

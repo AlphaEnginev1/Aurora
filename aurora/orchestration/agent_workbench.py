@@ -153,6 +153,33 @@ If no Workbench action is needed, answer normally.
                 call_options["work_id"] = mission_id
                 scoped_project_id = current_metadata.get("project_id")
                 if isinstance(scoped_project_id, str) and scoped_project_id.strip():
+                    requested_project_id = call_options.get("project_id")
+                    if requested_project_id is not None and requested_project_id != scoped_project_id:
+                        # Never silently redirect a model-requested operation into
+                        # another project. Return authoritative failed evidence and
+                        # consume budget, but do not invoke the Workbench.
+                        rejected = WorkbenchResult(
+                            capability=call.capability,
+                            operation="project_scope_validation",
+                            status="failed",
+                            error=(
+                                "agent Workbench project_id conflicts with the "
+                                "authoritative task project"
+                            ),
+                            correlation_id=(
+                                str(current_metadata["correlation_id"])
+                                if isinstance(current_metadata.get("correlation_id"), str)
+                                and current_metadata["correlation_id"].strip()
+                                else None
+                            ),
+                        )
+                        receipt = _bounded_result(call, rejected, self.MAX_RESULT_CHARS)
+                        receipt["requested_project_id"] = requested_project_id
+                        receipt["project_id"] = scoped_project_id
+                        executed += 1
+                        workbench_receipts.append(receipt)
+                        results.append(receipt)
+                        continue
                     call_options["project_id"] = scoped_project_id
                 idempotency_key = (
                     f"agent-task:{mission_id}:{task_id}:call:{executed}"
