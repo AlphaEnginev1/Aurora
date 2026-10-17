@@ -97,6 +97,7 @@ class MissionRuntimeResult:
     events: tuple[TaskEvent, ...]
     wait_timed_out: bool = False
     wait_timeout_seconds: float | None = None
+    cycles_run: int = 0
 
 
 class DirectorMissionWaitTimeout(DirectorRuntimeError):
@@ -1409,7 +1410,7 @@ class DirectorRuntime:
         if max_cycles < 1:
             raise DirectorRuntimeError("max_cycles must be at least 1")
         observed: list[TaskEvent] = []
-        for _ in range(max_cycles):
+        for cycles_run in range(1, max_cycles + 1):
             cycle = self.run_once()
             observed.extend(cycle.events)
             if self._is_finalized(submission.mission_id):
@@ -1418,6 +1419,7 @@ class DirectorRuntime:
                     status=self._final_status(submission.mission_id),
                     tasks=self._results_snapshot(submission.mission_id),
                     events=tuple(observed) + self._mission_events(submission.mission_id),
+                    cycles_run=cycles_run,
                 )
         raise DirectorRuntimeError(
             f"mission did not reach final state within max_cycles: {submission.mission_id}"
