@@ -402,6 +402,66 @@ def test_task_lifecycle_events_inherit_project_role_and_correlation_context(
     }
 
 
+def test_event_journal_rejects_project_scope_conflicts_at_storage_boundary(
+    tmp_path: Path,
+):
+    store = DurableTaskStore(tmp_path / "event-project-binding.db")
+    mission_id = "mission-project-binding"
+    store.enqueue(
+        mission_id,
+        [
+            DelegatedTask(
+                "inspect",
+                "researcher",
+                "inspect project evidence",
+                project_id="project-a",
+            )
+        ],
+        correlation_id="corr-project-binding",
+        initial_events=(
+            {
+                "event_type": "mission_submitted",
+                "project_id": "project-a",
+                "correlation_id": "corr-project-binding",
+                "payload": {
+                    "objective": "inspect project evidence",
+                    "project_id": "project-a",
+                    "correlation_id": "corr-project-binding",
+                },
+            },
+        ),
+    )
+
+    with pytest.raises(TaskStoreError, match="project_id conflicts"):
+        store.append_event(
+            mission_id=mission_id,
+            task_id="inspect",
+            event_type="task_scope_conflict",
+            project_id="project-b",
+            correlation_id="corr-project-binding",
+            payload={"project_id": "project-b"},
+        )
+
+    # Mission-level events have no task row to consult; the submission receipt
+    # must still prevent an explicit project reassignment.
+    with pytest.raises(TaskStoreError, match="project_id conflicts"):
+        store.append_event(
+            mission_id=mission_id,
+            task_id=None,
+            event_type="mission_scope_conflict",
+            project_id="project-b",
+            correlation_id="corr-project-binding",
+            payload={"project_id": "project-b"},
+        )
+
+    events = store.events(mission_id)
+    assert all(event.project_id == "project-a" for event in events)
+    assert not any(
+        event.event_type in {"task_scope_conflict", "mission_scope_conflict"}
+        for event in events
+    )
+
+
 def test_enqueue_rolls_back_task_rows_and_initial_events_as_one_transaction(tmp_path: Path):
     store = DurableTaskStore(tmp_path / "tasks.db")
     tasks = (
