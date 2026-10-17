@@ -837,7 +837,7 @@ Keep responses useful and concise unless the human asks for depth."""
             # treating "additional", "uploaded", or "installation" as a request.
             "add", "upload", "save", "configure", "prepare",
             "send", "merge", "publish", "install", "delete", "remove", "sync",
-        })        })
+        })
         tokens = normalized.split()
         return any(
             marker in normalized if " " in marker
