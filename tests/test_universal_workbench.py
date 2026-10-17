@@ -371,6 +371,29 @@ def test_project_scoped_workbench_paths_cannot_target_another_project(tmp_path: 
     with pytest.raises(WorkbenchError, match="outside project-scoped workspace"):
         wb.execute(
             WorkbenchRequest(
+                "workbench:project:inspect",
+                "director",
+                "mission-project-a-inspect",
+                arguments=(str(project_b),),
+                options={"project_id": "project-a"},
+            )
+        )
+
+    inspect_own = wb.execute(
+        WorkbenchRequest(
+            "workbench:project:inspect",
+            "director",
+            "mission-project-a-inspect-own",
+            arguments=(str(project_a),),
+            options={"project_id": "project-a"},
+        )
+    )
+    assert inspect_own.status == "succeeded"
+    assert inspect_own.output["path"] == str(project_a)
+
+    with pytest.raises(WorkbenchError, match="outside project-scoped workspace"):
+        wb.execute(
+            WorkbenchRequest(
                 "workbench:file:write",
                 "director",
                 "mission-project-a",
@@ -408,3 +431,107 @@ def test_project_scoped_workbench_paths_cannot_target_another_project(tmp_path: 
     )
     with pytest.raises(WorkbenchError, match="outside project-scoped workspace"):
         wb._command_execute(command)
+
+
+
+def test_project_scoped_github_operations_cannot_target_another_repository(
+    tmp_path: Path,
+    monkeypatch,
+):
+    repository_root = tmp_path / "repo"
+    repository_root.mkdir()
+    runtime_root = tmp_path / "runtime"
+    runtime_root.mkdir()
+    workbench = UniversalWorkbench(
+        repository_root=repository_root,
+        runtime_root=runtime_root,
+        gateway=FakeGateway(),
+        policy=Policy(frozenset({"workbench:*"}), frozenset()),
+        session_store=WorkSessionStore(runtime_root / "sessions.db"),
+        configured_roots=(),
+    )
+    workbench.project_intake.register(
+        project_id="project-a",
+        name="Project A",
+        objective="Bind GitHub actions to the project repository",
+        workspace=str(repository_root),
+        repository="https://github.com/acme/project-a",
+    )
+
+    connector_calls = []
+    def record_call(name):
+        def call(*args, **kwargs):
+            connector_calls.append((name, args, kwargs))
+            return {"ok": True, "merged": True}
+        return call
+
+    for method in (
+        "create_branch",
+        "upsert_file",
+        "create_pull_request",
+        "merge_pull_request",
+        "workflow_runs",
+        "get",
+    ):
+        setattr(workbench.github, method, record_call(method))
+
+    monkeypatch.setenv("GITHUB_TOKEN", "test-token")
+    monkeypatch.setenv("AURORA_GITHUB_ALLOW_WRITES", "1")
+    monkeypatch.setenv("AURORA_GITHUB_ALLOW_MERGE", "1")
+
+    cases = [
+        (
+            "workbench:github:branch",
+            (json.dumps({"owner": "acme", "repo": "project-b", "branch": "feature", "sha": "abc"}),),
+        ),
+        (
+            "workbench:github:file:write",
+            (json.dumps({"owner": "acme", "repo": "project-b", "path": "README.md", "content": "wrong repo", "message": "write", "branch": "main"}),),
+        ),
+        (
+            "workbench:github:pr",
+            (json.dumps({"owner": "acme", "repo": "project-b", "title": "wrong repo", "head": "feature", "base": "main"}),),
+        ),
+        (
+            "workbench:github:merge",
+            (json.dumps({"owner": "acme", "repo": "project-b", "number": 7}),),
+        ),
+        (
+            "workbench:github:workflow:read",
+            (json.dumps({"owner": "acme", "repo": "project-b"}),),
+        ),
+        ("workbench:github:get", ("repo:acme/project-b",)),
+    ]
+    for capability, arguments in cases:
+        with pytest.raises(WorkbenchError, match="conflicts with canonical repository"):
+            workbench.execute(
+                WorkbenchRequest(
+                    capability,
+                    "director",
+                    "mission-project-a",
+                    arguments=arguments,
+                    options={"project_id": "project-a"},
+                )
+            )
+
+    assert connector_calls == []
+
+    valid = workbench.execute(
+        WorkbenchRequest(
+            "workbench:github:file:write",
+            "director",
+            "mission-project-a-valid",
+            arguments=(json.dumps({
+                "owner": "acme",
+                "repo": "project-a",
+                "path": "README.md",
+                "content": "valid project",
+                "message": "write",
+                "branch": "main",
+            }),),
+            options={"project_id": "project-a"},
+        )
+    )
+    assert valid.status == "succeeded"
+    assert len(connector_calls) == 1
+    assert connector_calls[0][0] == "upsert_file"
