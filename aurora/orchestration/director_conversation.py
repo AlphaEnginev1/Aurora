@@ -780,6 +780,9 @@ Keep responses useful and concise unless the human asks for depth."""
             "como funciona ", "explica ", "describe ", "what is ", "what does ",
             "how does ", "why does ", "explain ", "describe ", "how do i ",
             "how can i ", "how to ", "como puedo ", "como se ",
+            "can you explain ", "could you explain ", "would you explain ",
+            "can you tell me ", "could you tell me ", "can you describe ",
+            "could you describe ", "please explain ", "please describe ",
         )
         if normalized.startswith(informational_prefixes):
             return False
