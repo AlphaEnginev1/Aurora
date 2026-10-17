@@ -1079,13 +1079,29 @@ Keep responses useful and concise unless the human asks for depth."""
                         else f"conversation:adhoc-{uuid4().hex}:{call_index}"
                     )
                     workbench_options = dict(options)
-                    workbench_options.pop("correlation_id", None)
-                    workbench_options["work_id"] = direct_workbench_mission_id
                     scoped_project_id = (metadata or {}).get("project_id")
                     if isinstance(scoped_project_id, str) and scoped_project_id.strip():
-                        # A project-scoped conversation cannot be redirected to a
-                        # different project by model-generated tool options.
+                        requested_project_id = workbench_options.get("project_id")
+                        if requested_project_id is not None and requested_project_id != scoped_project_id:
+                            # Reject rather than silently redirect a write to another
+                            # project than the model explicitly requested.
+                            results.append({
+                                "tool": "workbench",
+                                "call_index": call_index,
+                                "accepted": False,
+                                "status": "failed",
+                                "capability": capability,
+                                "error": (
+                                    "direct Workbench project_id conflicts with the "
+                                    "authoritative conversation session project"
+                                ),
+                                "requested_project_id": requested_project_id,
+                                "project_id": scoped_project_id,
+                            })
+                            continue
                         workbench_options["project_id"] = scoped_project_id
+                    workbench_options.pop("correlation_id", None)
+                    workbench_options["work_id"] = direct_workbench_mission_id
                     result = self.workbench.execute(
                         WorkbenchRequest(
                             capability=capability,
