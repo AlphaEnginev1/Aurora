@@ -1707,20 +1707,6 @@ async function testProvider(provider) {
     $("inspector").setAttribute("aria-hidden", "true");
   }
 
-  async function ensureConversationSession() {
-    if (state.conversationSessionId) return state.conversationSessionId;
-    const response = await fetch(state.conversationApiBase + "/session", {
-      method: "POST",
-      headers: { Accept: "application/json", "Content-Type": "application/json" },
-      body: JSON.stringify({})
-    });
-    if (!response.ok) throw new Error("conversation session " + response.status);
-    const data = await response.json();
-    if (!data || typeof data.session_id !== "string" || !data.session_id) throw new Error("invalid conversation session contract");
-    state.conversationSessionId = data.session_id;
-    return data.session_id;
-  }
-
   function chatWelcomeHtml() {
     return '<div class="chat-welcome" id="chat-welcome">' +
       '<div class="chat-welcome-symbol" aria-hidden="true">✳</div>' +
