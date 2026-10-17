@@ -184,6 +184,37 @@ def test_project_scoped_mission_rejects_unknown_project(tmp_path: Path):
         service.submit_mission(objective="Bad project", project_id="not-registered")
 
 
+def test_initial_task_graph_rejects_unknown_task_project_id_without_mission_scope(
+    tmp_path: Path,
+):
+    planner = _Planner()
+    store = DurableTaskStore(tmp_path / "missions.db")
+    service = DurableDirectorService(
+        planner=planner,
+        task_engine=TaskEngine(_Orchestration(), tmp_path / "workspace"),
+        store=store,
+    )
+
+    with pytest.raises(DurableDirectorError, match="references unknown project_id"):
+        service.submit_mission(
+            objective="Inspect an unregistered project",
+            mission_id="mission-unknown-task-project",
+            correlation_id="corr-unknown-task-project",
+            tasks=(
+                DelegatedTask(
+                    "task-unknown",
+                    "researcher",
+                    "Inspect unknown project",
+                    project_id="missing-project",
+                ),
+            ),
+        )
+
+    assert planner.calls == []
+    assert store.list_tasks("mission-unknown-task-project") == ()
+    assert store.events("mission-unknown-task-project") == ()
+
+
 def test_initial_task_graph_rejects_conflicting_project_id_before_persisting(tmp_path: Path):
     planner = _Planner()
     store = DurableTaskStore(tmp_path / "missions.db")
