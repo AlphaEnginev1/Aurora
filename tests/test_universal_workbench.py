@@ -368,17 +368,16 @@ def test_project_scoped_workbench_paths_cannot_target_another_project(tmp_path: 
         workspace=str(project_b),
     )
 
-    inspect_other = wb.execute(
-        WorkbenchRequest(
-            "workbench:project:inspect",
-            "director",
-            "mission-project-a-inspect",
-            arguments=(str(project_b),),
-            options={"project_id": "project-a"},
+    with pytest.raises(WorkbenchError, match="outside project-scoped workspace"):
+        wb.execute(
+            WorkbenchRequest(
+                "workbench:project:inspect",
+                "director",
+                "mission-project-a-inspect",
+                arguments=(str(project_b),),
+                options={"project_id": "project-a"},
+            )
         )
-    )
-    assert inspect_other.status == "failed"
-    assert "outside project-scoped workspace" in (inspect_other.error or "")
 
     inspect_own = wb.execute(
         WorkbenchRequest(
@@ -504,17 +503,16 @@ def test_project_scoped_github_operations_cannot_target_another_repository(
         ("workbench:github:get", ("repo:acme/project-b",)),
     ]
     for capability, arguments in cases:
-        result = workbench.execute(
-            WorkbenchRequest(
-                capability,
-                "director",
-                "mission-project-a",
-                arguments=arguments,
-                options={"project_id": "project-a"},
+        with pytest.raises(WorkbenchError, match="conflicts with canonical repository"):
+            workbench.execute(
+                WorkbenchRequest(
+                    capability,
+                    "director",
+                    "mission-project-a",
+                    arguments=arguments,
+                    options={"project_id": "project-a"},
+                )
             )
-        )
-        assert result.status == "failed"
-        assert "conflicts with canonical repository" in result.error
 
     assert connector_calls == []
 
