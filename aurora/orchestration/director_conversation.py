@@ -795,6 +795,15 @@ Keep responses useful and concise unless the human asks for depth."""
             "investigate", "review", "revisa", "check", "verify", "fix", "repair",
             "build", "refactor", "inspect", "analyz", "analyse", "analiz",
             "compara", "run tests", "run the tests", "deploy", "create", "write",
+            # Common imperative forms for Spanish and English execution requests.
+            # Questions such as "how can I create..." remain informational because
+            # informational_prefixes are checked before this marker list.
+            "haz", "crea", "anad", "agreg", "gener", "escrib", "sub", "guard",
+            "configur", "prepar", "envi", "elimin", "borr", "fusion", "public",
+            "instal", "conect", "habilit", "desactiv", "resuelv", "sincroniz",
+            "compart", "mov", "copi", "cambi", "add", "upload", "save",
+            "configure", "prepare", "send", "merge", "publish", "install",
+            "delete", "remove", "sync",
             "delegate", "execute", "launch", "continue with", "finish", "complete",
             "resolve", "examine", "inspecciona", "mision", "mission", "multiagente",
             "multi-agent", "run_mission", "tarea delegada", "tareas delegadas",
