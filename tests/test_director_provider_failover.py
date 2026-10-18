@@ -781,7 +781,7 @@ def test_factory_uses_explicit_openrouter_free_reserve_and_persists_activation(
     settings = OperatorSettingsStore(tmp_path / "operator-settings.json")
     settings.save({
         "director": {
-            "failover": {"enabled": True, "order": ["openrouter", "nvidia_api"]},
+            "failover": {"enabled": True, "order": ["nvidia_api"]},
         },
         "providers": {
             "nvidia_api": {"api_key": "nvidia-test"},
@@ -804,6 +804,14 @@ def test_factory_uses_explicit_openrouter_free_reserve_and_persists_activation(
         active_provider=FailingRouter(),
         db_path=tmp_path / "tasks.db",
     )
+
+    # Change reserve priority after controller construction. Every failover
+    # decision must consult current persisted settings rather than startup state.
+    settings.save({
+        "director": {
+            "failover": {"enabled": True, "order": ["openrouter", "nvidia_api"]},
+        },
+    })
 
     response = controller.generate(
         messages=[{"role": "user", "content": "continue the accepted mission"}],
