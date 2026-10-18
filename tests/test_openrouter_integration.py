@@ -42,10 +42,29 @@ def test_explicit_openrouter_director_mode_requires_key_and_registered_model(mon
     monkeypatch.setenv("AURORA_DIRECTOR_PROVIDER", "openrouter")
     monkeypatch.setenv("OPENROUTER_API_KEY", "openrouter-test")
     monkeypatch.setenv("OPENROUTER_MODEL_ID", "openrouter/free")
-    model = SimpleNamespace(id="openrouter/free", provider="openrouter", pricing_tier="free")
+    model = SimpleNamespace(
+        id="openrouter/free",
+        provider="openrouter",
+        pricing_tier="free",
+        enabled=True,
+        healthy=True,
+        available=True,
+    )
+
+    class FakeModelRegistry:
+        ids = ("openrouter/free",)
+        models = (model,)
+
+        @staticmethod
+        def resolve(model_id):
+            if model_id != "openrouter/free":
+                raise KeyError(model_id)
+            return model
+
     router = SimpleNamespace(
         cost_policy="free_only",
-        model_registry=SimpleNamespace(ids=("openrouter/free",), models=(model,)),
+        provider_registry=SimpleNamespace(ids=("openrouter",)),
+        model_registry=FakeModelRegistry(),
     )
     provider = _build_director_provider(router=router)
     assert provider is not None
