@@ -312,7 +312,6 @@ class DirectorProviderFailoverController:
         self._candidate_resolver = candidate_resolver
         self._health_store = health_store
         self._lock = RLock()
-        self._failed_candidates: set[tuple[str, str]] = set()
 
     @property
     def provider_id(self) -> str:
@@ -354,6 +353,10 @@ class DirectorProviderFailoverController:
     ) -> DirectorModelResponse:
         with self._lock:
             active = self._active_provider
+            # A reserve rejected on this request must not be attempted twice in
+            # the same fallback chain, but it may recover after its health
+            # cooldown for a later request. Durable health state owns cooldown.
+            failed_candidates_this_call: set[tuple[str, str]] = set()
             try:
                 response = _generate_compatible_provider(
                     active,
@@ -395,7 +398,7 @@ class DirectorProviderFailoverController:
                     if not (
                         active_model_id and candidate.model == active_model_id
                     )
-                    and self._candidate_key(candidate) not in self._failed_candidates
+                    and self._candidate_key(candidate) not in failed_candidates_this_call
                 ]
                 if self._candidate_resolver is not None:
                     try:
@@ -425,7 +428,7 @@ class DirectorProviderFailoverController:
                         if not (
                             active_model_id and candidate.model == active_model_id
                         )
-                        and self._candidate_key(candidate) not in self._failed_candidates
+                        and self._candidate_key(candidate) not in failed_candidates_this_call
                         and self._candidate_key(candidate) not in seen
                     )
                 last_error: Exception = exc
@@ -507,7 +510,7 @@ class DirectorProviderFailoverController:
                                 )
                             except Exception as health_exc:
                                 report_failure("provider_health_store", health_exc)
-                        self._failed_candidates.add(self._candidate_key(candidate))
+                        failed_candidates_this_call.add(self._candidate_key(candidate))
                         self._store.record(
                             transition_id=f"{attempt_id}:failed",
                             correlation_id=correlation_id,
