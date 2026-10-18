@@ -645,6 +645,9 @@ def build_director_service(*, inference_policy_path: str | Path, autonomy_policy
         audit_path=audit_path,
         resolution=resolution,
         capability_runtime=capability_runtime,
+        project_registry=project_registry,
+        projects_path=projects_path,
+        workspace_root=root,
     )
     orchestration=OrchestrationEngine(
         router,
@@ -674,6 +677,7 @@ def build_director_service(*, inference_policy_path: str | Path, autonomy_policy
         model_performance=model_performance,
         research_service=research_service,
         research_learning_gate=research_learning_gate,
+        project_registry=project_registry,
     )
     director_provider = _build_director_provider(settings_store, router=router)
 
