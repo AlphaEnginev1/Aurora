@@ -150,55 +150,50 @@ def _register_openrouter_free_model(
 
 
 def _apply_local_model_settings(router: ModelRouter, settings_store: OperatorSettingsStore) -> None:
-    settings = settings_store.load()
-    director = settings.get("director", {}) if isinstance(settings, dict) else {}
-    provider_id = str(director.get("provider", "")).strip().lower()
-    model_id = str(director.get("model", "")).strip()
-    if provider_id != "nvidia_api" or not model_id:
-        return
-    base_url = str(
-        settings.get("providers", {}).get("nvidia_api", {}).get(
-            "base_url", "https://integrate.api.nvidia.com/v1"
-        )
-    ).rstrip("/")
+    """Do not grant NVIDIA model activation from a persisted preference.
+
+    The selected model ID and configured endpoint are preferences only. The
+    authoritative NVIDIA Free Endpoint discovery/activation pipeline owns the
+    enabled/free/healthy state; this function deliberately does not manufacture
+    or re-enable a model from the static seed policy.
+    """
+    return
+
+
+def _has_authoritative_nvidia_free_activation(
+    router: ModelRouter,
+    settings_store: OperatorSettingsStore,
+    model_id: str,
+) -> bool:
+    """Require both active registry state and a durable official-catalog receipt."""
+    if router.model_registry is None or router.provider_registry is None:
+        return False
+    if "nvidia_api" not in router.provider_registry.ids:
+        return False
     try:
-        existing = router.model_registry.resolve(model_id)
+        model = router.model_registry.resolve(model_id)
     except Exception:
-        existing = None
-    if existing is None:
-        model = ModelSpec(
-            id=model_id,
-            provider="nvidia_api",
-            endpoint=base_url,
-            capabilities=("chat", "reasoning", "tool_use"),
-            context_window=131072,
-            enabled=True,
-            pricing_tier=("free" if is_free_model("nvidia_api", model_id) else "unknown"),
-        )
-        router.model_registry = type(router.model_registry).from_specs(
-            [*router.model_registry.models, model],
-            provider_registry=router.provider_registry,
-        )
-        router.models = list(router.model_registry.models)
-        return
-    if not existing.enabled or existing.endpoint != base_url:
-        updated = ModelSpec(
-            id=existing.id,
-            provider=existing.provider,
-            endpoint=base_url,
-            capabilities=existing.capabilities or ("chat", "reasoning", "tool_use"),
-            context_window=existing.context_window or 131072,
-            enabled=True,
-            specialties=existing.specialties,
-            quality_score=existing.quality_score,
-            latency_score=existing.latency_score,
-            cost_score=existing.cost_score,
-            healthy=existing.healthy,
-            available=existing.available,
-            pricing_tier=existing.pricing_tier or ("free" if is_free_model("nvidia_api", existing.id) else "unknown"),
-        )
-        router.model_registry.replace(updated)
-        router.models = list(router.model_registry.models)
+        return False
+    if not (
+        model.provider == "nvidia_api"
+        and model.enabled
+        and model.healthy
+        and model.available
+        and model.pricing_tier == "free"
+    ):
+        return False
+    try:
+        candidates = ModelCandidateStore(
+            settings_store.path.resolve().parent / "model-candidates.db"
+        ).list(provider_id="nvidia_api", state="synced", limit=500)
+    except Exception:
+        return False
+    return any(
+        item.model.id == model_id
+        and isinstance(item.metadata, dict)
+        and item.metadata.get("free_endpoint_catalog") is True
+        for item in candidates
+    )
 
 
 def _build_director_provider(
@@ -271,14 +266,6 @@ def _build_director_provider(
         model = str(configured.get("model", "")).strip()
         if not model:
             return None
-        if router is not None and getattr(router, "cost_policy", "all") == "free_only" and not is_free_model("nvidia_api", model):
-            # Dynamically discovered NVIDIA Free Endpoint models are admitted by the
-            # discovery/activation path; static models must still pass the free policy.
-            if not (router.model_registry and any(
-                item.id == model and item.provider == "nvidia_api" and item.pricing_tier == "free"
-                for item in router.model_registry.models
-            )):
-                raise RuntimeError("free_only inference policy rejects NVIDIA model: " + model)
         if settings_store is None:
             key = os.getenv("NVIDIA_API_KEY", "")
         else:
@@ -288,8 +275,23 @@ def _build_director_provider(
                 if callable(credential)
                 else ""
             ) or os.getenv("NVIDIA_API_KEY", "")
+            provider_settings = (
+                settings.get("providers", {}).get("nvidia_api", {})
+                if isinstance(settings.get("providers", {}), dict)
+                else {}
+            )
+            if isinstance(provider_settings, dict) and provider_settings.get("enabled", True) is False:
+                raise RuntimeError("NVIDIA Director mode is selected but the provider is disabled")
         if not key or router is None:
             return None
+        if getattr(router, "cost_policy", "free_only") == "free_only":
+            if not _has_authoritative_nvidia_free_activation(router, settings_store, model):
+                raise RuntimeError(
+                    "free_only policy rejects NVIDIA model without an active model registration "
+                    "and a synced official Free Endpoint catalog receipt: " + model
+                )
+        else:
+            raise RuntimeError("Aurora canonical runtime requires cost_policy=free_only")
         return BoundInferenceDirectorProvider(
             router,
             provider_id="nvidia_api",
