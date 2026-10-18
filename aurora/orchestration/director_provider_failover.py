@@ -368,10 +368,12 @@ class DirectorProviderFailoverController:
                     capability=capability,
                     preferred_models=preferred_models,
                 )
-                if self._health_store is not None:
-                    # The routed provider is only a facade. Health belongs to the
-                    # provider/model that actually executed the request, as reported
-                    # by the successful response receipt.
+                if (
+                    self._health_store is not None
+                    and not self._router_owns_health(active)
+                ):
+                    # Standalone providers may not write ModelRouter health receipts;
+                    # use the concrete response identity rather than the facade ID.
                     actual_provider = str(
                         getattr(response, "provider", "")
                         or getattr(active, "provider_id", "")
@@ -577,15 +579,24 @@ class DirectorProviderFailoverController:
                     f"Director provider failover exhausted after {getattr(active, 'provider_id', 'unknown')} failed"
                 ) from last_error
 
+    def _router_owns_health(self, provider: DirectorProvider) -> bool:
+        """Avoid double-counting when the active adapter wraps this health-aware router."""
+        router = getattr(provider, "_router", None)
+        return (
+            router is not None
+            and self._health_store is not None
+            and getattr(router, "health_store", None) is self._health_store
+        )
+
     def _record_health(
         self,
         provider: DirectorProvider,
         model: str | None,
         error: Exception,
     ) -> None:
-        if self._health_store is None:
+        if self._health_store is None or self._router_owns_health(provider):
             return
-        # Errors from InferenceDirectorProvider/ModelRouter identify the real
+        # Errors from standalone router adapters identify the real
         # executor in ProviderErrorContext; the facade's provider_id is not the
         # provider that just failed. Attribute failures to that concrete receipt.
         context = getattr(error, "context", None)
