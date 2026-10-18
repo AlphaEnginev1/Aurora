@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, replace as dataclass_replace
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -243,12 +243,61 @@ class ModelDiscoveryService:
                     )
             else:
                 result[provider_id] = tuple(staged)
+                # A complete successful NVIDIA response is an authoritative
+                # current snapshot: candidates that were previously approved but
+                # are no longer in the Free Endpoint catalog must be rejected.
+                # On transport/catalog failure we preserve the last good snapshot
+                # rather than revoke models due to a transient outage.
+                if provider_id == "nvidia_api":
+                    self._reconcile_nvidia_free_endpoint_snapshot(tuple(staged))
                 with self.candidate_store._connect() as db:
                     db.execute(
                         "UPDATE model_discovery_refresh SET last_completed_at=?,last_success=1,staged_count=?,last_error=NULL WHERE provider_id=?",
                         (_now(), len(staged), provider_id),
                     )
         return result
+
+    def _reconcile_nvidia_free_endpoint_snapshot(
+        self,
+        discovered: Sequence[DiscoveredModelCandidate],
+    ) -> tuple[str, ...]:
+        """Revoke synced NVIDIA candidates absent from a successful current snapshot."""
+        current_free_ids = {
+            candidate.model.id
+            for candidate in discovered
+            if candidate.provider_id == "nvidia_api"
+            and candidate.model.provider == "nvidia_api"
+            and isinstance(candidate.metadata, Mapping)
+            and candidate.metadata.get("free_endpoint_catalog") is True
+        }
+        revoked: list[str] = []
+        # Reconcile against the complete durable set, not just models returned
+        # by the latest endpoint page. This runs only after both the NVIDIA model
+        # endpoint and official Free Endpoint catalog were read successfully.
+        for previous in self.candidate_store.list(
+            provider_id="nvidia_api",
+            state="synced",
+            limit=5000,
+        ):
+            model_id = previous.model.id
+            if model_id in current_free_ids:
+                continue
+            self.candidate_store.set_state(previous.candidate_id, "rejected")
+            revoked.append(model_id)
+            # A successful refresh may reveal that an already-active model is no
+            # longer entitled to free inference. Disable it in memory immediately.
+            if model_id in self.model_registry.ids:
+                active = self.model_registry.resolve(model_id)
+                if active.provider == "nvidia_api":
+                    self.model_registry.replace(
+                        dataclass_replace(
+                            active,
+                            enabled=False,
+                            healthy=False,
+                            available=False,
+                        )
+                    )
+        return tuple(sorted(set(revoked)))
 
     def discover_and_stage(
         self,
