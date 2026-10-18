@@ -110,6 +110,32 @@ class DurableDirectorService:
                 "mission_id is already bound to a different or missing correlation_id"
             )
         restored_tasks = tuple(item.task for item in existing_tasks)
+        # Idempotent replay is still an execution boundary. Revalidate durable
+        # task scope against the current canonical registry so a previously
+        # accepted but now-unresolvable project target cannot be replayed as a
+        # valid order.
+        project_registry = getattr(self.planner, "project_registry", None)
+        for task in restored_tasks:
+            task_project_id = task.project_id
+            if project_id is not None and task_project_id != project_id:
+                raise DurableDirectorError(
+                    f"durable task {task.task_id!r} lost or conflicts with the "
+                    "authoritative mission project_id"
+                )
+            if task_project_id is None:
+                continue
+            if project_registry is None:
+                raise DurableDirectorError(
+                    f"durable task {task.task_id!r} is project-scoped but the "
+                    "canonical project registry is unavailable"
+                )
+            try:
+                project_registry.resolve(task_project_id)
+            except Exception as exc:
+                raise DurableDirectorError(
+                    f"durable task {task.task_id!r} references unknown project_id "
+                    f"{task_project_id!r}"
+                ) from exc
         restored_plan = DirectorPlan(
             objective=str(submitted.get("objective", objective)),
             tasks=restored_tasks,
