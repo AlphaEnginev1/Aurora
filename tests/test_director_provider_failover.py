@@ -1007,3 +1007,63 @@ def test_failover_records_the_incoming_mission_correlation_id(tmp_path: Path):
     assert records
     assert {item["correlation_id"] for item in records} == {"corr-stable"}
 
+def test_model_router_health_is_not_double_counted_by_failover_controller(tmp_path: Path):
+    from aurora.inference.errors import ProviderTimeoutError
+    from aurora.inference.models import ModelSpec
+    from aurora.inference.provider_health import ProviderHealthStore
+    from aurora.inference.providers.registry import ProviderRegistry, ProviderSpec
+    from aurora.inference.registry import ModelRegistry
+    from aurora.inference.router import ModelRouter
+    from aurora.orchestration.director_provider import InferenceDirectorProvider
+
+    class TimeoutProvider:
+        def generate(self, *_args, **_kwargs):
+            raise ProviderTimeoutError("controlled timeout")
+
+    providers = ProviderRegistry((
+        ProviderSpec(
+            "nvidia_api",
+            "NVIDIA",
+            ("chat", "reasoning"),
+            True,
+            lambda _model: TimeoutProvider(),
+        ),
+    ))
+    model = ModelSpec(
+        id="nvidia/model-timeout",
+        provider="nvidia_api",
+        endpoint="https://integrate.api.nvidia.com/v1",
+        capabilities=("chat", "reasoning"),
+        enabled=True,
+        healthy=True,
+        available=True,
+        pricing_tier="free",
+    )
+    registry = ModelRegistry([model], provider_registry=providers)
+    health = ProviderHealthStore(tmp_path / "health.db")
+    router = ModelRouter(
+        models=[model],
+        provider_registry=providers,
+        model_registry=registry,
+        health_store=health,
+        cost_policy="free_only",
+    )
+    controller = DirectorProviderFailoverController(
+        active_provider=InferenceDirectorProvider(router),
+        candidates=(),
+        store=DirectorProviderFailoverStore(str(tmp_path / "failovers.db")),
+        activate=lambda _candidate, _provider: None,
+        health_store=health,
+    )
+
+    with pytest.raises(DirectorProviderFailoverError):
+        controller.generate(
+            messages=[{"role": "user", "content": "timeout test"}],
+            model=None,
+            role="director_conversation",
+        )
+
+    snapshot = health.snapshot("nvidia_api", "nvidia/model-timeout")
+    assert snapshot.failure_count == 1
+    assert snapshot.consecutive_failures == 1
+
