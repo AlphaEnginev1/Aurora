@@ -183,8 +183,13 @@ def _has_authoritative_nvidia_free_activation(
     ):
         return False
     try:
+        candidate_root = (
+            settings_store.path.resolve().parent
+            if settings_store is not None
+            else Path(os.getenv("AURORA_WORKSPACE_ROOT", ".aurora-runtime")).resolve()
+        )
         candidates = ModelCandidateStore(
-            settings_store.path.resolve().parent / "model-candidates.db"
+            candidate_root / "model-candidates.db"
         ).list(provider_id="nvidia_api", state="synced", limit=500)
     except Exception:
         return False
