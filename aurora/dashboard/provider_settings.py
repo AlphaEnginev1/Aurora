@@ -155,70 +155,58 @@ class ProviderSettingsService:
                 )
 
             if provider_id == "nvidia_api" and nvidia_key and selected_model and selected_model != "router":
-                existing = next(
-                    (item for item in router.model_registry.models if item.id == selected_model),
-                    None,
-                )
-                if existing is None and hasattr(self.runtime, "model_discovery"):
-                    try:
-                        refresh_service = getattr(self.runtime, "autonomous_discovery_refresh", None)
-                        if refresh_service is not None:
-                            refresh_service.refresh_if_due(force=True)
-                        else:
-                            self.runtime.model_discovery.refresh_all(
-                                provider_ids=("nvidia_api",),
-                                min_interval_seconds=0,
-                                force=True,
-                            )
-                            self.runtime.model_discovery.activate_eligible_discovered(
-                                provider_id="nvidia_api",
-                                cost_policy=getattr(router, "cost_policy", "free_only"),
-                                health_store=getattr(router, "health_store", None),
-                            )
-                        existing = next(
-                            (item for item in router.model_registry.models if item.id == selected_model),
-                            None,
+                try:
+                    refresh_service = getattr(self.runtime, "autonomous_discovery_refresh", None)
+                    if refresh_service is not None:
+                        refresh_service.refresh_if_due(force=True)
+                    elif hasattr(self.runtime, "model_discovery"):
+                        self.runtime.model_discovery.refresh_all(
+                            provider_ids=("nvidia_api",),
+                            min_interval_seconds=0,
+                            force=True,
                         )
-                    except Exception:
-                        existing = None
-                if existing is None:
-                    if not is_free_model("nvidia_api", selected_model):
-                        raise DashboardProviderSettingsError(
-                            "selected model is not a currently discovered or explicitly seeded free NVIDIA model"
+                        self.runtime.model_discovery.activate_eligible_discovered(
+                            provider_id="nvidia_api",
+                            cost_policy=getattr(router, "cost_policy", "free_only"),
+                            health_store=getattr(router, "health_store", None),
                         )
-                    existing = ModelSpec(
-                        id=selected_model,
-                        provider="nvidia_api",
-                        endpoint=str(settings["providers"]["nvidia_api"]["base_url"]).rstrip("/"),
-                        capabilities=("chat", "reasoning", "tool_use"),
-                        context_window=131072,
-                        enabled=True,
-                        pricing_tier="free",
+                except Exception:
+                    # A failed live refresh cannot authorize a static seed model.
+                    pass
+
+                from aurora.orchestration.factory import _has_authoritative_nvidia_free_activation
+
+                if not _has_authoritative_nvidia_free_activation(
+                    router, self.store, selected_model
+                ):
+                    raise DashboardProviderSettingsError(
+                        "selected NVIDIA model is not active in the current official Free Endpoint catalog; "
+                        "static seed metadata is not authorization"
                     )
-                    router.model_registry = type(router.model_registry).from_specs(
-                        [*router.model_registry.models, existing],
-                        provider_registry=router.provider_registry,
-                    )
-                    router.models = list(router.model_registry.models)
-                    _rebind_runtime_discovery(self.runtime, router)
-                elif not existing.enabled or existing.endpoint != str(settings["providers"]["nvidia_api"]["base_url"]).rstrip("/"):
+
+                existing = router.model_registry.resolve(selected_model)
+                endpoint = str(
+                    settings["providers"]["nvidia_api"]["base_url"]
+                ).rstrip("/")
+                if existing.endpoint != endpoint:
                     updated = ModelSpec(
                         id=existing.id,
                         provider=existing.provider,
-                        endpoint=str(settings["providers"]["nvidia_api"]["base_url"]).rstrip("/"),
-                        capabilities=existing.capabilities or ("chat", "reasoning", "tool_use"),
-                        context_window=existing.context_window or 131072,
-                        enabled=True,
+                        endpoint=endpoint,
+                        capabilities=existing.capabilities,
+                        context_window=existing.context_window,
+                        enabled=existing.enabled,
                         specialties=existing.specialties,
                         quality_score=existing.quality_score,
                         latency_score=existing.latency_score,
                         cost_score=existing.cost_score,
                         healthy=existing.healthy,
                         available=existing.available,
-                        pricing_tier=existing.pricing_tier or "free",
+                        pricing_tier=existing.pricing_tier,
                     )
                     router.model_registry.replace(updated)
                     router.models = list(router.model_registry.models)
+                    _rebind_runtime_discovery(self.runtime, router)
 
             from aurora.orchestration.factory import _build_director_provider
 
@@ -272,7 +260,9 @@ class ProviderSettingsService:
                 candidate.model.id
                 for candidate in candidates
                 if getattr(candidate, "model", None) is not None
-                and getattr(candidate.model, "pricing_tier", "unknown") == "free"
+                and isinstance(getattr(candidate, "metadata", None), Mapping)
+                and candidate.metadata.get("free_endpoint_catalog") is True
+                and getattr(candidate.model, "provider", None) == "nvidia_api"
             ]
             return {
                 "provider": "nvidia_api",
