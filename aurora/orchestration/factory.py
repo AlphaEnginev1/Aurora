@@ -43,7 +43,11 @@ from aurora.skills.evolution_runtime import SkillEvolutionRuntime
 from aurora.skills.validation_lab import SkillValidationLab
 from aurora.skills.improvement import SkillImprovementGenerator
 from aurora.skills.discovery import SkillDiscoveryService
-from aurora.operator_settings import OperatorSettingsStore, settings_path
+from aurora.operator_settings import (
+    ALLOWED_DIRECTOR_FAILOVER_PROVIDERS,
+    OperatorSettingsStore,
+    settings_path,
+)
 from .director import DirectorPlanner, DirectorService
 from .director_provider import InferenceDirectorProvider
 from .director_provider_failover import (
@@ -215,12 +219,40 @@ def _build_director_provider(
         return None
 
     if director_provider_id == "openrouter":
-        model = os.getenv("OPENROUTER_MODEL_ID", "openrouter/free").strip() or "openrouter/free"
-        key = os.getenv("OPENROUTER_API_KEY", "").strip()
+        model = str(configured.get("model", "") or os.getenv(
+            "OPENROUTER_MODEL_ID", "openrouter/free"
+        )).strip() or "openrouter/free"
+        if model != "openrouter/free" or not is_free_model("openrouter", model):
+            raise RuntimeError(
+                "free_only inference policy permits only OpenRouter's official openrouter/free route"
+            )
+        provider_config = (
+            settings.get("providers", {}).get("openrouter", {})
+            if isinstance(settings.get("providers", {}), dict)
+            else {}
+        )
+        if isinstance(provider_config, dict) and provider_config.get("enabled", True) is False:
+            raise RuntimeError("OpenRouter Director mode is selected but the provider is disabled")
+        stored_key = (
+            settings_store.credential("openrouter")
+            if settings_store is not None
+            else ""
+        )
+        key = stored_key or os.getenv("OPENROUTER_API_KEY", "").strip()
         if not key or router is None:
             return None
-        if router.model_registry is None or model not in router.model_registry.ids:
-            raise RuntimeError("OpenRouter model is not registered in the free-only model catalog: " + model)
+        if router.provider_registry is None or "openrouter" not in router.provider_registry.ids:
+            raise RuntimeError("OpenRouter is not active in the configured provider registry")
+        if router.model_registry is None:
+            raise RuntimeError("OpenRouter model registry is not configured")
+        try:
+            registered = router.model_registry.resolve(model)
+        except Exception as exc:
+            raise RuntimeError(
+                "OpenRouter free model is not registered in Aurora's model catalog"
+            ) from exc
+        if registered.provider != "openrouter" or registered.pricing_tier != "free":
+            raise RuntimeError("OpenRouter model registration violates free_only policy")
         return BoundInferenceDirectorProvider(
             router,
             provider_id="openrouter",
@@ -275,9 +307,22 @@ def _build_director_provider_failover(
         return active_provider
 
     order = failover.get("order", ["nvidia_api"])
-    if not isinstance(order, list):
-        raise RuntimeError("director.failover.order must be a list")
-    normalized_order = tuple(str(item).strip().lower() for item in order if str(item).strip().lower() == "nvidia_api")
+    if (
+        not isinstance(order, list)
+        or not order
+        or any(not isinstance(item, str) for item in order)
+    ):
+        raise RuntimeError("director.failover.order must be a non-empty list of provider IDs")
+    normalized_order = tuple(str(item).strip().lower() for item in order)
+    if (
+        any(item not in ALLOWED_DIRECTOR_FAILOVER_PROVIDERS for item in normalized_order)
+        or len(normalized_order) != len(set(normalized_order))
+        or any(not item for item in normalized_order)
+    ):
+        raise RuntimeError(
+            "director.failover.order may contain only approved free-only providers: "
+            + ", ".join(ALLOWED_DIRECTOR_FAILOVER_PROVIDERS)
+        )
 
     model_candidate_store = ModelCandidateStore(
         Path(db_path).resolve().parent / "model-candidates.db"
@@ -365,8 +410,9 @@ def _build_director_provider_failover(
                     )
                 )
 
-        # Existing configured NVIDIA models remain reserve candidates; discovery is
-        # still the preferred source and never creates a hard seven-model ceiling.
+        # Keep currently active NVIDIA models available as reserves after they
+        # have entered the canonical registry. The discovery path above remains
+        # the source of dynamic NVIDIA candidates.
         for model in router.available():
             if model.provider != "nvidia_api":
                 continue
@@ -379,6 +425,28 @@ def _build_director_provider_failover(
                 continue
             seen_models.add(key)
             pool_specs.append(model)
+
+        # Other providers are reserves only when explicitly named in the operator's
+        # failover order and explicitly authorized by the canonical free-model policy.
+        # An API key alone never authorizes a paid/unknown model to run.
+        static_fallback_ids = {
+            provider_id for provider_id in normalized_order if provider_id != "nvidia_api"
+        }
+        if static_fallback_ids:
+            for model in router.available():
+                if model.provider not in static_fallback_ids:
+                    continue
+                if active_id == model.provider and active_model_id == model.id:
+                    continue
+                if "reasoning" not in model.capabilities or model.pricing_tier != "free":
+                    continue
+                if not is_free_model(model.provider, model.id):
+                    continue
+                key = (model.provider, model.id)
+                if key in seen_models:
+                    continue
+                seen_models.add(key)
+                pool_specs.append(model)
 
         if not pool_specs:
             return ()
@@ -417,6 +485,20 @@ def _build_director_provider_failover(
             report_failure("failover_reserve_pool", exc)
             return ()
 
+        # The operator order chooses provider priority; DynamicReservePool still
+        # ranks eligible models inside each provider by the canonical score/health.
+        provider_rank = {
+            provider_id: index for index, provider_id in enumerate(normalized_order)
+        }
+        reserve_candidates = tuple(sorted(
+            reserve_candidates,
+            key=lambda item: (
+                provider_rank.get(item.model.provider, len(provider_rank)),
+                -item.score,
+                -item.model.quality_score,
+                item.model.id,
+            ),
+        ))
         candidates: list[DirectorProviderCandidate] = []
         for reserve_candidate in reserve_candidates:
             selected = reserve_candidate.model
