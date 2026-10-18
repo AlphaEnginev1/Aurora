@@ -390,7 +390,11 @@ class DirectorProviderFailoverController:
                 self._record_health(active, model, exc)
                 if not _is_failoverable(exc):
                     raise
-                correlation_id = self._correlation_id(active)
+                correlation_id = self._correlation_id(
+                    active,
+                    metadata=metadata,
+                    role=role,
+                )
                 active_provider_id = str(getattr(active, "provider_id", "") or "")
                 active_model_id = _failed_model_id(active, model, exc)
                 self._record_and_emit(
@@ -611,12 +615,37 @@ class DirectorProviderFailoverController:
             str(candidate.model or "").strip(),
         )
 
-    def _correlation_id(self, provider: DirectorProvider) -> str:
+    def _correlation_id(
+        self,
+        provider: DirectorProvider,
+        *,
+        metadata: Mapping[str, Any] | None = None,
+        role: str | None = None,
+    ) -> str:
         context = self._context_provider() if self._context_provider is not None else None
-        mission_id = str((context or {}).get("mission_id") or "global")
-        role = str((context or {}).get("role") or "director")
+        context = context if isinstance(context, Mapping) else {}
+        metadata = metadata if isinstance(metadata, Mapping) else {}
+        # The durable mission correlation is authoritative when a mission is
+        # already being planned. For conversation turns before mission creation,
+        # preserve the incoming request/turn correlation rather than minting a
+        # disconnected failover ID.
+        correlation_id = str(
+            context.get("correlation_id")
+            or metadata.get("correlation_id")
+            or ""
+        ).strip()
+        if correlation_id:
+            return correlation_id
+        mission_id = str(
+            context.get("mission_id")
+            or metadata.get("mission_id")
+            or metadata.get("session_id")
+            or metadata.get("turn_id")
+            or "global"
+        )
+        resolved_role = str(context.get("role") or role or metadata.get("role") or "director")
         safe = "_".join(
-            item for item in (mission_id.strip(), role.strip(), getattr(provider, "provider_id", "unknown"))
+            item for item in (mission_id.strip(), resolved_role.strip(), getattr(provider, "provider_id", "unknown"))
             if item
         )
         return f"{safe}:{_now().replace(':', '').replace('+00:00', 'Z')}"
