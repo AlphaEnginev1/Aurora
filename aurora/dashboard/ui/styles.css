@@ -2946,3 +2946,34 @@ body {
 .credential-state.present{color:var(--good);border-color:rgba(99,230,165,.25);background:rgba(99,230,165,.06)}
 .credential-state.missing{color:var(--muted)}
 #nvidia-test[hidden]{display:none}
+
+.settings-failover{
+  display:grid;
+  gap:9px;
+  margin-top:8px;
+  padding:14px;
+  border:1px solid var(--line);
+  border-radius:12px;
+  background:rgba(5,11,16,.48)
+}
+.settings-failover>.eyebrow{
+  color:var(--accent);
+  font-size:9px;
+  letter-spacing:.16em;
+  margin-bottom:2px
+}
+.settings-failover label{
+  margin-top:2px
+}
+.settings-failover .settings-note{
+  margin-top:3px
+}
+.settings-failover code{
+  color:var(--accent);
+  font-size:inherit
+}
+.settings-form select:disabled,.settings-form input:disabled{
+  opacity:.8;
+  cursor:not-allowed
+}
+
