@@ -429,7 +429,7 @@
                 <input id="credential-endpoint" type="url" autocomplete="off" placeholder="Provider endpoint">
                 <label for="credential-key">API key</label>
                 <input id="credential-key" type="password" autocomplete="new-password" placeholder="Paste the provider API key">
-                <p class="settings-note">Keys are stored in Aurora's local operator settings with restricted file permissions. The table never displays the secret itself. Saving a key does not automatically enable inference: each provider must also have a compatible runtime adapter and a successful connection test.</p>
+                <p class="settings-note">Keys are stored in Aurora's local operator settings with restricted file permissions. The table never displays the secret itself. NVIDIA catalog discovery uses the saved provider credential and can run before choosing a primary model. Saving a key does not automatically enable inference: each provider must also have a compatible runtime adapter and a successful connection test.</p>
                 <div class="settings-actions">
                   <button id="credential-save" class="primary-button" type="button">Save provider credential</button>
                   <button id="credential-clear" class="ghost-button" type="button">Clear input</button>
