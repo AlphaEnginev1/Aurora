@@ -13,10 +13,40 @@ def test_default_director_provider_is_router_even_with_legacy_persisted_nvidia(m
     assert factory._build_director_provider(Settings()) is None
 
 
-def test_nvidia_can_be_selected_as_director_provider(monkeypatch):
+def test_nvidia_can_be_selected_only_with_synced_official_catalog_receipt(
+    monkeypatch, tmp_path
+):
+    from aurora.inference.discovery import DiscoveredModelCandidate, ModelCandidateStore, candidate_id
+    from aurora.inference.models import ModelSpec
+
+    model_id = "nvidia/current-catalog-model"
+    active_model = ModelSpec(
+        id=model_id,
+        provider="nvidia_api",
+        endpoint="https://integrate.api.nvidia.com/v1",
+        capabilities=("chat", "reasoning"),
+        enabled=True,
+        healthy=True,
+        available=True,
+        pricing_tier="free",
+    )
+
+    class FakeModelRegistry:
+        models = (active_model,)
+        ids = (model_id,)
+
+        def resolve(self, requested):
+            if requested != model_id:
+                raise KeyError(requested)
+            return active_model
+
+    class FakeProviderRegistry:
+        ids = ("nvidia_api",)
+
     class FakeRouter:
         cost_policy = "free_only"
-        model_registry = type("MR", (), {"models": ()})()
+        model_registry = FakeModelRegistry()
+        provider_registry = FakeProviderRegistry()
 
     class FakeBound:
         provider_id = "nvidia_api"
@@ -28,14 +58,35 @@ def test_nvidia_can_be_selected_as_director_provider(monkeypatch):
     monkeypatch.setattr(factory, "BoundInferenceDirectorProvider", FakeBound)
 
     class Settings:
+        path = tmp_path / "operator-settings.json"
+
         def load(self):
-            return {"director": {"provider": "nvidia_api", "model": "nvidia/nemotron-3-ultra-550b-a55b"}}
+            return {
+                "director": {
+                    "provider": "nvidia_api",
+                    "model": model_id,
+                },
+                "providers": {"nvidia_api": {"enabled": True}},
+            }
+
         def credential(self, provider_id):
             return "secret" if provider_id == "nvidia_api" else ""
 
+    candidates = ModelCandidateStore(tmp_path / "model-candidates.db")
+    candidate = DiscoveredModelCandidate(
+        candidate_id=candidate_id("nvidia_api", model_id),
+        provider_id="nvidia_api",
+        model=active_model,
+        metadata={"free_endpoint_catalog": True},
+        discovered_at="2026-10-18T00:00:00+00:00",
+        state="synced",
+    )
+    candidates.upsert(candidate)
+    candidates.set_state(candidate.candidate_id, "synced")
+
     provider = factory._build_director_provider(Settings(), router=FakeRouter())
     assert provider.provider_id == "nvidia_api"
-    assert provider.kwargs["model"] == "nvidia/nemotron-3-ultra-550b-a55b"
+    assert provider.kwargs["model"] == model_id
 
 
 def test_non_nvidia_director_provider_falls_back_to_router(monkeypatch):
