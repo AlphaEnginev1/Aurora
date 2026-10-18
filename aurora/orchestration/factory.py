@@ -217,7 +217,7 @@ def _build_director_provider(
     director_provider_id = (
         configured_provider
         if configured.get("operator_selected") is True
-        else (environment_provider or configured_provider)
+        else (environment_provider or "router")
     )
 
     if director_provider_id in {"router", "inference_fabric", ""}:
