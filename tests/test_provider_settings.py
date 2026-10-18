@@ -38,6 +38,7 @@ def router(tmp_path: Path):
     return ModelRouter(
         models=[model],
         provider_registry=registry,
+        cost_policy="free_only",
     )
 
 
