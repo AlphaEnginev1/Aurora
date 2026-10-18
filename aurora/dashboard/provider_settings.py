@@ -78,7 +78,7 @@ class ProviderSettingsService:
             if isinstance(requested_director, Mapping) and "provider" in requested_director:
                 form_payload["director"] = {
                     **dict(requested_director),
-                    "operator_selected": True,
+                    "provider_source": "operator_settings",
                 }
             settings = self.store.update_from_form(form_payload)
             persisted = True
