@@ -611,7 +611,7 @@ def test_successful_nvidia_failover_persists_and_reloads_after_restart(tmp_path:
                 "provider": "router",
                 "model": "nvidia/nemotron-3-ultra-550b-a55b",
                 "endpoint": "https://generativelanguage.googleapis.com/v1beta",
-                "failover": {"enabled": True, "order": ["nvidia_api", "router"]},
+                "failover": {"enabled": True, "order": ["nvidia_api"]},
             },
             "providers": {
                 "nvidia_api": {
