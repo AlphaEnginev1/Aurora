@@ -913,3 +913,39 @@ def test_failed_reserve_can_recover_on_a_later_request(tmp_path: Path):
     assert reserve.calls == 2
     assert controller.provider_id == "nvidia_api"
 
+def test_routed_success_health_uses_actual_response_receipt(tmp_path: Path):
+    from aurora.inference.provider_health import ProviderHealthStore
+
+    health = ProviderHealthStore(tmp_path / "health.db")
+
+    class RoutedSuccess:
+        provider_id = "inference_router"
+
+        def generate(self, **_kwargs):
+            return DirectorModelResponse(
+                content="actual NVIDIA result",
+                model="nvidia/model-actual",
+                provider="nvidia_api",
+                request_id="request-routed-success",
+                execution_id="execution-routed-success",
+                tool_calls=(),
+            )
+
+    controller = DirectorProviderFailoverController(
+        active_provider=RoutedSuccess(),
+        candidates=(),
+        store=DirectorProviderFailoverStore(str(tmp_path / "runtime.db")),
+        activate=lambda _candidate, _provider: None,
+        health_store=health,
+    )
+
+    response = controller.generate(
+        messages=[{"role": "user", "content": "hello"}],
+        model="router",
+        role="director_conversation",
+    )
+
+    assert response.provider == "nvidia_api"
+    assert health.snapshot("nvidia_api", "nvidia/model-actual").success_count == 1
+    assert health.snapshot("inference_router", "router").success_count == 0
+
