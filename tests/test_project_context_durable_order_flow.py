@@ -611,3 +611,78 @@ def test_task_engine_rejects_project_workspace_outside_authorized_roots(
     # Resolution/validation must fail before the external path is created.
     assert not external_workspace.exists()
 
+def _add_paused_project(planner: _Planner) -> None:
+    planner.project_registry.projects["project-paused"] = ProjectSpec(
+        project_id="project-paused",
+        name="Paused Project",
+        objective="Must not accept new scoped work",
+        status=ProjectStatus.PAUSED,
+        repository="org/project-paused",
+        current_state="paused for safety",
+    )
+
+
+def test_durable_submission_rejects_inactive_mission_project_before_planning(
+    tmp_path: Path,
+):
+    planner = _Planner()
+    _add_paused_project(planner)
+    store = DurableTaskStore(tmp_path / "missions.db")
+    service = DurableDirectorService(
+        planner=planner,
+        task_engine=TaskEngine(
+            _Orchestration(),
+            tmp_path / "workspace",
+            project_registry=planner.project_registry,
+        ),
+        store=store,
+    )
+
+    with pytest.raises(DurableDirectorError, match="must be active before mission submission"):
+        service.submit_mission(
+            objective="Inspect paused project",
+            mission_id="mission-paused-project",
+            correlation_id="corr-paused-project",
+            project_id="project-paused",
+        )
+
+    assert planner.calls == []
+    assert store.list_tasks("mission-paused-project") == ()
+    assert store.events("mission-paused-project") == ()
+
+
+def test_durable_submission_rejects_inactive_task_project_before_persistence(
+    tmp_path: Path,
+):
+    planner = _Planner()
+    _add_paused_project(planner)
+    store = DurableTaskStore(tmp_path / "missions.db")
+    service = DurableDirectorService(
+        planner=planner,
+        task_engine=TaskEngine(
+            _Orchestration(),
+            tmp_path / "workspace",
+            project_registry=planner.project_registry,
+        ),
+        store=store,
+    )
+
+    with pytest.raises(DurableDirectorError, match="requires an active project_id"):
+        service.submit_mission(
+            objective="Inspect paused task project",
+            mission_id="mission-paused-task-project",
+            correlation_id="corr-paused-task-project",
+            tasks=(
+                DelegatedTask(
+                    "task-paused",
+                    "researcher",
+                    "Inspect paused project",
+                    project_id="project-paused",
+                ),
+            ),
+        )
+
+    assert planner.calls == []
+    assert store.list_tasks("mission-paused-task-project") == ()
+    assert store.events("mission-paused-task-project") == ()
+
