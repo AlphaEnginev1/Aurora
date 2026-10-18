@@ -1070,6 +1070,15 @@ def test_openrouter_can_be_selected_as_director_primary_from_saved_settings(
     assert state["director"]["model"] == "openrouter/free"
     assert state["runtime"]["director_provider"] == "openrouter"
     assert runtime.director.planner.provider.provider_id == "openrouter"
+    # Startup rebuild must honor the saved operator choice even when the launcher
+    # still exports its default AURORA_DIRECTOR_PROVIDER=router value.
+    from aurora.orchestration.factory import _build_director_provider
+    restarted_primary = _build_director_provider(
+        store,
+        router=runtime.director.planner.router,
+    )
+    assert restarted_primary.provider_id == "openrouter"
+    assert store.load()["director"]["operator_selected"] is True
     registered = runtime.director.planner.router.model_registry.resolve("openrouter/free")
     assert registered.provider == "openrouter"
     assert registered.pricing_tier == "free"
