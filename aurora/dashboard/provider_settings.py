@@ -155,26 +155,29 @@ class ProviderSettingsService:
                 )
 
             if provider_id == "nvidia_api" and nvidia_key and selected_model and selected_model != "router":
-                try:
-                    refresh_service = getattr(self.runtime, "autonomous_discovery_refresh", None)
-                    if refresh_service is not None:
-                        refresh_service.refresh_if_due(force=True)
-                    elif hasattr(self.runtime, "model_discovery"):
-                        self.runtime.model_discovery.refresh_all(
-                            provider_ids=("nvidia_api",),
-                            min_interval_seconds=0,
-                            force=True,
-                        )
-                        self.runtime.model_discovery.activate_eligible_discovered(
-                            provider_id="nvidia_api",
-                            cost_policy=getattr(router, "cost_policy", "free_only"),
-                            health_store=getattr(router, "health_store", None),
-                        )
-                except Exception:
-                    # A failed live refresh cannot authorize a static seed model.
-                    pass
-
                 from aurora.orchestration.factory import _has_authoritative_nvidia_free_activation
+
+                if not _has_authoritative_nvidia_free_activation(
+                    router, self.store, selected_model
+                ):
+                    try:
+                        refresh_service = getattr(self.runtime, "autonomous_discovery_refresh", None)
+                        if refresh_service is not None:
+                            refresh_service.refresh_if_due(force=True)
+                        elif hasattr(self.runtime, "model_discovery"):
+                            self.runtime.model_discovery.refresh_all(
+                                provider_ids=("nvidia_api",),
+                                min_interval_seconds=0,
+                                force=True,
+                            )
+                            self.runtime.model_discovery.activate_eligible_discovered(
+                                provider_id="nvidia_api",
+                                cost_policy=getattr(router, "cost_policy", "free_only"),
+                                health_store=getattr(router, "health_store", None),
+                            )
+                    except Exception:
+                        # A failed live refresh cannot authorize a static seed model.
+                        pass
 
                 if not _has_authoritative_nvidia_free_activation(
                     router, self.store, selected_model
