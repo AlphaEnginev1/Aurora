@@ -219,9 +219,17 @@ def _build_director_provider(
         return None
 
     if director_provider_id == "openrouter":
-        model = str(configured.get("model", "") or os.getenv(
-            "OPENROUTER_MODEL_ID", "openrouter/free"
-        )).strip() or "openrouter/free"
+        persisted_provider_id = str(configured.get("provider", "router")).strip().lower()
+        # An explicit process environment override must not inherit a model ID
+        # belonging to a different persisted provider.
+        persisted_model = (
+            str(configured.get("model", "")).strip()
+            if persisted_provider_id == "openrouter"
+            else ""
+        )
+        model = str(
+            persisted_model or os.getenv("OPENROUTER_MODEL_ID", "openrouter/free")
+        ).strip() or "openrouter/free"
         if model != "openrouter/free" or not is_free_model("openrouter", model):
             raise RuntimeError(
                 "free_only inference policy permits only OpenRouter's official openrouter/free route"
