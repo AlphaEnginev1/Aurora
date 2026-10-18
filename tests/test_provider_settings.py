@@ -117,6 +117,10 @@ def test_nvidia_static_seed_is_not_activated_without_official_catalog_evidence(t
     # into an executable model without the official catalog receipt.
     assert "google/gemma-4-31b-it" not in runtime.director.planner.router.model_registry.ids
     assert runtime.director.planner.provider.provider_id == "inference_router"
+    restored = store.load()
+    assert restored["director"]["provider"] == "router"
+    # Credentials are retained even though an invalid primary selection is rejected.
+    assert restored["providers"]["nvidia_api"]["api_key"] == "secret"
 
 
 def test_nvidia_director_selection_accepts_synced_official_catalog_candidate(tmp_path: Path):
