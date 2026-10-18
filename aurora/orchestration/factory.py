@@ -242,8 +242,10 @@ def _build_director_provider(
             else ""
         )
         key = stored_key or os.getenv("OPENROUTER_API_KEY", "").strip()
-        if not key or router is None:
-            return None
+        if not key:
+            raise RuntimeError("OpenRouter Director mode requires OPENROUTER_API_KEY or a saved OpenRouter credential")
+        if router is None:
+            raise RuntimeError("OpenRouter Director mode requires the canonical inference router")
         if router.provider_registry is None or "openrouter" not in router.provider_registry.ids:
             raise RuntimeError("OpenRouter is not active in the configured provider registry")
         if router.model_registry is None:
@@ -263,9 +265,20 @@ def _build_director_provider(
         )
 
     if director_provider_id == "nvidia_api":
-        model = str(configured.get("model", "")).strip()
+        persisted_provider_id = str(configured.get("provider", "router")).strip().lower()
+        persisted_model = (
+            str(configured.get("model", "")).strip()
+            if persisted_provider_id == "nvidia_api"
+            else ""
+        )
+        model = str(
+            persisted_model
+            or os.getenv("NVIDIA_MODEL_ID", "nvidia/nemotron-3-ultra-550b-a55b")
+        ).strip()
         if not model:
-            return None
+            raise RuntimeError(
+                "NVIDIA Director mode requires a configured model ID from the Free Endpoint catalog"
+            )
         if settings_store is None:
             key = os.getenv("NVIDIA_API_KEY", "")
         else:
@@ -282,8 +295,10 @@ def _build_director_provider(
             )
             if isinstance(provider_settings, dict) and provider_settings.get("enabled", True) is False:
                 raise RuntimeError("NVIDIA Director mode is selected but the provider is disabled")
-        if not key or router is None:
-            return None
+        if not key:
+            raise RuntimeError("NVIDIA Director mode requires NVIDIA_API_KEY or a saved NVIDIA credential")
+        if router is None:
+            raise RuntimeError("NVIDIA Director mode requires the canonical inference router")
         if getattr(router, "cost_policy", "free_only") == "free_only":
             if not _has_authoritative_nvidia_free_activation(router, settings_store, model):
                 raise RuntimeError(
