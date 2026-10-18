@@ -1071,3 +1071,57 @@ def test_openrouter_can_be_selected_as_director_primary_from_saved_settings(
     assert registered.pricing_tier == "free"
     assert registered.endpoint == "https://openrouter-proxy.example/api/v1"
 
+def test_director_failover_enablement_applies_without_restart(tmp_path: Path):
+    from aurora.orchestration.director_provider_failover import DirectorProviderFailoverController
+
+    runtime = Runtime(router(tmp_path))
+    store = OperatorSettingsStore(tmp_path / "operator-settings.json")
+    store.save({
+        "director": {
+            "provider": "router",
+            "model": "router",
+            "failover": {"enabled": False, "order": ["nvidia_api"]},
+        },
+    })
+    service = ProviderSettingsService(store, runtime)
+
+    disabled = service.save_and_apply({
+        "director": {
+            "provider": "router",
+            "model": "router",
+            "failover": {"enabled": False, "order": ["nvidia_api"]},
+        },
+    })
+    assert disabled["director"]["failover"]["enabled"] is False
+    assert not isinstance(
+        runtime.director.planner.provider,
+        DirectorProviderFailoverController,
+    )
+
+    enabled = service.save_and_apply({
+        "director": {
+            "provider": "router",
+            "model": "router",
+            "failover": {"enabled": True, "order": ["openrouter", "nvidia_api"]},
+        },
+    })
+    assert enabled["director"]["failover"]["enabled"] is True
+    assert enabled["director"]["failover"]["order"] == ["openrouter", "nvidia_api"]
+    assert isinstance(
+        runtime.director.planner.provider,
+        DirectorProviderFailoverController,
+    )
+
+    disabled_again = service.save_and_apply({
+        "director": {
+            "provider": "router",
+            "model": "router",
+            "failover": {"enabled": False, "order": ["nvidia_api"]},
+        },
+    })
+    assert disabled_again["director"]["failover"]["enabled"] is False
+    assert not isinstance(
+        runtime.director.planner.provider,
+        DirectorProviderFailoverController,
+    )
+
