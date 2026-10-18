@@ -555,7 +555,7 @@ def test_canonical_startup_rehydrates_synced_model_before_director_validation(mo
                 "director": {
                     "provider": "nvidia_api",
                     "model": model_id,
-                    "operator_selected": True,
+                    "provider_source": "operator_settings",
                 },
                 "providers": {"nvidia_api": {"enabled": True}},
             }
