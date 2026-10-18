@@ -6,7 +6,7 @@ from aurora.orchestration.director import DirectorPlan
 from aurora.orchestration.durable_director import DurableDirectorError, DurableDirectorService
 from aurora.inference.models import InferenceResponse
 from aurora.orchestration.engine import TaskResult
-from aurora.orchestration.task_engine import DelegatedTask, TaskEngine
+from aurora.orchestration.task_engine import DelegatedTask, TaskEngine, TaskEngineError
 from aurora.orchestration.team_runtime import TeamCoordinator
 from aurora.organization.agent_team import AgentTeam, TeamMember
 from aurora.orchestration.task_store import DurableTaskStore
@@ -57,7 +57,7 @@ def test_project_id_is_resolved_persisted_and_propagated_to_durable_tasks(tmp_pa
     store = DurableTaskStore(tmp_path / "missions.db")
     service = DurableDirectorService(
         planner=planner,
-        task_engine=TaskEngine(_Orchestration(), tmp_path / "workspace"),
+        task_engine=TaskEngine(_Orchestration(), tmp_path / "workspace", project_registry=planner.project_registry),
         store=store,
     )
 
@@ -331,6 +331,66 @@ def test_team_coordinator_auto_role_resolution_preserves_project_id(
     assert state.tasks[0].project_id == "project-a"
 
 
+def test_task_engine_requires_registered_active_project_scope(tmp_path: Path):
+    projects = {
+        "project-a": ProjectSpec(
+            project_id="project-a",
+            name="Project A",
+            objective="Active project",
+            status=ProjectStatus.ACTIVE,
+            repository="org/project-a",
+            workspace=str(tmp_path / "projects" / "a"),
+        ),
+    }
+    inactive_status = next(
+        status for status in ProjectStatus if status is not ProjectStatus.ACTIVE
+    )
+    projects["project-paused"] = ProjectSpec(
+        project_id="project-paused",
+        name="Paused project",
+        objective="Must not execute",
+        status=inactive_status,
+        repository="org/project-paused",
+        workspace=str(tmp_path / "projects" / "paused"),
+    )
+    registry = ProjectRegistry(projects)
+
+    task = DelegatedTask(
+        "inspect",
+        "researcher",
+        "Inspect registered project",
+        project_id="project-a",
+    )
+    with pytest.raises(TaskEngineError, match="canonical ProjectRegistry"):
+        TaskEngine(_Orchestration(), tmp_path / "workspace").validate((task,))
+
+    engine = TaskEngine(
+        _Orchestration(),
+        tmp_path / "workspace",
+        project_registry=registry,
+    )
+    with pytest.raises(TaskEngineError, match="invalid project scope"):
+        engine.validate((
+            DelegatedTask(
+                "unknown",
+                "researcher",
+                "Inspect unknown project",
+                project_id="not-registered",
+            ),
+        ))
+    with pytest.raises(TaskEngineError, match="requires an active project"):
+        engine.validate((
+            DelegatedTask(
+                "paused",
+                "researcher",
+                "Inspect paused project",
+                project_id="project-paused",
+            ),
+        ))
+
+    assert engine.validate((task,))[0].project_id == "project-a"
+
+
 def test_project_id_reaches_model_inference_metadata(tmp_path: Path):
 
     class RecordingOrchestration(_Orchestration):
@@ -352,7 +412,7 @@ def test_project_id_reaches_model_inference_metadata(tmp_path: Path):
             return TaskResult(task_id=kwargs["task_id"], role=kwargs["role"], response=response)
 
     orchestration = RecordingOrchestration()
-    engine = TaskEngine(orchestration, tmp_path / "workspace")
+    engine = TaskEngine(orchestration, tmp_path / "workspace", project_registry=_Planner().project_registry)
     result = engine.execute_one(
         DelegatedTask(
             "task-project",
