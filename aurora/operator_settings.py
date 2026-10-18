@@ -12,6 +12,11 @@ from urllib.parse import urlparse
 
 _FALLBACK_NVIDIA_ENDPOINT = "https://integrate.api.nvidia.com/v1"
 
+# Explicit fallback allow-list. Only these providers have an approved free-only
+# execution route in config/free-model-policy.json. Configuring other API keys
+# does not grant permission to invoke those providers for Director failover.
+ALLOWED_DIRECTOR_FAILOVER_PROVIDERS = ("nvidia_api", "openrouter")
+
 
 def _load_default_provider_endpoints() -> dict[str, str]:
     """Read endpoint defaults from the canonical provider catalog.
@@ -100,7 +105,9 @@ class OperatorSettingsStore:
         if not isinstance(payload, Mapping):
             raise OperatorSettingsError("operator settings must be an object")
         with self._lock:
-            merged = _normalize(_merge(self.load(), payload))
+            merged_payload = _merge(self.load(), payload)
+            _validate_failover_order(merged_payload)
+            merged = _normalize(merged_payload)
             _validate(merged)
             self.path.write_text(
                 json.dumps(merged, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
@@ -228,9 +235,25 @@ def _normalize(data: Mapping[str, Any]) -> dict[str, Any]:
     failover = director.get("failover", {})
     if not isinstance(failover, Mapping):
         failover = {}
+    raw_order = failover.get("order", ["nvidia_api"])
+    # Migrate old/unknown entries away rather than ever enabling a provider whose
+    # free-only policy is not explicitly approved. The default remains fail-closed.
+    normalized_order: list[str] = []
+    if isinstance(raw_order, list):
+        for item in raw_order:
+            if not isinstance(item, str):
+                continue
+            provider_id = item.strip().lower()
+            if (
+                provider_id in ALLOWED_DIRECTOR_FAILOVER_PROVIDERS
+                and provider_id not in normalized_order
+            ):
+                normalized_order.append(provider_id)
+    if not normalized_order:
+        normalized_order = ["nvidia_api"]
     director["failover"] = {
         "enabled": bool(failover.get("enabled", True)),
-        "order": ["nvidia_api"],
+        "order": normalized_order,
     }
     provider_configs = result.get("providers", {})
     if not isinstance(provider_configs, Mapping):
@@ -300,8 +323,22 @@ def _validate(data: Mapping[str, Any]) -> None:
     if failover.get("enabled", True) is not True and failover.get("enabled", True) is not False:
         raise OperatorSettingsError("director.failover.enabled must be boolean")
     order = failover.get("order", [])
-    if order != ["nvidia_api"]:
-        raise OperatorSettingsError("director.failover.order must be exactly ['nvidia_api']")
+    if (
+        not isinstance(order, list)
+        or not order
+        or any(
+            not isinstance(item, str)
+            or item != item.strip().lower()
+            or item not in ALLOWED_DIRECTOR_FAILOVER_PROVIDERS
+            for item in order
+        )
+        or len(order) != len(set(order))
+    ):
+        raise OperatorSettingsError(
+            "director.failover.order must be a non-empty, unique ordered list "
+            "containing only approved free-only providers: "
+            + ", ".join(ALLOWED_DIRECTOR_FAILOVER_PROVIDERS)
+        )
     nvidia = providers.get("nvidia_api")
     if not isinstance(nvidia, Mapping):
         raise OperatorSettingsError("provider configuration missing: nvidia_api")
@@ -334,6 +371,32 @@ def _validate(data: Mapping[str, Any]) -> None:
             raise OperatorSettingsError(
                 f"{provider_id}.base_url must use HTTPS (HTTP is allowed only for loopback services)"
             )
+
+
+def _validate_failover_order(data: Mapping[str, Any]) -> None:
+    """Reject unsafe order updates before normalization can discard them."""
+    director = data.get("director", {})
+    failover = director.get("failover", {}) if isinstance(director, Mapping) else {}
+    if not isinstance(failover, Mapping) or "order" not in failover:
+        return
+    order = failover["order"]
+    if (
+        not isinstance(order, list)
+        or not order
+        or any(
+            not isinstance(item, str)
+            or item.strip() != item
+            or item.lower() != item
+            or item not in ALLOWED_DIRECTOR_FAILOVER_PROVIDERS
+            for item in order
+        )
+        or len(order) != len(set(order))
+    ):
+        raise OperatorSettingsError(
+            "director.failover.order may contain only a non-empty, duplicate-free "
+            "ordered list of approved free-only providers: "
+            + ", ".join(ALLOWED_DIRECTOR_FAILOVER_PROVIDERS)
+        )
 
 
 def _merge(base: Mapping[str, Any], overlay: Mapping[str, Any]) -> dict[str, Any]:
