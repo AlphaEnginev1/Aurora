@@ -300,7 +300,9 @@ def test_factory_ignores_historical_health_cooldown_when_building_reserve_order(
 
 def test_dynamic_failure_context_excludes_the_concrete_failed_model(tmp_path: Path):
     from aurora.inference.errors import ProviderErrorContext, ProviderTimeoutError
+    from aurora.inference.provider_health import ProviderHealthStore
 
+    health = ProviderHealthStore(tmp_path / "health.db", failure_threshold=1)
     failed = FakeProvider("nvidia_api", ["should not be called"])
     reserve = FakeProvider("nvidia_api", ["reserve works"])
 
@@ -330,6 +332,7 @@ def test_dynamic_failure_context_excludes_the_concrete_failed_model(tmp_path: Pa
         ),
         store=DirectorProviderFailoverStore(str(tmp_path / "runtime.db")),
         activate=lambda _candidate, _provider: None,
+        health_store=health,
     )
 
     response = controller.generate(
@@ -342,6 +345,9 @@ def test_dynamic_failure_context_excludes_the_concrete_failed_model(tmp_path: Pa
     assert response.content == "reserve works"
     assert failed.calls == 0
     assert reserve.calls == 1
+    # The failure from an inference-router facade must penalize the provider/model
+    # named by the provider error receipt, not (inference_router, requested alias).
+    assert health.is_eligible("nvidia_api", "nvidia/model-a") is False
 
 
 def test_factory_uses_cached_nvidia_catalog_when_live_discovery_is_unavailable(tmp_path: Path, monkeypatch):
