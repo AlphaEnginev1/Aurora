@@ -640,6 +640,7 @@ def test_successful_nvidia_failover_persists_and_reloads_after_restart(tmp_path:
                     "provider": candidate.provider_id,
                     "model": candidate.model or "router",
                     "endpoint": candidate.endpoint or "https://example.invalid",
+                    "provider_source": "runtime_failover",
                 }
             }
         )
