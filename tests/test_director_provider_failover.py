@@ -1067,3 +1067,41 @@ def test_model_router_health_is_not_double_counted_by_failover_controller(tmp_pa
     assert snapshot.failure_count == 1
     assert snapshot.consecutive_failures == 1
 
+def test_failover_uses_runtime_model_candidate_store_when_task_db_is_elsewhere(
+    tmp_path: Path, monkeypatch
+):
+    from types import SimpleNamespace
+    from aurora.orchestration import factory
+
+    settings = OperatorSettingsStore(tmp_path / "settings" / "operator-settings.json")
+    settings.save({
+        "director": {
+            "failover": {"enabled": True, "order": ["nvidia_api"]},
+        },
+        "providers": {"nvidia_api": {"api_key": "nvidia-test"}},
+    })
+    failover_db = tmp_path / "custom-database-location" / "tasks.db"
+    candidate_db = tmp_path / "runtime-root" / "model-candidates.db"
+    observed_paths = []
+
+    class RecordingCandidateStore:
+        def __init__(self, path):
+            observed_paths.append(Path(path).resolve())
+
+    monkeypatch.setattr(factory, "ModelCandidateStore", RecordingCandidateStore)
+
+    controller = factory._build_director_provider_failover(
+        settings_store=settings,
+        router=SimpleNamespace(
+            provider_registry=object(),
+            model_registry=object(),
+            cost_policy="free_only",
+        ),
+        active_provider=FakeProvider("inference_router", ["unused"]),
+        db_path=failover_db,
+        model_candidate_store_path=candidate_db,
+    )
+
+    assert isinstance(controller, DirectorProviderFailoverController)
+    assert observed_paths == [candidate_db.resolve()]
+
