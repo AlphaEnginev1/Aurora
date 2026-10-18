@@ -58,7 +58,7 @@ def test_nvidia_discovery_stages_candidates(tmp_path: Path):
         "providers": {"nvidia_api": {"api_key": "secret"}},
     })
 
-    candidate_a = SimpleNamespace(model=ModelSpec(
+    candidate_a = SimpleNamespace(metadata={"free_endpoint_catalog": True}, model=ModelSpec(
         "nvidia/model-a",
         "nvidia_api",
         "https://integrate.api.nvidia.com/v1",
@@ -67,7 +67,7 @@ def test_nvidia_discovery_stages_candidates(tmp_path: Path):
         available=False,
         pricing_tier="free",
     ))
-    candidate_b = SimpleNamespace(model=ModelSpec(
+    candidate_b = SimpleNamespace(metadata={"free_endpoint_catalog": True}, model=ModelSpec(
         "nvidia/model-b",
         "nvidia_api",
         "https://integrate.api.nvidia.com/v1",
@@ -93,7 +93,10 @@ def test_nvidia_discovery_stages_candidates(tmp_path: Path):
     assert result["stage_state"] == "discovered"
 
 
-def test_nvidia_selected_model_is_activated_without_editing_repo_policy(tmp_path: Path):
+def test_nvidia_static_seed_is_not_activated_without_official_catalog_evidence(tmp_path: Path):
+    import pytest
+    from aurora.dashboard.provider_settings import DashboardProviderSettingsError
+
     runtime = Runtime(router(tmp_path))
     store = OperatorSettingsStore(tmp_path / "operator-settings.json")
     store.save({
@@ -101,37 +104,104 @@ def test_nvidia_selected_model_is_activated_without_editing_repo_policy(tmp_path
     })
     service = ProviderSettingsService(store, runtime)
 
+    with pytest.raises(DashboardProviderSettingsError, match="official Free Endpoint catalog"):
+        service.save_and_apply({
+            "director": {
+                "provider": "nvidia_api",
+                "model": "google/gemma-4-31b-it",
+                "endpoint": "https://integrate.api.nvidia.com/v1",
+            },
+        })
+
+    # A saved preference and a static free-policy record cannot turn a candidate
+    # into an executable model without the official catalog receipt.
+    assert "google/gemma-4-31b-it" not in runtime.director.planner.router.model_registry.ids
+    assert runtime.director.planner.provider.provider_id == "inference_router"
+
+
+def test_nvidia_director_selection_accepts_synced_official_catalog_candidate(tmp_path: Path):
+    from aurora.inference.discovery import DiscoveredModelCandidate, ModelCandidateStore, candidate_id
+
+    runtime = Runtime(router(tmp_path))
+    store = OperatorSettingsStore(tmp_path / "operator-settings.json")
+    store.save({
+        "providers": {"nvidia_api": {"api_key": "secret"}},
+    })
+    selected = ModelSpec(
+        "google/gemma-4-31b-it",
+        "nvidia_api",
+        "https://integrate.api.nvidia.com/v1",
+        capabilities=("chat", "reasoning", "tool_use"),
+        enabled=False,
+        pricing_tier="free",
+    )
+    candidate = DiscoveredModelCandidate(
+        candidate_id=candidate_id("nvidia_api", selected.id),
+        provider_id="nvidia_api",
+        model=selected,
+        metadata={"free_endpoint_catalog": True},
+        discovered_at="2026-10-18T00:00:00+00:00",
+    )
+    candidate_store = ModelCandidateStore(tmp_path / "model-candidates.db")
+    candidate_store.upsert(candidate)
+    candidate_store.set_state(candidate.candidate_id, "synced")
+
+    class ApprovedDiscovery:
+        provider_registry = None
+        model_registry = None
+
+        def refresh_all(self, **_kwargs):
+            return {"nvidia_api": (candidate,)}
+
+        def activate_eligible_discovered(self, *, provider_id, cost_policy, health_store=None, **_kwargs):
+            assert provider_id == "nvidia_api"
+            assert cost_policy == "free_only"
+            approved = ModelSpec(
+                id=selected.id,
+                provider=selected.provider,
+                endpoint=selected.endpoint,
+                capabilities=selected.capabilities,
+                enabled=True,
+                healthy=True,
+                available=True,
+                pricing_tier="free",
+            )
+            self.model_registry.register(approved)
+            return (approved,)
+
+    runtime.model_discovery = ApprovedDiscovery()
+    service = ProviderSettingsService(store, runtime)
     state = service.save_and_apply({
         "director": {
             "provider": "nvidia_api",
-            "model": "google/gemma-4-31b-it",
+            "model": selected.id,
             "endpoint": "https://integrate.api.nvidia.com/v1",
         },
     })
 
     assert state["runtime"]["director_provider"] == "nvidia_api"
-    model = runtime.director.planner.router.model_registry.resolve("google/gemma-4-31b-it")
-    assert model.enabled is True
-    assert model.provider == "nvidia_api"
+    activated = runtime.director.planner.router.model_registry.resolve(selected.id)
+    assert activated.enabled is True
+    assert activated.provider == "nvidia_api"
+    assert activated.pricing_tier == "free"
     assert runtime.director.planner.provider.provider_id == "nvidia_api"
 
 
-def test_local_nvidia_model_setting_can_be_restored_on_startup(tmp_path: Path):
+def test_local_nvidia_model_preference_does_not_activate_static_seed_on_startup(tmp_path: Path):
     from aurora.orchestration.factory import _apply_local_model_settings
     store = OperatorSettingsStore(tmp_path / "operator-settings.json")
     store.save({
         "director": {
             "provider": "nvidia_api",
             "model": "poolside/laguna-xs-2.1",
-            "endpoint": "https://integrate.api.nvidia.com/v1",
         },
         "providers": {"nvidia_api": {"api_key": "secret"}},
     })
     r = router(tmp_path)
+    before = tuple(r.model_registry.models)
     _apply_local_model_settings(r, store)
-    restored = r.model_registry.resolve("poolside/laguna-xs-2.1")
-    assert restored.enabled is True
-    assert restored.provider == "nvidia_api"
+    assert tuple(r.model_registry.models) == before
+    assert "poolside/laguna-xs-2.1" not in r.model_registry.ids
 
 
 
