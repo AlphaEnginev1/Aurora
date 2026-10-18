@@ -686,3 +686,44 @@ def test_durable_submission_rejects_inactive_task_project_before_persistence(
     assert store.list_tasks("mission-paused-task-project") == ()
     assert store.events("mission-paused-task-project") == ()
 
+def test_task_engine_rejects_task_workspace_symlink_escape(tmp_path: Path):
+    import hashlib
+
+    runtime_root = tmp_path / "runtime"
+    project_root = runtime_root / "projects" / "project-a"
+    external_root = tmp_path / "outside"
+    project_root.mkdir(parents=True)
+    external_root.mkdir()
+    try:
+        (project_root / "tasks").symlink_to(external_root, target_is_directory=True)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"directory symlinks are unavailable in this environment: {exc}")
+
+    registry = ProjectRegistry({
+        "project-a": ProjectSpec(
+            project_id="project-a",
+            name="Project A",
+            objective="Keep task work inside its project root",
+            status=ProjectStatus.ACTIVE,
+            workspace=str(project_root),
+        ),
+    })
+    engine = TaskEngine(
+        _Orchestration(),
+        runtime_root,
+        project_registry=registry,
+        allowed_workspace_roots=(runtime_root,),
+    )
+    task = DelegatedTask(
+        "task-symlink",
+        "researcher",
+        "Inspect Project A",
+        project_id="project-a",
+    )
+
+    with pytest.raises(TaskEngineError, match="task workspace escapes"):
+        engine._workspace_for_task(task, "mission-symlink-scope")
+
+    digest = hashlib.sha256(b"mission-symlink-scope").hexdigest()
+    assert not (external_root / digest).exists()
+
