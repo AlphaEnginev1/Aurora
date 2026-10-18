@@ -71,7 +71,16 @@ class ProviderSettingsService:
                 ) from rollback_error
 
         try:
-            settings = self.store.update_from_form(payload)
+            # A provider chosen and applied through this Settings surface is an
+            # explicit operator override, not a transient launcher default.
+            form_payload = dict(payload)
+            requested_director = payload.get("director", {})
+            if isinstance(requested_director, Mapping) and "provider" in requested_director:
+                form_payload["director"] = {
+                    **dict(requested_director),
+                    "operator_selected": True,
+                }
+            settings = self.store.update_from_form(form_payload)
             persisted = True
             router = self.runtime.director.planner.router
             configured_providers = settings.get("providers", {})
