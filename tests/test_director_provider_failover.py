@@ -659,9 +659,48 @@ def test_successful_nvidia_failover_persists_and_reloads_after_restart(tmp_path:
     assert persisted["provider"] == "nvidia_api"
     assert persisted["model"] == "poolside/laguna-xs-2.1"
 
+    from types import SimpleNamespace
+    from aurora.inference.discovery import DiscoveredModelCandidate, ModelCandidateStore, candidate_id
+    from aurora.inference.models import ModelSpec
     from aurora.orchestration.factory import _build_director_provider
 
-    restarted_provider = _build_director_provider(settings, router=object())
+    active_model = ModelSpec(
+        id="poolside/laguna-xs-2.1",
+        provider="nvidia_api",
+        endpoint="https://integrate.api.nvidia.com/v1",
+        capabilities=("chat", "reasoning"),
+        enabled=True,
+        healthy=True,
+        available=True,
+        pricing_tier="free",
+    )
+    candidates = ModelCandidateStore(tmp_path / "model-candidates.db")
+    receipt = DiscoveredModelCandidate(
+        candidate_id=candidate_id("nvidia_api", active_model.id),
+        provider_id="nvidia_api",
+        model=active_model,
+        metadata={"free_endpoint_catalog": True},
+        discovered_at="2026-10-18T00:00:00+00:00",
+        state="synced",
+    )
+    candidates.upsert(receipt)
+    candidates.set_state(receipt.candidate_id, "synced")
+
+    class RestartModelRegistry:
+        models = (active_model,)
+        ids = (active_model.id,)
+
+        def resolve(self, model_id):
+            if model_id != active_model.id:
+                raise KeyError(model_id)
+            return active_model
+
+    restarted_router = SimpleNamespace(
+        cost_policy="free_only",
+        provider_registry=SimpleNamespace(ids=("nvidia_api",)),
+        model_registry=RestartModelRegistry(),
+    )
+    restarted_provider = _build_director_provider(settings, router=restarted_router)
     assert restarted_provider is not None
     assert restarted_provider.provider_id == "nvidia_api"
 
