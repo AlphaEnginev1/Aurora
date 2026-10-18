@@ -8,6 +8,7 @@ from aurora.autonomy.policy import Policy
 from aurora.organization import OrganizationRegistry
 from aurora.workbench import UniversalWorkbench, WorkbenchError, WorkbenchRequest
 from aurora.projects.registry import ProjectRegistry, ProjectSpec, ProjectStatus
+from aurora.orchestration.task_engine import TaskEngine
 from aurora.workbench.session import WorkSessionStore
 
 
@@ -358,7 +359,7 @@ def test_workbench_uses_canonical_registry_and_isolates_reused_work_ids(tmp_path
             objective="Only access Alpha resources",
             status=ProjectStatus.ACTIVE,
             repository="AlphaEnginev1/alpha",
-            workspace=str(alpha_root),
+            workspace="projects/alpha",
         ),
         "project-beta": ProjectSpec(
             project_id="project-beta",
@@ -366,7 +367,7 @@ def test_workbench_uses_canonical_registry_and_isolates_reused_work_ids(tmp_path
             objective="Only access Beta resources",
             status=ProjectStatus.ACTIVE,
             repository="AlphaEnginev1/beta",
-            workspace=str(beta_root),
+            workspace="projects/beta",
         ),
     })
     sessions = WorkSessionStore(runtime / "sessions.db")
@@ -402,6 +403,9 @@ def test_workbench_uses_canonical_registry_and_isolates_reused_work_ids(tmp_path
     assert Path(beta_session.workspace_root) == beta_root.resolve()
     assert workbench._project_workspace_root("project-alpha") == alpha_root.resolve()
     assert workbench._project_workspace_root("project-beta") == beta_root.resolve()
+    task_engine = TaskEngine(None, runtime, project_registry=registry)
+    assert task_engine._project_workspace_root("project-alpha") == alpha_root.resolve()
+    assert task_engine._project_workspace_root("project-beta") == beta_root.resolve()
 
 
 def test_project_scoped_workbench_research_overrides_untrusted_project_constraints(tmp_path: Path):
