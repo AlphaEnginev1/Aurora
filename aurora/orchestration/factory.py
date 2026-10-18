@@ -396,10 +396,46 @@ def _build_director_provider_failover(
         active_model_id = str(
             getattr(current_active, "model", "") or requested_model or ""
         ).strip()
+
+        # Read the persisted controls for each failover decision. The dashboard
+        # can enable/disable failover or reorder approved reserves without a daemon
+        # restart; a malformed hand-edited order fails closed.
+        current_settings = settings_store.load()
+        current_director = (
+            current_settings.get("director", {})
+            if isinstance(current_settings, dict)
+            else {}
+        )
+        current_failover = (
+            current_director.get("failover", {})
+            if isinstance(current_director, dict)
+            else {}
+        )
+        if not isinstance(current_failover, dict) or current_failover.get("enabled", True) is False:
+            return ()
+        current_order = current_failover.get("order", ["nvidia_api"])
+        if (
+            not isinstance(current_order, list)
+            or not current_order
+            or any(not isinstance(item, str) for item in current_order)
+        ):
+            return ()
+        active_order = tuple(str(item).strip().lower() for item in current_order)
+        if (
+            any(item not in ALLOWED_DIRECTOR_FAILOVER_PROVIDERS for item in active_order)
+            or len(active_order) != len(set(active_order))
+            or any(not item for item in active_order)
+        ):
+            return ()
+
         pool_specs: list[ModelSpec] = []
         seen_models: set[tuple[str, str]] = set()
 
-        provider_settings = settings.get("providers", {}) if isinstance(settings, dict) else {}
+        provider_settings = (
+            current_settings.get("providers", {})
+            if isinstance(current_settings, dict)
+            else {}
+        )
         nvidia_settings = (
             provider_settings.get("nvidia_api", {})
             if isinstance(provider_settings, dict)
@@ -422,7 +458,7 @@ def _build_director_provider_failover(
             model_candidate_store,
         )
 
-        for provider_id in normalized_order:
+        for provider_id in active_order:
             if provider_id != "nvidia_api":
                 continue
             if provider_id == active_id and active_model_id:
@@ -531,7 +567,7 @@ def _build_director_provider_failover(
         # failover order and explicitly authorized by the canonical free-model policy.
         # An API key alone never authorizes a paid/unknown model to run.
         static_fallback_ids = {
-            provider_id for provider_id in normalized_order if provider_id != "nvidia_api"
+            provider_id for provider_id in active_order if provider_id != "nvidia_api"
         }
         if static_fallback_ids:
             for model in router.available():
@@ -589,7 +625,7 @@ def _build_director_provider_failover(
         # The operator order chooses provider priority; DynamicReservePool still
         # ranks eligible models inside each provider by the canonical score/health.
         provider_rank = {
-            provider_id: index for index, provider_id in enumerate(normalized_order)
+            provider_id: index for index, provider_id in enumerate(active_order)
         }
         reserve_candidates = tuple(sorted(
             reserve_candidates,
