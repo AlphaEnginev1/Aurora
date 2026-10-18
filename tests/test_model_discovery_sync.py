@@ -593,3 +593,56 @@ def test_canonical_startup_rehydrates_synced_model_before_director_validation(mo
     provider = factory._build_director_provider(Settings(), router=router)
     assert provider is not None
     assert provider.provider_id == "nvidia_api"
+
+def test_nvidia_static_free_metadata_cannot_authorize_candidate_activation(tmp_path):
+    from aurora.inference.discovery import (
+        DiscoveredModelCandidate,
+        ModelCandidateStore,
+        ModelDiscoveryService,
+        candidate_id,
+    )
+    from aurora.inference.models import ModelSpec
+    from aurora.inference.providers.registry import ProviderRegistry, ProviderSpec
+    from aurora.inference.registry import ModelRegistry
+
+    model_id = "nvidia/nemotron-3-ultra-550b-a55b"
+    candidate = DiscoveredModelCandidate(
+        candidate_id=candidate_id("nvidia_api", model_id),
+        provider_id="nvidia_api",
+        model=ModelSpec(
+            id=model_id,
+            provider="nvidia_api",
+            endpoint="https://integrate.api.nvidia.com/v1",
+            capabilities=("chat", "reasoning"),
+            enabled=False,
+            healthy=False,
+            available=False,
+            pricing_tier="free",
+        ),
+        # Old endpoint row metadata and a static pricing tier are not the
+        # authoritative Free Endpoint catalog receipt.
+        metadata={"free_endpoint": True, "pricing_tier": "free"},
+        discovered_at="2026-10-18T00:00:00+00:00",
+    )
+    providers = ProviderRegistry((
+        ProviderSpec(
+            "nvidia_api",
+            "NVIDIA",
+            ("chat", "reasoning"),
+            True,
+            lambda _model: object(),
+        ),
+    ))
+    registry = ModelRegistry([], provider_registry=providers)
+    store = ModelCandidateStore(tmp_path / "model-candidates.db")
+    store.upsert(candidate)
+    service = ModelDiscoveryService(providers, registry, store)
+
+    assert service.activate_free_discovered(provider_id="nvidia_api") == ()
+    assert service.activate_eligible_discovered(
+        provider_id="nvidia_api",
+        cost_policy="free_only",
+    ) == ()
+    assert model_id not in registry.ids
+    assert store.get(candidate.candidate_id).state == "discovered"
+
