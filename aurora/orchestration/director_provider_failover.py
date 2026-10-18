@@ -369,10 +369,22 @@ class DirectorProviderFailoverController:
                     preferred_models=preferred_models,
                 )
                 if self._health_store is not None:
-                    self._health_store.record_success(
-                        str(getattr(active, "provider_id", "") or ""),
-                        str(getattr(active, "model", "") or model or getattr(active, "provider_id", "") or "unknown"),
-                    )
+                    # The routed provider is only a facade. Health belongs to the
+                    # provider/model that actually executed the request, as reported
+                    # by the successful response receipt.
+                    actual_provider = str(
+                        getattr(response, "provider", "")
+                        or getattr(active, "provider_id", "")
+                        or ""
+                    ).strip()
+                    actual_model = str(
+                        getattr(response, "model", "")
+                        or getattr(active, "model", "")
+                        or model
+                        or actual_provider
+                    ).strip()
+                    if actual_provider and actual_model:
+                        self._health_store.record_success(actual_provider, actual_model)
                 return response
             except Exception as exc:
                 self._record_health(active, model, exc)
@@ -569,8 +581,22 @@ class DirectorProviderFailoverController:
     ) -> None:
         if self._health_store is None:
             return
-        provider_id = str(getattr(provider, "provider_id", "") or "").strip()
-        model_id = str(getattr(provider, "model", "") or model or provider_id).strip()
+        # Errors from InferenceDirectorProvider/ModelRouter identify the real
+        # executor in ProviderErrorContext; the facade's provider_id is not the
+        # provider that just failed. Attribute failures to that concrete receipt.
+        context = getattr(error, "context", None)
+        provider_id = str(
+            getattr(context, "provider", "")
+            or getattr(provider, "provider_id", "")
+            or ""
+        ).strip()
+        model_id = str(
+            getattr(context, "selected_model", "")
+            or getattr(context, "provider_model", "")
+            or getattr(provider, "model", "")
+            or model
+            or provider_id
+        ).strip()
         if not provider_id or not model_id:
             return
         try:
