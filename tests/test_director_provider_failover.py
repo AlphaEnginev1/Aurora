@@ -949,3 +949,34 @@ def test_routed_success_health_uses_actual_response_receipt(tmp_path: Path):
     assert health.snapshot("nvidia_api", "nvidia/model-actual").success_count == 1
     assert health.snapshot("inference_router", "router").success_count == 0
 
+def test_failover_records_the_incoming_mission_correlation_id(tmp_path: Path):
+    primary = FakeProvider(
+        "inference_router",
+        [ProviderFailure("primary route unavailable")],
+    )
+    reserve = FakeProvider("nvidia_api", ["reserve completed"])
+    store = DirectorProviderFailoverStore(str(tmp_path / "runtime.db"))
+    controller = DirectorProviderFailoverController(
+        active_provider=primary,
+        candidates=(_candidate("nvidia_api", reserve, "nvidia/free-model-b"),),
+        store=store,
+        activate=lambda _candidate, _provider: None,
+    )
+
+    response = controller.generate(
+        messages=[{"role": "user", "content": "continue the existing request"}],
+        model="router",
+        role="director_planner",
+        metadata={
+            "mission_id": "mission-stable",
+            "task_id": "task-stable",
+            "project_id": "project-stable",
+            "correlation_id": "corr-stable",
+        },
+    )
+
+    assert response.provider == "nvidia_api"
+    records = store.list_recent(limit=20)
+    assert records
+    assert {item["correlation_id"] for item in records} == {"corr-stable"}
+
