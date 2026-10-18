@@ -1444,11 +1444,10 @@ async function testProvider(provider) {
       showSettingsMessage("Aurora uses NVIDIA only.", true);
       return;
     }
-    // Save the exact values shown in Settings before discovery. Otherwise this
-    // test can use a stale credential/registry snapshot from daemon startup.
-    const saved = await saveSettings();
-    if (!saved) return;
-    showSettingsMessage("Checking NVIDIA's live model catalog…", false);
+    // This button tests the already-saved credential-vault endpoint. Do not
+    // require a Director primary model selection first: catalog discovery is what
+    // supplies the allowed IDs for that selection.
+    showSettingsMessage("Checking NVIDIA's saved credential against the official Free Endpoint catalog…", false);
     const response = await fetch(state.apiBase + "/settings/test", {
       method: "POST",
       headers: { Accept: "application/json", "Content-Type": "application/json" },
