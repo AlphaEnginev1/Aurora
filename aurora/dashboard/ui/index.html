@@ -374,18 +374,39 @@
           <div class="settings-layout">
             <section class="panel content-panel settings-main">
               <div class="panel-head">
-                <div><div class="eyebrow">DIRECTOR ENGINE</div><h2>NVIDIA Router</h2></div>
+                <div><div class="eyebrow">DIRECTOR ENGINE</div><h2>Inference routing</h2></div>
               </div>
               <div class="settings-form">
-                <label for="director-provider">Runtime mode</label>
+                <label for="director-provider">Primary runtime mode</label>
                 <select id="director-provider">
-                  <option value="router">Aurora NVIDIA Router</option>
-                  <option value="nvidia_api">Direct NVIDIA model</option>
+                  <option value="router">Aurora inference router</option>
+                  <option value="nvidia_api">Direct NVIDIA Free Endpoint</option>
+                  <option value="openrouter">OpenRouter official free route</option>
                 </select>
                 <label for="director-model">Preferred model</label>
                 <input id="director-model" type="text" autocomplete="off" placeholder="nvidia/nemotron-3-ultra-550b-a55b">
-                <label for="director-endpoint">NVIDIA endpoint</label>
+                <label for="director-endpoint">Primary provider endpoint</label>
                 <input id="director-endpoint" type="url" autocomplete="off" placeholder="https://integrate.api.nvidia.com/v1">
+                <div class="settings-failover">
+                  <div class="eyebrow">RECOVERY ROUTING</div>
+                  <label for="director-failover-enabled">Automatic provider failover</label>
+                  <select id="director-failover-enabled">
+                    <option value="true">Enabled · continue on provider failure</option>
+                    <option value="false">Disabled · fail closed on provider failure</option>
+                  </select>
+                  <label for="director-failover-first">First reserve provider</label>
+                  <select id="director-failover-first">
+                    <option value="nvidia_api">NVIDIA Free Endpoint catalog</option>
+                    <option value="openrouter">OpenRouter official free route</option>
+                  </select>
+                  <label for="director-failover-second">Second reserve provider (optional)</label>
+                  <select id="director-failover-second">
+                    <option value="">No second reserve</option>
+                    <option value="nvidia_api">NVIDIA Free Endpoint catalog</option>
+                    <option value="openrouter">OpenRouter official free route</option>
+                  </select>
+                  <p class="settings-note">Only the approved free routes can be selected. NVIDIA reserves must be present in the official live Free Endpoint catalog; OpenRouter is restricted to <code>openrouter/free</code> and is skipped unless its credential is configured and its free-quota preflight permits inference.</p>
+                </div>
                 <div class="settings-actions">
                   <button id="settings-save" class="primary-button" type="button">Save & apply</button>
                   <button id="settings-reload" class="ghost-button" type="button">Reload</button>
