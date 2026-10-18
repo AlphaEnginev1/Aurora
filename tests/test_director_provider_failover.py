@@ -828,3 +828,43 @@ def test_bound_provider_failure_uses_concrete_model_and_skips_same_model_reserve
     assert reserve.calls == 1
     assert active.model == "openrouter/free"
 
+def test_failed_reserve_can_recover_on_a_later_request(tmp_path: Path):
+    primary = FakeProvider(
+        "inference_router",
+        [
+            ProviderFailure("primary unavailable on first request"),
+            ProviderFailure("primary unavailable on second request"),
+        ],
+    )
+    reserve = FakeProvider(
+        "nvidia_api",
+        [
+            ProviderFailure("reserve temporarily unavailable"),
+            "reserve recovered",
+        ],
+    )
+    controller = DirectorProviderFailoverController(
+        active_provider=primary,
+        candidates=(_candidate("nvidia_api", reserve, "nvidia/model-a"),),
+        store=DirectorProviderFailoverStore(str(tmp_path / "runtime.db")),
+        activate=lambda _candidate, _provider: None,
+    )
+
+    with pytest.raises(DirectorProviderFailoverError):
+        controller.generate(
+            messages=[{"role": "user", "content": "first request"}],
+            model=None,
+            role="director_conversation",
+        )
+
+    recovered = controller.generate(
+        messages=[{"role": "user", "content": "later request after recovery"}],
+        model=None,
+        role="director_conversation",
+    )
+
+    assert recovered.content == "reserve recovered"
+    assert primary.calls == 2
+    assert reserve.calls == 2
+    assert controller.provider_id == "nvidia_api"
+
