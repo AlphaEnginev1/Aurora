@@ -775,3 +775,56 @@ def test_factory_uses_explicit_openrouter_free_reserve_and_persists_activation(
     assert persisted["model"] == "openrouter/free"
     assert persisted["failover"]["order"] == ["openrouter", "nvidia_api"]
 
+def test_bound_provider_failure_uses_concrete_model_and_skips_same_model_reserve(
+    tmp_path: Path,
+):
+    from aurora.inference.errors import ProviderErrorContext, ProviderTimeoutError
+    from aurora.inference.router import ModelRouter
+    from aurora.orchestration.director_provider_failover import BoundInferenceDirectorProvider
+
+    class FailingRouter:
+        def generate(self, request, **_kwargs):
+            raise ProviderTimeoutError(
+                "free route timed out",
+                context=ProviderErrorContext(
+                    provider="openrouter",
+                    request_id=request.request_id,
+                    execution_id="exec-openrouter-failed",
+                    requested_model=request.model,
+                    selected_model="openrouter/free",
+                    provider_model="openrouter/free",
+                ),
+            )
+
+    # BoundInferenceDirectorProvider only needs the router's generate contract
+    # in this test; no network adapter or live provider call is made.
+    active = BoundInferenceDirectorProvider(
+        FailingRouter(),
+        provider_id="openrouter",
+        model="openrouter/free",
+    )
+    same_model = FakeProvider("openrouter", ["must never be retried"])
+    reserve = FakeProvider("nvidia_api", ["NVIDIA reserve response"])
+
+    controller = DirectorProviderFailoverController(
+        active_provider=active,
+        candidates=(
+            _candidate("openrouter", same_model, "openrouter/free"),
+            _candidate("nvidia_api", reserve, "nvidia/test-free-model"),
+        ),
+        store=DirectorProviderFailoverStore(str(tmp_path / "runtime.db")),
+        activate=lambda _candidate, _provider: None,
+    )
+
+    response = controller.generate(
+        messages=[{"role": "user", "content": "continue accepted work"}],
+        model="router",  # A router alias must not overwrite the bound model identity.
+        role="director_conversation",
+    )
+
+    assert response.provider == "nvidia_api"
+    assert response.content == "NVIDIA reserve response"
+    assert same_model.calls == 0
+    assert reserve.calls == 1
+    assert active.model == "openrouter/free"
+
