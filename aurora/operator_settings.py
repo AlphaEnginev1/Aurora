@@ -222,13 +222,13 @@ def _normalize(data: Mapping[str, Any]) -> dict[str, Any]:
         provider = "router"
     director["provider"] = provider
     director["endpoint"] = NVIDIA_ENDPOINT
-    # Distinguish a deliberate dashboard choice from defaults or legacy values.
-    # This flag lets a saved operator selection take precedence over launcher
-    # defaults such as AURORA_DIRECTOR_PROVIDER=router after restart.
-    director["operator_selected"] = (
-        director.get("operator_selected")
-        if isinstance(director.get("operator_selected"), bool)
-        else False
+    # Only explicit Settings choices and a successfully activated failover
+    # route override launcher defaults. Legacy provider values remain inert.
+    provider_source = str(director.get("provider_source", "")).strip().lower()
+    director["provider_source"] = (
+        provider_source
+        if provider_source in {"operator_settings", "runtime_failover"}
+        else ""
     )
     model = str(director.get("model", "")).strip()
     if provider == "router":
