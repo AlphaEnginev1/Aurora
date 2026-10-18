@@ -102,7 +102,9 @@ def make_runtime(tmp_path: Path, *, max_continue_reviews: int = 1, project_regis
         max_continue_reviews=max_continue_reviews,
         project_registry=project_registry,
     )
-    engine = TaskEngine(FakeOrchestration(), tmp_path / "workspace")
+    engine = TaskEngine(
+        FakeOrchestration(), tmp_path / "workspace", project_registry=project_registry
+    )
     director = DurableDirectorService(
         planner=planner,
         task_engine=engine,
