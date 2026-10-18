@@ -8,6 +8,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 import hashlib
+import json
 from enum import StrEnum
 from pathlib import Path
 from typing import Sequence
