@@ -27,6 +27,14 @@ def test_dashboard_ui_assets_are_present():
     assert 'data-nav-target="health"' in html
     assert 'data-nav-target="settings"' in html
     assert 'id="director-provider"' in html
+    assert 'option value="openrouter">OpenRouter official free route</option>' in html
+    assert 'id="director-failover-enabled"' in html
+    assert 'id="director-failover-first"' in html
+    assert 'id="director-failover-second"' in html
+    assert "function syncDirectorProviderFields()" in js
+    assert 'model = provider === "openrouter" ? "openrouter/free"' in js
+    assert "failover: {" in js
+    assert "failoverOrder.push(second)" in js
     assert 'id="gemini-key"' not in html
     # Settings uses one provider-agnostic form; the legacy NVIDIA-only input is gone.
     assert 'id="credential-provider"' in html
