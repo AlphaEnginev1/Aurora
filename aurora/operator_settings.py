@@ -216,18 +216,20 @@ def _normalize(data: Mapping[str, Any]) -> dict[str, Any]:
     result = _merge(DEFAULT_SETTINGS, data)
     director = result["director"]
     provider = str(director.get("provider", "router")).strip().lower()
-    if provider not in {"router", "nvidia_api"}:
-        # Legacy external providers are migrated to the canonical Router path.
-        # Runtime startup does not persist this normalization; the explicit
-        # operator migration helper owns durable migration when requested.
+    if provider not in {"router", "nvidia_api", "openrouter"}:
+        # Providers without an explicitly approved free-only runtime route do
+        # not become Director primaries merely because their API key is stored.
         provider = "router"
     director["provider"] = provider
     director["endpoint"] = NVIDIA_ENDPOINT
     model = str(director.get("model", "")).strip()
     if provider == "router":
         # Router mode owns model selection dynamically. Never persist or resurrect
-        # a historical NVIDIA model as the Director model in this mode.
+        # a historical provider model in this mode.
         director["model"] = "router"
+    elif provider == "openrouter":
+        # Only the canonical official free router is permitted for direct mode.
+        director["model"] = "openrouter/free"
     elif not _is_nvidia_model_id(model):
         # Direct NVIDIA mode requires an explicit NVIDIA model. The selected model
         # is validated against the live discovery pool before execution.
@@ -306,8 +308,8 @@ def _validate(data: Mapping[str, Any]) -> None:
     if not isinstance(director, Mapping) or not isinstance(providers, Mapping):
         raise OperatorSettingsError("operator settings require director and providers objects")
     provider = str(director.get("provider", "")).strip().lower()
-    if provider not in {"router", "nvidia_api"}:
-        raise OperatorSettingsError("director.provider must be router or nvidia_api")
+    if provider not in {"router", "nvidia_api", "openrouter"}:
+        raise OperatorSettingsError("director.provider must be router, nvidia_api, or openrouter")
     model = str(director.get("model", "")).strip()
     if not model:
         raise OperatorSettingsError("director.model cannot be empty")
@@ -315,6 +317,13 @@ def _validate(data: Mapping[str, Any]) -> None:
         raise OperatorSettingsError("router director must not pin a provider model")
     if provider == "nvidia_api" and not _is_nvidia_model_id(model):
         raise OperatorSettingsError("nvidia_api director.model must be an NVIDIA model identifier")
+    if provider == "openrouter":
+        if model != "openrouter/free":
+            raise OperatorSettingsError("OpenRouter Director mode is restricted to openrouter/free")
+        openrouter = providers.get("openrouter", {})
+        stored_key = str(openrouter.get("api_key", "") or "") if isinstance(openrouter, Mapping) else ""
+        if not stored_key.strip() and not os.getenv("OPENROUTER_API_KEY", "").strip():
+            raise OperatorSettingsError("OpenRouter Director mode requires an OpenRouter API key")
     if not str(director.get("endpoint", "")).strip().startswith("https://"):
         raise OperatorSettingsError("director.endpoint must use HTTPS")
     failover = director.get("failover", {})
