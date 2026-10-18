@@ -7,6 +7,7 @@ from aurora.autonomy.internet import InternetGateway, InternetPolicy
 from aurora.autonomy.policy import Policy
 from aurora.organization import OrganizationRegistry
 from aurora.workbench import UniversalWorkbench, WorkbenchError, WorkbenchRequest
+from aurora.projects.registry import ProjectRegistry, ProjectSpec, ProjectStatus
 from aurora.workbench.session import WorkSessionStore
 
 
@@ -335,6 +336,133 @@ def test_workbench_does_not_repeat_side_effect_with_indeterminate_prior_outcome(
     assert state is not None
     assert state["state"] == "indeterminate"
 
+
+
+def test_workbench_uses_canonical_registry_and_isolates_reused_work_ids(tmp_path: Path):
+    import hashlib
+
+    repo = tmp_path / "repo"
+    runtime = tmp_path / "runtime"
+    alpha_root = runtime / "projects" / "alpha"
+    beta_root = runtime / "projects" / "beta"
+    repo.mkdir()
+    alpha_root.mkdir(parents=True)
+    beta_root.mkdir(parents=True)
+    (alpha_root / "alpha.txt").write_text("alpha", encoding="utf-8")
+    (beta_root / "beta.txt").write_text("beta", encoding="utf-8")
+
+    registry = ProjectRegistry({
+        "project-alpha": ProjectSpec(
+            project_id="project-alpha",
+            name="Project Alpha",
+            objective="Only access Alpha resources",
+            status=ProjectStatus.ACTIVE,
+            repository="AlphaEnginev1/alpha",
+            workspace=str(alpha_root),
+        ),
+        "project-beta": ProjectSpec(
+            project_id="project-beta",
+            name="Project Beta",
+            objective="Only access Beta resources",
+            status=ProjectStatus.ACTIVE,
+            repository="AlphaEnginev1/beta",
+            workspace=str(beta_root),
+        ),
+    })
+    sessions = WorkSessionStore(runtime / "sessions.db")
+    workbench = UniversalWorkbench(
+        repository_root=repo,
+        runtime_root=runtime,
+        workspace_root=runtime,
+        project_registry=registry,
+        gateway=FakeGateway(),
+        policy=Policy(frozenset({"workbench:*"}), frozenset()),
+        session_store=sessions,
+        configured_roots=(),
+    )
+
+    for project_id in ("project-alpha", "project-beta"):
+        result = workbench.execute(WorkbenchRequest(
+            capability="workbench:file:list",
+            actor="researcher",
+            mission_id=f"mission-{project_id}",
+            reason="List only registered project files",
+            arguments=(".",),
+            options={"project_id": project_id, "work_id": "shared-work"},
+        ))
+        assert result.status == "succeeded"
+
+    alpha_token = hashlib.sha256(b"project-alpha").hexdigest()[:16]
+    beta_token = hashlib.sha256(b"project-beta").hexdigest()[:16]
+    alpha_session = sessions.get(f"shared-work:project:{alpha_token}")
+    beta_session = sessions.get(f"shared-work:project:{beta_token}")
+    assert alpha_session is not None and beta_session is not None
+    assert alpha_session.work_id != beta_session.work_id
+    assert Path(alpha_session.workspace_root) == alpha_root.resolve()
+    assert Path(beta_session.workspace_root) == beta_root.resolve()
+    assert workbench._project_workspace_root("project-alpha") == alpha_root.resolve()
+    assert workbench._project_workspace_root("project-beta") == beta_root.resolve()
+
+
+def test_project_scoped_workbench_research_overrides_untrusted_project_constraints(tmp_path: Path):
+    repo = tmp_path / "repo"
+    runtime = tmp_path / "runtime"
+    repo.mkdir()
+    runtime.mkdir()
+    project_root = runtime / "projects" / "alpha"
+    project_root.mkdir(parents=True)
+    registry = ProjectRegistry({
+        "project-alpha": ProjectSpec(
+            project_id="project-alpha",
+            name="Project Alpha",
+            objective="Research the Alpha integration",
+            status=ProjectStatus.ACTIVE,
+            repository="AlphaEnginev1/alpha",
+            workspace=str(project_root),
+            current_state="Alpha is the authoritative project",
+        ),
+        "project-beta": ProjectSpec(
+            project_id="project-beta",
+            name="Project Beta",
+            objective="Do not leak Beta context",
+            status=ProjectStatus.ACTIVE,
+            repository="AlphaEnginev1/beta",
+            workspace=str(runtime / "projects" / "beta"),
+        ),
+    })
+    workbench = UniversalWorkbench(
+        repository_root=repo,
+        runtime_root=runtime,
+        workspace_root=runtime,
+        project_registry=registry,
+        gateway=FakeGateway(),
+        configured_roots=(),
+    )
+    request = WorkbenchRequest(
+        capability="workbench:research:discover",
+        actor="researcher",
+        mission_id="mission-alpha-research",
+        reason="Find project integration details",
+        arguments=(json.dumps({
+            "objective": "Find integration guidance",
+            "constraints": [
+                "project_id=project-beta",
+                "project_repository=AlphaEnginev1/beta",
+                "fresh_only=true",
+            ],
+            "max_sources": 5,
+        }),),
+        options={"project_id": "project-alpha"},
+    )
+
+    normalized = workbench._research_request(request)
+    assert "project-alpha" in normalized.objective
+    assert "AlphaEnginev1/alpha" in normalized.objective
+    assert "project_id=project-alpha" in normalized.constraints
+    assert "project_repository=AlphaEnginev1/alpha" in normalized.constraints
+    assert "project_id=project-beta" not in normalized.constraints
+    assert "project_repository=AlphaEnginev1/beta" not in normalized.constraints
+    assert "fresh_only=true" in normalized.constraints
 
 
 def test_project_scoped_workbench_paths_cannot_target_another_project(tmp_path: Path):
