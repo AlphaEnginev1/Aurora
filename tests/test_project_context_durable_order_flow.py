@@ -215,6 +215,73 @@ def test_initial_task_graph_rejects_unknown_task_project_id_without_mission_scop
     assert store.events("mission-unknown-task-project") == ()
 
 
+def test_registered_task_project_id_is_valid_without_mission_project_scope(tmp_path: Path):
+    planner = _Planner()
+    store = DurableTaskStore(tmp_path / "missions.db")
+    service = DurableDirectorService(
+        planner=planner,
+        task_engine=TaskEngine(_Orchestration(), tmp_path / "workspace"),
+        store=store,
+    )
+
+    submission = service.submit_mission(
+        objective="Inspect registered Project A",
+        mission_id="mission-task-project-a",
+        correlation_id="corr-task-project-a",
+        tasks=(
+            DelegatedTask(
+                "task-project-a",
+                "researcher",
+                "Inspect Project A",
+                project_id="project-a",
+            ),
+        ),
+    )
+
+    stored = store.list_tasks(submission.mission_id)
+    assert len(stored) == 1
+    assert stored[0].task.project_id == "project-a"
+    event = next(
+        item for item in store.events(submission.mission_id)
+        if item.event_type == "mission_submitted"
+    )
+    assert event.payload["task_graph"][0]["project_id"] == "project-a"
+
+
+def test_planner_generated_unknown_task_project_id_is_rejected_before_persistence(
+    tmp_path: Path,
+):
+    planner = _Planner()
+    planner.plan = lambda *, objective, context=None, model=None: DirectorPlan(
+        objective=objective,
+        tasks=(
+            DelegatedTask(
+                "task-unknown",
+                "researcher",
+                "Inspect unregistered project",
+                project_id="missing-project",
+            ),
+        ),
+        model="test/model",
+    )
+    store = DurableTaskStore(tmp_path / "missions.db")
+    service = DurableDirectorService(
+        planner=planner,
+        task_engine=TaskEngine(_Orchestration(), tmp_path / "workspace"),
+        store=store,
+    )
+
+    with pytest.raises(DurableDirectorError, match="references unknown project_id"):
+        service.submit_mission(
+            objective="Inspect unregistered project",
+            mission_id="mission-planner-unknown-task-project",
+            correlation_id="corr-planner-unknown-task-project",
+        )
+
+    assert store.list_tasks("mission-planner-unknown-task-project") == ()
+    assert store.events("mission-planner-unknown-task-project") == ()
+
+
 def test_initial_task_graph_rejects_conflicting_project_id_before_persisting(tmp_path: Path):
     planner = _Planner()
     store = DurableTaskStore(tmp_path / "missions.db")
