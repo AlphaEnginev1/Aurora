@@ -251,6 +251,8 @@ def _build_director_provider(
             raise RuntimeError("OpenRouter Director mode requires OPENROUTER_API_KEY or a saved OpenRouter credential")
         if router is None:
             raise RuntimeError("OpenRouter Director mode requires the canonical inference router")
+        if getattr(router, "cost_policy", "free_only") != "free_only":
+            raise RuntimeError("OpenRouter Director mode requires cost_policy=free_only")
         if router.provider_registry is None or "openrouter" not in router.provider_registry.ids:
             raise RuntimeError("OpenRouter is not active in the configured provider registry")
         if router.model_registry is None:
@@ -261,8 +263,16 @@ def _build_director_provider(
             raise RuntimeError(
                 "OpenRouter free model is not registered in Aurora's model catalog"
             ) from exc
-        if registered.provider != "openrouter" or registered.pricing_tier != "free":
-            raise RuntimeError("OpenRouter model registration violates free_only policy")
+        if not (
+            registered.provider == "openrouter"
+            and registered.pricing_tier == "free"
+            and registered.enabled
+            and registered.healthy
+            and registered.available
+        ):
+            raise RuntimeError(
+                "OpenRouter model registration is not active and available under free_only policy"
+            )
         return BoundInferenceDirectorProvider(
             router,
             provider_id="openrouter",
