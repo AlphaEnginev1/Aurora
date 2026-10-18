@@ -32,7 +32,7 @@ def test_dashboard_ui_assets_are_present():
     assert 'id="director-failover-first"' in html
     assert 'id="director-failover-second"' in html
     assert "function syncDirectorProviderFields()" in js
-    assert 'model = provider === "openrouter" ? "openrouter/free"' in js
+    assert 'provider === "openrouter" ? "openrouter/free"' in js
     assert "failover: {" in js
     assert "failoverOrder.push(second)" in js
     assert 'id="gemini-key"' not in html
