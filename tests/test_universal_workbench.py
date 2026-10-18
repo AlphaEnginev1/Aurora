@@ -408,6 +408,48 @@ def test_workbench_uses_canonical_registry_and_isolates_reused_work_ids(tmp_path
     assert task_engine._project_workspace_root("project-beta") == beta_root.resolve()
 
 
+def test_project_registration_updates_shared_runtime_registry(tmp_path: Path):
+    repo = tmp_path / "repo"
+    runtime = tmp_path / "runtime"
+    repo.mkdir()
+    runtime.mkdir()
+    registry = ProjectRegistry({})
+    workbench = UniversalWorkbench(
+        repository_root=repo,
+        runtime_root=runtime,
+        workspace_root=runtime,
+        project_registry=registry,
+        gateway=FakeGateway(),
+        policy=Policy(frozenset({"workbench:*"}), frozenset()),
+        configured_roots=(),
+    )
+
+    registered = workbench.execute(WorkbenchRequest(
+        capability="workbench:project:register",
+        actor="director",
+        mission_id="mission-register-project",
+        arguments=(json.dumps({
+            "project_id": "project-new",
+            "name": "New Project",
+            "objective": "Register and use the same canonical project",
+            "workspace": "projects/new",
+            "repository": "AlphaEnginev1/new",
+        }),),
+    ))
+    assert registered.status == "succeeded"
+    assert registry.resolve("project-new").workspace == "projects/new"
+
+    listed = workbench.execute(WorkbenchRequest(
+        capability="workbench:file:list",
+        actor="researcher",
+        mission_id="mission-use-new-project",
+        arguments=(".",),
+        options={"project_id": "project-new"},
+    ))
+    assert listed.status == "succeeded"
+    assert workbench._project_workspace_root("project-new") == (runtime / "projects" / "new").resolve()
+
+
 def test_project_scoped_workbench_research_overrides_untrusted_project_constraints(tmp_path: Path):
     repo = tmp_path / "repo"
     runtime = tmp_path / "runtime"
