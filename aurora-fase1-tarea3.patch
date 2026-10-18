@@ -1,0 +1,1093 @@
+diff -ruN '--exclude=__pycache__' '--exclude=.pytest_cache' /tmp/p1/Aurora-main/aurora/alerts.py Aurora-main/aurora/alerts.py
+--- a/aurora/alerts.py	1970-01-01 00:00:00.000000000 +0000
++++ b/aurora/alerts.py	2026-10-11 05:57:06.075869312 +0000
+@@ -0,0 +1,244 @@
++"""Alertas salientes (Telegram / webhook) con deduplicacion y envio asincrono.
++
++Diseno:
++  * ``AlertManager.notify`` deduplica por clave (una alerta por clave y ventana).
++  * ``AlertManager.resolve`` envia "recuperado" solo si esa clave estaba activa.
++  * El envio va en un hilo aparte: una red caida nunca bloquea el runtime.
++  * Los fallos del canal se registran en el log (con secretos ocultos) y nunca se propagan.
++  * ``AlertManager.from_tracker`` es el ``alert_sink`` de ``FailureTracker``.
++"""
++from __future__ import annotations
++
++import json
++import logging
++import os
++import queue
++import re
++import socket
++import threading
++import time
++import urllib.request
++from dataclasses import dataclass
++from typing import Any, Callable, Mapping, Protocol
++from urllib.parse import urlparse
++
++logger = logging.getLogger("aurora.alerts")
++
++_SECRET = re.compile(r"(bot\d+:[A-Za-z0-9_\-]+|nvapi-[A-Za-z0-9._\-]+|Bearer\s+[A-Za-z0-9._\-]+)", re.IGNORECASE)
++_ICONS = {"critical": "🔴", "warning": "🟠", "recovered": "🟢"}
++
++
++def redact(text: str) -> str:
++    return _SECRET.sub("***", text)
++
++
++@dataclass(frozen=True)
++class AlertMessage:
++    key: str
++    severity: str  # critical | warning | recovered
++    title: str
++    detail: str
++    host: str
++
++    def text(self) -> str:
++        icon = _ICONS.get(self.severity, "")
++        body = f"{icon} Aurora [{self.host}] {self.title}"
++        return body + (f"\n{self.detail}" if self.detail else "")
++
++
++class AlertChannel(Protocol):
++    name: str
++
++    def send(self, message: AlertMessage) -> None: ...
++
++
++class HttpPoster:
++    """POST JSON con urllib; opcionalmente a traves del proxy de salida gobernado."""
++
++    def __init__(self, proxy_url: str | None = None, timeout: float = 10.0) -> None:
++        handler = urllib.request.ProxyHandler({"https": proxy_url, "http": proxy_url} if proxy_url else {})
++        self._opener = urllib.request.build_opener(handler)
++        self.timeout = timeout
++
++    def post_json(self, url: str, payload: Mapping[str, Any]) -> None:
++        request = urllib.request.Request(
++            url,
++            data=json.dumps(payload).encode("utf-8"),
++            headers={"Content-Type": "application/json"},
++            method="POST",
++        )
++        with self._opener.open(request, timeout=self.timeout) as response:
++            if not 200 <= response.status < 300:
++                raise RuntimeError(f"alert endpoint returned HTTP {response.status}")
++
++
++class TelegramChannel:
++    name = "telegram"
++
++    def __init__(self, bot_token: str, chat_id: str, poster: Any) -> None:
++        self._url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
++        self._chat_id = chat_id
++        self._poster = poster
++
++    def send(self, message: AlertMessage) -> None:
++        self._poster.post_json(
++            self._url,
++            {"chat_id": self._chat_id, "text": message.text(), "disable_web_page_preview": True},
++        )
++
++
++class WebhookChannel:
++    """Webhook generico. Incluye ``text`` (Slack) y ``content`` (Discord)."""
++
++    name = "webhook"
++
++    def __init__(self, url: str, poster: Any) -> None:
++        parsed = urlparse(url)
++        local = parsed.hostname in {"127.0.0.1", "localhost", "::1"}
++        if parsed.scheme != "https" and not (parsed.scheme == "http" and local):
++            raise ValueError("AURORA_ALERT_WEBHOOK_URL must use https")
++        self._url = url
++        self._poster = poster
++
++    def send(self, message: AlertMessage) -> None:
++        text = message.text()
++        self._poster.post_json(
++            self._url,
++            {"text": text, "content": text, "key": message.key, "severity": message.severity, "title": message.title},
++        )
++
++
++class AlertManager:
++    def __init__(
++        self,
++        channels: list[AlertChannel] | None = None,
++        *,
++        dedup_seconds: float = 1800.0,
++        clock: Callable[[], float] = time.monotonic,
++        asynchronous: bool = True,
++        host: str | None = None,
++        queue_size: int = 100,
++    ) -> None:
++        self.channels = list(channels or [])
++        self.dedup_seconds = dedup_seconds
++        self._clock = clock
++        self._asynchronous = asynchronous
++        self._host = host or socket.gethostname()
++        self._lock = threading.Lock()
++        self._last_sent: dict[str, float] = {}
++        self._queue: queue.Queue[AlertMessage] = queue.Queue(maxsize=queue_size)
++        self._worker: threading.Thread | None = None
++
++    # -- API publica ------------------------------------------------------
++    def notify(self, key: str, severity: str, title: str, detail: str = "", *, force: bool = False) -> bool:
++        """Envia una alerta salvo que la misma clave ya se enviara dentro de la ventana."""
++        now = self._clock()
++        with self._lock:
++            last = self._last_sent.get(key)
++            if last is not None and now - last < self.dedup_seconds and not force:
++                return False
++            self._last_sent[key] = now
++        self._dispatch(AlertMessage(key, severity, title, detail, self._host))
++        return True
++
++    def resolve(self, key: str, title: str, detail: str = "", *, force: bool = False) -> bool:
++        """Envia 'recuperado' solo si la clave estaba activa (o con force=True)."""
++        with self._lock:
++            if key not in self._last_sent and not force:
++                return False
++            self._last_sent.pop(key, None)
++        self._dispatch(AlertMessage(key, "recovered", title, detail, self._host))
++        return True
++
++    def from_tracker(self, payload: Mapping[str, Any]) -> None:
++        """``alert_sink`` para FailureTracker."""
++        component = str(payload.get("component", "?"))
++        key = f"tracker:{component}"
++        if payload.get("kind") == "recovered":
++            self.resolve(key, f"{component} recuperado", f"tras {payload.get('previous_consecutive_failures')} fallos seguidos")
++            return
++        self.notify(
++            key,
++            "critical",
++            f"{component} falla repetidamente ({payload.get('consecutive_failures')} seguidos)",
++            str(payload.get("last_error", "")),
++        )
++
++    def flush(self, timeout: float = 5.0) -> None:
++        deadline = time.monotonic() + timeout
++        while time.monotonic() < deadline:
++            if self._queue.unfinished_tasks == 0:
++                return
++            time.sleep(0.02)
++
++    # -- interno ----------------------------------------------------------
++    def _dispatch(self, message: AlertMessage) -> None:
++        log = logger.error if message.severity == "critical" else logger.warning
++        log("ALERT [%s] %s | %s", message.severity, message.title, redact(message.detail)[:300])
++        if not self.channels:
++            return
++        if not self._asynchronous:
++            self._deliver(message)
++            return
++        self._ensure_worker()
++        try:
++            self._queue.put_nowait(message)
++        except queue.Full:
++            logger.warning("alert queue full; dropping %s", message.key)
++
++    def _ensure_worker(self) -> None:
++        with self._lock:
++            if self._worker is None or not self._worker.is_alive():
++                self._worker = threading.Thread(target=self._run, name="aurora-alerts", daemon=True)
++                self._worker.start()
++
++    def _run(self) -> None:
++        while True:
++            message = self._queue.get()
++            try:
++                self._deliver(message)
++            finally:
++                self._queue.task_done()
++
++    def _deliver(self, message: AlertMessage) -> None:
++        for channel in self.channels:
++            try:
++                channel.send(message)
++            except Exception as exc:  # un canal caido no debe afectar a los demas
++                logger.error("alert channel %s failed: %s", channel.name, redact(f"{type(exc).__name__}: {exc}")[:200])
++
++
++def build_alert_manager_from_env(
++    env: Mapping[str, str] | None = None,
++    *,
++    use_egress_proxy: bool | None = None,
++    asynchronous: bool = True,
++) -> AlertManager:
++    """Construye el AlertManager desde variables de entorno.
++
++    AURORA_TELEGRAM_BOT_TOKEN + AURORA_TELEGRAM_CHAT_ID, y/o AURORA_ALERT_WEBHOOK_URL.
++    AURORA_ALERT_DEDUP_SECONDS (def. 1800). AURORA_ALERT_USE_EGRESS_PROXY (def. 1).
++    """
++    env = os.environ if env is None else env
++    if use_egress_proxy is None:
++        use_egress_proxy = env.get("AURORA_ALERT_USE_EGRESS_PROXY", "1").strip().lower() not in {"0", "false", "no"}
++    proxy_url = None
++    proxy_host = env.get("AURORA_EGRESS_PROXY_HOST", "").strip()
++    if use_egress_proxy and proxy_host:
++        proxy_url = f"http://{proxy_host}:{env.get('AURORA_EGRESS_PROXY_PORT', '3128').strip() or '3128'}"
++    poster = HttpPoster(proxy_url)
++    channels: list[AlertChannel] = []
++    token = env.get("AURORA_TELEGRAM_BOT_TOKEN", "").strip()
++    chat_id = env.get("AURORA_TELEGRAM_CHAT_ID", "").strip()
++    if token and chat_id:
++        channels.append(TelegramChannel(token, chat_id, poster))
++    webhook = env.get("AURORA_ALERT_WEBHOOK_URL", "").strip()
++    if webhook:
++        channels.append(WebhookChannel(webhook, poster))
++    if not channels:
++        logger.warning("no alert channel configured (set AURORA_TELEGRAM_BOT_TOKEN/CHAT_ID or AURORA_ALERT_WEBHOOK_URL); alerts go to the log only")
++    try:
++        dedup = float(env.get("AURORA_ALERT_DEDUP_SECONDS", "").strip() or 1800)
++    except ValueError:
++        dedup = 1800.0
++    return AlertManager(channels, dedup_seconds=dedup, asynchronous=asynchronous)
+diff -ruN '--exclude=__pycache__' '--exclude=.pytest_cache' /tmp/p1/Aurora-main/aurora/external_monitor.py Aurora-main/aurora/external_monitor.py
+--- a/aurora/external_monitor.py	1970-01-01 00:00:00.000000000 +0000
++++ b/aurora/external_monitor.py	2026-10-11 05:57:06.076007737 +0000
+@@ -0,0 +1,128 @@
++"""Monitor externo: comprueba el endpoint de salud y avisa si Aurora no responde.
++
++Pensado para ejecutarse cada minuto desde un timer systemd (deploy/aurora-monitor.timer),
++como proceso independiente del daemon, para detectar tambien que el servicio este caido.
++
++    python -m aurora.external_monitor
++
++Variables: AURORA_MONITOR_URL, AURORA_DASHBOARD_API_TOKEN, AURORA_MONITOR_STATE,
++AURORA_MONITOR_FAILURES_BEFORE_ALERT (def. 2), AURORA_MONITOR_REALERT_SECONDS (def. 21600),
++AURORA_MONITOR_SYSTEMD_UNIT (opcional, p. ej. aurora.service),
++AURORA_MONITOR_USE_EGRESS_PROXY (def. 0: el monitor envia directo, porque el proxy puede estar caido).
++Canales: los mismos que el daemon (Telegram / webhook).
++"""
++from __future__ import annotations
++
++import json
++import logging
++import os
++import subprocess
++import time
++import urllib.error
++import urllib.request
++from pathlib import Path
++from typing import Any, Callable, Mapping
++
++from aurora.alerts import AlertManager, build_alert_manager_from_env
++
++logger = logging.getLogger("aurora.external_monitor")
++ALERT_KEY = "external:aurora-down"
++
++
++def probe_health(url: str, token: str | None, timeout: float = 10.0) -> tuple[bool, str]:
++    request = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"} if token else {})
++    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))  # nunca usar proxies del entorno
++    try:
++        with opener.open(request, timeout=timeout) as response:
++            body = response.read(2_000_000)
++            if response.status != 200:
++                return False, f"HTTP {response.status}"
++            json.loads(body.decode("utf-8"))
++            return True, "ok"
++    except urllib.error.HTTPError as exc:
++        return False, f"HTTP {exc.code}"
++    except json.JSONDecodeError:
++        return False, "respuesta de salud no es JSON valido"
++    except Exception as exc:
++        return False, f"{type(exc).__name__}: {str(exc)[:120]}"
++
++
++def probe_systemd_unit(unit: str) -> tuple[bool, str]:
++    try:
++        result = subprocess.run(["systemctl", "is-active", unit], capture_output=True, text=True, timeout=10)
++    except Exception as exc:
++        return False, f"no se pudo consultar systemd: {type(exc).__name__}"
++    state = result.stdout.strip() or "unknown"
++    return state == "active", f"{unit} esta '{state}'"
++
++
++def run_check(
++    *,
++    probe: Callable[[], tuple[bool, str]],
++    alerts: AlertManager,
++    state_path: Path,
++    failures_before_alert: int = 2,
++    realert_seconds: float = 21600.0,
++    now: Callable[[], float] = time.time,
++) -> dict[str, Any]:
++    """Una ejecucion del monitor. El estado persiste en disco entre ejecuciones."""
++    try:
++        state = json.loads(state_path.read_text(encoding="utf-8"))
++    except (OSError, ValueError):
++        state = {}
++    failures = int(state.get("consecutive_failures", 0))
++    alerted_at = state.get("alerted_at")
++    ok, detail = probe()
++    if ok:
++        if alerted_at is not None:
++            alerts.resolve(ALERT_KEY, "Aurora ha vuelto a responder", f"tras {failures} comprobaciones fallidas", force=True)
++        state = {"consecutive_failures": 0, "alerted_at": None}
++    else:
++        failures += 1
++        due = alerted_at is None or now() - float(alerted_at) >= realert_seconds
++        if failures >= failures_before_alert and due:
++            alerts.notify(ALERT_KEY, "critical", "Aurora NO responde", f"{detail} ({failures} comprobaciones seguidas)", force=True)
++            alerted_at = now()
++        state = {"consecutive_failures": failures, "alerted_at": alerted_at, "last_detail": detail}
++    try:
++        state_path.parent.mkdir(parents=True, exist_ok=True)
++        tmp = state_path.with_suffix(".tmp")
++        tmp.write_text(json.dumps(state), encoding="utf-8")
++        tmp.replace(state_path)
++    except OSError as exc:
++        logger.error("no se pudo guardar el estado del monitor: %s", exc)
++    alerts.flush(15.0)
++    return {"ok": ok, "detail": detail, **state}
++
++
++def main(env: Mapping[str, str] | None = None) -> int:
++    env = os.environ if env is None else env
++    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
++    port = env.get("AURORA_DASHBOARD_PORT", "8787")
++    url = env.get("AURORA_MONITOR_URL", f"http://127.0.0.1:{port}/api/dashboard/health")
++    token = env.get("AURORA_DASHBOARD_API_TOKEN") or None
++    unit = env.get("AURORA_MONITOR_SYSTEMD_UNIT", "").strip()
++    use_proxy = env.get("AURORA_MONITOR_USE_EGRESS_PROXY", "0").strip().lower() in {"1", "true", "yes"}
++    alerts = build_alert_manager_from_env(env, use_egress_proxy=use_proxy, asynchronous=False)
++
++    def probe() -> tuple[bool, str]:
++        if unit:
++            ok, detail = probe_systemd_unit(unit)
++            if not ok:
++                return False, detail
++        return probe_health(url, token)
++
++    workspace = env.get("AURORA_WORKSPACE_ROOT", ".aurora-runtime")
++    result = run_check(
++        probe=probe,
++        alerts=alerts,
++        state_path=Path(env.get("AURORA_MONITOR_STATE", f"{workspace}/monitor-state.json")),
++        failures_before_alert=max(1, int(env.get("AURORA_MONITOR_FAILURES_BEFORE_ALERT", "2") or 2)),
++        realert_seconds=float(env.get("AURORA_MONITOR_REALERT_SECONDS", "21600") or 21600),
++    )
++    logger.info("monitor: ok=%s detail=%s failures=%s", result["ok"], result["detail"], result.get("consecutive_failures"))
++    return 0 if result["ok"] else 1
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
+diff -ruN '--exclude=__pycache__' '--exclude=.pytest_cache' /tmp/p1/Aurora-main/aurora/health_monitor.py Aurora-main/aurora/health_monitor.py
+--- a/aurora/health_monitor.py	1970-01-01 00:00:00.000000000 +0000
++++ b/aurora/health_monitor.py	2026-10-11 05:57:06.077273291 +0000
+@@ -0,0 +1,199 @@
++"""Chequeos periodicos de salud del runtime 24/7 con alertas.
++
++Cada chequeo devuelve ``CheckResult``. Un chequeo debe fallar ``failures_before_alert``
++ciclos seguidos antes de alertar (evita falsas alarmas por picos) y avisa al recuperarse.
++"""
++from __future__ import annotations
++
++import json
++import logging
++import shutil
++import socket
++import threading
++from dataclasses import dataclass
++from pathlib import Path
++from typing import Any, Callable, Sequence
++
++logger = logging.getLogger("aurora.health_monitor")
++
++
++@dataclass(frozen=True)
++class CheckResult:
++    ok: bool
++    detail: str = ""
++    severity: str = "critical"  # critical | warning
++
++
++@dataclass(frozen=True)
++class HealthCheck:
++    key: str
++    title: str
++    run: Callable[[], CheckResult]
++
++
++class HealthMonitor:
++    def __init__(
++        self,
++        checks: Sequence[HealthCheck],
++        alerts: Any,
++        *,
++        interval_seconds: float = 60.0,
++        failures_before_alert: int = 2,
++    ) -> None:
++        self.checks = list(checks)
++        self.alerts = alerts
++        self.interval_seconds = interval_seconds
++        self.failures_before_alert = max(1, failures_before_alert)
++        self._consecutive: dict[str, int] = {}
++        self._stop = threading.Event()
++        self._thread: threading.Thread | None = None
++
++    def run_once(self) -> dict[str, CheckResult]:
++        results: dict[str, CheckResult] = {}
++        for check in self.checks:
++            try:
++                result = check.run()
++            except Exception as exc:  # un chequeo roto es en si un problema que alertar
++                result = CheckResult(False, f"el chequeo fallo: {type(exc).__name__}: {str(exc)[:150]}", "warning")
++            results[check.key] = result
++            if result.ok:
++                if self._consecutive.get(check.key, 0) >= self.failures_before_alert:
++                    self.alerts.resolve(f"health:{check.key}", f"{check.title}: recuperado", result.detail)
++                self._consecutive[check.key] = 0
++                continue
++            count = self._consecutive.get(check.key, 0) + 1
++            self._consecutive[check.key] = count
++            if count >= self.failures_before_alert:
++                self.alerts.notify(f"health:{check.key}", result.severity, check.title, result.detail)
++        return results
++
++    def start(self) -> None:
++        if self._thread is not None and self._thread.is_alive():
++            return
++        self._stop.clear()
++        self._thread = threading.Thread(target=self._loop, name="aurora-health-monitor", daemon=True)
++        self._thread.start()
++
++    def stop(self, timeout: float = 5.0) -> None:
++        self._stop.set()
++        if self._thread is not None:
++            self._thread.join(timeout)
++
++    def _loop(self) -> None:
++        while not self._stop.is_set():
++            try:
++                self.run_once()
++            except Exception:
++                logger.exception("health monitor cycle failed")
++            self._stop.wait(self.interval_seconds)
++
++
++# -- chequeos concretos ----------------------------------------------------
++
++def check_disk_usage(path: str | Path, threshold_percent: float = 80.0) -> CheckResult:
++    usage = shutil.disk_usage(str(path))
++    percent = usage.used / usage.total * 100.0
++    free_gb = usage.free / 1024**3
++    detail = f"{path}: {percent:.0f}% usado, {free_gb:.1f} GB libres"
++    return CheckResult(percent < threshold_percent, detail, "critical" if percent >= 95 else "warning")
++
++
++def check_egress_proxy(host: str, port: int, timeout: float = 3.0) -> CheckResult:
++    try:
++        with socket.create_connection((host, port), timeout=timeout):
++            return CheckResult(True, f"{host}:{port} responde")
++    except OSError as exc:
++        return CheckResult(False, f"proxy de salida {host}:{port} inaccesible ({type(exc).__name__})")
++
++
++def check_stalled_missions(store: Any, idle_seconds: float) -> CheckResult:
++    stalled = store.stalled_missions(idle_seconds=idle_seconds)
++    if not stalled:
++        return CheckResult(True, "sin misiones atascadas")
++    lines = [
++        f"{item['mission_id']}: {int(item['idle_seconds'] // 60)} min sin actividad "
++        f"({item['running']} en curso, {item['pending']} pendientes)"
++        for item in stalled[:5]
++    ]
++    extra = f" (+{len(stalled) - 5} mas)" if len(stalled) > 5 else ""
++    return CheckResult(False, "; ".join(lines) + extra, "warning")
++
++
++def enabled_models_from_policy(policy_path: str | Path) -> list[tuple[str, str]]:
++    policy = json.loads(Path(policy_path).read_text(encoding="utf-8"))
++    return [
++        (str(model.get("provider", "nvidia_api")), str(model["id"]))
++        for model in policy.get("models", [])
++        if model.get("enabled") is True
++    ]
++
++
++def check_models_available(
++    health_store: Any,
++    enabled_models: Callable[[], Sequence[tuple[str, str]]],
++    degraded_fraction: float = 0.5,
++) -> CheckResult:
++    """Critico si ningun modelo habilitado es enrutable; aviso si falla una fraccion alta."""
++    models = list(enabled_models())
++    if not models:
++        return CheckResult(False, "no hay ningun modelo habilitado en la politica de inferencia")
++    blocked: list[Any] = []
++    for provider_id, model_id in models:
++        snapshot = health_store.snapshot(provider_id, model_id)
++        if not snapshot.routable:
++            blocked.append(snapshot)
++    ok_count = len(models) - len(blocked)
++    codes: dict[str, int] = {}
++    for snapshot in blocked:
++        code = str(snapshot.last_error_code or snapshot.last_error_type or "?")
++        codes[code] = codes.get(code, 0) + 1
++    summary = ", ".join(f"{code} x{n}" for code, n in sorted(codes.items()))
++    detail = f"{ok_count}/{len(models)} modelos operativos" + (f"; errores: {summary}" if summary else "")
++    if ok_count == 0:
++        return CheckResult(False, "NINGUN modelo disponible. " + detail, "critical")
++    if len(blocked) / len(models) >= degraded_fraction:
++        return CheckResult(False, "muchos modelos caidos. " + detail, "warning")
++    return CheckResult(True, detail)
++
++
++def build_default_monitor(
++    *,
++    store: Any,
++    alerts: Any,
++    workspace_root: str | Path,
++    inference_policy_path: str | Path,
++    proxy_host: str | None,
++    proxy_port: int,
++    env: Any = None,
++) -> HealthMonitor:
++    """Monitor estandar del daemon: disco, proxy de salida, misiones atascadas y modelos."""
++    import os
++
++    env = os.environ if env is None else env
++    interval = float(env.get("AURORA_MONITOR_INTERVAL_SECONDS", "") or 60)
++    disk_percent = float(env.get("AURORA_DISK_ALERT_PERCENT", "") or 80)
++    stalled_seconds = float(env.get("AURORA_STALLED_MISSION_MINUTES", "") or 30) * 60.0
++    workspace = Path(workspace_root)
++
++    checks = [
++        HealthCheck("disk", "Disco casi lleno", lambda: check_disk_usage(workspace, disk_percent)),
++        HealthCheck("stalled_missions", "Misiones atascadas", lambda: check_stalled_missions(store, stalled_seconds)),
++    ]
++    if proxy_host:
++        checks.append(
++            HealthCheck("egress_proxy", "Proxy de salida inaccesible", lambda: check_egress_proxy(proxy_host, proxy_port))
++        )
++    try:
++        from aurora.inference.provider_health import ProviderHealthStore
++
++        health_store = ProviderHealthStore(workspace / "tasks.db")
++        checks.append(
++            HealthCheck(
++                "models",
++                "Modelos de inferencia no disponibles",
++                lambda: check_models_available(health_store, lambda: enabled_models_from_policy(inference_policy_path)),
++            )
++        )
++    except Exception:
++        logger.exception("model availability check disabled")
++    return HealthMonitor(checks, alerts, interval_seconds=interval)
+diff -ruN '--exclude=__pycache__' '--exclude=.pytest_cache' /tmp/p1/Aurora-main/aurora/orchestration/daemon.py Aurora-main/aurora/orchestration/daemon.py
+--- a/aurora/orchestration/daemon.py	2026-10-10 20:59:48.000000000 +0000
++++ b/aurora/orchestration/daemon.py	2026-10-11 05:57:06.077575436 +0000
+@@ -8,7 +8,9 @@
+ from threading import Event, Thread
+ import signal
+ 
+-from aurora.failure_tracker import configure_logging
++from aurora.alerts import build_alert_manager_from_env
++from aurora.failure_tracker import FailureTracker, configure_logging, set_tracker
++from aurora.health_monitor import build_default_monitor
+ from .factory import build_director_runtime
+ from aurora.dashboard.conversation_api import DashboardConversationAPI
+ from aurora.dashboard.http_server import DashboardHTTPError, create_dashboard_server
+@@ -120,6 +122,9 @@
+         ),
+     )
+ 
++    alerts = build_alert_manager_from_env()
++    set_tracker(FailureTracker(alert_sink=alerts.from_tracker))
++
+     dashboard_server = None
+     operator_store = OperatorSettingsStore(settings_path(os.getenv("AURORA_WORKSPACE_ROOT", ".aurora-runtime")))
+     provider_settings = ProviderSettingsService(operator_store, runtime)
+@@ -177,9 +182,20 @@
+     stop = Event()
+     signal.signal(signal.SIGINT, lambda *_: stop.set())
+     signal.signal(signal.SIGTERM, lambda *_: stop.set())
++    monitor = build_default_monitor(
++        store=runtime.store,
++        alerts=alerts,
++        workspace_root=_path_env("AURORA_WORKSPACE_ROOT", ".aurora-runtime"),
++        inference_policy_path=_path_env("AURORA_INFERENCE_POLICY", "config/inference-policy.json"),
++        proxy_host=proxy_host,
++        proxy_port=int(os.getenv("AURORA_EGRESS_PROXY_PORT", "3128")),
++    )
++    monitor.start()
+     try:
+         runtime.run_forever(stop)
+     finally:
++        monitor.stop()
++        alerts.flush(5.0)
+         if dashboard_server is not None:
+             dashboard_server.shutdown()
+             dashboard_server.server_close()
+diff -ruN '--exclude=__pycache__' '--exclude=.pytest_cache' /tmp/p1/Aurora-main/aurora/orchestration/task_store.py Aurora-main/aurora/orchestration/task_store.py
+--- a/aurora/orchestration/task_store.py	2026-10-09 18:47:51.000000000 +0000
++++ b/aurora/orchestration/task_store.py	2026-10-11 05:56:49.327364973 +0000
+@@ -8,7 +8,7 @@
+ from pathlib import Path
+ import sqlite3
+ import uuid
+-from typing import Sequence
++from typing import Any, Sequence
+ 
+ from .task_engine import DelegatedTask
+ 
+@@ -649,6 +649,57 @@
+             ).fetchall()
+         return tuple(row["mission_id"] for row in rows)
+ 
++    def stalled_missions(
++        self, *, idle_seconds: float, now: datetime | None = None
++    ) -> tuple[dict[str, Any], ...]:
++        """Misiones con tareas pending/running (ultima fase) sin actividad reciente.
++
++        La actividad es el maximo entre ``tasks.updated_at`` (que ``renew_lease``
++        actualiza) y la fecha del ultimo evento de la mision.
++        """
++        if idle_seconds <= 0:
++            raise TaskStoreError("idle_seconds must be positive")
++        now = now or datetime.now(timezone.utc)
++        stalled: list[dict[str, Any]] = []
++        with self._connect() as db:
++            rows = db.execute(
++                """
++                SELECT t.mission_id AS mission_id,
++                       MAX(t.updated_at) AS last_task_at,
++                       SUM(CASE WHEN t.status = 'running' THEN 1 ELSE 0 END) AS running,
++                       SUM(CASE WHEN t.status = 'pending' THEN 1 ELSE 0 END) AS pending
++                FROM tasks t
++                WHERE t.phase = (SELECT MAX(phase) FROM tasks WHERE mission_id = t.mission_id)
++                GROUP BY t.mission_id
++                HAVING running + pending > 0
++                """
++            ).fetchall()
++            for row in rows:
++                event = db.execute(
++                    "SELECT MAX(created_at) AS last_event_at FROM task_events WHERE mission_id = ?",
++                    (row["mission_id"],),
++                ).fetchone()
++                stamps = [value for value in (row["last_task_at"], event["last_event_at"]) if value]
++                parsed = []
++                for value in stamps:
++                    try:
++                        parsed.append(datetime.fromisoformat(value))
++                    except ValueError:
++                        continue
++                if not parsed:
++                    continue
++                idle = (now - max(parsed)).total_seconds()
++                if idle >= idle_seconds:
++                    stalled.append(
++                        {
++                            "mission_id": row["mission_id"],
++                            "idle_seconds": idle,
++                            "running": int(row["running"]),
++                            "pending": int(row["pending"]),
++                        }
++                    )
++        return tuple(sorted(stalled, key=lambda item: -item["idle_seconds"]))
++
+     def mission_status(self, mission_id: str) -> str:
+         """Compute mission state from the latest durable planning phase."""
+         tasks = self.list_tasks(mission_id)
+diff -ruN '--exclude=__pycache__' '--exclude=.pytest_cache' /tmp/p1/Aurora-main/config/network-policy.json Aurora-main/config/network-policy.json
+--- a/config/network-policy.json	2026-10-09 18:47:51.000000000 +0000
++++ b/config/network-policy.json	2026-10-11 05:56:49.348177633 +0000
+@@ -13,7 +13,8 @@
+     "security.ubuntu.com",
+     "integrate.api.nvidia.com",
+     "generativelanguage.googleapis.com",
+-    "build.nvidia.com"
++    "build.nvidia.com",
++    "api.telegram.org"
+   ],
+   "browser_isolation_required": true,
+   "sandbox_network": "broker_only",
+diff -ruN '--exclude=__pycache__' '--exclude=.pytest_cache' /tmp/p1/Aurora-main/deploy/aurora-monitor.service Aurora-main/deploy/aurora-monitor.service
+--- a/deploy/aurora-monitor.service	1970-01-01 00:00:00.000000000 +0000
++++ b/deploy/aurora-monitor.service	2026-10-11 05:56:49.329829237 +0000
+@@ -0,0 +1,14 @@
++[Unit]
++Description=Aurora external health monitor (one-shot)
++After=network-online.target
++
++[Service]
++Type=oneshot
++User=aurora
++Group=aurora
++WorkingDirectory=/opt/aurora
++EnvironmentFile=/etc/aurora/aurora.env
++Environment=AURORA_MONITOR_SYSTEMD_UNIT=aurora.service
++ExecStart=/opt/aurora/.venv/bin/python -m aurora.external_monitor
++NoNewPrivileges=true
++PrivateTmp=true
+diff -ruN '--exclude=__pycache__' '--exclude=.pytest_cache' /tmp/p1/Aurora-main/deploy/aurora-monitor.timer Aurora-main/deploy/aurora-monitor.timer
+--- a/deploy/aurora-monitor.timer	1970-01-01 00:00:00.000000000 +0000
++++ b/deploy/aurora-monitor.timer	2026-10-11 05:56:49.330477957 +0000
+@@ -0,0 +1,11 @@
++[Unit]
++Description=Run Aurora external health monitor every minute
++
++[Timer]
++OnBootSec=90s
++OnUnitActiveSec=60s
++AccuracySec=5s
++Unit=aurora-monitor.service
++
++[Install]
++WantedBy=timers.target
+diff -ruN '--exclude=__pycache__' '--exclude=.pytest_cache' /tmp/p1/Aurora-main/deploy/aurora.env.example Aurora-main/deploy/aurora.env.example
+--- a/deploy/aurora.env.example	2026-10-10 16:52:25.000000000 +0000
++++ b/deploy/aurora.env.example	2026-10-11 05:56:49.348464382 +0000
+@@ -43,3 +43,17 @@
+ AURORA_ORGANIZATION_POLICY=config/organization.json
+ AURORA_SKILLS_POLICY=config/skills.json
+ AURORA_TASK_DB=.aurora-runtime/tasks.db
++
++# --- Alertas (tarea 3) ---
++# Telegram: crea un bot con @BotFather y obten el chat_id. Deja vacio para solo log.
++AURORA_TELEGRAM_BOT_TOKEN=
++AURORA_TELEGRAM_CHAT_ID=
++# Webhook generico (Slack/Discord/otro). Debe ser https. Anade su host a config/network-policy.json.
++AURORA_ALERT_WEBHOOK_URL=
++AURORA_ALERT_DEDUP_SECONDS=1800
++AURORA_ALERT_USE_EGRESS_PROXY=1
++# Umbrales del monitor interno
++AURORA_FAILURE_ALERT_THRESHOLD=3
++AURORA_MONITOR_INTERVAL_SECONDS=60
++AURORA_DISK_ALERT_PERCENT=80
++AURORA_STALLED_MISSION_MINUTES=30
+diff -ruN '--exclude=__pycache__' '--exclude=.pytest_cache' /tmp/p1/Aurora-main/docs/operations/PRODUCTION_DEPLOYMENT.md Aurora-main/docs/operations/PRODUCTION_DEPLOYMENT.md
+--- a/docs/operations/PRODUCTION_DEPLOYMENT.md	2026-10-10 16:52:25.000000000 +0000
++++ b/docs/operations/PRODUCTION_DEPLOYMENT.md	2026-10-11 05:58:26.922519758 +0000
+@@ -114,3 +114,17 @@
+ ```
+ 
+ No API key or authorization JSON belongs in the repository.
++
++## Alerts and external monitoring
++
++1. Set a channel in `/etc/aurora/aurora.env`: `AURORA_TELEGRAM_BOT_TOKEN` + `AURORA_TELEGRAM_CHAT_ID` (create the bot with @BotFather) and/or `AURORA_ALERT_WEBHOOK_URL` (https; add its host to `config/network-policy.json`). With no channel, alerts only go to the journal.
++2. The daemon sends alerts through the governed egress proxy by default (`AURORA_ALERT_USE_EGRESS_PROXY=1`); `api.telegram.org` is already in the network policy.
++3. Install the external monitor (independent of the daemon, runs every minute and detects a dead service):
++
++```bash
++sudo cp deploy/aurora-monitor.service deploy/aurora-monitor.timer /etc/systemd/system/
++sudo systemctl daemon-reload
++sudo systemctl enable --now aurora-monitor.timer
++```
++
++The monitor sends directly (not through the egress proxy) so it still alerts if the proxy is down. Test it: `sudo systemctl stop aurora.service` and expect a message within ~2-3 minutes.
+diff -ruN '--exclude=__pycache__' '--exclude=.pytest_cache' /tmp/p1/Aurora-main/tests/test_alerts_and_monitoring.py Aurora-main/tests/test_alerts_and_monitoring.py
+--- a/tests/test_alerts_and_monitoring.py	1970-01-01 00:00:00.000000000 +0000
++++ b/tests/test_alerts_and_monitoring.py	2026-10-11 05:57:47.581604693 +0000
+@@ -0,0 +1,303 @@
++"""Tarea 3 (Fase 1): alertas, chequeos de salud y monitor externo."""
++import json
++import socket
++from datetime import datetime, timedelta, timezone
++from http.server import BaseHTTPRequestHandler, HTTPServer
++from pathlib import Path
++from threading import Thread
++from types import SimpleNamespace
++
++import pytest
++
++from aurora.alerts import (
++    AlertManager,
++    AlertMessage,
++    HttpPoster,
++    TelegramChannel,
++    WebhookChannel,
++    build_alert_manager_from_env,
++    redact,
++)
++from aurora.external_monitor import probe_health, run_check
++from aurora.failure_tracker import FailureTracker
++from aurora.health_monitor import (
++    CheckResult,
++    HealthCheck,
++    HealthMonitor,
++    build_default_monitor,
++    check_disk_usage,
++    check_egress_proxy,
++    check_models_available,
++    check_stalled_missions,
++)
++from aurora.orchestration.task_engine import DelegatedTask
++from aurora.orchestration.task_store import DurableTaskStore
++
++
++class Recorder:
++    name = "recorder"
++
++    def __init__(self):
++        self.messages = []
++
++    def send(self, message):
++        self.messages.append(message)
++
++
++class Exploding:
++    name = "exploding"
++
++    def send(self, message):
++        raise RuntimeError("network down bot123:SECRET_TOKEN")
++
++
++def make_manager(*channels, clock=None, dedup=100.0):
++    state = {"now": 0.0}
++    manager = AlertManager(
++        list(channels), dedup_seconds=dedup, clock=clock or (lambda: state["now"]), asynchronous=False, host="srv"
++    )
++    manager.state = state
++    return manager
++
++
++# -- AlertManager --------------------------------------------------------
++
++def test_dedup_window_and_resolve_only_when_active():
++    recorder = Recorder()
++    manager = make_manager(recorder)
++    assert manager.resolve("k", "recuperado") is False  # nada activo
++    assert manager.notify("k", "critical", "caida", "detalle") is True
++    assert manager.notify("k", "critical", "caida", "detalle") is False  # dentro de la ventana
++    manager.state["now"] = 101.0
++    assert manager.notify("k", "critical", "caida") is True  # ventana vencida
++    assert manager.resolve("k", "ok") is True
++    assert [m.severity for m in recorder.messages] == ["critical", "critical", "recovered"]
++    assert recorder.messages[0].text().startswith("🔴 Aurora [srv] caida")
++
++
++def test_failing_channel_does_not_break_others_or_leak_secrets(caplog):
++    recorder = Recorder()
++    manager = make_manager(Exploding(), recorder)
++    manager.notify("k", "critical", "t")
++    assert len(recorder.messages) == 1
++    assert "SECRET_TOKEN" not in caplog.text
++    assert "bot123:SECRET_TOKEN" not in redact("x bot123:SECRET_TOKEN y")
++
++
++def test_async_delivery_via_worker_thread():
++    recorder = Recorder()
++    manager = AlertManager([recorder], asynchronous=True, host="srv")
++    manager.notify("k", "warning", "t")
++    manager.flush(3.0)
++    assert len(recorder.messages) == 1
++
++
++def test_failure_tracker_integration_alerts_and_recovers():
++    recorder = Recorder()
++    manager = make_manager(recorder)
++    tracker = FailureTracker(alert_threshold=2, alert_sink=manager.from_tracker)
++    tracker.record_failure("model_catalog_refresh", RuntimeError("down"))
++    assert recorder.messages == []
++    tracker.record_failure("model_catalog_refresh", RuntimeError("down"))
++    assert len(recorder.messages) == 1 and recorder.messages[0].severity == "critical"
++    tracker.record_success("model_catalog_refresh")
++    assert recorder.messages[-1].severity == "recovered"
++
++
++# -- canales y entorno ---------------------------------------------------
++
++def test_telegram_channel_payload_and_webhook_validation():
++    posted = []
++    poster = SimpleNamespace(post_json=lambda url, payload: posted.append((url, payload)))
++    TelegramChannel("123:ABC", "42", poster).send(AlertMessage("k", "critical", "t", "d", "srv"))
++    url, payload = posted[0]
++    assert url == "https://api.telegram.org/bot123:ABC/sendMessage"
++    assert payload["chat_id"] == "42" and "123:ABC" not in payload["text"]
++    with pytest.raises(ValueError):
++        WebhookChannel("http://example.com/hook", poster)
++    WebhookChannel("https://example.com/hook", poster)
++    WebhookChannel("http://127.0.0.1:9/hook", poster)
++
++
++def test_build_from_env_channels_and_proxy():
++    env = {
++        "AURORA_TELEGRAM_BOT_TOKEN": "1:A",
++        "AURORA_TELEGRAM_CHAT_ID": "9",
++        "AURORA_ALERT_WEBHOOK_URL": "https://example.com/h",
++        "AURORA_EGRESS_PROXY_HOST": "127.0.0.1",
++        "AURORA_EGRESS_PROXY_PORT": "3128",
++        "AURORA_ALERT_DEDUP_SECONDS": "60",
++    }
++    manager = build_alert_manager_from_env(env)
++    assert [c.name for c in manager.channels] == ["telegram", "webhook"]
++    assert manager.dedup_seconds == 60.0
++    assert build_alert_manager_from_env({}).channels == []
++
++
++def test_http_poster_really_posts_json_to_local_webhook():
++    received = []
++
++    class Handler(BaseHTTPRequestHandler):
++        def do_POST(self):
++            received.append(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
++            self.send_response(200)
++            self.end_headers()
++
++        def log_message(self, *args):
++            pass
++
++    server = HTTPServer(("127.0.0.1", 0), Handler)
++    Thread(target=server.serve_forever, daemon=True).start()
++    try:
++        manager = make_manager(WebhookChannel(f"http://127.0.0.1:{server.server_port}/hook", HttpPoster()))
++        manager.notify("k", "critical", "prueba", "detalle")
++    finally:
++        server.shutdown()
++    assert received and received[0]["title"] == "prueba" and "prueba" in received[0]["text"]
++
++
++# -- HealthMonitor y chequeos --------------------------------------------
++
++def test_monitor_alerts_after_consecutive_failures_and_recovers():
++    recorder = Recorder()
++    manager = make_manager(recorder)
++    state = {"ok": False}
++    check = HealthCheck("disk", "Disco casi lleno", lambda: CheckResult(state["ok"], "95% usado", "warning"))
++    monitor = HealthMonitor([check], manager, failures_before_alert=2)
++    monitor.run_once()
++    assert recorder.messages == []  # un solo fallo no alerta
++    monitor.run_once()
++    assert len(recorder.messages) == 1 and recorder.messages[0].severity == "warning"
++    monitor.run_once()
++    assert len(recorder.messages) == 1  # deduplicada
++    state["ok"] = True
++    monitor.run_once()
++    assert recorder.messages[-1].severity == "recovered"
++
++
++def test_crashing_check_is_reported_not_raised():
++    recorder = Recorder()
++    manager = make_manager(recorder)
++
++    def boom():
++        raise RuntimeError("db locked")
++
++    HealthMonitor([HealthCheck("x", "X", boom)], manager, failures_before_alert=1).run_once()
++    assert "db locked" in recorder.messages[0].detail
++
++
++def test_disk_and_proxy_checks(tmp_path):
++    assert check_disk_usage(tmp_path, 100.1).ok is True
++    assert check_disk_usage(tmp_path, 0.0).ok is False
++    listener = socket.socket()
++    listener.bind(("127.0.0.1", 0))
++    listener.listen(1)
++    port = listener.getsockname()[1]
++    try:
++        assert check_egress_proxy("127.0.0.1", port).ok is True
++    finally:
++        listener.close()
++    assert check_egress_proxy("127.0.0.1", port, timeout=0.5).ok is False
++
++
++def test_stalled_missions_detected_from_durable_store(tmp_path):
++    store = DurableTaskStore(tmp_path / "tasks.db")
++    store.enqueue("m-stuck", [DelegatedTask("a", "agent", "work")])
++    assert store.stalled_missions(idle_seconds=60) == ()  # recien creada
++    future = datetime.now(timezone.utc) + timedelta(hours=1)
++    stalled = store.stalled_missions(idle_seconds=1800, now=future)
++    assert [m["mission_id"] for m in stalled] == ["m-stuck"] and stalled[0]["pending"] == 1
++    result = check_stalled_missions(store, 1800)
++    assert result.ok is True  # ahora mismo no esta atascada
++    with pytest.raises(Exception):
++        store.stalled_missions(idle_seconds=0)
++
++
++def _snap(routable, code=None):
++    return SimpleNamespace(routable=routable, last_error_code=code, last_error_type=None)
++
++
++def test_models_available_check_levels():
++    models = [("nvidia_api", "a"), ("nvidia_api", "b"), ("nvidia_api", "c")]
++    store = SimpleNamespace(snapshot=lambda p, m: {"a": _snap(True), "b": _snap(True), "c": _snap(True)}[m])
++    assert check_models_available(store, lambda: models).ok is True
++    store = SimpleNamespace(snapshot=lambda p, m: _snap(m == "a", "403"))
++    degraded = check_models_available(store, lambda: models)
++    assert degraded.ok is False and degraded.severity == "warning" and "403 x2" in degraded.detail
++    store = SimpleNamespace(snapshot=lambda p, m: _snap(False, "429"))
++    down = check_models_available(store, lambda: models)
++    assert down.ok is False and down.severity == "critical" and "NINGUN" in down.detail
++    assert check_models_available(store, lambda: []).ok is False
++
++
++def test_default_monitor_builds_expected_checks(tmp_path):
++    policy = tmp_path / "policy.json"
++    policy.write_text(json.dumps({"models": [{"id": "m1", "provider": "nvidia_api", "enabled": True}]}))
++    store = DurableTaskStore(tmp_path / "tasks.db")
++    monitor = build_default_monitor(
++        store=store, alerts=make_manager(), workspace_root=tmp_path, inference_policy_path=policy,
++        proxy_host="127.0.0.1", proxy_port=1, env={},
++    )
++    assert [c.key for c in monitor.checks] == ["disk", "stalled_missions", "egress_proxy", "models"]
++    assert monitor.run_once()["models"].ok is True
++
++
++# -- monitor externo -----------------------------------------------------
++
++def test_external_monitor_alerts_once_then_recovers_and_persists_state(tmp_path):
++    recorder = Recorder()
++    manager = make_manager(recorder)
++    state_file = tmp_path / "state.json"
++    outcome = {"ok": False}
++    clock = {"t": 1000.0}
++
++    def run():
++        return run_check(
++            probe=lambda: (outcome["ok"], "HTTP 500" if not outcome["ok"] else "ok"),
++            alerts=manager, state_path=state_file, failures_before_alert=2,
++            realert_seconds=3600, now=lambda: clock["t"],
++        )
++
++    run()
++    assert recorder.messages == []  # primera comprobacion fallida: aun no
++    run()
++    assert len(recorder.messages) == 1 and "NO responde" in recorder.messages[0].title
++    clock["t"] += 600
++    run()
++    assert len(recorder.messages) == 1  # no repite antes de realert_seconds
++    clock["t"] += 4000
++    run()
++    assert len(recorder.messages) == 2  # re-alerta si sigue caido
++    outcome["ok"] = True
++    run()
++    assert recorder.messages[-1].severity == "recovered"
++    assert json.loads(state_file.read_text())["consecutive_failures"] == 0
++    run()
++    assert len(recorder.messages) == 3  # sin 'recuperado' repetido
++
++
++def test_probe_health_against_local_server_with_token():
++    seen = {}
++
++    class Handler(BaseHTTPRequestHandler):
++        def do_GET(self):
++            seen["auth"] = self.headers.get("Authorization")
++            code = 200 if self.path == "/ok" else 500
++            self.send_response(code)
++            self.end_headers()
++            self.wfile.write(b'{"status": "ok"}')
++
++        def log_message(self, *args):
++            pass
++
++    server = HTTPServer(("127.0.0.1", 0), Handler)
++    Thread(target=server.serve_forever, daemon=True).start()
++    base = f"http://127.0.0.1:{server.server_port}"
++    try:
++        assert probe_health(base + "/ok", "tok") == (True, "ok")
++        assert seen["auth"] == "Bearer tok"
++        assert probe_health(base + "/fail", None) == (False, "HTTP 500")
++    finally:
++        server.shutdown()
++    ok, detail = probe_health(base + "/ok", None, timeout=1.0)
++    assert ok is False  # servidor apagado -> detectado
