@@ -103,7 +103,7 @@ def test_factory_discovers_and_selects_available_nvidia_model_without_fixed_id(t
                 capabilities=("reasoning",),
                 quality_score=0.2,
             ),
-            metadata={},
+            metadata={"free_endpoint_catalog": True},
             discovered_at="2026-10-05T00:00:00+00:00",
         ),
         DiscoveredModelCandidate(
@@ -116,7 +116,7 @@ def test_factory_discovers_and_selects_available_nvidia_model_without_fixed_id(t
                 capabilities=("reasoning",),
                 quality_score=0.9,
             ),
-            metadata={},
+            metadata={"free_endpoint_catalog": True},
             discovered_at="2026-10-05T00:00:00+00:00",
         ),
     )
@@ -212,7 +212,7 @@ def test_factory_ignores_historical_health_cooldown_when_building_reserve_order(
                 quality_score=0.2,
                 pricing_tier="free",
             ),
-            metadata={"free_endpoint": True},
+            metadata={"free_endpoint_catalog": True},
             discovered_at="2026-10-05T00:00:00+00:00",
         ),
         DiscoveredModelCandidate(
@@ -226,7 +226,7 @@ def test_factory_ignores_historical_health_cooldown_when_building_reserve_order(
                 quality_score=0.9,
                 pricing_tier="free",
             ),
-            metadata={"free_endpoint": True},
+            metadata={"free_endpoint_catalog": True},
             discovered_at="2026-10-05T00:00:00+00:00",
         ),
     )
@@ -300,7 +300,9 @@ def test_factory_ignores_historical_health_cooldown_when_building_reserve_order(
 
 def test_dynamic_failure_context_excludes_the_concrete_failed_model(tmp_path: Path):
     from aurora.inference.errors import ProviderErrorContext, ProviderTimeoutError
+    from aurora.inference.provider_health import ProviderHealthStore
 
+    health = ProviderHealthStore(tmp_path / "health.db", failure_threshold=1)
     failed = FakeProvider("nvidia_api", ["should not be called"])
     reserve = FakeProvider("nvidia_api", ["reserve works"])
 
@@ -330,6 +332,7 @@ def test_dynamic_failure_context_excludes_the_concrete_failed_model(tmp_path: Pa
         ),
         store=DirectorProviderFailoverStore(str(tmp_path / "runtime.db")),
         activate=lambda _candidate, _provider: None,
+        health_store=health,
     )
 
     response = controller.generate(
@@ -342,6 +345,9 @@ def test_dynamic_failure_context_excludes_the_concrete_failed_model(tmp_path: Pa
     assert response.content == "reserve works"
     assert failed.calls == 0
     assert reserve.calls == 1
+    # The failure from an inference-router facade must penalize the provider/model
+    # named by the provider error receipt, not (inference_router, requested alias).
+    assert health.is_eligible("nvidia_api", "nvidia/model-a") is False
 
 
 def test_factory_uses_cached_nvidia_catalog_when_live_discovery_is_unavailable(tmp_path: Path, monkeypatch):
@@ -393,7 +399,7 @@ def test_factory_uses_cached_nvidia_catalog_when_live_discovery_is_unavailable(t
             endpoint="https://integrate.api.nvidia.com/v1",
             capabilities=("reasoning",),
         ),
-        metadata={},
+        metadata={"free_endpoint_catalog": True},
         discovered_at="2026-10-05T00:00:00+00:00",
     )
     cache = ModelCandidateStore(tmp_path / "model-candidates.db")
@@ -611,7 +617,7 @@ def test_successful_nvidia_failover_persists_and_reloads_after_restart(tmp_path:
                 "provider": "router",
                 "model": "nvidia/nemotron-3-ultra-550b-a55b",
                 "endpoint": "https://generativelanguage.googleapis.com/v1beta",
-                "failover": {"enabled": True, "order": ["nvidia_api", "router"]},
+                "failover": {"enabled": True, "order": ["nvidia_api"]},
             },
             "providers": {
                 "nvidia_api": {
@@ -634,6 +640,7 @@ def test_successful_nvidia_failover_persists_and_reloads_after_restart(tmp_path:
                     "provider": candidate.provider_id,
                     "model": candidate.model or "router",
                     "endpoint": candidate.endpoint or "https://example.invalid",
+                    "provider_source": "runtime_failover",
                 }
             }
         )
@@ -659,8 +666,500 @@ def test_successful_nvidia_failover_persists_and_reloads_after_restart(tmp_path:
     assert persisted["provider"] == "nvidia_api"
     assert persisted["model"] == "poolside/laguna-xs-2.1"
 
+    from types import SimpleNamespace
+    from aurora.inference.discovery import DiscoveredModelCandidate, ModelCandidateStore, candidate_id
+    from aurora.inference.models import ModelSpec
     from aurora.orchestration.factory import _build_director_provider
 
-    restarted_provider = _build_director_provider(settings, router=object())
+    active_model = ModelSpec(
+        id="poolside/laguna-xs-2.1",
+        provider="nvidia_api",
+        endpoint="https://integrate.api.nvidia.com/v1",
+        capabilities=("chat", "reasoning"),
+        enabled=True,
+        healthy=True,
+        available=True,
+        pricing_tier="free",
+    )
+    candidates = ModelCandidateStore(tmp_path / "model-candidates.db")
+    receipt = DiscoveredModelCandidate(
+        candidate_id=candidate_id("nvidia_api", active_model.id),
+        provider_id="nvidia_api",
+        model=active_model,
+        metadata={"free_endpoint_catalog": True},
+        discovered_at="2026-10-18T00:00:00+00:00",
+        state="synced",
+    )
+    candidates.upsert(receipt)
+    candidates.set_state(receipt.candidate_id, "synced")
+
+    class RestartModelRegistry:
+        models = (active_model,)
+        ids = (active_model.id,)
+
+        def resolve(self, model_id):
+            if model_id != active_model.id:
+                raise KeyError(model_id)
+            return active_model
+
+    restarted_router = SimpleNamespace(
+        cost_policy="free_only",
+        provider_registry=SimpleNamespace(ids=("nvidia_api",)),
+        model_registry=RestartModelRegistry(),
+    )
+    restarted_provider = _build_director_provider(settings, router=restarted_router)
     assert restarted_provider is not None
     assert restarted_provider.provider_id == "nvidia_api"
+
+def test_factory_uses_explicit_openrouter_free_reserve_and_persists_activation(
+    tmp_path: Path, monkeypatch
+):
+    from aurora.inference.models import InferenceResponse, ModelSpec
+    from aurora.inference.providers.registry import ProviderRegistry, ProviderSpec
+    from aurora.inference.registry import ModelRegistry
+    from aurora.inference.router import ModelRouter
+    from aurora.orchestration.factory import _build_director_provider_failover
+
+    class FakeOpenRouterInferenceProvider:
+        provider_id = "openrouter"
+
+        def __init__(self, _model):
+            pass
+
+        def generate(self, request, *, selected_model, execution_id):
+            return InferenceResponse(
+                model=selected_model,
+                provider="openrouter",
+                content="authorized OpenRouter free reserve succeeded",
+                request_id=request.request_id,
+                execution_id=execution_id,
+                selected_model=selected_model,
+                provider_model=selected_model,
+                reported_model=selected_model,
+            )
+
+    registry = ProviderRegistry((
+        ProviderSpec(
+            provider_id="openrouter",
+            name="OpenRouter free route",
+            capabilities=("chat", "reasoning"),
+            enabled=True,
+            factory=lambda model: FakeOpenRouterInferenceProvider(model),
+        ),
+    ))
+    free_model = ModelSpec(
+        id="openrouter/free",
+        provider="openrouter",
+        endpoint="https://openrouter.ai/api/v1",
+        capabilities=("chat", "reasoning"),
+        specialties=("reasoning", "planning"),
+        enabled=True,
+        healthy=True,
+        available=True,
+        pricing_tier="free",
+        cost_score=1.0,
+    )
+    model_registry = ModelRegistry([free_model], provider_registry=registry)
+    router = ModelRouter(
+        models=[free_model],
+        provider_registry=registry,
+        model_registry=model_registry,
+        cost_policy="free_only",
+    )
+
+    class EmptyNvidiaDiscovery:
+        def __init__(self, *_args):
+            pass
+
+        def refresh_all(self, **_kwargs):
+            return {"nvidia_api": ()}
+
+    monkeypatch.setattr(
+        "aurora.orchestration.factory.ModelDiscoveryService",
+        EmptyNvidiaDiscovery,
+    )
+
+    settings = OperatorSettingsStore(tmp_path / "operator-settings.json")
+    settings.save({
+        "director": {
+            "failover": {"enabled": True, "order": ["nvidia_api"]},
+        },
+        "providers": {
+            "nvidia_api": {"api_key": "nvidia-test"},
+            "openrouter": {
+                "api_key": "openrouter-test",
+                "base_url": "https://openrouter.ai/api/v1",
+            },
+        },
+    })
+
+    class FailingRouter:
+        provider_id = "inference_router"
+
+        def generate(self, **_kwargs):
+            raise ProviderFailure("forced primary router outage")
+
+    controller = _build_director_provider_failover(
+        settings_store=settings,
+        router=router,
+        active_provider=FailingRouter(),
+        db_path=tmp_path / "tasks.db",
+    )
+
+    # Change reserve priority after controller construction. Every failover
+    # decision must consult current persisted settings rather than startup state.
+    settings.save({
+        "director": {
+            "failover": {"enabled": True, "order": ["openrouter", "nvidia_api"]},
+        },
+    })
+
+    response = controller.generate(
+        messages=[{"role": "user", "content": "continue the accepted mission"}],
+        model="router/test-model",
+        role="director_conversation",
+    )
+
+    assert response.provider == "openrouter"
+    assert response.model == "openrouter/free"
+    assert response.content == "authorized OpenRouter free reserve succeeded"
+    assert controller.provider_id == "openrouter"
+    persisted = settings.load()["director"]
+    assert persisted["provider"] == "openrouter"
+    assert persisted["model"] == "openrouter/free"
+    assert persisted["failover"]["order"] == ["openrouter", "nvidia_api"]
+
+def test_bound_provider_failure_uses_concrete_model_and_skips_same_model_reserve(
+    tmp_path: Path,
+):
+    from aurora.inference.errors import ProviderErrorContext, ProviderTimeoutError
+    from aurora.inference.router import ModelRouter
+    from aurora.orchestration.director_provider_failover import BoundInferenceDirectorProvider
+
+    class FailingRouter:
+        def generate(self, request, **_kwargs):
+            raise ProviderTimeoutError(
+                "free route timed out",
+                context=ProviderErrorContext(
+                    provider="openrouter",
+                    request_id=request.request_id,
+                    execution_id="exec-openrouter-failed",
+                    requested_model=request.model,
+                    selected_model="openrouter/free",
+                    provider_model="openrouter/free",
+                ),
+            )
+
+    # BoundInferenceDirectorProvider only needs the router's generate contract
+    # in this test; no network adapter or live provider call is made.
+    active = BoundInferenceDirectorProvider(
+        FailingRouter(),
+        provider_id="openrouter",
+        model="openrouter/free",
+    )
+    same_model = FakeProvider("openrouter", ["must never be retried"])
+    reserve = FakeProvider("nvidia_api", ["NVIDIA reserve response"])
+
+    controller = DirectorProviderFailoverController(
+        active_provider=active,
+        candidates=(
+            _candidate("openrouter", same_model, "openrouter/free"),
+            _candidate("nvidia_api", reserve, "nvidia/test-free-model"),
+        ),
+        store=DirectorProviderFailoverStore(str(tmp_path / "runtime.db")),
+        activate=lambda _candidate, _provider: None,
+    )
+
+    response = controller.generate(
+        messages=[{"role": "user", "content": "continue accepted work"}],
+        model="router",  # A router alias must not overwrite the bound model identity.
+        role="director_conversation",
+    )
+
+    assert response.provider == "nvidia_api"
+    assert response.content == "NVIDIA reserve response"
+    assert same_model.calls == 0
+    assert reserve.calls == 1
+    assert active.model == "openrouter/free"
+
+def test_failed_reserve_can_recover_on_a_later_request(tmp_path: Path):
+    primary = FakeProvider(
+        "inference_router",
+        [
+            ProviderFailure("primary unavailable on first request"),
+            ProviderFailure("primary unavailable on second request"),
+        ],
+    )
+    reserve = FakeProvider(
+        "nvidia_api",
+        [
+            ProviderFailure("reserve temporarily unavailable"),
+            "reserve recovered",
+        ],
+    )
+    controller = DirectorProviderFailoverController(
+        active_provider=primary,
+        candidates=(_candidate("nvidia_api", reserve, "nvidia/model-a"),),
+        store=DirectorProviderFailoverStore(str(tmp_path / "runtime.db")),
+        activate=lambda _candidate, _provider: None,
+    )
+
+    with pytest.raises(DirectorProviderFailoverError):
+        controller.generate(
+            messages=[{"role": "user", "content": "first request"}],
+            model=None,
+            role="director_conversation",
+        )
+
+    recovered = controller.generate(
+        messages=[{"role": "user", "content": "later request after recovery"}],
+        model=None,
+        role="director_conversation",
+    )
+
+    assert recovered.content == "reserve recovered"
+    assert primary.calls == 2
+    assert reserve.calls == 2
+    assert controller.provider_id == "nvidia_api"
+
+def test_routed_success_health_uses_actual_response_receipt(tmp_path: Path):
+    from aurora.inference.provider_health import ProviderHealthStore
+
+    health = ProviderHealthStore(tmp_path / "health.db")
+
+    class RoutedSuccess:
+        provider_id = "inference_router"
+
+        def generate(self, **_kwargs):
+            return DirectorModelResponse(
+                content="actual NVIDIA result",
+                model="nvidia/model-actual",
+                provider="nvidia_api",
+                request_id="request-routed-success",
+                execution_id="execution-routed-success",
+                tool_calls=(),
+            )
+
+    controller = DirectorProviderFailoverController(
+        active_provider=RoutedSuccess(),
+        candidates=(),
+        store=DirectorProviderFailoverStore(str(tmp_path / "runtime.db")),
+        activate=lambda _candidate, _provider: None,
+        health_store=health,
+    )
+
+    response = controller.generate(
+        messages=[{"role": "user", "content": "hello"}],
+        model="router",
+        role="director_conversation",
+    )
+
+    assert response.provider == "nvidia_api"
+    assert health.snapshot("nvidia_api", "nvidia/model-actual").success_count == 1
+    assert health.snapshot("inference_router", "router").success_count == 0
+
+def test_failover_records_the_incoming_mission_correlation_id(tmp_path: Path):
+    primary = FakeProvider(
+        "inference_router",
+        [ProviderFailure("primary route unavailable")],
+    )
+    class RecordingReserve:
+        provider_id = "nvidia_api"
+
+        def __init__(self):
+            self.received_metadata = None
+
+        def generate(
+            self, *, messages, model, role, tools=(), metadata=None,
+            capability="reasoning", preferred_models=(),
+        ):
+            self.received_metadata = dict(metadata or {})
+            return DirectorModelResponse(
+                content="reserve completed",
+                model="nvidia/free-model-b",
+                provider="nvidia_api",
+                request_id="request-reserve",
+                execution_id="execution-reserve",
+                tool_calls=(),
+            )
+
+    reserve = RecordingReserve()
+    store = DirectorProviderFailoverStore(str(tmp_path / "runtime.db"))
+    controller = DirectorProviderFailoverController(
+        active_provider=primary,
+        candidates=(DirectorProviderCandidate(
+            provider_id="nvidia_api",
+            model="nvidia/free-model-b",
+            endpoint=None,
+            factory=lambda: reserve,
+        ),),
+        store=store,
+        activate=lambda _candidate, _provider: None,
+    )
+
+    incoming_metadata = {
+        "mission_id": "mission-stable",
+        "task_id": "task-stable",
+        "project_id": "project-stable",
+        "correlation_id": "corr-stable",
+    }
+    response = controller.generate(
+        messages=[{"role": "user", "content": "continue the existing request"}],
+        model="router",
+        role="director_planner",
+        metadata=incoming_metadata,
+    )
+
+    assert response.provider == "nvidia_api"
+    assert reserve.received_metadata == incoming_metadata
+    records = store.list_recent(limit=20)
+    assert records
+    assert {item["correlation_id"] for item in records} == {"corr-stable"}
+
+def test_model_router_health_is_not_double_counted_by_failover_controller(tmp_path: Path):
+    from aurora.inference.errors import ProviderTimeoutError
+    from aurora.inference.models import ModelSpec
+    from aurora.inference.provider_health import ProviderHealthStore
+    from aurora.inference.providers.registry import ProviderRegistry, ProviderSpec
+    from aurora.inference.registry import ModelRegistry
+    from aurora.inference.router import ModelRouter
+    from aurora.orchestration.director_provider import InferenceDirectorProvider
+
+    class TimeoutProvider:
+        def generate(self, *_args, **_kwargs):
+            raise ProviderTimeoutError("controlled timeout")
+
+    providers = ProviderRegistry((
+        ProviderSpec(
+            "nvidia_api",
+            "NVIDIA",
+            ("chat", "reasoning"),
+            True,
+            lambda _model: TimeoutProvider(),
+        ),
+    ))
+    model = ModelSpec(
+        id="nvidia/model-timeout",
+        provider="nvidia_api",
+        endpoint="https://integrate.api.nvidia.com/v1",
+        capabilities=("chat", "reasoning"),
+        enabled=True,
+        healthy=True,
+        available=True,
+        pricing_tier="free",
+    )
+    registry = ModelRegistry([model], provider_registry=providers)
+    health = ProviderHealthStore(tmp_path / "health.db")
+    router = ModelRouter(
+        models=[model],
+        provider_registry=providers,
+        model_registry=registry,
+        health_store=health,
+        cost_policy="free_only",
+    )
+    controller = DirectorProviderFailoverController(
+        active_provider=InferenceDirectorProvider(router),
+        candidates=(),
+        store=DirectorProviderFailoverStore(str(tmp_path / "failovers.db")),
+        activate=lambda _candidate, _provider: None,
+        health_store=health,
+    )
+
+    with pytest.raises(DirectorProviderFailoverError):
+        controller.generate(
+            messages=[{"role": "user", "content": "timeout test"}],
+            model=None,
+            role="director_conversation",
+        )
+
+    snapshot = health.snapshot("nvidia_api", "nvidia/model-timeout")
+    assert snapshot.failure_count == 1
+    assert snapshot.consecutive_failures == 1
+
+def test_failover_uses_runtime_model_candidate_store_when_task_db_is_elsewhere(
+    tmp_path: Path, monkeypatch
+):
+    from types import SimpleNamespace
+    from aurora.orchestration import factory
+
+    settings = OperatorSettingsStore(tmp_path / "settings" / "operator-settings.json")
+    settings.save({
+        "director": {
+            "failover": {"enabled": True, "order": ["nvidia_api"]},
+        },
+        "providers": {"nvidia_api": {"api_key": "nvidia-test"}},
+    })
+    failover_db = tmp_path / "custom-database-location" / "tasks.db"
+    candidate_db = tmp_path / "runtime-root" / "model-candidates.db"
+    observed_paths = []
+
+    class RecordingCandidateStore:
+        def __init__(self, path):
+            observed_paths.append(Path(path).resolve())
+
+    monkeypatch.setattr(factory, "ModelCandidateStore", RecordingCandidateStore)
+
+    controller = factory._build_director_provider_failover(
+        settings_store=settings,
+        router=SimpleNamespace(
+            provider_registry=object(),
+            model_registry=object(),
+            cost_policy="free_only",
+        ),
+        active_provider=FakeProvider("inference_router", ["unused"]),
+        db_path=failover_db,
+        model_candidate_store_path=candidate_db,
+    )
+
+    assert isinstance(controller, DirectorProviderFailoverController)
+    assert observed_paths == [candidate_db.resolve()]
+
+def test_disabling_failover_in_saved_settings_fails_closed_immediately(
+    tmp_path: Path,
+):
+    from types import SimpleNamespace
+    from aurora.orchestration import factory
+
+    settings = OperatorSettingsStore(tmp_path / "settings" / "operator-settings.json")
+    settings.save({
+        "director": {
+            "failover": {"enabled": True, "order": ["nvidia_api"]},
+        },
+        "providers": {"nvidia_api": {"api_key": "nvidia-test"}},
+    })
+    primary = FakeProvider(
+        "inference_router",
+        [ProviderFailure("primary route deliberately unavailable")],
+    )
+    activated = []
+    controller = factory._build_director_provider_failover(
+        settings_store=settings,
+        router=SimpleNamespace(
+            provider_registry=object(),
+            model_registry=SimpleNamespace(models=(), ids=()),
+            cost_policy="free_only",
+            available=lambda: (),
+        ),
+        active_provider=primary,
+        db_path=tmp_path / "runtime" / "tasks.db",
+        health_store=None,
+        model_candidate_store_path=tmp_path / "runtime" / "model-candidates.db",
+    )
+
+    settings.save({
+        "director": {
+            "failover": {"enabled": False, "order": ["nvidia_api"]},
+        },
+    })
+
+    with pytest.raises(DirectorProviderFailoverError):
+        controller.generate(
+            messages=[{"role": "user", "content": "must fail closed"}],
+            model="router",
+            role="director_conversation",
+        )
+
+    assert primary.calls == 1
+    assert controller.provider_id == "inference_router"
+    assert activated == []
+

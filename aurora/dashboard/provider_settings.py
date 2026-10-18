@@ -1,4 +1,4 @@
-"""Dashboard provider settings for the NVIDIA-only Aurora runtime."""
+"""Dashboard provider settings for Aurora's governed free-only inference runtime."""
 
 from __future__ import annotations
 
@@ -12,7 +12,6 @@ from urllib.parse import urlparse
 
 from aurora.inference.errors import ProviderResponseError
 from aurora.inference.models import InferenceRequest, ModelSpec, new_execution_id
-from aurora.inference.free_policy import is_free_model
 from aurora.inference.providers.catalog import ProviderCatalog
 from aurora.inference.providers.openrouter_quota import OpenRouterQuotaError, read_openrouter_free_quota
 from aurora.inference.providers.registry import default_provider_registry
@@ -39,8 +38,50 @@ class ProviderSettingsService:
         return data
 
     def save_and_apply(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        # Preserve the last working Director route if a new primary fails catalog,
+        # credential, provider-registry or runtime-application validation. Provider
+        # credentials supplied in this update remain saved; only Director routing
+        # settings are rolled back.
+        previous_settings = self.store.load()
+        previous_director = previous_settings.get("director", {})
+        planner = self.runtime.director.planner
+        previous_planner_provider = planner.provider
+        previous_active_provider = getattr(previous_planner_provider, "active_provider", None)
+        persisted = False
+
+        def rollback_director() -> None:
+            if not persisted:
+                return
+            try:
+                self.store.update_from_form({"director": previous_director})
+                if (
+                    previous_active_provider is not None
+                    and callable(getattr(previous_planner_provider, "set_active_provider", None))
+                ):
+                    previous_planner_provider.set_active_provider(previous_active_provider)
+                    planner.provider = previous_planner_provider
+                else:
+                    planner.provider = previous_planner_provider
+                conversation = getattr(self.runtime, "conversation_service", None)
+                if conversation is not None and previous_planner_provider is not None:
+                    conversation.set_provider(previous_planner_provider)
+            except Exception as rollback_error:
+                raise DashboardProviderSettingsError(
+                    "new Director routing was rejected, and the previous route could not be restored safely"
+                ) from rollback_error
+
         try:
-            settings = self.store.update_from_form(payload)
+            # A provider chosen and applied through this Settings surface is an
+            # explicit operator override, not a transient launcher default.
+            form_payload = dict(payload)
+            requested_director = payload.get("director", {})
+            if isinstance(requested_director, Mapping) and "provider" in requested_director:
+                form_payload["director"] = {
+                    **dict(requested_director),
+                    "provider_source": "operator_settings",
+                }
+            settings = self.store.update_from_form(form_payload)
+            persisted = True
             router = self.runtime.director.planner.router
             configured_providers = settings.get("providers", {})
 
@@ -142,22 +183,49 @@ class ProviderSettingsService:
             router.models = list(router.model_registry.models)
             selected_model = str(settings["director"].get("model", "")).strip()
             provider_id = str(settings["director"].get("provider", "")).strip().lower()
-            if provider_id not in {"router", "nvidia_api"}:
+            if provider_id not in {"router", "nvidia_api", "openrouter"}:
                 raise DashboardProviderSettingsError(
-                    "Aurora supports only the NVIDIA inference fabric"
+                    "Director primary must be the inference router, NVIDIA, or the official OpenRouter free route"
                 )
+            if provider_id == "openrouter":
+                openrouter_config = settings.get("providers", {}).get("openrouter", {})
+                if (
+                    isinstance(openrouter_config, Mapping)
+                    and openrouter_config.get("enabled", True) is False
+                ):
+                    raise DashboardProviderSettingsError(
+                        "OpenRouter is disabled in provider Settings"
+                    )
+                if selected_model != "openrouter/free" or not openrouter_key:
+                    raise DashboardProviderSettingsError(
+                        "OpenRouter Director mode requires its API key and the official openrouter/free model"
+                    )
 
-            if nvidia_key and selected_model and selected_model != "router":
-                existing = next(
-                    (item for item in router.model_registry.models if item.id == selected_model),
-                    None,
-                )
-                if existing is None and hasattr(self.runtime, "model_discovery"):
+            if provider_id == "nvidia_api":
+                nvidia_config = settings.get("providers", {}).get("nvidia_api", {})
+                if (
+                    isinstance(nvidia_config, Mapping)
+                    and nvidia_config.get("enabled", True) is False
+                ):
+                    raise DashboardProviderSettingsError(
+                        "NVIDIA is disabled in provider Settings"
+                    )
+                if not nvidia_key or not selected_model or selected_model == "router":
+                    raise DashboardProviderSettingsError(
+                        "Direct NVIDIA mode requires a credential and a selected model from the official Free Endpoint catalog"
+                    )
+
+            if provider_id == "nvidia_api" and nvidia_key and selected_model and selected_model != "router":
+                from aurora.orchestration.factory import _has_authoritative_nvidia_free_activation
+
+                if not _has_authoritative_nvidia_free_activation(
+                    router, self.store, selected_model
+                ):
                     try:
                         refresh_service = getattr(self.runtime, "autonomous_discovery_refresh", None)
                         if refresh_service is not None:
                             refresh_service.refresh_if_due(force=True)
-                        else:
+                        elif hasattr(self.runtime, "model_discovery"):
                             self.runtime.model_discovery.refresh_all(
                                 provider_ids=("nvidia_api",),
                                 min_interval_seconds=0,
@@ -168,65 +236,89 @@ class ProviderSettingsService:
                                 cost_policy=getattr(router, "cost_policy", "free_only"),
                                 health_store=getattr(router, "health_store", None),
                             )
-                        existing = next(
-                            (item for item in router.model_registry.models if item.id == selected_model),
-                            None,
-                        )
                     except Exception:
-                        existing = None
-                if existing is None:
-                    if not is_free_model("nvidia_api", selected_model):
-                        raise DashboardProviderSettingsError(
-                            "selected model is not a currently discovered or explicitly seeded free NVIDIA model"
-                        )
-                    existing = ModelSpec(
-                        id=selected_model,
-                        provider="nvidia_api",
-                        endpoint=str(settings["providers"]["nvidia_api"]["base_url"]).rstrip("/"),
-                        capabilities=("chat", "reasoning", "tool_use"),
-                        context_window=131072,
-                        enabled=True,
-                        pricing_tier="free",
+                        # A failed live refresh cannot authorize a static seed model.
+                        pass
+
+                if not _has_authoritative_nvidia_free_activation(
+                    router, self.store, selected_model
+                ):
+                    raise DashboardProviderSettingsError(
+                        "selected NVIDIA model is not active in the current official Free Endpoint catalog; "
+                        "static seed metadata is not authorization"
                     )
-                    router.model_registry = type(router.model_registry).from_specs(
-                        [*router.model_registry.models, existing],
-                        provider_registry=router.provider_registry,
-                    )
-                    router.models = list(router.model_registry.models)
-                    _rebind_runtime_discovery(self.runtime, router)
-                elif not existing.enabled or existing.endpoint != str(settings["providers"]["nvidia_api"]["base_url"]).rstrip("/"):
+
+                existing = router.model_registry.resolve(selected_model)
+                endpoint = str(
+                    settings["providers"]["nvidia_api"]["base_url"]
+                ).rstrip("/")
+                if existing.endpoint != endpoint:
                     updated = ModelSpec(
                         id=existing.id,
                         provider=existing.provider,
-                        endpoint=str(settings["providers"]["nvidia_api"]["base_url"]).rstrip("/"),
-                        capabilities=existing.capabilities or ("chat", "reasoning", "tool_use"),
-                        context_window=existing.context_window or 131072,
-                        enabled=True,
+                        endpoint=endpoint,
+                        capabilities=existing.capabilities,
+                        context_window=existing.context_window,
+                        enabled=existing.enabled,
                         specialties=existing.specialties,
                         quality_score=existing.quality_score,
                         latency_score=existing.latency_score,
                         cost_score=existing.cost_score,
                         healthy=existing.healthy,
                         available=existing.available,
-                        pricing_tier=existing.pricing_tier or "free",
+                        pricing_tier=existing.pricing_tier,
                     )
                     router.model_registry.replace(updated)
                     router.models = list(router.model_registry.models)
+                    _rebind_runtime_discovery(self.runtime, router)
 
-            provider = InferenceDirectorProvider(router)
-            active = self.runtime.director.planner.provider
-            if hasattr(active, "set_active_provider"):
-                active.set_active_provider(provider)
-                provider_for_runtime = active
-            else:
-                self.runtime.director.planner.provider = provider
-                provider_for_runtime = provider
+            from aurora.orchestration.factory import (
+                _build_director_provider,
+                _build_director_provider_failover,
+            )
+
+            provider = _build_director_provider(self.store, router=router) or InferenceDirectorProvider(router)
+            runtime_store = getattr(self.runtime, "store", None)
+            runtime_store_path = getattr(runtime_store, "path", None)
+            failover_db_path = (
+                Path(runtime_store_path).resolve()
+                if runtime_store_path is not None
+                else self.store.path.resolve().parent / "tasks.db"
+            )
+            # Rebuild the lightweight provider controller from the just-persisted
+            # settings, so enabling/disabling failover and reordering free reserves
+            # takes effect without restarting the daemon. Its durable transition
+            # ledger remains on the same runtime database.
+            provider_for_runtime = _build_director_provider_failover(
+                settings_store=self.store,
+                router=router,
+                active_provider=provider,
+                db_path=failover_db_path,
+                health_store=getattr(router, "health_store", None),
+                model_candidate_store_path=(
+                    self.store.path.resolve().parent / "model-candidates.db"
+                ),
+            )
+            self.runtime.director.planner.provider = provider_for_runtime
+            configure_telemetry = getattr(
+                self.runtime, "_configure_provider_failover_telemetry", None
+            )
+            if callable(configure_telemetry):
+                configure_telemetry()
             conversation = getattr(self.runtime, "conversation_service", None)
             if conversation is not None:
                 conversation.set_provider(provider_for_runtime)
             return self.public()
-        except (OperatorSettingsError, KeyError, TypeError, ValueError) as exc:
-            raise DashboardProviderSettingsError(str(exc)) from exc
+        except DashboardProviderSettingsError:
+            rollback_director()
+            raise
+        except Exception as exc:
+            rollback_director()
+            if isinstance(exc, (OperatorSettingsError, KeyError, TypeError, ValueError)):
+                raise DashboardProviderSettingsError(str(exc)) from exc
+            raise DashboardProviderSettingsError(
+                "provider settings could not be applied safely; the previous Director route was restored"
+            ) from exc
 
     def test_provider(self, provider_id: str) -> dict[str, Any]:
         provider_id = str(provider_id).strip().lower()
@@ -263,7 +355,9 @@ class ProviderSettingsService:
                 candidate.model.id
                 for candidate in candidates
                 if getattr(candidate, "model", None) is not None
-                and getattr(candidate.model, "pricing_tier", "unknown") == "free"
+                and isinstance(getattr(candidate, "metadata", None), Mapping)
+                and candidate.metadata.get("free_endpoint_catalog") is True
+                and getattr(candidate.model, "provider", None) == "nvidia_api"
             ]
             return {
                 "provider": "nvidia_api",

@@ -89,6 +89,11 @@ class BoundInferenceDirectorProvider:
     def provider_id(self) -> str:
         return self._provider_id
 
+    @property
+    def model(self) -> str | None:
+        """Expose the pinned model for health accounting and safe retry exclusion."""
+        return self._model
+
     def generate(
         self,
         *,
@@ -307,7 +312,6 @@ class DirectorProviderFailoverController:
         self._candidate_resolver = candidate_resolver
         self._health_store = health_store
         self._lock = RLock()
-        self._failed_candidates: set[tuple[str, str]] = set()
 
     @property
     def provider_id(self) -> str:
@@ -349,6 +353,10 @@ class DirectorProviderFailoverController:
     ) -> DirectorModelResponse:
         with self._lock:
             active = self._active_provider
+            # A reserve rejected on this request must not be attempted twice in
+            # the same fallback chain, but it may recover after its health
+            # cooldown for a later request. Durable health state owns cooldown.
+            failed_candidates_this_call: set[tuple[str, str]] = set()
             try:
                 response = _generate_compatible_provider(
                     active,
@@ -360,17 +368,35 @@ class DirectorProviderFailoverController:
                     capability=capability,
                     preferred_models=preferred_models,
                 )
-                if self._health_store is not None:
-                    self._health_store.record_success(
-                        str(getattr(active, "provider_id", "") or ""),
-                        str(model or getattr(active, "model", "") or getattr(active, "provider_id", "") or "unknown"),
-                    )
+                if (
+                    self._health_store is not None
+                    and not self._router_owns_health(active)
+                ):
+                    # Standalone providers may not write ModelRouter health receipts;
+                    # use the concrete response identity rather than the facade ID.
+                    actual_provider = str(
+                        getattr(response, "provider", "")
+                        or getattr(active, "provider_id", "")
+                        or ""
+                    ).strip()
+                    actual_model = str(
+                        getattr(response, "model", "")
+                        or getattr(active, "model", "")
+                        or model
+                        or actual_provider
+                    ).strip()
+                    if actual_provider and actual_model:
+                        self._health_store.record_success(actual_provider, actual_model)
                 return response
             except Exception as exc:
                 self._record_health(active, model, exc)
                 if not _is_failoverable(exc):
                     raise
-                correlation_id = self._correlation_id(active)
+                correlation_id = self._correlation_id(
+                    active,
+                    metadata=metadata,
+                    role=role,
+                )
                 active_provider_id = str(getattr(active, "provider_id", "") or "")
                 active_model_id = _failed_model_id(active, model, exc)
                 self._record_and_emit(
@@ -390,7 +416,7 @@ class DirectorProviderFailoverController:
                     if not (
                         active_model_id and candidate.model == active_model_id
                     )
-                    and self._candidate_key(candidate) not in self._failed_candidates
+                    and self._candidate_key(candidate) not in failed_candidates_this_call
                 ]
                 if self._candidate_resolver is not None:
                     try:
@@ -420,7 +446,7 @@ class DirectorProviderFailoverController:
                         if not (
                             active_model_id and candidate.model == active_model_id
                         )
-                        and self._candidate_key(candidate) not in self._failed_candidates
+                        and self._candidate_key(candidate) not in failed_candidates_this_call
                         and self._candidate_key(candidate) not in seen
                     )
                 last_error: Exception = exc
@@ -432,7 +458,7 @@ class DirectorProviderFailoverController:
                         phase="attempted",
                         role=role,
                         from_provider=getattr(active, "provider_id", "unknown"),
-                        from_model=model,
+                        from_model=active_model_id or model,
                         to_provider=candidate.provider_id,
                         to_model=candidate.model,
                     )
@@ -442,7 +468,7 @@ class DirectorProviderFailoverController:
                             "correlation_id": correlation_id,
                             "role": role,
                             "from_provider": getattr(active, "provider_id", "unknown"),
-                            "from_model": model,
+                            "from_model": active_model_id or model,
                             **candidate.descriptor(),
                         }
                     )
@@ -502,7 +528,7 @@ class DirectorProviderFailoverController:
                                 )
                             except Exception as health_exc:
                                 report_failure("provider_health_store", health_exc)
-                        self._failed_candidates.add(self._candidate_key(candidate))
+                        failed_candidates_this_call.add(self._candidate_key(candidate))
                         self._store.record(
                             transition_id=f"{attempt_id}:failed",
                             correlation_id=correlation_id,
@@ -553,16 +579,39 @@ class DirectorProviderFailoverController:
                     f"Director provider failover exhausted after {getattr(active, 'provider_id', 'unknown')} failed"
                 ) from last_error
 
+    def _router_owns_health(self, provider: DirectorProvider) -> bool:
+        """Avoid double-counting when the active adapter wraps this health-aware router."""
+        router = getattr(provider, "_router", None)
+        return (
+            router is not None
+            and self._health_store is not None
+            and getattr(router, "health_store", None) is self._health_store
+        )
+
     def _record_health(
         self,
         provider: DirectorProvider,
         model: str | None,
         error: Exception,
     ) -> None:
-        if self._health_store is None:
+        if self._health_store is None or self._router_owns_health(provider):
             return
-        provider_id = str(getattr(provider, "provider_id", "") or "").strip()
-        model_id = str(model or getattr(provider, "model", "") or provider_id).strip()
+        # Errors from standalone router adapters identify the real
+        # executor in ProviderErrorContext; the facade's provider_id is not the
+        # provider that just failed. Attribute failures to that concrete receipt.
+        context = getattr(error, "context", None)
+        provider_id = str(
+            getattr(context, "provider", "")
+            or getattr(provider, "provider_id", "")
+            or ""
+        ).strip()
+        model_id = str(
+            getattr(context, "selected_model", "")
+            or getattr(context, "provider_model", "")
+            or getattr(provider, "model", "")
+            or model
+            or provider_id
+        ).strip()
         if not provider_id or not model_id:
             return
         try:
@@ -577,12 +626,37 @@ class DirectorProviderFailoverController:
             str(candidate.model or "").strip(),
         )
 
-    def _correlation_id(self, provider: DirectorProvider) -> str:
+    def _correlation_id(
+        self,
+        provider: DirectorProvider,
+        *,
+        metadata: Mapping[str, Any] | None = None,
+        role: str | None = None,
+    ) -> str:
         context = self._context_provider() if self._context_provider is not None else None
-        mission_id = str((context or {}).get("mission_id") or "global")
-        role = str((context or {}).get("role") or "director")
+        context = context if isinstance(context, Mapping) else {}
+        metadata = metadata if isinstance(metadata, Mapping) else {}
+        # The durable mission correlation is authoritative when a mission is
+        # already being planned. For conversation turns before mission creation,
+        # preserve the incoming request/turn correlation rather than minting a
+        # disconnected failover ID.
+        correlation_id = str(
+            context.get("correlation_id")
+            or metadata.get("correlation_id")
+            or ""
+        ).strip()
+        if correlation_id:
+            return correlation_id
+        mission_id = str(
+            context.get("mission_id")
+            or metadata.get("mission_id")
+            or metadata.get("session_id")
+            or metadata.get("turn_id")
+            or "global"
+        )
+        resolved_role = str(context.get("role") or role or metadata.get("role") or "director")
         safe = "_".join(
-            item for item in (mission_id.strip(), role.strip(), getattr(provider, "provider_id", "unknown"))
+            item for item in (mission_id.strip(), resolved_role.strip(), getattr(provider, "provider_id", "unknown"))
             if item
         )
         return f"{safe}:{_now().replace(':', '').replace('+00:00', 'Z')}"
@@ -643,14 +717,17 @@ def _failed_model_id(
     error: Exception,
 ) -> str:
     """Resolve the concrete model that failed when routing selected it dynamically."""
-    requested = str(requested_model or getattr(active, "model", "") or "").strip()
-    if requested:
-        return requested
+    # A provider's concrete execution receipt wins over a generic router alias
+    # supplied by the caller. Bound providers then supply their pinned model;
+    # only an unbound router falls back to the requested alias.
     context = getattr(error, "context", None)
     selected = str(getattr(context, "selected_model", "") or "").strip()
     if selected:
         return selected
-    return str(getattr(active, "model", "") or "").strip()
+    bound_model = str(getattr(active, "model", "") or "").strip()
+    if bound_model:
+        return bound_model
+    return str(requested_model or "").strip()
 
 
 def _is_failoverable(exc: Exception) -> bool:

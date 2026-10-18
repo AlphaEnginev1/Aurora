@@ -12,6 +12,11 @@ from urllib.parse import urlparse
 
 _FALLBACK_NVIDIA_ENDPOINT = "https://integrate.api.nvidia.com/v1"
 
+# Explicit fallback allow-list. Only these providers have an approved free-only
+# execution route in config/free-model-policy.json. Configuring other API keys
+# does not grant permission to invoke those providers for Director failover.
+ALLOWED_DIRECTOR_FAILOVER_PROVIDERS = ("nvidia_api", "openrouter")
+
 
 def _load_default_provider_endpoints() -> dict[str, str]:
     """Read endpoint defaults from the canonical provider catalog.
@@ -77,7 +82,7 @@ class OperatorSettingsError(RuntimeError):
 
 
 class OperatorSettingsStore:
-    """Persist only NVIDIA runtime configuration outside source control."""
+    """Persist local provider credentials and free-only Director routing outside source control."""
 
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
@@ -100,7 +105,10 @@ class OperatorSettingsStore:
         if not isinstance(payload, Mapping):
             raise OperatorSettingsError("operator settings must be an object")
         with self._lock:
-            merged = _normalize(_merge(self.load(), payload))
+            merged_payload = _merge(self.load(), payload)
+            _validate_failover_order(merged_payload)
+            _validate_provider_enabled_flags(merged_payload)
+            merged = _normalize(merged_payload)
             _validate(merged)
             self.path.write_text(
                 json.dumps(merged, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
@@ -209,18 +217,28 @@ def _normalize(data: Mapping[str, Any]) -> dict[str, Any]:
     result = _merge(DEFAULT_SETTINGS, data)
     director = result["director"]
     provider = str(director.get("provider", "router")).strip().lower()
-    if provider not in {"router", "nvidia_api"}:
-        # Legacy external providers are migrated to the canonical Router path.
-        # Runtime startup does not persist this normalization; the explicit
-        # operator migration helper owns durable migration when requested.
+    if provider not in {"router", "nvidia_api", "openrouter"}:
+        # Providers without an explicitly approved free-only runtime route do
+        # not become Director primaries merely because their API key is stored.
         provider = "router"
     director["provider"] = provider
     director["endpoint"] = NVIDIA_ENDPOINT
+    # Only explicit Settings choices and a successfully activated failover
+    # route override launcher defaults. Legacy provider values remain inert.
+    provider_source = str(director.get("provider_source", "")).strip().lower()
+    director["provider_source"] = (
+        provider_source
+        if provider_source in {"operator_settings", "runtime_failover"}
+        else ""
+    )
     model = str(director.get("model", "")).strip()
     if provider == "router":
         # Router mode owns model selection dynamically. Never persist or resurrect
-        # a historical NVIDIA model as the Director model in this mode.
+        # a historical provider model in this mode.
         director["model"] = "router"
+    elif provider == "openrouter":
+        # Only the canonical official free router is permitted for direct mode.
+        director["model"] = "openrouter/free"
     elif not _is_nvidia_model_id(model):
         # Direct NVIDIA mode requires an explicit NVIDIA model. The selected model
         # is validated against the live discovery pool before execution.
@@ -228,9 +246,29 @@ def _normalize(data: Mapping[str, Any]) -> dict[str, Any]:
     failover = director.get("failover", {})
     if not isinstance(failover, Mapping):
         failover = {}
+    raw_order = failover.get("order", ["nvidia_api"])
+    # Migrate old/unknown entries away rather than ever enabling a provider whose
+    # free-only policy is not explicitly approved. The default remains fail-closed.
+    normalized_order: list[str] = []
+    if isinstance(raw_order, list):
+        for item in raw_order:
+            if not isinstance(item, str):
+                continue
+            provider_id = item.strip().lower()
+            if (
+                provider_id in ALLOWED_DIRECTOR_FAILOVER_PROVIDERS
+                and provider_id not in normalized_order
+            ):
+                normalized_order.append(provider_id)
+    if not normalized_order:
+        normalized_order = ["nvidia_api"]
+    failover_enabled = failover.get("enabled", True)
+    # A malformed persisted flag must never turn recovery back on silently.
+    if not isinstance(failover_enabled, bool):
+        failover_enabled = False
     director["failover"] = {
-        "enabled": bool(failover.get("enabled", True)),
-        "order": ["nvidia_api"],
+        "enabled": failover_enabled,
+        "order": normalized_order,
     }
     provider_configs = result.get("providers", {})
     if not isinstance(provider_configs, Mapping):
@@ -244,8 +282,11 @@ def _normalize(data: Mapping[str, Any]) -> dict[str, Any]:
             continue
         default_url = DEFAULT_PROVIDER_ENDPOINTS.get(provider_id, "")
         base_url = str(raw_config.get("base_url", default_url) or default_url).strip().rstrip("/")
+        provider_enabled = raw_config.get("enabled", True)
+        if not isinstance(provider_enabled, bool):
+            provider_enabled = False
         normalized_providers[provider_id] = {
-            "enabled": bool(raw_config.get("enabled", True)),
+            "enabled": provider_enabled,
             "api_key": str(raw_config.get("api_key", "") or ""),
             "base_url": base_url,
         }
@@ -283,15 +324,31 @@ def _validate(data: Mapping[str, Any]) -> None:
     if not isinstance(director, Mapping) or not isinstance(providers, Mapping):
         raise OperatorSettingsError("operator settings require director and providers objects")
     provider = str(director.get("provider", "")).strip().lower()
-    if provider not in {"router", "nvidia_api"}:
-        raise OperatorSettingsError("director.provider must be router or nvidia_api")
+    if provider not in {"router", "nvidia_api", "openrouter"}:
+        raise OperatorSettingsError("director.provider must be router, nvidia_api, or openrouter")
     model = str(director.get("model", "")).strip()
     if not model:
         raise OperatorSettingsError("director.model cannot be empty")
     if provider == "router" and model != "router":
         raise OperatorSettingsError("router director must not pin a provider model")
-    if provider == "nvidia_api" and not _is_nvidia_model_id(model):
-        raise OperatorSettingsError("nvidia_api director.model must be an NVIDIA model identifier")
+    if provider == "nvidia_api":
+        if not _is_nvidia_model_id(model):
+            raise OperatorSettingsError("nvidia_api director.model must be an NVIDIA model identifier")
+        nvidia = providers.get("nvidia_api", {})
+        if isinstance(nvidia, Mapping) and nvidia.get("enabled", True) is False:
+            raise OperatorSettingsError("NVIDIA Director mode cannot use a disabled provider")
+        stored_key = str(nvidia.get("api_key", "") or "") if isinstance(nvidia, Mapping) else ""
+        if not stored_key.strip() and not os.getenv("NVIDIA_API_KEY", "").strip():
+            raise OperatorSettingsError("NVIDIA Director mode requires an NVIDIA API key")
+    if provider == "openrouter":
+        if model != "openrouter/free":
+            raise OperatorSettingsError("OpenRouter Director mode is restricted to openrouter/free")
+        openrouter = providers.get("openrouter", {})
+        if isinstance(openrouter, Mapping) and openrouter.get("enabled", True) is False:
+            raise OperatorSettingsError("OpenRouter Director mode cannot use a disabled provider")
+        stored_key = str(openrouter.get("api_key", "") or "") if isinstance(openrouter, Mapping) else ""
+        if not stored_key.strip() and not os.getenv("OPENROUTER_API_KEY", "").strip():
+            raise OperatorSettingsError("OpenRouter Director mode requires an OpenRouter API key")
     if not str(director.get("endpoint", "")).strip().startswith("https://"):
         raise OperatorSettingsError("director.endpoint must use HTTPS")
     failover = director.get("failover", {})
@@ -300,8 +357,22 @@ def _validate(data: Mapping[str, Any]) -> None:
     if failover.get("enabled", True) is not True and failover.get("enabled", True) is not False:
         raise OperatorSettingsError("director.failover.enabled must be boolean")
     order = failover.get("order", [])
-    if order != ["nvidia_api"]:
-        raise OperatorSettingsError("director.failover.order must be exactly ['nvidia_api']")
+    if (
+        not isinstance(order, list)
+        or not order
+        or any(
+            not isinstance(item, str)
+            or item != item.strip().lower()
+            or item not in ALLOWED_DIRECTOR_FAILOVER_PROVIDERS
+            for item in order
+        )
+        or len(order) != len(set(order))
+    ):
+        raise OperatorSettingsError(
+            "director.failover.order must be a non-empty, unique ordered list "
+            "containing only approved free-only providers: "
+            + ", ".join(ALLOWED_DIRECTOR_FAILOVER_PROVIDERS)
+        )
     nvidia = providers.get("nvidia_api")
     if not isinstance(nvidia, Mapping):
         raise OperatorSettingsError("provider configuration missing: nvidia_api")
@@ -334,6 +405,48 @@ def _validate(data: Mapping[str, Any]) -> None:
             raise OperatorSettingsError(
                 f"{provider_id}.base_url must use HTTPS (HTTP is allowed only for loopback services)"
             )
+
+
+def _validate_provider_enabled_flags(data: Mapping[str, Any]) -> None:
+    """Reject non-boolean provider enablement before settings are normalized."""
+    providers = data.get("providers", {})
+    if not isinstance(providers, Mapping):
+        raise OperatorSettingsError("operator settings providers must be an object")
+    for provider_id, config in providers.items():
+        if not isinstance(config, Mapping):
+            raise OperatorSettingsError(f"{provider_id}.configuration must be an object")
+        if "enabled" in config and not isinstance(config["enabled"], bool):
+            raise OperatorSettingsError(f"{provider_id}.enabled must be boolean")
+
+
+def _validate_failover_order(data: Mapping[str, Any]) -> None:
+    """Reject unsafe order updates before normalization can discard them."""
+    director = data.get("director", {})
+    failover = director.get("failover", {}) if isinstance(director, Mapping) else {}
+    if not isinstance(failover, Mapping):
+        return
+    if "enabled" in failover and not isinstance(failover["enabled"], bool):
+        raise OperatorSettingsError("director.failover.enabled must be boolean")
+    if "order" not in failover:
+        return
+    order = failover["order"]
+    if (
+        not isinstance(order, list)
+        or not order
+        or any(
+            not isinstance(item, str)
+            or item.strip() != item
+            or item.lower() != item
+            or item not in ALLOWED_DIRECTOR_FAILOVER_PROVIDERS
+            for item in order
+        )
+        or len(order) != len(set(order))
+    ):
+        raise OperatorSettingsError(
+            "director.failover.order may contain only a non-empty, duplicate-free "
+            "ordered list of approved free-only providers: "
+            + ", ".join(ALLOWED_DIRECTOR_FAILOVER_PROVIDERS)
+        )
 
 
 def _merge(base: Mapping[str, Any], overlay: Mapping[str, Any]) -> dict[str, Any]:

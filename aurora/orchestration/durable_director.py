@@ -8,6 +8,8 @@ import json
 from typing import Sequence
 from uuid import uuid4
 
+from aurora.projects.registry import ProjectStatus
+
 from .director import DirectorPlan, DirectorPlanner
 from .event_bus import DurableEventBus
 from .task_engine import DelegatedTask, TaskEngine
@@ -110,6 +112,37 @@ class DurableDirectorService:
                 "mission_id is already bound to a different or missing correlation_id"
             )
         restored_tasks = tuple(item.task for item in existing_tasks)
+        # Idempotent replay is still an execution boundary. Revalidate durable
+        # task scope against the current canonical registry so a previously
+        # accepted but now-unresolvable project target cannot be replayed as a
+        # valid order.
+        project_registry = getattr(self.planner, "project_registry", None)
+        for task in restored_tasks:
+            task_project_id = task.project_id
+            if project_id is not None and task_project_id != project_id:
+                raise DurableDirectorError(
+                    f"durable task {task.task_id!r} lost or conflicts with the "
+                    "authoritative mission project_id"
+                )
+            if task_project_id is None:
+                continue
+            if project_registry is None:
+                raise DurableDirectorError(
+                    f"durable task {task.task_id!r} is project-scoped but the "
+                    "canonical project registry is unavailable"
+                )
+            try:
+                project = project_registry.resolve(task_project_id)
+            except Exception as exc:
+                raise DurableDirectorError(
+                    f"durable task {task.task_id!r} references unknown project_id "
+                    f"{task_project_id!r}"
+                ) from exc
+            if project.status is not ProjectStatus.ACTIVE:
+                raise DurableDirectorError(
+                    f"durable task {task.task_id!r} requires an active project_id; "
+                    f"{task_project_id!r} is {project.status.value}"
+                )
         restored_plan = DirectorPlan(
             objective=str(submitted.get("objective", objective)),
             tasks=restored_tasks,
@@ -178,6 +211,11 @@ class DurableDirectorService:
                 project = project_registry.resolve(project_id)
             except Exception as exc:
                 raise DurableDirectorError(f"unknown project_id: {project_id}") from exc
+            if project.status is not ProjectStatus.ACTIVE:
+                raise DurableDirectorError(
+                    f"project_id {project_id!r} must be active before mission submission; "
+                    f"current status is {project.status.value}"
+                )
             if tasks is None:
                 context = list(context or [])
                 context.append({"role": "system", "content": json.dumps({
@@ -211,15 +249,33 @@ class DurableDirectorService:
                 execution_id=planning_execution_id,
             )
 
-        # A mission's project binding is authoritative. Do not silently rewrite
-        # contradictory task-level targets: a caller must receive a rejection
-        # rather than an order that executes under a different project scope.
-        if project_id is not None:
-            for task in plan.tasks:
-                if task.project_id is not None and task.project_id != project_id:
-                    raise DurableDirectorError(
-                        f"task {task.task_id!r} project_id conflicts with authoritative mission project"
-                    )
+        # Task-level project identities can affect inference and Workbench
+        # scope even when the mission itself is not project-bound. Resolve every
+        # supplied identity against the canonical registry before any write.
+        project_registry = getattr(self.planner, "project_registry", None)
+        for task in plan.tasks:
+            task_project_id = task.project_id
+            if task_project_id is None:
+                continue
+            if project_id is not None and task_project_id != project_id:
+                raise DurableDirectorError(
+                    f"task {task.task_id!r} project_id conflicts with authoritative mission project"
+                )
+            if project_registry is None:
+                raise DurableDirectorError(
+                    f"task {task.task_id!r} is project-scoped but the canonical project registry is unavailable"
+                )
+            try:
+                project = project_registry.resolve(task_project_id)
+            except Exception as exc:
+                raise DurableDirectorError(
+                    f"task {task.task_id!r} references unknown project_id {task_project_id!r}"
+                ) from exc
+            if project.status is not ProjectStatus.ACTIVE:
+                raise DurableDirectorError(
+                    f"task {task.task_id!r} requires an active project_id; "
+                    f"{task_project_id!r} is {project.status.value}"
+                )
         try:
             mission = mission_id.strip() if mission_id and mission_id.strip() else f"mission-{uuid4().hex}"
             initial_events: list[dict[str, object]] = []

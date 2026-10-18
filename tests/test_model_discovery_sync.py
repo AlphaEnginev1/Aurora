@@ -548,8 +548,17 @@ def test_canonical_startup_rehydrates_synced_model_before_director_validation(mo
     )
 
     class Settings:
+        path = tmp_path / "operator-settings.json"
+
         def load(self):
-            return {"director": {"provider": "nvidia_api", "model": model_id}}
+            return {
+                "director": {
+                    "provider": "nvidia_api",
+                    "model": model_id,
+                    "provider_source": "operator_settings",
+                },
+                "providers": {"nvidia_api": {"enabled": True}},
+            }
 
         def credential(self, provider_id):
             assert provider_id == "nvidia_api"
@@ -588,3 +597,160 @@ def test_canonical_startup_rehydrates_synced_model_before_director_validation(mo
     provider = factory._build_director_provider(Settings(), router=router)
     assert provider is not None
     assert provider.provider_id == "nvidia_api"
+
+def test_nvidia_static_free_metadata_cannot_authorize_candidate_activation(tmp_path):
+    from aurora.inference.discovery import (
+        DiscoveredModelCandidate,
+        ModelCandidateStore,
+        ModelDiscoveryService,
+        candidate_id,
+    )
+    from aurora.inference.models import ModelSpec
+    from aurora.inference.providers.registry import ProviderRegistry, ProviderSpec
+    from aurora.inference.registry import ModelRegistry
+
+    model_id = "nvidia/nemotron-3-ultra-550b-a55b"
+    candidate = DiscoveredModelCandidate(
+        candidate_id=candidate_id("nvidia_api", model_id),
+        provider_id="nvidia_api",
+        model=ModelSpec(
+            id=model_id,
+            provider="nvidia_api",
+            endpoint="https://integrate.api.nvidia.com/v1",
+            capabilities=("chat", "reasoning"),
+            enabled=False,
+            healthy=False,
+            available=False,
+            pricing_tier="free",
+        ),
+        # Old endpoint row metadata and a static pricing tier are not the
+        # authoritative Free Endpoint catalog receipt.
+        metadata={"free_endpoint": True, "pricing_tier": "free"},
+        discovered_at="2026-10-18T00:00:00+00:00",
+    )
+    providers = ProviderRegistry((
+        ProviderSpec(
+            "nvidia_api",
+            "NVIDIA",
+            ("chat", "reasoning"),
+            True,
+            lambda _model: object(),
+        ),
+    ))
+    registry = ModelRegistry([], provider_registry=providers)
+    store = ModelCandidateStore(tmp_path / "model-candidates.db")
+    store.upsert(candidate)
+    service = ModelDiscoveryService(providers, registry, store)
+
+    assert service.activate_free_discovered(provider_id="nvidia_api") == ()
+    assert service.activate_eligible_discovered(
+        provider_id="nvidia_api",
+        cost_policy="free_only",
+    ) == ()
+    assert model_id not in registry.ids
+    assert store.get(candidate.candidate_id).state == "discovered"
+
+def test_successful_nvidia_refresh_revokes_synced_models_missing_from_free_catalog(tmp_path):
+    model_id = "nvidia/previously-free-model"
+    model = ModelSpec(
+        id=model_id,
+        provider="nvidia_api",
+        endpoint="https://integrate.api.nvidia.com/v1",
+        capabilities=("chat", "reasoning"),
+        enabled=True,
+        healthy=True,
+        available=True,
+        pricing_tier="free",
+    )
+    candidate = DiscoveredModelCandidate(
+        candidate_id=candidate_id("nvidia_api", model_id),
+        provider_id="nvidia_api",
+        model=model,
+        metadata={"free_endpoint_catalog": True},
+        discovered_at="2026-10-18T00:00:00+00:00",
+        state="synced",
+    )
+    provider_registry = ProviderRegistry((
+        ProviderSpec(
+            "nvidia_api",
+            "NVIDIA",
+            ("chat", "reasoning"),
+            True,
+            lambda _model: object(),
+            discovery_factory=lambda: FakeDiscoveryProvider(()),
+        ),
+    ))
+    candidate_store = ModelCandidateStore(tmp_path / "model-candidates.db")
+    candidate_store.upsert(candidate)
+    candidate_store.set_state(candidate.candidate_id, "synced")
+    model_registry = ModelRegistry((model,), provider_registry=provider_registry)
+    service = ModelDiscoveryService(provider_registry, model_registry, candidate_store)
+
+    refreshed = service.refresh_all(
+        provider_ids=("nvidia_api",),
+        min_interval_seconds=0,
+        force=True,
+    )
+
+    assert refreshed["nvidia_api"] == ()
+    assert candidate_store.get(candidate.candidate_id).state == "rejected"
+    revoked = model_registry.resolve(model_id)
+    assert revoked.enabled is False
+    assert revoked.healthy is False
+    assert revoked.available is False
+
+
+def test_transient_nvidia_catalog_failure_preserves_last_good_synced_model(tmp_path):
+    model_id = "nvidia/last-good-free-model"
+    model = ModelSpec(
+        id=model_id,
+        provider="nvidia_api",
+        endpoint="https://integrate.api.nvidia.com/v1",
+        capabilities=("chat", "reasoning"),
+        enabled=True,
+        healthy=True,
+        available=True,
+        pricing_tier="free",
+    )
+    candidate = DiscoveredModelCandidate(
+        candidate_id=candidate_id("nvidia_api", model_id),
+        provider_id="nvidia_api",
+        model=model,
+        metadata={"free_endpoint_catalog": True},
+        discovered_at="2026-10-18T00:00:00+00:00",
+        state="synced",
+    )
+
+    class BrokenDiscovery:
+        def discover(self):
+            raise RuntimeError("controlled transient catalog failure")
+
+    provider_registry = ProviderRegistry((
+        ProviderSpec(
+            "nvidia_api",
+            "NVIDIA",
+            ("chat", "reasoning"),
+            True,
+            lambda _model: object(),
+            discovery_factory=BrokenDiscovery,
+        ),
+    ))
+    candidate_store = ModelCandidateStore(tmp_path / "model-candidates.db")
+    candidate_store.upsert(candidate)
+    candidate_store.set_state(candidate.candidate_id, "synced")
+    model_registry = ModelRegistry((model,), provider_registry=provider_registry)
+    service = ModelDiscoveryService(provider_registry, model_registry, candidate_store)
+
+    refreshed = service.refresh_all(
+        provider_ids=("nvidia_api",),
+        min_interval_seconds=0,
+        force=True,
+    )
+
+    assert refreshed["nvidia_api"] == ()
+    assert candidate_store.get(candidate.candidate_id).state == "synced"
+    retained = model_registry.resolve(model_id)
+    assert retained.enabled is True
+    assert retained.healthy is True
+    assert retained.available is True
+

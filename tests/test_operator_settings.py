@@ -144,3 +144,101 @@ def test_local_ollama_http_endpoint_is_allowed_for_loopback_only(tmp_path: Path)
         },
     })
     assert store.load()["providers"]["ollama"]["base_url"] == "http://127.0.0.1:11434/v1"
+
+def test_director_failover_order_allows_only_explicitly_approved_free_providers(tmp_path: Path):
+    import pytest
+    from aurora.operator_settings import OperatorSettingsError
+
+    store = OperatorSettingsStore(tmp_path / "operator-settings.json")
+    saved = store.save({
+        "director": {
+            "failover": {"enabled": True, "order": ["openrouter", "nvidia_api"]},
+        },
+        "providers": {
+            "openrouter": {
+                "api_key": "openrouter-test",
+                "base_url": "https://openrouter.ai/api/v1",
+            },
+        },
+    })
+    assert saved["director"]["failover"]["order"] == ["openrouter", "nvidia_api"]
+    assert store.load()["director"]["failover"]["order"] == ["openrouter", "nvidia_api"]
+
+    with pytest.raises(OperatorSettingsError, match="approved free-only providers"):
+        store.save({
+            "director": {
+                "failover": {"enabled": True, "order": ["openrouter", "openai"]},
+            },
+        })
+
+
+def test_openrouter_director_setting_is_pinned_to_official_free_route(tmp_path: Path):
+    store = OperatorSettingsStore(tmp_path / "operator-settings.json")
+    saved = store.save({
+        "director": {
+            "provider": "openrouter",
+            "model": "any-model-from-form",
+        },
+        "providers": {
+            "openrouter": {
+                "api_key": "openrouter-test",
+                "base_url": "https://openrouter.ai/api/v1",
+            },
+        },
+    })
+    assert saved["director"]["provider"] == "openrouter"
+    assert saved["director"]["model"] == "openrouter/free"
+
+
+def test_openrouter_director_setting_requires_a_credential(tmp_path: Path, monkeypatch):
+    import pytest
+    from aurora.operator_settings import OperatorSettingsError
+
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    store = OperatorSettingsStore(tmp_path / "operator-settings.json")
+    with pytest.raises(OperatorSettingsError, match="requires an OpenRouter API key"):
+        store.save({"director": {"provider": "openrouter"}})
+
+def test_malformed_persisted_enablement_flags_fail_closed(tmp_path: Path):
+    path = tmp_path / "operator-settings.json"
+    path.write_text(
+        """{
+          "director": {
+            "provider": "router",
+            "model": "router",
+            "endpoint": "https://integrate.api.nvidia.com/v1",
+            "failover": {"enabled": "false", "order": ["openrouter"]}
+          },
+          "providers": {
+            "nvidia_api": {"enabled": true, "api_key": "nvidia-test"},
+            "openrouter": {
+              "enabled": "false",
+              "api_key": "openrouter-test",
+              "base_url": "https://openrouter.ai/api/v1"
+            }
+          }
+        }""",
+        encoding="utf-8",
+    )
+
+    loaded = OperatorSettingsStore(path).load()
+    assert loaded["director"]["failover"]["enabled"] is False
+    assert loaded["providers"]["openrouter"]["enabled"] is False
+
+
+def test_non_boolean_provider_enablement_is_rejected_on_save(tmp_path: Path):
+    import pytest
+    from aurora.operator_settings import OperatorSettingsError
+
+    store = OperatorSettingsStore(tmp_path / "operator-settings.json")
+    with pytest.raises(OperatorSettingsError, match="openrouter.enabled must be boolean"):
+        store.save({
+            "providers": {
+                "openrouter": {
+                    "enabled": "false",
+                    "api_key": "openrouter-test",
+                    "base_url": "https://openrouter.ai/api/v1",
+                },
+            },
+        })
+
