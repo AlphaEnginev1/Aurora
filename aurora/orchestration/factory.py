@@ -216,7 +216,7 @@ def _build_director_provider(
     configured_provider = str(configured.get("provider", "router")).strip().lower()
     director_provider_id = (
         configured_provider
-        if configured.get("operator_selected") is True
+        if configured.get("provider_source") in {"operator_settings", "runtime_failover"}
         else (environment_provider or "router")
     )
 
@@ -671,6 +671,7 @@ def _build_director_provider_failover(
                             "https://integrate.api.nvidia.com/v1",
                         )
                     ),
+                    "provider_source": "runtime_failover",
                 }
             }
         )
