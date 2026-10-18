@@ -1078,7 +1078,7 @@ def test_openrouter_can_be_selected_as_director_primary_from_saved_settings(
         router=runtime.director.planner.router,
     )
     assert restarted_primary.provider_id == "openrouter"
-    assert store.load()["director"]["operator_selected"] is True
+    assert store.load()["director"]["provider_source"] == "operator_settings"
     registered = runtime.director.planner.router.model_registry.resolve("openrouter/free")
     assert registered.provider == "openrouter"
     assert registered.pricing_tier == "free"
