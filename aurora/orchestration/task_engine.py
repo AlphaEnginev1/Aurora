@@ -140,6 +140,9 @@ class TaskEngine:
     research_service: ResearchService | None = None
     research_learning_gate: ResearchLearningGate | None = None
     project_registry: ProjectRegistry | None = None
+    # Align project workspace authorization with UniversalWorkbench's roots.
+    # If omitted, direct TaskEngine users are restricted to workspace_root.
+    allowed_workspace_roots: tuple[Path, ...] | None = None
     _results: dict[str, DelegatedTaskResult] = field(default_factory=dict, init=False)
 
     def validate(self, tasks: Sequence[DelegatedTask]) -> tuple[DelegatedTask, ...]:
@@ -235,9 +238,27 @@ class TaskEngine:
             configured = Path(project.workspace).expanduser()
             if not configured.is_absolute():
                 configured = self.workspace_root / configured
-            return configured.resolve()
-        digest = hashlib.sha256(project.project_id.encode("utf-8")).hexdigest()[:24]
-        return (self.workspace_root / "projects" / digest).resolve()
+            workspace = configured.resolve()
+        else:
+            digest = hashlib.sha256(project.project_id.encode("utf-8")).hexdigest()[:24]
+            workspace = (self.workspace_root / "projects" / digest).resolve()
+
+        # A trusted registry supplies project identity, but its workspace path is
+        # still data: reject absolute paths (or symlink-resolved targets) outside
+        # the same authorized roots used by UniversalWorkbench.
+        raw_roots = self.allowed_workspace_roots
+        allowed_roots = tuple(
+            Path(item).expanduser().resolve()
+            for item in (raw_roots if raw_roots is not None else (self.workspace_root,))
+        )
+        if not any(
+            workspace == allowed_root or allowed_root in workspace.parents
+            for allowed_root in allowed_roots
+        ):
+            raise TaskEngineError(
+                f"project workspace for {project.project_id!r} is outside allowed TaskEngine roots"
+            )
+        return workspace
 
     def execute(self, tasks: Sequence[DelegatedTask]) -> tuple[DelegatedTaskResult, ...]:
         plan = self.validate(tasks)
