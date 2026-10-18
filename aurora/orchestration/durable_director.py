@@ -8,6 +8,8 @@ import json
 from typing import Sequence
 from uuid import uuid4
 
+from aurora.projects.registry import ProjectStatus
+
 from .director import DirectorPlan, DirectorPlanner
 from .event_bus import DurableEventBus
 from .task_engine import DelegatedTask, TaskEngine
@@ -130,12 +132,17 @@ class DurableDirectorService:
                     "canonical project registry is unavailable"
                 )
             try:
-                project_registry.resolve(task_project_id)
+                project = project_registry.resolve(task_project_id)
             except Exception as exc:
                 raise DurableDirectorError(
                     f"durable task {task.task_id!r} references unknown project_id "
                     f"{task_project_id!r}"
                 ) from exc
+            if project.status is not ProjectStatus.ACTIVE:
+                raise DurableDirectorError(
+                    f"durable task {task.task_id!r} requires an active project_id; "
+                    f"{task_project_id!r} is {project.status.value}"
+                )
         restored_plan = DirectorPlan(
             objective=str(submitted.get("objective", objective)),
             tasks=restored_tasks,
@@ -204,6 +211,11 @@ class DurableDirectorService:
                 project = project_registry.resolve(project_id)
             except Exception as exc:
                 raise DurableDirectorError(f"unknown project_id: {project_id}") from exc
+            if project.status is not ProjectStatus.ACTIVE:
+                raise DurableDirectorError(
+                    f"project_id {project_id!r} must be active before mission submission; "
+                    f"current status is {project.status.value}"
+                )
             if tasks is None:
                 context = list(context or [])
                 context.append({"role": "system", "content": json.dumps({
@@ -254,11 +266,16 @@ class DurableDirectorService:
                     f"task {task.task_id!r} is project-scoped but the canonical project registry is unavailable"
                 )
             try:
-                project_registry.resolve(task_project_id)
+                project = project_registry.resolve(task_project_id)
             except Exception as exc:
                 raise DurableDirectorError(
                     f"task {task.task_id!r} references unknown project_id {task_project_id!r}"
                 ) from exc
+            if project.status is not ProjectStatus.ACTIVE:
+                raise DurableDirectorError(
+                    f"task {task.task_id!r} requires an active project_id; "
+                    f"{task_project_id!r} is {project.status.value}"
+                )
         try:
             mission = mission_id.strip() if mission_id and mission_id.strip() else f"mission-{uuid4().hex}"
             initial_events: list[dict[str, object]] = []
