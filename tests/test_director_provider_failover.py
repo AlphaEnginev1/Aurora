@@ -103,7 +103,7 @@ def test_factory_discovers_and_selects_available_nvidia_model_without_fixed_id(t
                 capabilities=("reasoning",),
                 quality_score=0.2,
             ),
-            metadata={},
+            metadata={"free_endpoint_catalog": True},
             discovered_at="2026-10-05T00:00:00+00:00",
         ),
         DiscoveredModelCandidate(
@@ -116,7 +116,7 @@ def test_factory_discovers_and_selects_available_nvidia_model_without_fixed_id(t
                 capabilities=("reasoning",),
                 quality_score=0.9,
             ),
-            metadata={},
+            metadata={"free_endpoint_catalog": True},
             discovered_at="2026-10-05T00:00:00+00:00",
         ),
     )
@@ -212,7 +212,7 @@ def test_factory_ignores_historical_health_cooldown_when_building_reserve_order(
                 quality_score=0.2,
                 pricing_tier="free",
             ),
-            metadata={"free_endpoint": True},
+            metadata={"free_endpoint_catalog": True},
             discovered_at="2026-10-05T00:00:00+00:00",
         ),
         DiscoveredModelCandidate(
@@ -226,7 +226,7 @@ def test_factory_ignores_historical_health_cooldown_when_building_reserve_order(
                 quality_score=0.9,
                 pricing_tier="free",
             ),
-            metadata={"free_endpoint": True},
+            metadata={"free_endpoint_catalog": True},
             discovered_at="2026-10-05T00:00:00+00:00",
         ),
     )
@@ -393,7 +393,7 @@ def test_factory_uses_cached_nvidia_catalog_when_live_discovery_is_unavailable(t
             endpoint="https://integrate.api.nvidia.com/v1",
             capabilities=("reasoning",),
         ),
-        metadata={},
+        metadata={"free_endpoint_catalog": True},
         discovered_at="2026-10-05T00:00:00+00:00",
     )
     cache = ModelCandidateStore(tmp_path / "model-candidates.db")
