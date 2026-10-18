@@ -664,3 +664,114 @@ def test_successful_nvidia_failover_persists_and_reloads_after_restart(tmp_path:
     restarted_provider = _build_director_provider(settings, router=object())
     assert restarted_provider is not None
     assert restarted_provider.provider_id == "nvidia_api"
+
+def test_factory_uses_explicit_openrouter_free_reserve_and_persists_activation(
+    tmp_path: Path, monkeypatch
+):
+    from aurora.inference.models import InferenceResponse, ModelSpec
+    from aurora.inference.providers.registry import ProviderRegistry, ProviderSpec
+    from aurora.inference.registry import ModelRegistry
+    from aurora.inference.router import ModelRouter
+    from aurora.orchestration.factory import _build_director_provider_failover
+
+    class FakeOpenRouterInferenceProvider:
+        provider_id = "openrouter"
+
+        def __init__(self, _model):
+            pass
+
+        def generate(self, request, *, selected_model, execution_id):
+            return InferenceResponse(
+                model=selected_model,
+                provider="openrouter",
+                content="authorized OpenRouter free reserve succeeded",
+                request_id=request.request_id,
+                execution_id=execution_id,
+                selected_model=selected_model,
+                provider_model=selected_model,
+                reported_model=selected_model,
+            )
+
+    registry = ProviderRegistry((
+        ProviderSpec(
+            provider_id="openrouter",
+            name="OpenRouter free route",
+            capabilities=("chat", "reasoning"),
+            enabled=True,
+            factory=lambda model: FakeOpenRouterInferenceProvider(model),
+        ),
+    ))
+    free_model = ModelSpec(
+        id="openrouter/free",
+        provider="openrouter",
+        endpoint="https://openrouter.ai/api/v1",
+        capabilities=("chat", "reasoning"),
+        specialties=("reasoning", "planning"),
+        enabled=True,
+        healthy=True,
+        available=True,
+        pricing_tier="free",
+        cost_score=1.0,
+    )
+    model_registry = ModelRegistry([free_model], provider_registry=registry)
+    router = ModelRouter(
+        models=[free_model],
+        provider_registry=registry,
+        model_registry=model_registry,
+        cost_policy="free_only",
+    )
+
+    class EmptyNvidiaDiscovery:
+        def __init__(self, *_args):
+            pass
+
+        def refresh_all(self, **_kwargs):
+            return {"nvidia_api": ()}
+
+    monkeypatch.setattr(
+        "aurora.orchestration.factory.ModelDiscoveryService",
+        EmptyNvidiaDiscovery,
+    )
+
+    settings = OperatorSettingsStore(tmp_path / "operator-settings.json")
+    settings.save({
+        "director": {
+            "failover": {"enabled": True, "order": ["openrouter", "nvidia_api"]},
+        },
+        "providers": {
+            "nvidia_api": {"api_key": "nvidia-test"},
+            "openrouter": {
+                "api_key": "openrouter-test",
+                "base_url": "https://openrouter.ai/api/v1",
+            },
+        },
+    })
+
+    class FailingRouter:
+        provider_id = "inference_router"
+
+        def generate(self, **_kwargs):
+            raise ProviderFailure("forced primary router outage")
+
+    controller = _build_director_provider_failover(
+        settings_store=settings,
+        router=router,
+        active_provider=FailingRouter(),
+        db_path=tmp_path / "tasks.db",
+    )
+
+    response = controller.generate(
+        messages=[{"role": "user", "content": "continue the accepted mission"}],
+        model="router/test-model",
+        role="director_conversation",
+    )
+
+    assert response.provider == "openrouter"
+    assert response.model == "openrouter/free"
+    assert response.content == "authorized OpenRouter free reserve succeeded"
+    assert controller.provider_id == "openrouter"
+    persisted = settings.load()["director"]
+    assert persisted["provider"] == "openrouter"
+    assert persisted["model"] == "openrouter/free"
+    assert persisted["failover"]["order"] == ["openrouter", "nvidia_api"]
+
