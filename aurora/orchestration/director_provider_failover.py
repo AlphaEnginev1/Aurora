@@ -89,6 +89,11 @@ class BoundInferenceDirectorProvider:
     def provider_id(self) -> str:
         return self._provider_id
 
+    @property
+    def model(self) -> str | None:
+        """Expose the pinned model for health accounting and safe retry exclusion."""
+        return self._model
+
     def generate(
         self,
         *,
@@ -363,7 +368,7 @@ class DirectorProviderFailoverController:
                 if self._health_store is not None:
                     self._health_store.record_success(
                         str(getattr(active, "provider_id", "") or ""),
-                        str(model or getattr(active, "model", "") or getattr(active, "provider_id", "") or "unknown"),
+                        str(getattr(active, "model", "") or model or getattr(active, "provider_id", "") or "unknown"),
                     )
                 return response
             except Exception as exc:
@@ -432,7 +437,7 @@ class DirectorProviderFailoverController:
                         phase="attempted",
                         role=role,
                         from_provider=getattr(active, "provider_id", "unknown"),
-                        from_model=model,
+                        from_model=active_model_id or model,
                         to_provider=candidate.provider_id,
                         to_model=candidate.model,
                     )
@@ -442,7 +447,7 @@ class DirectorProviderFailoverController:
                             "correlation_id": correlation_id,
                             "role": role,
                             "from_provider": getattr(active, "provider_id", "unknown"),
-                            "from_model": model,
+                            "from_model": active_model_id or model,
                             **candidate.descriptor(),
                         }
                     )
@@ -562,7 +567,7 @@ class DirectorProviderFailoverController:
         if self._health_store is None:
             return
         provider_id = str(getattr(provider, "provider_id", "") or "").strip()
-        model_id = str(model or getattr(provider, "model", "") or provider_id).strip()
+        model_id = str(getattr(provider, "model", "") or model or provider_id).strip()
         if not provider_id or not model_id:
             return
         try:
@@ -643,14 +648,17 @@ def _failed_model_id(
     error: Exception,
 ) -> str:
     """Resolve the concrete model that failed when routing selected it dynamically."""
-    requested = str(requested_model or getattr(active, "model", "") or "").strip()
-    if requested:
-        return requested
+    # A provider's concrete execution receipt wins over a generic router alias
+    # supplied by the caller. Bound providers then supply their pinned model;
+    # only an unbound router falls back to the requested alias.
     context = getattr(error, "context", None)
     selected = str(getattr(context, "selected_model", "") or "").strip()
     if selected:
         return selected
-    return str(getattr(active, "model", "") or "").strip()
+    bound_model = str(getattr(active, "model", "") or "").strip()
+    if bound_model:
+        return bound_model
+    return str(requested_model or "").strip()
 
 
 def _is_failoverable(exc: Exception) -> bool:
