@@ -1113,3 +1113,52 @@ def test_failover_uses_runtime_model_candidate_store_when_task_db_is_elsewhere(
     assert isinstance(controller, DirectorProviderFailoverController)
     assert observed_paths == [candidate_db.resolve()]
 
+def test_disabling_failover_in_saved_settings_fails_closed_immediately(
+    tmp_path: Path,
+):
+    from types import SimpleNamespace
+    from aurora.orchestration import factory
+
+    settings = OperatorSettingsStore(tmp_path / "settings" / "operator-settings.json")
+    settings.save({
+        "director": {
+            "failover": {"enabled": True, "order": ["nvidia_api"]},
+        },
+        "providers": {"nvidia_api": {"api_key": "nvidia-test"}},
+    })
+    primary = FakeProvider(
+        "inference_router",
+        [ProviderFailure("primary route deliberately unavailable")],
+    )
+    activated = []
+    controller = factory._build_director_provider_failover(
+        settings_store=settings,
+        router=SimpleNamespace(
+            provider_registry=object(),
+            model_registry=SimpleNamespace(models=(), ids=()),
+            cost_policy="free_only",
+            available=lambda: (),
+        ),
+        active_provider=primary,
+        db_path=tmp_path / "runtime" / "tasks.db",
+        health_store=None,
+        model_candidate_store_path=tmp_path / "runtime" / "model-candidates.db",
+    )
+
+    settings.save({
+        "director": {
+            "failover": {"enabled": False, "order": ["nvidia_api"]},
+        },
+    })
+
+    with pytest.raises(DirectorProviderFailoverError):
+        controller.generate(
+            messages=[{"role": "user", "content": "must fail closed"}],
+            model="router",
+            role="director_conversation",
+        )
+
+    assert primary.calls == 1
+    assert controller.provider_id == "inference_router"
+    assert activated == []
+
