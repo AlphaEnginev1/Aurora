@@ -322,13 +322,10 @@ class ModelDiscoveryService:
             seen_ids.add(candidate.candidate_id)
             model = candidate.model
             metadata = dict(candidate.metadata)
-            catalog_free = bool(
-                metadata.get("free_endpoint")
-                or str(metadata.get("access_tier", "")).strip().lower() == "free"
-                or str(metadata.get("pricing_tier", "")).strip().lower() == "free"
-                or str(metadata.get("tier", "")).strip().lower() == "free"
-                or model.pricing_tier == "free"
-            )
+            # NVIDIA's static free-policy entries are metadata only. In
+            # free_endpoint mode, only the trusted discovery adapter's explicit
+            # authoritative catalog receipt can authorize activation.
+            catalog_free = metadata.get("free_endpoint_catalog") is True
             if not is_discovered_free_model(
                 provider_id, model.id, discovered_free_endpoint=catalog_free
             ):
@@ -386,14 +383,10 @@ class ModelDiscoveryService:
             seen.add(candidate.candidate_id)
             model = candidate.model
             metadata = dict(candidate.metadata)
-            catalog_free = bool(
-                metadata.get("free_endpoint")
-                or metadata.get("free_endpoint_catalog")
-                or str(metadata.get("access_tier", "")).strip().lower() == "free"
-                or str(metadata.get("pricing_tier", "")).strip().lower() == "free"
-                or str(metadata.get("tier", "")).strip().lower() == "free"
-                or model.pricing_tier == "free"
-            )
+            # Never let static model metadata or /models pricing fields stand in
+            # for the official NVIDIA Free Endpoint catalog. Other providers are
+            # checked against their explicit central free-model policy.
+            catalog_free = metadata.get("free_endpoint_catalog") is True
             if normalized_policy == "free_only" and not is_discovered_free_model(
                 provider_id, model.id, discovered_free_endpoint=catalog_free
             ):
