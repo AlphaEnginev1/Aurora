@@ -893,7 +893,11 @@ class TaskEngine:
         if not execution_scope.strip():
             raise TaskEngineError("execution_scope cannot be empty")
         digest = hashlib.sha256(execution_scope.encode("utf-8")).hexdigest()
-        workspace = project_root / "tasks" / digest
+        workspace = (project_root / "tasks" / digest).resolve()
+        if not (workspace == project_root or project_root in workspace.parents):
+            raise TaskEngineError(
+                f"task workspace escapes its authorized project root for task {task.task_id!r}"
+            )
         workspace.mkdir(parents=True, exist_ok=True)
         return workspace
 
