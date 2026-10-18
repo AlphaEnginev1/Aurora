@@ -678,6 +678,9 @@ def build_director_service(*, inference_policy_path: str | Path, autonomy_policy
         research_service=research_service,
         research_learning_gate=research_learning_gate,
         project_registry=project_registry,
+        # Keep TaskEngine project-workspace authorization aligned with the
+        # exact roots enforced by the shared UniversalWorkbench.
+        allowed_workspace_roots=workbench.roots,
     )
     director_provider = _build_director_provider(settings_store, router=router)
 
