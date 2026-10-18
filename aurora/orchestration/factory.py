@@ -338,14 +338,25 @@ def _build_director_provider_failover(
     if router.provider_registry is None or router.model_registry is None:
         raise RuntimeError("model registries are not configured")
 
+    # The Director's active provider can change after every successful failover
+    # or Settings update. Resolve reserves against that live state rather than
+    # the provider captured when the controller was first built.
+    controller_ref: dict[str, DirectorProviderFailoverController] = {}
+
     def resolve_candidates(
         messages: list[dict[str, object]],
         requested_model: str | None,
         role: str,
     ) -> tuple[DirectorProviderCandidate, ...]:
-        active_id = str(getattr(active_provider, "provider_id", "") or "")
+        current_controller = controller_ref.get("controller")
+        current_active = (
+            current_controller.active_provider
+            if current_controller is not None
+            else active_provider
+        )
+        active_id = str(getattr(current_active, "provider_id", "") or "")
         active_model_id = str(
-            getattr(active_provider, "model", "") or requested_model or ""
+            getattr(current_active, "model", "") or requested_model or ""
         ).strip()
         pool_specs: list[ModelSpec] = []
         seen_models: set[tuple[str, str]] = set()
@@ -541,7 +552,7 @@ def _build_director_provider_failover(
             }
         )
 
-    return DirectorProviderFailoverController(
+    controller = DirectorProviderFailoverController(
         active_provider=active_provider,
         candidates=(),
         store=DirectorProviderFailoverStore(str(db_path)),
@@ -549,6 +560,8 @@ def _build_director_provider_failover(
         candidate_resolver=resolve_candidates,
         health_store=health_store,
     )
+    controller_ref["controller"] = controller
+    return controller
 
 
 
