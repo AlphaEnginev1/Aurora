@@ -12,7 +12,6 @@ from urllib.parse import urlparse
 
 from aurora.inference.errors import ProviderResponseError
 from aurora.inference.models import InferenceRequest, ModelSpec, new_execution_id
-from aurora.inference.free_policy import is_free_model
 from aurora.inference.providers.catalog import ProviderCatalog
 from aurora.inference.providers.openrouter_quota import OpenRouterQuotaError, read_openrouter_free_quota
 from aurora.inference.providers.registry import default_provider_registry
@@ -146,13 +145,33 @@ class ProviderSettingsService:
                 raise DashboardProviderSettingsError(
                     "Director primary must be the inference router, NVIDIA, or the official OpenRouter free route"
                 )
-            if provider_id == "openrouter" and (
-                selected_model != "openrouter/free"
-                or not openrouter_key
-            ):
-                raise DashboardProviderSettingsError(
-                    "OpenRouter Director mode requires its API key and the official openrouter/free model"
-                )
+            if provider_id == "openrouter":
+                openrouter_config = settings.get("providers", {}).get("openrouter", {})
+                if (
+                    isinstance(openrouter_config, Mapping)
+                    and openrouter_config.get("enabled", True) is False
+                ):
+                    raise DashboardProviderSettingsError(
+                        "OpenRouter is disabled in provider Settings"
+                    )
+                if selected_model != "openrouter/free" or not openrouter_key:
+                    raise DashboardProviderSettingsError(
+                        "OpenRouter Director mode requires its API key and the official openrouter/free model"
+                    )
+
+            if provider_id == "nvidia_api":
+                nvidia_config = settings.get("providers", {}).get("nvidia_api", {})
+                if (
+                    isinstance(nvidia_config, Mapping)
+                    and nvidia_config.get("enabled", True) is False
+                ):
+                    raise DashboardProviderSettingsError(
+                        "NVIDIA is disabled in provider Settings"
+                    )
+                if not nvidia_key or not selected_model or selected_model == "router":
+                    raise DashboardProviderSettingsError(
+                        "Direct NVIDIA mode requires a credential and a selected model from the official Free Endpoint catalog"
+                    )
 
             if provider_id == "nvidia_api" and nvidia_key and selected_model and selected_model != "router":
                 from aurora.orchestration.factory import _has_authoritative_nvidia_free_activation
