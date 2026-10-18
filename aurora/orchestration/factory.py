@@ -208,12 +208,17 @@ def _build_director_provider(
 ):
     settings = settings_store.load() if settings_store is not None else {}
     configured = settings.get("director", {}) if isinstance(settings, dict) else {}
-    # Persisted settings never override the canonical Router default.
-    # Direct provider selection requires an explicit process-level opt-in.
-    director_provider_id = os.getenv(
-        "AURORA_DIRECTOR_PROVIDER",
-        str(configured.get("provider", "router")),
-    ).strip().lower()
+    # A deliberate selection saved from Dashboard Settings takes precedence
+    # over the launcher's default environment value, and survives daemon restarts.
+    # Explicit process-level configuration remains authoritative until the
+    # operator deliberately selects a route in Settings.
+    environment_provider = os.getenv("AURORA_DIRECTOR_PROVIDER", "").strip().lower()
+    configured_provider = str(configured.get("provider", "router")).strip().lower()
+    director_provider_id = (
+        configured_provider
+        if configured.get("operator_selected") is True
+        else (environment_provider or configured_provider)
+    )
 
     if director_provider_id in {"router", "inference_fabric", ""}:
         return None
