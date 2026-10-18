@@ -38,8 +38,41 @@ class ProviderSettingsService:
         return data
 
     def save_and_apply(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        # Preserve the last working Director route if a new primary fails catalog,
+        # credential, provider-registry or runtime-application validation. Provider
+        # credentials supplied in this update remain saved; only Director routing
+        # settings are rolled back.
+        previous_settings = self.store.load()
+        previous_director = previous_settings.get("director", {})
+        planner = self.runtime.director.planner
+        previous_planner_provider = planner.provider
+        previous_active_provider = getattr(previous_planner_provider, "active_provider", None)
+        persisted = False
+
+        def rollback_director() -> None:
+            if not persisted:
+                return
+            try:
+                self.store.update_from_form({"director": previous_director})
+                if (
+                    previous_active_provider is not None
+                    and callable(getattr(previous_planner_provider, "set_active_provider", None))
+                ):
+                    previous_planner_provider.set_active_provider(previous_active_provider)
+                    planner.provider = previous_planner_provider
+                else:
+                    planner.provider = previous_planner_provider
+                conversation = getattr(self.runtime, "conversation_service", None)
+                if conversation is not None and previous_planner_provider is not None:
+                    conversation.set_provider(previous_planner_provider)
+            except Exception as rollback_error:
+                raise DashboardProviderSettingsError(
+                    "new Director routing was rejected, and the previous route could not be restored safely"
+                ) from rollback_error
+
         try:
             settings = self.store.update_from_form(payload)
+            persisted = True
             router = self.runtime.director.planner.router
             configured_providers = settings.get("providers", {})
 
@@ -244,8 +277,16 @@ class ProviderSettingsService:
             if conversation is not None:
                 conversation.set_provider(provider_for_runtime)
             return self.public()
-        except (OperatorSettingsError, KeyError, TypeError, ValueError) as exc:
-            raise DashboardProviderSettingsError(str(exc)) from exc
+        except DashboardProviderSettingsError:
+            rollback_director()
+            raise
+        except Exception as exc:
+            rollback_director()
+            if isinstance(exc, (OperatorSettingsError, KeyError, TypeError, ValueError)):
+                raise DashboardProviderSettingsError(str(exc)) from exc
+            raise DashboardProviderSettingsError(
+                "provider settings could not be applied safely; the previous Director route was restored"
+            ) from exc
 
     def test_provider(self, provider_id: str) -> dict[str, Any]:
         provider_id = str(provider_id).strip().lower()
