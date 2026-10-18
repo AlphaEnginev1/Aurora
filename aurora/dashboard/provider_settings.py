@@ -1,4 +1,4 @@
-"""Dashboard provider settings for the NVIDIA-only Aurora runtime."""
+"""Dashboard provider settings for Aurora's governed free-only inference runtime."""
 
 from __future__ import annotations
 
@@ -142,12 +142,19 @@ class ProviderSettingsService:
             router.models = list(router.model_registry.models)
             selected_model = str(settings["director"].get("model", "")).strip()
             provider_id = str(settings["director"].get("provider", "")).strip().lower()
-            if provider_id not in {"router", "nvidia_api"}:
+            if provider_id not in {"router", "nvidia_api", "openrouter"}:
                 raise DashboardProviderSettingsError(
-                    "Aurora supports only the NVIDIA inference fabric"
+                    "Director primary must be the inference router, NVIDIA, or the official OpenRouter free route"
+                )
+            if provider_id == "openrouter" and (
+                selected_model != "openrouter/free"
+                or not openrouter_key
+            ):
+                raise DashboardProviderSettingsError(
+                    "OpenRouter Director mode requires its API key and the official openrouter/free model"
                 )
 
-            if nvidia_key and selected_model and selected_model != "router":
+            if provider_id == "nvidia_api" and nvidia_key and selected_model and selected_model != "router":
                 existing = next(
                     (item for item in router.model_registry.models if item.id == selected_model),
                     None,
@@ -213,7 +220,9 @@ class ProviderSettingsService:
                     router.model_registry.replace(updated)
                     router.models = list(router.model_registry.models)
 
-            provider = InferenceDirectorProvider(router)
+            from aurora.orchestration.factory import _build_director_provider
+
+            provider = _build_director_provider(self.store, router=router) or InferenceDirectorProvider(router)
             active = self.runtime.director.planner.provider
             if hasattr(active, "set_active_provider"):
                 active.set_active_provider(provider)
