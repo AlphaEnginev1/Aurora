@@ -571,3 +571,35 @@ def test_idempotent_replay_revalidates_task_project_against_canonical_registry(
         event.event_type == "mission_submitted"
         for event in store.events("mission-project-replay-validation")
     ) == 1
+
+def test_task_engine_rejects_project_workspace_outside_authorized_roots(
+    tmp_path: Path,
+):
+    allowed_root = tmp_path / "runtime"
+    external_workspace = tmp_path / "external-project"
+    allowed_root.mkdir()
+    registry = ProjectRegistry({
+        "project-external": ProjectSpec(
+            project_id="project-external",
+            name="External Project",
+            objective="Must stay within authorized workspace roots",
+            status=ProjectStatus.ACTIVE,
+            workspace=str(external_workspace),
+        ),
+    })
+    engine = TaskEngine(
+        _Orchestration(),
+        allowed_root,
+        project_registry=registry,
+        allowed_workspace_roots=(allowed_root,),
+    )
+
+    with pytest.raises(
+        TaskEngineError,
+        match="outside allowed TaskEngine roots",
+    ):
+        engine._project_workspace_root("project-external")
+
+    # Resolution/validation must fail before the external path is created.
+    assert not external_workspace.exists()
+
