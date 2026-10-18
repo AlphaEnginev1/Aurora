@@ -464,7 +464,11 @@ def test_registered_task_project_id_is_valid_without_mission_project_scope(tmp_p
     store = DurableTaskStore(tmp_path / "missions.db")
     service = DurableDirectorService(
         planner=planner,
-        task_engine=TaskEngine(_Orchestration(), tmp_path / "workspace"),
+        task_engine=TaskEngine(
+            _Orchestration(),
+            tmp_path / "workspace",
+            project_registry=planner.project_registry,
+        ),
         store=store,
     )
 
@@ -533,7 +537,11 @@ def test_idempotent_replay_revalidates_task_project_against_canonical_registry(
     store = DurableTaskStore(tmp_path / "missions.db")
     service = DurableDirectorService(
         planner=planner,
-        task_engine=TaskEngine(_Orchestration(), tmp_path / "workspace"),
+        task_engine=TaskEngine(
+            _Orchestration(),
+            tmp_path / "workspace",
+            project_registry=planner.project_registry,
+        ),
         store=store,
     )
     tasks = (
