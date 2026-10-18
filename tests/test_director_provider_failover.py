@@ -954,28 +954,55 @@ def test_failover_records_the_incoming_mission_correlation_id(tmp_path: Path):
         "inference_router",
         [ProviderFailure("primary route unavailable")],
     )
-    reserve = FakeProvider("nvidia_api", ["reserve completed"])
+    class RecordingReserve:
+        provider_id = "nvidia_api"
+
+        def __init__(self):
+            self.received_metadata = None
+
+        def generate(
+            self, *, messages, model, role, tools=(), metadata=None,
+            capability="reasoning", preferred_models=(),
+        ):
+            self.received_metadata = dict(metadata or {})
+            return DirectorModelResponse(
+                content="reserve completed",
+                model="nvidia/free-model-b",
+                provider="nvidia_api",
+                request_id="request-reserve",
+                execution_id="execution-reserve",
+                tool_calls=(),
+            )
+
+    reserve = RecordingReserve()
     store = DirectorProviderFailoverStore(str(tmp_path / "runtime.db"))
     controller = DirectorProviderFailoverController(
         active_provider=primary,
-        candidates=(_candidate("nvidia_api", reserve, "nvidia/free-model-b"),),
+        candidates=(DirectorProviderCandidate(
+            provider_id="nvidia_api",
+            model="nvidia/free-model-b",
+            endpoint=None,
+            factory=lambda: reserve,
+        ),),
         store=store,
         activate=lambda _candidate, _provider: None,
     )
 
+    incoming_metadata = {
+        "mission_id": "mission-stable",
+        "task_id": "task-stable",
+        "project_id": "project-stable",
+        "correlation_id": "corr-stable",
+    }
     response = controller.generate(
         messages=[{"role": "user", "content": "continue the existing request"}],
         model="router",
         role="director_planner",
-        metadata={
-            "mission_id": "mission-stable",
-            "task_id": "task-stable",
-            "project_id": "project-stable",
-            "correlation_id": "corr-stable",
-        },
+        metadata=incoming_metadata,
     )
 
     assert response.provider == "nvidia_api"
+    assert reserve.received_metadata == incoming_metadata
     records = store.list_recent(limit=20)
     assert records
     assert {item["correlation_id"] for item in records} == {"corr-stable"}
