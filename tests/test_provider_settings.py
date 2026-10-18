@@ -109,11 +109,11 @@ def test_nvidia_selected_model_is_activated_without_editing_repo_policy(tmp_path
         },
     })
 
-    assert state["runtime"]["director_provider"] == "inference_router"
+    assert state["runtime"]["director_provider"] == "nvidia_api"
     model = runtime.director.planner.router.model_registry.resolve("google/gemma-4-31b-it")
     assert model.enabled is True
     assert model.provider == "nvidia_api"
-    assert runtime.director.planner.provider.provider_id == "inference_router"
+    assert runtime.director.planner.provider.provider_id == "nvidia_api"
 
 
 def test_local_nvidia_model_setting_can_be_restored_on_startup(tmp_path: Path):
@@ -965,3 +965,34 @@ def test_openrouter_inference_reports_allowlisted_response_diagnostics_without_l
         assert safe_diagnostic in str(caught.value)
         assert "sensitive-provider-detail" not in str(caught.value)
         assert "openrouter-live-diagnostic-secret" not in str(caught.value)
+
+def test_openrouter_can_be_selected_as_director_primary_from_saved_settings(
+    tmp_path: Path, monkeypatch,
+):
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.delenv("AURORA_DIRECTOR_PROVIDER", raising=False)
+    runtime = Runtime(router(tmp_path))
+    store = OperatorSettingsStore(tmp_path / "operator-settings.json")
+    store.save({
+        "director": {"provider": "openrouter", "model": "anything-is-normalized"},
+        "providers": {
+            "openrouter": {
+                "api_key": "openrouter-direct-test",
+                "base_url": "https://openrouter-proxy.example/api/v1",
+                "enabled": True,
+            },
+        },
+    })
+
+    service = ProviderSettingsService(store, runtime)
+    state = service.save_and_apply({})
+
+    assert state["director"]["provider"] == "openrouter"
+    assert state["director"]["model"] == "openrouter/free"
+    assert state["runtime"]["director_provider"] == "openrouter"
+    assert runtime.director.planner.provider.provider_id == "openrouter"
+    registered = runtime.director.planner.router.model_registry.resolve("openrouter/free")
+    assert registered.provider == "openrouter"
+    assert registered.pricing_tier == "free"
+    assert registered.endpoint == "https://openrouter-proxy.example/api/v1"
+
