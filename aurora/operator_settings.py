@@ -107,6 +107,7 @@ class OperatorSettingsStore:
         with self._lock:
             merged_payload = _merge(self.load(), payload)
             _validate_failover_order(merged_payload)
+            _validate_provider_enabled_flags(merged_payload)
             merged = _normalize(merged_payload)
             _validate(merged)
             self.path.write_text(
@@ -261,8 +262,12 @@ def _normalize(data: Mapping[str, Any]) -> dict[str, Any]:
                 normalized_order.append(provider_id)
     if not normalized_order:
         normalized_order = ["nvidia_api"]
+    failover_enabled = failover.get("enabled", True)
+    # A malformed persisted flag must never turn recovery back on silently.
+    if not isinstance(failover_enabled, bool):
+        failover_enabled = False
     director["failover"] = {
-        "enabled": bool(failover.get("enabled", True)),
+        "enabled": failover_enabled,
         "order": normalized_order,
     }
     provider_configs = result.get("providers", {})
@@ -277,8 +282,11 @@ def _normalize(data: Mapping[str, Any]) -> dict[str, Any]:
             continue
         default_url = DEFAULT_PROVIDER_ENDPOINTS.get(provider_id, "")
         base_url = str(raw_config.get("base_url", default_url) or default_url).strip().rstrip("/")
+        provider_enabled = raw_config.get("enabled", True)
+        if not isinstance(provider_enabled, bool):
+            provider_enabled = False
         normalized_providers[provider_id] = {
-            "enabled": bool(raw_config.get("enabled", True)),
+            "enabled": provider_enabled,
             "api_key": str(raw_config.get("api_key", "") or ""),
             "base_url": base_url,
         }
@@ -397,6 +405,18 @@ def _validate(data: Mapping[str, Any]) -> None:
             raise OperatorSettingsError(
                 f"{provider_id}.base_url must use HTTPS (HTTP is allowed only for loopback services)"
             )
+
+
+def _validate_provider_enabled_flags(data: Mapping[str, Any]) -> None:
+    """Reject non-boolean provider enablement before settings are normalized."""
+    providers = data.get("providers", {})
+    if not isinstance(providers, Mapping):
+        raise OperatorSettingsError("operator settings providers must be an object")
+    for provider_id, config in providers.items():
+        if not isinstance(config, Mapping):
+            raise OperatorSettingsError(f"{provider_id}.configuration must be an object")
+        if "enabled" in config and not isinstance(config["enabled"], bool):
+            raise OperatorSettingsError(f"{provider_id}.enabled must be boolean")
 
 
 def _validate_failover_order(data: Mapping[str, Any]) -> None:
