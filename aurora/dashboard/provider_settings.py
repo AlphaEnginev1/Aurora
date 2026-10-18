@@ -263,16 +263,39 @@ class ProviderSettingsService:
                     router.models = list(router.model_registry.models)
                     _rebind_runtime_discovery(self.runtime, router)
 
-            from aurora.orchestration.factory import _build_director_provider
+            from aurora.orchestration.factory import (
+                _build_director_provider,
+                _build_director_provider_failover,
+            )
 
             provider = _build_director_provider(self.store, router=router) or InferenceDirectorProvider(router)
-            active = self.runtime.director.planner.provider
-            if hasattr(active, "set_active_provider"):
-                active.set_active_provider(provider)
-                provider_for_runtime = active
-            else:
-                self.runtime.director.planner.provider = provider
-                provider_for_runtime = provider
+            runtime_store = getattr(self.runtime, "store", None)
+            runtime_store_path = getattr(runtime_store, "path", None)
+            failover_db_path = (
+                Path(runtime_store_path).resolve()
+                if runtime_store_path is not None
+                else self.store.path.resolve().parent / "tasks.db"
+            )
+            # Rebuild the lightweight provider controller from the just-persisted
+            # settings, so enabling/disabling failover and reordering free reserves
+            # takes effect without restarting the daemon. Its durable transition
+            # ledger remains on the same runtime database.
+            provider_for_runtime = _build_director_provider_failover(
+                settings_store=self.store,
+                router=router,
+                active_provider=provider,
+                db_path=failover_db_path,
+                health_store=getattr(router, "health_store", None),
+                model_candidate_store_path=(
+                    self.store.path.resolve().parent / "model-candidates.db"
+                ),
+            )
+            self.runtime.director.planner.provider = provider_for_runtime
+            configure_telemetry = getattr(
+                self.runtime, "_configure_provider_failover_telemetry", None
+            )
+            if callable(configure_telemetry):
+                configure_telemetry()
             conversation = getattr(self.runtime, "conversation_service", None)
             if conversation is not None:
                 conversation.set_provider(provider_for_runtime)
