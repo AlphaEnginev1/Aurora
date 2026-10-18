@@ -363,8 +363,21 @@ def _build_director_provider_failover(
         pool_specs: list[ModelSpec] = []
         seen_models: set[tuple[str, str]] = set()
 
+        provider_settings = settings.get("providers", {}) if isinstance(settings, dict) else {}
+        nvidia_settings = (
+            provider_settings.get("nvidia_api", {})
+            if isinstance(provider_settings, dict)
+            else {}
+        )
+        nvidia_enabled = not (
+            isinstance(nvidia_settings, dict)
+            and nvidia_settings.get("enabled", True) is False
+        )
         credentials = {
-            "nvidia_api": settings_store.credential("nvidia_api") or os.getenv("NVIDIA_API_KEY", ""),
+            "nvidia_api": (
+                settings_store.credential("nvidia_api")
+                or os.getenv("NVIDIA_API_KEY", "")
+            ) if nvidia_enabled else "",
         }
 
         discovery = ModelDiscoveryService(
@@ -393,10 +406,20 @@ def _build_director_provider_failover(
             else:
                 discovered = discovery.discover_and_stage(provider_id)
             if not discovered:
-                # Governed last-known discovery remains a valid reserve snapshot.
-                discovered = model_candidate_store.list(
-                    provider_id=provider_id,
-                    limit=500,
+                # Use only governed states from the durable catalog snapshot.
+                # Rejected/disabled candidates must never re-enter the reserve
+                # pool merely because a catalog refresh returned no new rows.
+                discovered = (
+                    model_candidate_store.list(
+                        provider_id=provider_id,
+                        state="discovered",
+                        limit=500,
+                    )
+                    + model_candidate_store.list(
+                        provider_id=provider_id,
+                        state="synced",
+                        limit=500,
+                    )
                 )
             if not discovered:
                 continue
