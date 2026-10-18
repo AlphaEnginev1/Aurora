@@ -1309,17 +1309,67 @@
     target.className = "settings-message " + (error ? "error" : "success");
   }
 
+  function syncDirectorProviderFields() {
+    const provider = $("director-provider").value;
+    const settings = safeObject(state.settings);
+    const director = safeObject(settings.director);
+    const savedProviders = safeObject(settings.providers);
+    const endpointProvider = provider === "openrouter" ? "openrouter" : "nvidia_api";
+    const endpointConfig = safeObject(savedProviders[endpointProvider]);
+    const endpointLabel = document.querySelector('label[for="director-endpoint"]');
+    if (endpointLabel) {
+      endpointLabel.textContent = provider === "openrouter" ? "OpenRouter endpoint" : "NVIDIA endpoint";
+    }
+    $("director-endpoint").value = String(
+      endpointConfig.base_url ||
+      (provider === "openrouter" ? "https://openrouter.ai/api/v1" : "https://integrate.api.nvidia.com/v1")
+    );
+    if (provider === "router") {
+      $("director-model").value = "router";
+      $("director-model").disabled = true;
+      $("director-model").placeholder = "Selected dynamically by Aurora's free-only router";
+    } else if (provider === "openrouter") {
+      $("director-model").value = "openrouter/free";
+      $("director-model").disabled = true;
+      $("director-model").placeholder = "Only the official free router is permitted";
+    } else {
+      $("director-model").disabled = false;
+      const current = $("director-model").value.trim();
+      if (!current || current === "router" || current === "openrouter/free") {
+        $("director-model").value = director.provider === "nvidia_api" && director.model
+          ? String(director.model)
+          : "nvidia/nemotron-3-ultra-550b-a55b";
+      }
+      $("director-model").placeholder = "A currently approved NVIDIA Free Endpoint model ID";
+    }
+    const second = $("director-failover-second");
+    if (second) {
+      const first = $("director-failover-first").value;
+      Array.from(second.options).forEach(function (option) {
+        option.disabled = Boolean(option.value && option.value === first);
+      });
+      if (second.value && second.value === first) second.value = "";
+    }
+  }
+
   function renderSettings(data) {
     state.settings = data;
     const director = safeObject(data.director);
     $("director-provider").value = String(director.provider || "router");
     $("director-model").value = String(director.model || "router");
-    $("director-endpoint").value = String(director.endpoint || "https://integrate.api.nvidia.com/v1");
+    const failover = safeObject(director.failover);
+    const order = safeArray(failover.order).filter(function (item) {
+      return ["nvidia_api", "openrouter"].includes(String(item));
+    });
+    $("director-failover-enabled").value = failover.enabled === false ? "false" : "true";
+    $("director-failover-first").value = order[0] || "nvidia_api";
+    $("director-failover-second").value = order[1] && order[1] !== order[0] ? order[1] : "";
+    syncDirectorProviderFields();
     $("settings-state").innerHTML =
       '<span class="signal-dot"></span> ' +
       esc(String(data.runtime && data.runtime.director_provider || director.provider || "unknown").toUpperCase());
     showSettingsMessage(
-      "Runtime settings loaded. Provider credentials are managed in the provider credential vault.",
+      "Runtime settings loaded. Only explicitly approved free routes may be primary or reserve providers.",
       false
     );
   }
@@ -1331,11 +1381,40 @@ async function loadSettings() {
   }
 
   async function saveSettings() {
+    const provider = $("director-provider").value;
+    const endpointProvider = provider === "openrouter" ? "openrouter" : "nvidia_api";
+    const endpoint = $("director-endpoint").value.trim();
+    const first = $("director-failover-first").value;
+    const second = $("director-failover-second").value;
+    if (!first || (second && second === first)) {
+      showSettingsMessage("Choose a valid first reserve provider and a different optional second provider.", true);
+      return false;
+    }
+    const failoverOrder = [first];
+    if (second) failoverOrder.push(second);
+    const model = provider === "router"
+      ? "router"
+      : (provider === "openrouter" ? "openrouter/free" : $("director-model").value.trim());
+    if (!endpoint) {
+      showSettingsMessage("Enter a provider endpoint before saving.", true);
+      return false;
+    }
+    if (provider === "nvidia_api" && !model) {
+      showSettingsMessage("Direct NVIDIA mode requires a model ID from the approved Free Endpoint catalog.", true);
+      return false;
+    }
     const payload = {
       director: {
-        provider: $("director-provider").value,
-        model: $("director-model").value.trim(),
-        endpoint: $("director-endpoint").value.trim()
+        provider: provider,
+        model: model,
+        endpoint: endpoint,
+        failover: {
+          enabled: $("director-failover-enabled").value === "true",
+          order: failoverOrder
+        }
+      },
+      providers: {
+        [endpointProvider]: { base_url: endpoint }
       }
     };
     const button = $("settings-save");
@@ -1650,6 +1729,13 @@ async function testProvider(provider) {
   function setupSettings() {
     $("settings-save").addEventListener("click", function () {
       saveSettings();
+    });
+    $("director-provider").addEventListener("change", syncDirectorProviderFields);
+    $("director-failover-first").addEventListener("change", syncDirectorProviderFields);
+    $("director-failover-second").addEventListener("change", function () {
+      const first = $("director-failover-first").value;
+      if ($("director-failover-second").value === first) $("director-failover-second").value = "";
+      syncDirectorProviderFields();
     });
     $("update-aurora").addEventListener("click", function () {
       updateAurora();
