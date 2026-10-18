@@ -177,7 +177,7 @@ def test_project_scoped_mission_rejects_unknown_project(tmp_path: Path):
     planner = _Planner()
     service = DurableDirectorService(
         planner=planner,
-        task_engine=TaskEngine(_Orchestration(), tmp_path / "workspace"),
+        task_engine=TaskEngine(_Orchestration(), tmp_path / "workspace", project_registry=planner.project_registry),
         store=DurableTaskStore(tmp_path / "missions.db"),
     )
     with pytest.raises(DurableDirectorError, match="unknown project_id"):
@@ -189,7 +189,7 @@ def test_initial_task_graph_rejects_conflicting_project_id_before_persisting(tmp
     store = DurableTaskStore(tmp_path / "missions.db")
     service = DurableDirectorService(
         planner=planner,
-        task_engine=TaskEngine(_Orchestration(), tmp_path / "workspace"),
+        task_engine=TaskEngine(_Orchestration(), tmp_path / "workspace", project_registry=planner.project_registry),
         store=store,
     )
 
@@ -222,7 +222,7 @@ def test_mission_idempotency_cannot_switch_project(tmp_path: Path):
     store = DurableTaskStore(tmp_path / "missions.db")
     service = DurableDirectorService(
         planner=planner,
-        task_engine=TaskEngine(_Orchestration(), tmp_path / "workspace"),
+        task_engine=TaskEngine(_Orchestration(), tmp_path / "workspace", project_registry=planner.project_registry),
         store=store,
     )
     service.submit_mission(
