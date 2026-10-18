@@ -315,12 +315,21 @@ def _validate(data: Mapping[str, Any]) -> None:
         raise OperatorSettingsError("director.model cannot be empty")
     if provider == "router" and model != "router":
         raise OperatorSettingsError("router director must not pin a provider model")
-    if provider == "nvidia_api" and not _is_nvidia_model_id(model):
-        raise OperatorSettingsError("nvidia_api director.model must be an NVIDIA model identifier")
+    if provider == "nvidia_api":
+        if not _is_nvidia_model_id(model):
+            raise OperatorSettingsError("nvidia_api director.model must be an NVIDIA model identifier")
+        nvidia = providers.get("nvidia_api", {})
+        if isinstance(nvidia, Mapping) and nvidia.get("enabled", True) is False:
+            raise OperatorSettingsError("NVIDIA Director mode cannot use a disabled provider")
+        stored_key = str(nvidia.get("api_key", "") or "") if isinstance(nvidia, Mapping) else ""
+        if not stored_key.strip() and not os.getenv("NVIDIA_API_KEY", "").strip():
+            raise OperatorSettingsError("NVIDIA Director mode requires an NVIDIA API key")
     if provider == "openrouter":
         if model != "openrouter/free":
             raise OperatorSettingsError("OpenRouter Director mode is restricted to openrouter/free")
         openrouter = providers.get("openrouter", {})
+        if isinstance(openrouter, Mapping) and openrouter.get("enabled", True) is False:
+            raise OperatorSettingsError("OpenRouter Director mode cannot use a disabled provider")
         stored_key = str(openrouter.get("api_key", "") or "") if isinstance(openrouter, Mapping) else ""
         if not stored_key.strip() and not os.getenv("OPENROUTER_API_KEY", "").strip():
             raise OperatorSettingsError("OpenRouter Director mode requires an OpenRouter API key")
@@ -386,7 +395,11 @@ def _validate_failover_order(data: Mapping[str, Any]) -> None:
     """Reject unsafe order updates before normalization can discard them."""
     director = data.get("director", {})
     failover = director.get("failover", {}) if isinstance(director, Mapping) else {}
-    if not isinstance(failover, Mapping) or "order" not in failover:
+    if not isinstance(failover, Mapping):
+        return
+    if "enabled" in failover and not isinstance(failover["enabled"], bool):
+        raise OperatorSettingsError("director.failover.enabled must be boolean")
+    if "order" not in failover:
         return
     order = failover["order"]
     if (
