@@ -1045,7 +1045,9 @@ def test_openrouter_can_be_selected_as_director_primary_from_saved_settings(
     tmp_path: Path, monkeypatch,
 ):
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
-    monkeypatch.delenv("AURORA_DIRECTOR_PROVIDER", raising=False)
+    # The launcher may default this environment variable to router; an explicit
+    # saved dashboard choice must take precedence after applying Settings.
+    monkeypatch.setenv("AURORA_DIRECTOR_PROVIDER", "router")
     runtime = Runtime(router(tmp_path))
     store = OperatorSettingsStore(tmp_path / "operator-settings.json")
     store.save({
@@ -1060,7 +1062,9 @@ def test_openrouter_can_be_selected_as_director_primary_from_saved_settings(
     })
 
     service = ProviderSettingsService(store, runtime)
-    state = service.save_and_apply({})
+    state = service.save_and_apply({
+        "director": {"provider": "openrouter", "model": "openrouter/free"},
+    })
 
     assert state["director"]["provider"] == "openrouter"
     assert state["director"]["model"] == "openrouter/free"
