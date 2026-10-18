@@ -339,6 +339,7 @@ def _build_director_provider_failover(
     active_provider,
     db_path: str | Path,
     health_store: ProviderHealthStore | None = None,
+    model_candidate_store_path: str | Path | None = None,
 ):
     settings = settings_store.load()
     director = settings.get("director", {}) if isinstance(settings, dict) else {}
@@ -364,9 +365,14 @@ def _build_director_provider_failover(
             + ", ".join(ALLOWED_DIRECTOR_FAILOVER_PROVIDERS)
         )
 
-    model_candidate_store = ModelCandidateStore(
-        Path(db_path).resolve().parent / "model-candidates.db"
+    # Discovery and runtime activation must share the same durable candidate
+    # ledger even when task/provider-failover SQLite files live in a custom path.
+    candidate_store_path = (
+        Path(model_candidate_store_path).resolve()
+        if model_candidate_store_path is not None
+        else Path(db_path).resolve().parent / "model-candidates.db"
     )
+    model_candidate_store = ModelCandidateStore(candidate_store_path)
     if router.provider_registry is None or router.model_registry is None:
         raise RuntimeError("model registries are not configured")
 
@@ -877,6 +883,7 @@ def build_director_service(*, inference_policy_path: str | Path, autonomy_policy
         active_provider=active_provider,
         db_path=provider_failover_db_path or (Path(workspace_root).resolve() / "tasks.db"),
         health_store=health_store,
+        model_candidate_store_path=Path(workspace_root).resolve() / "model-candidates.db",
     )
     return DirectorService(planner,task_engine)
 
