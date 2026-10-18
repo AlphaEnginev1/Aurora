@@ -282,6 +282,53 @@ def test_planner_generated_unknown_task_project_id_is_rejected_before_persistenc
     assert store.events("mission-planner-unknown-task-project") == ()
 
 
+def test_idempotent_replay_revalidates_task_project_against_canonical_registry(
+    tmp_path: Path,
+):
+    planner = _Planner()
+    store = DurableTaskStore(tmp_path / "missions.db")
+    service = DurableDirectorService(
+        planner=planner,
+        task_engine=TaskEngine(_Orchestration(), tmp_path / "workspace"),
+        store=store,
+    )
+    tasks = (
+        DelegatedTask(
+            "task-project-a",
+            "researcher",
+            "Inspect Project A",
+            project_id="project-a",
+        ),
+    )
+
+    first = service.submit_mission(
+        objective="Inspect registered Project A",
+        mission_id="mission-project-replay-validation",
+        correlation_id="corr-project-replay-validation",
+        tasks=tasks,
+    )
+    assert first.mission_id == "mission-project-replay-validation"
+    assert len(store.list_tasks(first.mission_id)) == 1
+
+    # Simulate the canonical project configuration changing between the
+    # original accepted order and a browser/request replay.
+    planner.project_registry.projects.pop("project-a")
+
+    with pytest.raises(DurableDirectorError, match="references unknown project_id"):
+        service.submit_mission(
+            objective="Inspect registered Project A",
+            mission_id="mission-project-replay-validation",
+            correlation_id="corr-project-replay-validation",
+            tasks=tasks,
+        )
+
+    assert len(store.list_tasks("mission-project-replay-validation")) == 1
+    assert sum(
+        event.event_type == "mission_submitted"
+        for event in store.events("mission-project-replay-validation")
+    ) == 1
+
+
 def test_initial_task_graph_rejects_conflicting_project_id_before_persisting(tmp_path: Path):
     planner = _Planner()
     store = DurableTaskStore(tmp_path / "missions.db")
