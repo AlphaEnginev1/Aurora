@@ -1468,6 +1468,8 @@ async function testProvider(provider) {
       button.addEventListener("click", function () {
         $("director-model").value = button.getAttribute("data-model") || "";
         $("director-provider").value = "nvidia_api";
+        syncDirectorProviderFields();
+        $("director-model").value = button.getAttribute("data-model") || "";
       });
     });
     showSettingsMessage(
