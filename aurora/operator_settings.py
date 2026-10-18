@@ -82,7 +82,7 @@ class OperatorSettingsError(RuntimeError):
 
 
 class OperatorSettingsStore:
-    """Persist only NVIDIA runtime configuration outside source control."""
+    """Persist local provider credentials and free-only Director routing outside source control."""
 
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
