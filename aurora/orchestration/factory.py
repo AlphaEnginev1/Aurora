@@ -16,7 +16,7 @@ from aurora.autonomy.sandbox import SandboxExecutor, SandboxPolicy
 from aurora.inference.registry import ModelRegistry
 from aurora.inference.router import ModelRouter
 from aurora.inference.models import InferenceRequest, ModelSpec
-from aurora.inference.free_policy import is_free_model
+from aurora.inference.free_policy import is_discovered_free_model, is_free_model
 from aurora.inference.discovery import ModelCandidateStore, ModelDiscoveryService
 from aurora.inference.autonomous_discovery import AutonomousDiscoveryRefreshService
 from aurora.inference.providers.catalog import ProviderCatalog
@@ -404,6 +404,17 @@ def _build_director_provider_failover(
                 capabilities = tuple(model.capabilities)
                 if "reasoning" not in capabilities:
                     continue
+                metadata = item.metadata if isinstance(item.metadata, dict) else {}
+                # NVIDIA's static free-list tier is metadata only. Discovery
+                # candidates qualify as reserves only with an explicit receipt
+                # from the authoritative Free Endpoint catalog.
+                catalog_free = metadata.get("free_endpoint_catalog") is True
+                if not is_discovered_free_model(
+                    provider_id,
+                    model.id,
+                    discovered_free_endpoint=catalog_free,
+                ):
+                    continue
                 key = (model.provider, model.id)
                 if (
                     key == (active_id, active_model_id)
@@ -429,11 +440,21 @@ def _build_director_provider_failover(
                     )
                 )
 
-        # Keep currently active NVIDIA models available as reserves after they
-        # have entered the canonical registry. The discovery path above remains
-        # the source of dynamic NVIDIA candidates.
+        # Existing active NVIDIA candidates are allowed only while their
+        # durable governance record retains the authoritative catalog receipt.
+        # This prevents an enabled seed/static ModelSpec from becoming a reserve.
+        synced_free_endpoint_ids = {
+            item.model.id
+            for item in model_candidate_store.list(
+                provider_id="nvidia_api", state="synced", limit=500
+            )
+            if isinstance(item.metadata, dict)
+            and item.metadata.get("free_endpoint_catalog") is True
+        }
         for model in router.available():
             if model.provider != "nvidia_api":
+                continue
+            if model.id not in synced_free_endpoint_ids:
                 continue
             if active_id == model.provider and active_model_id == model.id:
                 continue
